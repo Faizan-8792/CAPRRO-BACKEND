@@ -46,23 +46,24 @@ app.use(
 app.use(morgan("dev"));
 app.use(express.json());
 
-// ------- STATIC ONLY UNDER /admin -------
+// ------- STATIC (root + admin) -------
 
 const publicDir = path.join(__dirname, "..", "public");
 
-// Static files only for /admin paths
+// Root static: / -> public/index.html etc.
+app.use(express.static(publicDir));
+
+// Admin static under /admin (CSS/JS inside public/admin)
 app.use("/admin", express.static(path.join(publicDir, "admin")));
 
-// SPA routes for admin
+// Admin main page (use actual file name inside public/admin)
 app.get("/admin", (req, res) => {
-  res.sendFile(path.join(publicDir, "admin", "index.html"));
+  res.sendFile(path.join(publicDir, "admin", "admin.html"));
 });
 
 app.get("/admin/*", (req, res) => {
-  res.sendFile(path.join(publicDir, "admin", "index.html"));
+  res.sendFile(path.join(publicDir, "admin", "admin.html"));
 });
-
-// (NOTE: global app.use(express.static(publicDir));  ❌ REMOVE / COMMENT)
 
 // ------- HEALTH & APIs -------
 
