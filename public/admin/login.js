@@ -70,45 +70,6 @@ async function initLoginPage() {
   const goVerify = document.getElementById('goVerify');
   const verifyBtn = document.getElementById('verifyOtp');
 
-  // ---------- AUTO LOGIN (if token already exists) ----------
-  (async () => {
-    const token = getToken();
-    if (!token) return;
-
-    const path = window.location.pathname || '';
-    // Login page is "/" or "/index.html" at site root
-    const isLoginPage =
-      path === '/' ||
-      path === '' ||
-      path.endsWith('/index.html');
-
-    // If already on login page, DO NOT redirect again → prevents reload loop
-    if (isLoginPage) {
-      console.log('On login page; skipping auto-login redirect');
-      return;
-    }
-
-    try {
-      console.log('Auto-login: calling /auth/me');
-      const me = await api('/auth/me');
-      const user = me.user;
-
-      if (isSuperAdmin(user)) {
-        window.location.href = '/admin/super.html';
-        return;
-      } else if (user.role === 'FIRM_ADMIN' && user.isActive === true) {
-        window.location.href = '/admin/admin.html#dashboard';
-        return;
-      }
-
-      // Unknown role → clear and stay
-      clearToken();
-    } catch (e) {
-      console.error('Auto-login /auth/me failed:', e);
-      clearToken();
-    }
-  })();
-
   // ---------- UI handlers ----------
 
   goVerify?.addEventListener('click', () => {
@@ -239,7 +200,6 @@ async function initLoginPage() {
           user.firmId && user.isActive === false) {
         statusEl.textContent =
           'Request as Firm Admin has been successfully sent. Please wait for approval from your existing admin.';
-        clearToken();
         return;
       }
 
