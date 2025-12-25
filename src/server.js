@@ -1,45 +1,19 @@
-// src/server.js - FIXED
-import express from "express";
+// src/server.js
 import dotenv from "dotenv";
-import cors from "cors";
 import morgan from "morgan";
-import path from "path";
-import { fileURLToPath } from "url";
 import connectDB from "./config/db.js";
-import taskRoutes from "./routes/task.routes.js";
-import authRoutes from "./routes/auth.routes.js";
-import firmRoutes from "./routes/firm.routes.js";
-import reminderRoutes from "./routes/reminder.routes.js";
-import superRoutes from "./routes/super.routes.js";
-import statsRoutes from "./routes/stats.routes.js";
-
 import Reminder from "./models/Reminder.js";
 import { processReminderForNow } from "./controllers/reminder.controller.js";
+import app from "./app.js"; // ✅ use existing app.js
 
 // ----- Setup -----
 dotenv.config();
 connectDB();
 
-// __dirname resolve for ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const app = express();
-app.use(cors());
-app.use(express.json());
+// Extra logging if needed (app already has morgan, optional)
 app.use(morgan("dev"));
 
-// ✅ Serve static admin panel from /public
-app.use(express.static(path.join(__dirname, "..", "public")));
-
-// ----- API Routes -----
-app.use("/api/auth", authRoutes);
-app.use("/api/firms", firmRoutes);
-app.use("/api/reminders", reminderRoutes);
-app.use("/api/super", superRoutes);
-app.use("/api/stats", statsRoutes);  // ✅ SINGLE mount point
-app.use("/api/tasks", taskRoutes);
-
+// Root check (JSON response)
 app.get("/", (req, res) => {
   res.json({ ok: true, message: "CA PRO Toolkit backend running" });
 });
@@ -58,7 +32,6 @@ async function runReminderScheduler() {
   console.log("[REMINDER] Scheduler tick at", nowUtc.toISOString());
 
   try {
-    // ✅ FIXED: Removed .lean(false)
     const activeReminders = await Reminder.find({ isActive: true });
 
     for (const r of activeReminders) {
@@ -75,3 +48,5 @@ async function runReminderScheduler() {
 
 setInterval(runReminderScheduler, SCHEDULER_INTERVAL_MS);
 runReminderScheduler();
+
+export default server;

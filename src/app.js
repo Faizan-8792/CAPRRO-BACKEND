@@ -11,7 +11,7 @@ import reminderRoutes from "./routes/reminder.routes.js";
 import firmRoutes from "./routes/firm.routes.js";
 import statsRoutes from "./routes/stats.routes.js";
 import superRoutes from "./routes/super.routes.js";
-import taskRoutes from "./routes/task.routes.js"; // NEW
+import taskRoutes from "./routes/task.routes.js";
 
 const app = express();
 
@@ -35,6 +35,7 @@ app.use(
   })
 );
 
+// CORS (prod me origin baad me Render URL pe update kar sakte ho)
 app.use(
   cors({
     origin: ["http://localhost:5173", "chrome-extension://*"],
@@ -60,12 +61,13 @@ app.use("/api/reminders", reminderRoutes);
 app.use("/api/firms", firmRoutes);
 app.use("/api/stats", statsRoutes);
 app.use("/api/super", superRoutes);
-app.use("/api/tasks", taskRoutes); // NEW: all /api/tasks/* hit task.routes.js
+app.use("/api/tasks", taskRoutes);
 
-// Nice fallback: /admin or /admin/anything -> login page
+// Admin SPA routes
 app.get("/admin", (req, res) => {
   res.sendFile(path.join(publicDir, "admin", "index.html"));
 });
+
 app.get("/admin/*", (req, res) => {
   res.sendFile(path.join(publicDir, "admin", "index.html"));
 });
