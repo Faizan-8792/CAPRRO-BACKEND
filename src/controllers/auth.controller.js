@@ -61,7 +61,7 @@ export const sendOtp = async (req, res, next) => {
 
     const otp = generateOtp();
 
-    // 🔥 DEV MODE: PRINT OTP IN RENDER LOGS
+    // (Optional dev log – remove later if you want)
     console.log("🔐 OTP GENERATED for", normalizedEmail, "=>", otp);
 
     user.otpCodeHash = hashOtp(otp);
@@ -70,14 +70,12 @@ export const sendOtp = async (req, res, next) => {
     );
     await user.save();
 
-    // 🔥 IMPORTANT: DO NOT await email
-    sendOtpEmail(normalizedEmail, otp).catch((err) => {
-      console.error("OTP email failed:", err.message);
-    });
+    // ✅ ONLY CHANGE: OTP email now goes via Resend
+    await sendOtpEmail(normalizedEmail, otp);
 
     return res.json({
       ok: true,
-      message: "OTP generated. Please check email (or dev logs).",
+      message: "OTP sent to email",
     });
   } catch (err) {
     next(err);

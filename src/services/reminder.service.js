@@ -1,7 +1,14 @@
 // src/services/reminder.service.js
 
-import { getEmailTransporter } from "../config/email.js";
+import { Resend } from "resend";
 
+// Resend client
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// Default Resend sender (no custom domain required)
+const FROM_EMAIL = "CA PRO Toolkit <onboarding@resend.dev>";
+
+// ---------- Helper ----------
 function escHtml(s) {
   return String(s ?? "")
     .replaceAll("&", "&amp;")
@@ -11,6 +18,8 @@ function escHtml(s) {
     .replaceAll("'", "&#39;");
 }
 
+// ---------- SAME FUNCTION, SAME SIGNATURE ----------
+// ONLY email sending engine is changed (nodemailer → Resend)
 export async function sendComplianceReminderEmail({
   toEmail,
   title,
@@ -21,9 +30,6 @@ export async function sendComplianceReminderEmail({
   if (!toEmail) {
     throw new Error("sendComplianceReminderEmail: toEmail is required");
   }
-
-  const transporter = getEmailTransporter();
-  const from = process.env.EMAIL_FROM || process.env.EMAIL_USER;
 
   const due = new Date(dueDateISO);
   const dueText = Number.isNaN(due.getTime())
@@ -73,11 +79,18 @@ export async function sendComplianceReminderEmail({
     </div>
   `;
 
-  await transporter.sendMail({
-    from,
-    to: toEmail,
+  const { error } = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: [toEmail],
     subject,
     text,
     html,
   });
+
+  if (error) {
+    console.error("❌ Resend compliance reminder failed:", error);
+    throw new Error("Compliance reminder email failed");
+  }
+
+  console.log("📧 Compliance reminder sent to", toEmail);
 }
