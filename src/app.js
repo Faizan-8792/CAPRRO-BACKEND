@@ -19,7 +19,7 @@ const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Helmet with CSP allowing Bootstrap CDN (jsDelivr)
+// Helmet with CSP
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -35,7 +35,7 @@ app.use(
   })
 );
 
-// CORS (prod me origin baad me Render URL pe update kar sakte ho)
+// CORS
 app.use(
   cors({
     origin: ["http://localhost:5173", "chrome-extension://*"],
@@ -46,24 +46,14 @@ app.use(
 app.use(morgan("dev"));
 app.use(express.json());
 
-// Serve static admin files from /public
+// ------- STATIC ONLY UNDER /admin -------
+
 const publicDir = path.join(__dirname, "..", "public");
-app.use(express.static(publicDir));
 
-// Health check
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", uptime: process.uptime() });
-});
+// Static files only for /admin paths
+app.use("/admin", express.static(path.join(publicDir, "admin")));
 
-// API routes
-app.use("/api/auth", authRoutes);
-app.use("/api/reminders", reminderRoutes);
-app.use("/api/firms", firmRoutes);
-app.use("/api/stats", statsRoutes);
-app.use("/api/super", superRoutes);
-app.use("/api/tasks", taskRoutes);
-
-// Admin SPA routes
+// SPA routes for admin
 app.get("/admin", (req, res) => {
   res.sendFile(path.join(publicDir, "admin", "index.html"));
 });
@@ -71,5 +61,20 @@ app.get("/admin", (req, res) => {
 app.get("/admin/*", (req, res) => {
   res.sendFile(path.join(publicDir, "admin", "index.html"));
 });
+
+// (NOTE: global app.use(express.static(publicDir));  ❌ REMOVE / COMMENT)
+
+// ------- HEALTH & APIs -------
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", uptime: process.uptime() });
+});
+
+app.use("/api/auth", authRoutes);
+app.use("/api/reminders", reminderRoutes);
+app.use("/api/firms", firmRoutes);
+app.use("/api/stats", statsRoutes);
+app.use("/api/super", superRoutes);
+app.use("/api/tasks", taskRoutes);
 
 export default app;
