@@ -18,7 +18,11 @@ const app = express();
 const filename = fileURLToPath(import.meta.url);
 const dirname = path.dirname(filename);
 
-// Helmet with CSP (mainly affects pages served by backend: /admin)
+const isProd = process.env.NODE_ENV === "production";
+
+/* ===============================
+   HELMET (CSP – admin pages)
+================================ */
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -26,7 +30,11 @@ app.use(
         defaultSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
         scriptSrc: ["'self'"],
-        connectSrc: ["'self'", "https://cdn.jsdelivr.net"],
+        connectSrc: [
+          "'self'",
+          "https://cdn.jsdelivr.net",
+          "https://caprro-backend-1.onrender.com"
+        ],
         imgSrc: ["'self'", "data:", "https:"],
         fontSrc: ["'self'", "https://cdn.jsdelivr.net"],
       },
@@ -34,44 +42,34 @@ app.use(
   })
 );
 
-// ---------- CORS (UPDATED for local + live + chrome-extension) ----------
-const isProd = process.env.NODE_ENV === "production";
-
-const allowedOrigins = new Set(
-  [
-    // Dev frontend
-    !isProd ? "http://localhost:5173" : null,
-
-    // If you host any separate frontend/admin elsewhere, add it here as exact origin:
-    // "https://your-frontend-domain.com"
-  ].filter(Boolean)
-);
-
-// Optional: restrict chrome extension IDs via env (comma-separated)
-const allowedExtensionIds = (process.env.CORS_EXTENSION_IDS || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
-
+/* ===============================
+   CORS — FINAL FIX (IMPORTANT)
+   - Allows backend same-origin
+   - Allows chrome-extension
+   - Allows localhost dev
+================================ */
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow same-origin / curl / server-to-server calls where Origin is absent
+      // ✅ Allow same-origin / server calls
       if (!origin) return callback(null, true);
 
-      // Allow known web origins
-      if (allowedOrigins.has(origin)) return callback(null, true);
-
-      // Allow chrome extension origins
-      if (origin.startsWith("chrome-extension://")) {
-        // If no IDs specified, allow any chrome-extension origin (easy mode)
-        if (allowedExtensionIds.length === 0) return callback(null, true);
-
-        // Else allow only the listed extension IDs
-        const id = origin.replace("chrome-extension://", "").replaceAll("/", "");
-        if (allowedExtensionIds.includes(id)) return callback(null, true);
+      // ✅ Allow backend itself
+      if (origin === "https://caprro-backend-1.onrender.com") {
+        return callback(null, true);
       }
 
+      // ✅ Allow localhost dev
+      if (!isProd && origin.startsWith("http://localhost")) {
+        return callback(null, true);
+      }
+
+      // ✅ Allow ALL chrome extensions
+      if (origin.startsWith("chrome-extension://")) {
+        return callback(null, true);
+      }
+
+      // ❌ Block everything else
       return callback(new Error(`CORS blocked for origin: ${origin}`));
     },
     credentials: true,
@@ -81,31 +79,42 @@ app.use(
 app.use(morgan(isProd ? "combined" : "dev"));
 app.use(express.json());
 
-// ------- HEALTH -------
+/* ===============================
+   HEALTH
+================================ */
 app.get("/health", (req, res) =>
   res.json({ status: "ok", uptime: process.uptime() })
 );
 
-// ------- ROOT override (prevents serving public/index.html automatically on /) -------
+/* ===============================
+   ROOT
+================================ */
 app.get("/", (req, res) =>
   res.json({ message: "CA-PRO-TOOLKIT backend running", health: "/health" })
 );
 
-// ------- STATIC root/admin -------
+/* ===============================
+   STATIC FILES
+================================ */
 const publicDir = path.join(dirname, "..", "public");
 
-// IMPORTANT: index:false won't auto-serve public/index.html on "/"
+// Do NOT auto-serve index.html on "/"
 app.use(express.static(publicDir, { index: false }));
 
-// Admin static under /admin (CSS/JS inside public/admin)
-app.use("/admin", express.static(path.join(publicDir, "admin"), { index: false }));
+// Admin static files
+app.use(
+  "/admin",
+  express.static(path.join(publicDir, "admin"), { index: false })
+);
 
-// Admin main page
+// Admin entry
 app.get("/admin", (req, res) =>
   res.sendFile(path.join(publicDir, "admin", "admin.html"))
 );
 
-// ------- APIs -------
+/* ===============================
+   API ROUTES
+================================ */
 app.use("/api/auth", authRoutes);
 app.use("/api/reminders", reminderRoutes);
 app.use("/api/firms", firmRoutes);
