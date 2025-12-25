@@ -30,7 +30,7 @@ export function getEmailTransporter() {
   return transporter;
 }
 
-// ✅ NEW: helper used by reminder.controller.js
+
 export async function sendReminderEmail(to, subject, text) {
   const tx = getEmailTransporter();
 

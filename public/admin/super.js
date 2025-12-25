@@ -1,7 +1,7 @@
 // public/admin/super.js
 
 const API_BASE = "/api";
-const TOKEN_KEY = "capro_admin_jwt";
+const TOKEN_KEY = "caproadminjwt";
 
 function qs(id) {
   return document.getElementById(id);
@@ -48,8 +48,7 @@ async function api(path, opts = {}) {
   }
 
   if (!res.ok) {
-    const msg =
-      data?.error || data?.message || `Request failed (${res.status})`;
+    const msg = data?.error || data?.message || `Request failed (${res.status})`;
     const err = new Error(msg);
     err.status = res.status;
     err.data = data;
@@ -60,9 +59,9 @@ async function api(path, opts = {}) {
 }
 
 function requireSuperAdmin(user) {
-  return user.role === "SUPER_ADMIN";
+  return user.role === 'SUPER_ADMIN' ||
+         user.email === 'saifullahfaizan786@gmail.com';
 }
-
 async function loadMe() {
   const me = await api("/auth/me");
   return me.user;
@@ -88,9 +87,7 @@ async function revokeAdmin(userId) {
 }
 
 function renderPendingRow(user) {
-  const created = user.createdAt
-    ? new Date(user.createdAt).toLocaleString()
-    : "—";
+  const created = user.createdAt ? new Date(user.createdAt).toLocaleString() : "—";
 
   const firmId =
     typeof user.firmId === "object" && user.firmId !== null
@@ -168,9 +165,7 @@ async function updateFirmPlanApi(firmId, payload) {
 
 async function updateFirmUserApi(firmId, userId, payload) {
   const data = await api(
-    `/super/firms/${encodeURIComponent(firmId)}/users/${encodeURIComponent(
-      userId
-    )}`,
+    `/super/firms/${encodeURIComponent(firmId)}/users/${encodeURIComponent(userId)}`,
     {
       method: "PATCH",
       body: payload,
@@ -181,12 +176,8 @@ async function updateFirmUserApi(firmId, userId, payload) {
 
 async function deleteFirmUserApi(firmId, userId) {
   await api(
-    `/super/firms/${encodeURIComponent(firmId)}/users/${encodeURIComponent(
-      userId
-    )}`,
-    {
-      method: "DELETE",
-    }
+    `/super/firms/${encodeURIComponent(firmId)}/users/${encodeURIComponent(userId)}`,
+    { method: "DELETE" }
   );
 }
 
@@ -228,15 +219,9 @@ function renderFirmRow(firm) {
       <td>${escapeHtml(expiryText)}</td>
       <td>${activeBadge}</td>
       <td>
-        <button class="btn btn-sm btn-outline-primary me-1 firm-users-btn">
-          View users
-        </button>
-        <button class="btn btn-sm btn-outline-secondary me-1 firm-plan-btn">
-          Edit plan
-        </button>
-        <button class="btn btn-sm btn-outline-danger firm-delete-btn">
-          Delete firm
-        </button>
+        <button class="btn btn-sm btn-outline-primary me-1 firm-users-btn">View users</button>
+        <button class="btn btn-sm btn-outline-secondary me-1 firm-plan-btn">Edit plan</button>
+        <button class="btn btn-sm btn-outline-danger firm-delete-btn">Delete firm</button>
       </td>
     </tr>
   `;
@@ -255,9 +240,7 @@ function renderFirmUsersRows(firmId, users) {
 
   return users
     .map((u) => {
-      const created = u.createdAt
-        ? new Date(u.createdAt).toLocaleDateString()
-        : "—";
+      const created = u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—";
       const isFirmAdmin = u.role === "FIRM_ADMIN";
       const activeBadge = u.isActive
         ? `<span class="badge good">Yes</span>`
@@ -268,9 +251,7 @@ function renderFirmUsersRows(firmId, users) {
         : `<span class="badge">USER</span>`;
 
       return `
-        <tr data-user-id="${escapeHtml(u._id)}" data-firm-id="${escapeHtml(
-        firmId
-      )}">
+        <tr data-user-id="${escapeHtml(u._id)}" data-firm-id="${escapeHtml(firmId)}">
           <td>${escapeHtml(u.email || "—")}</td>
           <td>${escapeHtml(u.name || "—")}</td>
           <td>${roleBadge}</td>
@@ -284,9 +265,7 @@ function renderFirmUsersRows(firmId, users) {
             <button class="btn btn-sm btn-outline-warning me-1 firm-user-toggle-active">
               ${u.isActive ? "Deactivate" : "Activate"}
             </button>
-            <button class="btn btn-sm btn-outline-danger firm-user-delete">
-              Delete
-            </button>
+            <button class="btn btn-sm btn-outline-danger firm-user-delete">Delete</button>
           </td>
         </tr>
       `;
@@ -343,9 +322,7 @@ async function handleViewFirmUsers(firmId) {
     }
     if (statusEl) statusEl.textContent = "";
   } catch (err) {
-    if (statusEl) {
-      statusEl.textContent = err.message || "Failed to load users.";
-    }
+    if (statusEl) statusEl.textContent = err.message || "Failed to load users.";
   }
 
   const modalEl = document.getElementById("firmUsersModal");
@@ -382,9 +359,7 @@ function attachFirmUsersHandlers() {
 
       btn.disabled = true;
       try {
-        const updated = await updateFirmUserApi(firmId, userId, {
-          role: newRole,
-        });
+        const updated = await updateFirmUserApi(firmId, userId, { role: newRole });
 
         row.outerHTML = renderFirmUsersRows(firmId, [
           {
@@ -404,7 +379,7 @@ function attachFirmUsersHandlers() {
       return;
     }
 
-    // Toggle active (temporary suspend)
+    // Toggle active
     if (btn.classList.contains("firm-user-toggle-active")) {
       const isCurrentlyActive = row.innerHTML.includes(">Yes<");
       const newActive = !isCurrentlyActive;
@@ -416,9 +391,7 @@ function attachFirmUsersHandlers() {
 
       btn.disabled = true;
       try {
-        const updated = await updateFirmUserApi(firmId, userId, {
-          isActive: newActive,
-        });
+        const updated = await updateFirmUserApi(firmId, userId, { isActive: newActive });
 
         row.outerHTML = renderFirmUsersRows(firmId, [
           {
@@ -440,12 +413,7 @@ function attachFirmUsersHandlers() {
 
     // Delete user
     if (btn.classList.contains("firm-user-delete")) {
-      if (
-        !window.confirm(
-          "Delete this user from database? This cannot be undone."
-        )
-      )
-        return;
+      if (!window.confirm("Delete this user from database? This cannot be undone.")) return;
 
       btn.disabled = true;
       try {
@@ -464,14 +432,9 @@ async function handleEditFirmPlan(firmId, rowEl) {
   const currentExpiryCell = rowEl.querySelector("td:nth-child(5)");
   const currentActiveCell = rowEl.querySelector("td:nth-child(6)");
 
-  const currentPlanText = currentPlanCell?.innerText.includes("PREMIUM")
-    ? "PREMIUM"
-    : "FREE";
-
+  const currentPlanText = currentPlanCell?.innerText.includes("PREMIUM") ? "PREMIUM" : "FREE";
   const currentExpiryText = currentExpiryCell?.innerText.trim() || "";
-  const currentActive = currentActiveCell?.innerText
-    .toLowerCase()
-    .includes("active");
+  const currentActive = currentActiveCell?.innerText.toLowerCase().includes("active");
 
   const planInput = window.prompt(
     "Plan for this firm:\n- Type FREE for free plan\n- Type PREMIUM for paid plan",
@@ -501,21 +464,12 @@ async function handleEditFirmPlan(firmId, rowEl) {
     }
   }
 
-  const activeInput = window.prompt(
-    "Is this firm active? (yes/no):",
-    currentActive ? "yes" : "no"
-  );
+  const activeInput = window.prompt("Is this firm active? (yes/no):", currentActive ? "yes" : "no");
   const isActive =
-    typeof activeInput === "string" &&
-    activeInput.trim().toLowerCase().startsWith("y");
+    typeof activeInput === "string" && activeInput.trim().toLowerCase().startsWith("y");
 
   try {
-    const updated = await updateFirmPlanApi(firmId, {
-      planType,
-      planExpiry,
-      isActive,
-    });
-
+    const updated = await updateFirmPlanApi(firmId, { planType, planExpiry, isActive });
     rowEl.outerHTML = renderFirmRow(updated);
   } catch (err) {
     alert(err.message || "Failed to update plan.");
@@ -552,24 +506,26 @@ async function initSuperPage() {
 
   const token = getToken();
   if (!token) {
-    window.location.href = "./index.html";
+    // FIXED: index.html is now in public root, not inside /admin/
+    window.location.href = "/index.html";
     return;
   }
 
   qs("superLogoutBtn")?.addEventListener("click", () => {
     clearToken();
-    window.location.href = "./index.html";
+    // FIXED: index.html is now in public root
+    window.location.href = "/index.html";
   });
 
   qs("backToAdminBtn")?.addEventListener("click", () => {
-    window.location.href = "./admin.html";
+    window.location.href = "/admin/admin.html";
   });
 
   try {
     const me = await loadMe();
 
     if (!requireSuperAdmin(me)) {
-      window.location.href = "./admin.html";
+      window.location.href = "/admin/admin.html";
       return;
     }
 
@@ -601,8 +557,7 @@ async function initSuperPage() {
       }
     } catch (err) {
       if (pendingStatus) {
-        pendingStatus.textContent =
-          err.message || "Failed to load pending admins.";
+        pendingStatus.textContent = err.message || "Failed to load pending admins.";
       }
     }
 
@@ -639,8 +594,7 @@ async function initSuperPage() {
     console.error(err);
     const statusEl = qs("pendingStatus");
     if (statusEl) {
-      statusEl.textContent =
-        err.message || "Failed to load super admin dashboard.";
+      statusEl.textContent = err.message || "Failed to load super admin dashboard.";
     }
   }
 }

@@ -1,5 +1,7 @@
 const API_BASE = window.location.hostname === 'localhost' ? '/api' : '/capro/api';
 const TOKEN_KEY = 'caproadminjwt';
+let __clientsChaseLoading = false;
+let __lastHash = null; // NEW: prevents repeated hash handling
 
 function qs(id) {
     return document.getElementById(id);
@@ -27,11 +29,13 @@ function clearToken() {
 }
 
 function ensureFirmAdmin(role) {
+    // Only pure firm admins pass; super admin should not be treated as firm admin
     return role === 'FIRM_ADMIN';
 }
 
 function isSuperAdmin(user) {
-    return user.role === 'SUPERADMIN' || user.email === 'saifullahfaizan786@gmail.com';
+    return user.role === 'SUPER_ADMIN' ||
+           user.email === 'saifullahfaizan786@gmail.com';
 }
 
 async function api(path, opts) {
@@ -80,9 +84,10 @@ function showPage(hash) {
         }
     }
 
-    const nav = qs('nav');
-    if (nav) {
-        nav.querySelectorAll('a').forEach(a => {
+    // FIXED: Target sidebar links (.sidebar a), not <nav>
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar) {
+        sidebar.querySelectorAll('a').forEach(a => {
             const targetHash = a.getAttribute('href');
             a.classList.toggle('active', targetHash === hash);
         });
@@ -95,6 +100,13 @@ function showPage(hash) {
 function onHashChange() {
     const h = window.location.hash.replace('#', '') || 'dashboard';
     const hash = `#${h}`;
+
+    // NEW: if hash didn't actually change, do nothing
+    if (hash === __lastHash) {
+        return;
+    }
+    __lastHash = hash;
+
     showPage(hash);
 
     // Tasks page open hone par board init/refresh
@@ -106,93 +118,8 @@ function onHashChange() {
     // Dashboard open hone par smart widgets
     if (hash === '#dashboard') {
         if (window.loadTodayReminders) loadTodayReminders();
-        loadClientsToChaseToday();
+        if (!__clientsChaseLoading) loadClientsToChaseToday();
     }
-}
-
-// ---------- Login page (index.html) ----------
-async function initLoginPage() {
-    const sendOtpBtn = qs('sendOtp');
-    if (!sendOtpBtn) return;
-
-    const emailEl = qs('email');
-    const otpEl = qs('otp');
-    const statusEl = qs('status');
-    const otpBlock = qs('otpBlock');
-    const goVerify = qs('goVerify');
-    const verifyBtn = qs('verifyOtp');
-
-    goVerify?.addEventListener('click', () => {
-        otpBlock.style.display = 'block';
-        statusEl.textContent = 'Enter OTP and verify.';
-    });
-
-    sendOtpBtn.addEventListener('click', async () => {
-        try {
-            const email = emailEl.value.trim();
-            if (!email) {
-                statusEl.textContent = 'Email required.';
-                return;
-            }
-            statusEl.textContent = 'Sending OTP...';
-            const res = await fetch(`${API_BASE}/auth/send-otp`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email }),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data?.error || data?.message || 'Failed to send OTP');
-            otpBlock.style.display = 'block';
-            statusEl.textContent = 'OTP sent. Check your email.';
-        } catch (e) {
-            statusEl.textContent = e.message || 'Failed to send OTP.';
-        }
-    });
-
-    verifyBtn.addEventListener('click', async () => {
-        try {
-            const email = emailEl.value.trim();
-            const otpCode = otpEl.value.trim();
-            if (!email || !otpCode) {
-                statusEl.textContent = 'Email & OTP required.';
-                return;
-            }
-            statusEl.textContent = 'Verifying OTP...';
-            const res = await fetch(`${API_BASE}/auth/verify-otp`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, otpCode }),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data?.error || data?.message || 'Failed to verify OTP');
-            saveToken(data.token);
-            const me = await api('/auth/me');
-            const user = me.user;
-
-            if (isSuperAdmin(user)) {
-                statusEl.innerHTML = '<strong>Super Admin login successful</strong>';
-                setTimeout(() => window.location.href = './super.html', 1000);
-                return;
-            }
-
-            if (user.role === 'FIRM_ADMIN' && user.isActive === true) {
-                statusEl.innerHTML = '<strong>Firm Admin login successful</strong>';
-                setTimeout(() => window.location.href = './admin.html#dashboard', 1000);
-                return;
-            }
-
-            if (user.role === 'FIRM_ADMIN' && user.isActive === false) {
-                statusEl.innerHTML = '<strong>Successfully signed up for Firm Admin!</strong><br><small class="text-muted">Your request is now pending Super Admin approval. Check back later or contact Super Admin <a href="mailto:saifullahfaizan786@gmail.com">saifullahfaizan786@gmail.com</a>.</small>';
-                setTimeout(() => window.location.href = './admin.html#dashboard', 3000);
-                return;
-            }
-
-            clearToken();
-            statusEl.innerHTML = '<strong>Admin request submitted</strong><br><small class="text-muted">To become Firm Admin, create a firm from Chrome extension first, then return here.</small>';
-        } catch (e) {
-            statusEl.textContent = e.message || 'Login failed.';
-        }
-    });
 }
 
 // ✅ Last day notifications UI
@@ -272,14 +199,28 @@ async function markChaseComplete(type, taskId) {
     });
 }
 
+// ✅ FIXED: Global loading guard to prevent infinite loops
 async function loadClientsToChaseToday() {
+    // ✅ PREVENT MULTIPLE SIMULTANEOUS CALLS
+    if (__clientsChaseLoading) {
+        console.log('loadClientsToChaseToday: Already loading, skipping...');
+        return;
+    }
+    
+    __clientsChaseLoading = true;
+    console.log('loadClientsToChaseToday: Starting load...');
+
     const pendingList = qs("chasePendingList");
     const riskList = qs("chaseRiskList");
     const pendingStatus = qs("chasePendingStatus");
     const riskStatus = qs("chaseRiskStatus");
 
-    if (!pendingList || !riskList) return;
+    if (!pendingList || !riskList) {
+        __clientsChaseLoading = false;
+        return;
+    }
 
+    // Clear lists immediately
     pendingList.innerHTML = "";
     riskList.innerHTML = "";
     if (pendingStatus) pendingStatus.textContent = "Loading...";
@@ -347,7 +288,7 @@ async function loadClientsToChaseToday() {
         if (pendingStatus) pendingStatus.textContent = "";
         if (riskStatus) riskStatus.textContent = "";
 
-        // FIXED: Proper event delegation with loading state
+        // ✅ FIXED: Proper event delegation with loading state
         pendingList.onclick = async (e) => {
             const doneBtn = e.target.closest('.done-btn');
             if (doneBtn) {
@@ -360,7 +301,7 @@ async function loadClientsToChaseToday() {
                     doneBtn.textContent = "Done...";
 
                     await markChaseComplete('pending', taskId);
-                    await loadClientsToChaseToday();
+                    await loadClientsToChaseToday();  // ✅ Guard prevents infinite loop
                 } catch (err) {
                     alert(err.message || "Failed to mark as done.");
                 } finally {
@@ -390,7 +331,7 @@ async function loadClientsToChaseToday() {
                     doneBtn.textContent = "Done...";
 
                     await markChaseComplete('risk', taskId);
-                    await loadClientsToChaseToday();
+                    await loadClientsToChaseToday();  // ✅ Guard prevents infinite loop
                 } catch (err) {
                     alert(err.message || "Failed to mark as done.");
                 } finally {
@@ -409,10 +350,16 @@ async function loadClientsToChaseToday() {
             }
         };
 
+        console.log('loadClientsToChaseToday: Load complete');
+        
     } catch (err) {
         console.error("loadClientsToChaseToday error:", err);
         if (pendingStatus) pendingStatus.textContent = "Failed to load.";
         if (riskStatus) riskStatus.textContent = "Failed to load.";
+    } finally {
+        // ✅ ALWAYS RESET GUARD
+        __clientsChaseLoading = false;
+        console.log('loadClientsToChaseToday: Guard reset');
     }
 }
 
@@ -422,45 +369,67 @@ async function initAdminPage() {
 
     const token = getToken();
     if (!token) {
-        window.location.href = './index.html';
+        window.location.href = '/index.html';
         return;
     }
 
     function doLogout() {
         clearToken();
-        window.location.href = './index.html';
+        window.location.href = '/index.html';
     }
 
     qs('logoutBtn')?.addEventListener('click', doLogout);
+    
+    // ✅ Navigation setup
     window.addEventListener('hashchange', onHashChange);
+    
+    // FIXED: Target sidebar links (.sidebar a)
+    document.querySelectorAll('.sidebar a[href^="#"]').forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const hash = link.getAttribute('href');
+            window.location.hash = hash;
+        });
+    });
+
+    // Initial page load
+    onHashChange();
+
+    // Load task board if tasks page or global script exists
+    if (window.initTaskBoard || document.getElementById('taskBoardColumns')) {
+        console.log('Task board detected, waiting for hashchange to init');
+    }
 
     try {
         const meResp = await api('/auth/me');
         const me = meResp.user;
 
-        if (isSuperAdmin(me)) {
-            window.location.href = './super.html';
-            return;
-        }
-
+        // Non-admin access denied
         if (!ensureFirmAdmin(me.role)) {
+            // If this is Super Admin, always go to Super dashboard (no block)
+            if (isSuperAdmin(me)) {
+                window.location.href = '/admin/super.html';
+                return;
+            }
+
+            // For other roles, show access denied
             document.body.innerHTML = `
-                <div class="container" style="padding-top: 40px">
-                    <div class="card p-4 mx-auto" style="max-width: 500px">
-                        <div class="text-center mb-4">
-                            <h3>Admin Access</h3>
-                            <p class="text-muted">Create a firm from Chrome extension first.</p>
-                        </div>
-                        <div class="text-center">
-                            <a href="./index.html" class="btn btn-primary">Login</a>
-                        </div>
-                    </div>
+              <div class="container" style="padding-top: 40px">
+                <div class="card p-4 mx-auto" style="max-width: 500px">
+                  <div class="text-center mb-4">
+                    <h3>Access denied</h3>
+                    <p class="text-muted">This email does not have Firm Admin access.</p>
+                  </div>
+                  <div class="text-center">
+                    <a href="/index.html" class="btn btn-primary">Login</a>
+                  </div>
                 </div>
+              </div>
             `;
             return;
         }
 
-        // PENDING APPROVAL
+        // PENDING APPROVAL - View-only mode
         const pendingBanner = qs('pendingBanner');
         if (!me.isActive) {
             if (pendingBanner) {
@@ -496,24 +465,26 @@ async function initAdminPage() {
             qs('topSub').textContent = firm ? `Firm: ${firm.displayName} (@${firm.handle})` : 'No firm linked';
         }
 
-        // Dashboard KPIs
+        // ✅ DASHBOARD KPIs
         if (qs('kpiFirmName')) qs('kpiFirmName').textContent = firm?.displayName || 'Individual';
-        if (qs('kpiFirmHandle')) qs('kpiFirmHandle').textContent = firm?.handle ? `@${firm.handle}` : '';
+        if (qs('kpiFirmHandle')) qs('kpiFirmHandle').textContent = firm?.handle || '';
         if (qs('kpiPlanType')) qs('kpiPlanType').textContent = firm?.planType || 'FREE';
-
         const planExpiryText = firm?.planExpiry ? new Date(firm.planExpiry).toLocaleDateString() : 'NA';
         if (qs('kpiPlanExpiry')) qs('kpiPlanExpiry').textContent = `Expires ${planExpiryText}`;
+
+        // Form fields
         if (qs('settingsPlanType')) qs('settingsPlanType').value = firm?.planType || 'FREE';
         if (qs('settingsPlanExpiry')) qs('settingsPlanExpiry').value = planExpiryText;
-
-
-        // Firm form population
         if (qs('firmDisplayName')) qs('firmDisplayName').value = firm?.displayName || '';
         if (qs('firmHandle')) qs('firmHandle').value = firm?.handle || '';
         if (qs('firmDescription')) qs('firmDescription').value = firm?.description || '';
-        if (qs('firmPracticeAreas')) qs('firmPracticeAreas').value = Array.isArray(firm?.practiceAreas) ? firm.practiceAreas.join(', ') : '';
+        if (qs('firmPracticeAreas')) {
+            qs('firmPracticeAreas').value = Array.isArray(firm?.practiceAreas) 
+                ? firm.practiceAreas.join(', ') 
+                : firm?.practiceAreas || '';
+        }
 
-        // USERS
+        // ✅ USERS table
         let users = [];
         if (firm && firm._id) {
             try {
@@ -531,37 +502,36 @@ async function initAdminPage() {
         const tbody = qs('usersTbody');
         if (tbody) {
             if (!users.length) {
-                tbody.innerHTML = '<tr><td colspan="6" class="text-muted">No users</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No users</td></tr>';
             } else {
-                tbody.innerHTML = users.map(u =>
-                    `<tr>
+                tbody.innerHTML = users.map(u => `
+                    <tr>
                         <td>${escapeHtml(u.name)}</td>
                         <td>${escapeHtml(u.email)}</td>
                         <td><span class="badge bg-secondary">${escapeHtml(u.role)}</span></td>
                         <td>${escapeHtml(u.accountType)}</td>
                         <td>${u.isActive === false ? '<span class="badge bg-warning">Inactive</span>' : '<span class="badge bg-success">Active</span>'}</td>
                         <td>${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : ''}</td>
-                    </tr>`
-                ).join('');
+                    </tr>
+                `).join('');
             }
         }
 
-        // ========== JOIN CODE SECTION ==========
+        // ✅ COMPLETE JOIN CODE SECTION
         const joinField = qs('joinCodeField');
         const editJoinInput = qs('editJoinCode');
         let revealed = false;
-
-        const renderJoin = () => {
-            if (!joinField || !firm?.joinCode) {
-                if (joinField) joinField.value = '';
-                return;
-            }
-            joinField.value = revealed ? firm.joinCode : firm.joinCode.slice(0, 2) + '...';
-            if (editJoinInput) editJoinInput.value = firm.joinCode;
-        };
-
         const statusEl = qs('joinStatus');
 
+        function renderJoin() {
+            if (!joinField || !firm?.joinCode) return;
+            joinField.value = revealed ? firm.joinCode : firm.joinCode.slice(0, 2) + '...';
+            if (editJoinInput) editJoinInput.value = firm.joinCode;
+        }
+
+        renderJoin();
+
+        // Reveal button
         const revealBtn = qs('revealJoinBtn');
         if (revealBtn && me.isActive && firm?.joinCode) {
             revealBtn.addEventListener('click', () => {
@@ -571,6 +541,7 @@ async function initAdminPage() {
             });
         }
 
+        // Copy button
         const copyBtn = qs('copyJoinBtn');
         if (copyBtn && firm?.joinCode) {
             copyBtn.addEventListener('click', async () => {
@@ -586,6 +557,7 @@ async function initAdminPage() {
             });
         }
 
+        // Rotate button
         const rotateBtn = qs('rotateJoinBtn');
         if (me.isActive && rotateBtn && firm && firm._id) {
             rotateBtn.addEventListener('click', async () => {
@@ -606,6 +578,7 @@ async function initAdminPage() {
             });
         }
 
+        // Save custom join code
         const saveJoinCodeBtn = qs('saveJoinCodeBtn');
         if (me.isActive && saveJoinCodeBtn && firm && firm._id) {
             saveJoinCodeBtn.addEventListener('click', async () => {
@@ -638,8 +611,6 @@ async function initAdminPage() {
             });
         }
 
-        renderJoin();
-
         // Save firm button
         qs('saveFirmBtn')?.addEventListener('click', async () => {
             const firmStatus = qs('firmStatus');
@@ -664,17 +635,16 @@ async function initAdminPage() {
             }
         });
 
-        onHashChange();
     } catch (e) {
         console.error('Dashboard error:', e);
-        if (e.status === 401) {
+        if (e.status === 401 || e.status === 403) {
             clearToken();
-            window.location.href = './index.html';
+            window.location.href = '/index.html';
         }
+        // Other errors ignored - page stays visible
     }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    initLoginPage();
     initAdminPage();
 });
