@@ -1,4 +1,5 @@
 // src/app.js
+
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -46,17 +47,31 @@ app.use(
 app.use(morgan("dev"));
 app.use(express.json());
 
-// ------- STATIC (root + admin) -------
+// ------- HEALTH (keep early) -------
+app.get("/health", (req, res) => {
+  res.json({ status: "ok", uptime: process.uptime() });
+});
 
+// ------- ROOT override (prevents serving public/index.html on /) -------
+app.get("/", (req, res) => {
+  // choose one:
+  // 1) Redirect:
+  return res.redirect("/health");
+
+  // 2) Or JSON:
+  // return res.json({ message: "CA-PRO-TOOLKIT backend running", health: "/health" });
+});
+
+// ------- STATIC (root + admin) -------
 const publicDir = path.join(__dirname, "..", "public");
 
-// Root static: / -> public/index.html etc.
-app.use(express.static(publicDir));
+// IMPORTANT: index:false => / won't auto-serve public/index.html
+app.use(express.static(publicDir, { index: false }));
 
 // Admin static under /admin (CSS/JS inside public/admin)
-app.use("/admin", express.static(path.join(publicDir, "admin")));
+app.use("/admin", express.static(path.join(publicDir, "admin"), { index: false }));
 
-// Admin main page (use actual file name inside public/admin)
+// Admin main page
 app.get("/admin", (req, res) => {
   res.sendFile(path.join(publicDir, "admin", "admin.html"));
 });
@@ -65,12 +80,7 @@ app.get("/admin/*", (req, res) => {
   res.sendFile(path.join(publicDir, "admin", "admin.html"));
 });
 
-// ------- HEALTH & APIs -------
-
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", uptime: process.uptime() });
-});
-
+// ------- APIs -------
 app.use("/api/auth", authRoutes);
 app.use("/api/reminders", reminderRoutes);
 app.use("/api/firms", firmRoutes);

@@ -1,6 +1,6 @@
 // src/server.js
+
 import dotenv from "dotenv";
-import morgan from "morgan";
 import connectDB from "./config/db.js";
 import Reminder from "./models/Reminder.js";
 import { processReminderForNow } from "./controllers/reminder.controller.js";
@@ -10,14 +10,9 @@ import app from "./app.js";
 dotenv.config();
 connectDB();
 
-// Extra logging if needed
-app.use(morgan("dev"));
-
-// NOTE: Root `/` ab static se handle hoga (public/index.html),
-// isliye yahan koi app.get("/") JSON route nahi rakha.
-
 // ----- Server start -----
 const PORT = process.env.PORT || 4001;
+
 const server = app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);
 });
