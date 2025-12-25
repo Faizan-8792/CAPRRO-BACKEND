@@ -9,7 +9,8 @@ import {
   rotateJoinCode, 
   joinFirmByCode, 
   listFirmUsers,
-  requestFirmAdmin   // NEW
+  requestFirmAdmin,
+  deleteFirmUser   // ✅ ADD
 } from '../controllers/firm.controller.js';
 
 const router = express.Router();
@@ -33,5 +34,6 @@ router.post('/:firmId/join-code/rotate', rotateJoinCode);  // POST /api/firms/:f
 
 // Firm users
 router.get('/:firmId/users', listFirmUsers);           // GET /api/firms/:firmId/users
+router.delete('/:firmId/users/:userId', deleteFirmUser);  // ✅ DELETE user
 
 export default router;

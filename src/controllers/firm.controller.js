@@ -209,6 +209,9 @@ export const joinFirmByCode = async (req, res, next) => {
     user.accountType = "FIRM_USER";
     await user.save();
 
+    // ✅ FIX: Return UPDATED USER with firmId for popup.js
+    const updatedUser = await User.findById(userId).select('firmId accountType role name email');
+
     return res.json({
       ok: true,
       firm: {
@@ -216,6 +219,7 @@ export const joinFirmByCode = async (req, res, next) => {
         displayName: firm.displayName,
         handle: firm.handle,
       },
+      user: updatedUser  // ✅ This fixes popup.js
     });
   } catch (err) {
     next(err);
@@ -295,6 +299,43 @@ export const requestFirmAdmin = async (req, res, next) => {
   }
 };
 
+// DELETE /api/firms/:firmId/users/:userId
+// Firm owner can delete firm members (not self)
+export const deleteFirmUser = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { firmId, userId: targetUserId } = req.params;
+    
+    const firm = await assertFirmAdmin(userId, firmId);
+    if (!firm) return res.status(404).json({ ok: false, error: "Firm not found" });
+
+    // Cannot delete self
+    if (String(targetUserId) === String(userId)) {
+      return res.status(400).json({ ok: false, error: "Cannot delete yourself" });
+    }
+
+    // Delete user from firm (set firmId null)
+    await User.findByIdAndUpdate(targetUserId, {
+      firmId: null,
+      accountType: "INDIVIDUAL",
+      role: "USER"
+    });
+
+    // Return updated user list
+    const users = await User.find({ firmId: firm._id }).select(
+      "email name role accountType createdAt isActive"
+    );
+
+    return res.json({
+      ok: true,
+      firm: { id: firm._id, displayName: firm.displayName, handle: firm.handle },
+      users
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export default {
   createFirm,
   getMyFirm,
@@ -303,5 +344,6 @@ export default {
   rotateJoinCode,
   joinFirmByCode,
   listFirmUsers,
-  requestFirmAdmin, // NEW
+  requestFirmAdmin,
+  deleteFirmUser  // ✅ ADD
 };

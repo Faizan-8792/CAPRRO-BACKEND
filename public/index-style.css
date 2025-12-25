@@ -1,0 +1,853 @@
+/* =========================
+   CA PRO – HI-TECH ANIMATED THEME
+   FUTURISTIC PROFESSIONAL WITH LIVING BACKGROUNDS
+   ========================= */
+
+/* 🌐 IMPORT CDNs (Add these to admin.html <head> section) */
+/* 
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=Exo+2:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
+*/
+
+/* 🔥 ROOT VARIABLES - CYBERPUNK FINANCE PALETTE */
+:root {
+  --bg: #0a0e17;
+  --surface: #111827;
+  --surface-2: #1e293b;
+  --text: #f1f5f9;
+  --muted: #94a3b8;
+  --border: rgba(96, 165, 250, 0.2);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  
+  --pri: #3b82f6;
+  --pri-2: #60a5fa;
+  --pri-glow: rgba(59, 130, 246, 0.6);
+  --gold: #fbbf24;
+  --ok: #10b981;
+  --warn: #f59e0b;
+  --danger: #ef4444;
+  
+  --radius: 12px;
+  
+  /* Typography */
+  --font-heading: 'Orbitron', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body: 'Rajdhani', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Exo 2', 'Courier New', monospace;
+}
+
+/* 🎨 REDUCED MOTION SUPPORT */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* 🌌 FIXED BACKGROUND ANIMATIONS */
+body {
+  position: relative;
+  overflow-x: hidden;
+  min-height: 100vh;
+  background: var(--bg);
+  font-family: var(--font-body);
+  margin: 0;
+  color: var(--text);
+}
+
+/* ⚡ MATRIX CODE RAIN BACKGROUND */
+.matrix-rain {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: 
+    linear-gradient(transparent 95%, rgba(16, 185, 129, 0.05) 100%),
+    linear-gradient(90deg, transparent 95%, rgba(96, 165, 250, 0.03) 100%);
+  background-size: 100px 100px, 150px 150px;
+  animation: matrixRain 20s linear infinite;
+  pointer-events: none;
+  z-index: -3;
+  opacity: 0.4;
+}
+
+/* ✨ FLOATING DATA NODES */
+.floating-nodes {
+  position: fixed;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    radial-gradient(circle at 20% 80%, rgba(59, 130, 246, 0.1) 2px, transparent 3px),
+    radial-gradient(circle at 40% 20%, rgba(251, 191, 36, 0.08) 1px, transparent 2px),
+    radial-gradient(circle at 60% 50%, rgba(96, 165, 250, 0.07) 3px, transparent 4px),
+    radial-gradient(circle at 80% 40%, rgba(16, 185, 129, 0.09) 2px, transparent 3px);
+  background-size: 300px 300px, 400px 400px, 250px 250px, 350px 350px;
+  animation: floatNodes 60s linear infinite;
+  pointer-events: none;
+  z-index: -2;
+  opacity: 0.3;
+}
+
+/* 🔷 GLOWING CIRCUIT GRID */
+.circuit-grid {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    linear-gradient(rgba(59, 130, 246, 0.15) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59, 130, 246, 0.15) 1px, transparent 1px);
+  background-size: 50px 50px;
+  animation: gridPulse 8s ease-in-out infinite alternate;
+  pointer-events: none;
+  z-index: -2;
+  opacity: 0.1;
+}
+
+/* 🧠 NEURAL NETWORK LINES */
+.neural-lines {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: 
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 30px,
+      rgba(96, 165, 250, 0.04) 30px,
+      rgba(96, 165, 250, 0.04) 31px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 30px,
+      rgba(251, 191, 36, 0.03) 30px,
+      rgba(251, 191, 36, 0.03) 31px
+    );
+  background-size: 100px 100px;
+  animation: neuralFlow 15s linear infinite;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.2;
+}
+
+/* 🌠 FLOATING KPI ORBS */
+.kpi-orbs {
+  position: fixed;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.kpi-orb {
+  position: absolute;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--pri-glow) 0%, transparent 70%);
+  filter: blur(20px);
+  animation: orbFloat 20s ease-in-out infinite;
+}
+
+.kpi-orb:nth-child(1) {
+  top: 10%;
+  left: 5%;
+  animation-delay: 0s;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.4) 0%, transparent 70%);
+}
+
+.kpi-orb:nth-child(2) {
+  top: 20%;
+  right: 10%;
+  animation-delay: -5s;
+  background: radial-gradient(circle, rgba(251, 191, 36, 0.3) 0%, transparent 70%);
+}
+
+.kpi-orb:nth-child(3) {
+  bottom: 15%;
+  left: 15%;
+  animation-delay: -10s;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.3) 0%, transparent 70%);
+}
+
+.kpi-orb:nth-child(4) {
+  bottom: 25%;
+  right: 5%;
+  animation-delay: -15s;
+  background: radial-gradient(circle, rgba(239, 68, 68, 0.3) 0%, transparent 70%);
+}
+
+/* =======================
+   ANIMATION KEYFRAMES
+   ======================= */
+
+@keyframes matrixRain {
+  0% {
+    background-position: 0 0, 0 0;
+  }
+  100% {
+    background-position: 100px 1000px, 150px 750px;
+  }
+}
+
+@keyframes floatNodes {
+  0% {
+    background-position: 0 0, 100px 100px, 200px 200px, 300px 300px;
+  }
+  100% {
+    background-position: 300px 300px, 400px 400px, 500px 500px, 600px 600px;
+  }
+}
+
+@keyframes gridPulse {
+  0%, 100% {
+    opacity: 0.05;
+    background-size: 50px 50px;
+  }
+  50% {
+    opacity: 0.15;
+    background-size: 55px 55px;
+  }
+}
+
+@keyframes neuralFlow {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 100px 100px;
+  }
+}
+
+@keyframes orbFloat {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  25% {
+    transform: translate(50px, -30px) scale(1.1);
+  }
+  50% {
+    transform: translate(-30px, 40px) scale(0.9);
+  }
+  75% {
+    transform: translate(40px, 30px) scale(1.05);
+  }
+}
+
+@keyframes kpiCount {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes circuitTrail {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 200px 200px;
+  }
+}
+
+@keyframes buttonMatrix {
+  0% {
+    box-shadow: 0 0 5px var(--pri);
+  }
+  50% {
+    box-shadow: 0 0 20px var(--pri), 0 0 30px var(--pri-glow);
+  }
+  100% {
+    box-shadow: 0 0 5px var(--pri);
+  }
+}
+
+@keyframes cardHologram {
+  0%, 100% {
+    border-color: rgba(59, 130, 246, 0.3);
+    box-shadow: 0 5px 15px rgba(59, 130, 246, 0.2);
+  }
+  50% {
+    border-color: rgba(96, 165, 250, 0.5);
+    box-shadow: 0 8px 25px rgba(96, 165, 250, 0.4);
+  }
+}
+
+@keyframes tableScan {
+  0% {
+    background-position: 0 -100%;
+  }
+  100% {
+    background-position: 0 200%;
+  }
+}
+
+@keyframes sidebarCircuit {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 0 200px;
+  }
+}
+
+/* =======================
+   LAYOUT & STRUCTURE
+   ======================= */
+
+.container {
+  padding: 20px;
+}
+
+/* =======================
+   TOP NAVBAR - HOLOGRAPHIC TYPING
+   ======================= */
+
+.navbar {
+  background: linear-gradient(
+    90deg, 
+    rgba(15, 23, 42, 0.95), 
+    rgba(30, 41, 59, 0.95)
+  ) !important;
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(59, 130, 246, 0.4) !important;
+  box-shadow: 0 5px 30px rgba(0, 0, 0, 0.5);
+  position: relative;
+  overflow: hidden;
+}
+
+.navbar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(59, 130, 246, 0.2),
+    transparent
+  );
+  animation: hologramSlide 3s ease-in-out infinite;
+}
+
+.navbar-brand {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: linear-gradient(90deg, var(--pri), var(--gold));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 30px rgba(59, 130, 246, 0.5);
+  animation: hologramTyping 2s steps(20) infinite;
+}
+
+@keyframes hologramSlide {
+  0%, 100% {
+    left: -100%;
+  }
+  50% {
+    left: 100%;
+  }
+}
+
+@keyframes hologramTyping {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* =======================
+   SIDEBAR - CIRCUIT BOARD GLOW
+   ======================= */
+
+.sidebar {
+  width: 240px;
+  background: linear-gradient(
+    180deg,
+    rgba(15, 23, 42, 0.95),
+    rgba(30, 41, 59, 0.9)
+  ) !important;
+  backdrop-filter: blur(15px);
+  border-right: 1px solid rgba(59, 130, 246, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+.sidebar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: 
+    linear-gradient(90deg, transparent 49%, rgba(96, 165, 250, 0.1) 50%, transparent 51%),
+    linear-gradient(transparent 49%, rgba(96, 165, 250, 0.1) 50%, transparent 51%);
+  background-size: 20px 20px;
+  animation: sidebarCircuit 10s linear infinite;
+  pointer-events: none;
+  opacity: 0.3;
+}
+
+.sidebar > a {
+  display: block;
+  padding: 12px 20px;
+  color: var(--text);
+  text-decoration: none;
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 14px;
+  border-left: 3px solid transparent;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.sidebar > a:hover,
+.sidebar > a.active {
+  background: rgba(59, 130, 246, 0.15);
+  border-left-color: var(--pri);
+  color: white;
+  transform: translateX(5px);
+}
+
+.sidebar > a:hover::before {
+  content: '>';
+  position: absolute;
+  right: 15px;
+  animation: cursorBlink 1s infinite;
+}
+
+/* =======================
+   CARDS - GLASSMORPHISM
+   ======================= */
+
+.card {
+  background: rgba(17, 24, 39, 0.85) !important;
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(96, 165, 250, 0.3) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3) !important;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: cardHologram 3s ease-in-out infinite;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--pri), transparent);
+  animation: cardGlow 2s ease-in-out infinite;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 20px 50px rgba(59, 130, 246, 0.3) !important;
+  border-color: var(--pri) !important;
+}
+
+@keyframes cardGlow {
+  0%, 100% {
+    left: -100%;
+  }
+  50% {
+    left: 100%;
+  }
+}
+
+/* =======================
+   KPI METRICS - PULSING COUNTERS
+   ======================= */
+
+.kpi {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.kpi-value {
+  font-family: var(--font-heading);
+  font-size: 28px;
+  font-weight: 800;
+  background: linear-gradient(90deg, var(--pri), var(--gold));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: kpiCount 1s ease-out forwards;
+  text-shadow: 0 0 30px rgba(59, 130, 246, 0.3);
+}
+
+.kpi-value::after {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--pri);
+  border-radius: 50%;
+  margin-left: 5px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.5);
+  }
+}
+
+/* =======================
+   BUTTONS - MATRIX TRAIL EFFECT
+   ======================= */
+
+.btn {
+  font-family: var(--font-body);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: none !important;
+  border-radius: 8px !important;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s ease !important;
+  animation: buttonMatrix 3s infinite;
+}
+
+.btn::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(
+    45deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.1) 50%,
+    transparent 70%
+  );
+  transform: rotate(45deg);
+  animation: buttonTrail 2s linear infinite;
+}
+
+.btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px rgba(59, 130, 246, 0.5) !important;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--pri), var(--pri-2)) !important;
+  color: white !important;
+}
+
+.btn-outline-secondary {
+  background: transparent !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+}
+
+@keyframes buttonTrail {
+  0% {
+    transform: rotate(45deg) translateX(-100%);
+  }
+  100% {
+    transform: rotate(45deg) translateX(100%);
+  }
+}
+
+/* =======================
+   TABLES - DIGITAL SCAN LINES
+   ======================= */
+
+.table {
+  background: rgba(30, 41, 59, 0.8) !important;
+  backdrop-filter: blur(10px);
+  border-radius: var(--radius);
+  overflow: hidden;
+  position: relative;
+}
+
+.table::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 95%,
+    rgba(96, 165, 250, 0.1) 100%
+  );
+  background-size: 100% 30px;
+  animation: tableScan 10s linear infinite;
+  pointer-events: none;
+}
+
+.table th {
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.3),
+    rgba(96, 165, 250, 0.2)
+  ) !important;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: white !important;
+  border-bottom: 2px solid var(--pri) !important;
+}
+
+.table td {
+  border-bottom: 1px solid rgba(96, 165, 250, 0.1) !important;
+  color: var(--text) !important;
+  font-family: var(--font-body);
+}
+
+.table tbody tr {
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.table tbody tr:hover {
+  background: rgba(59, 130, 246, 0.1) !important;
+  transform: translateX(5px);
+}
+
+.table tbody tr:hover::before {
+  content: '▶';
+  position: absolute;
+  left: 5px;
+  color: var(--pri);
+  animation: cursorBlink 1s infinite;
+}
+
+@keyframes cursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* =======================
+   FORM INPUTS - TYPING CURSOR
+   ======================= */
+
+.form-control,
+.form-select {
+  background: rgba(30, 41, 59, 0.9) !important;
+  border: 1px solid rgba(96, 165, 250, 0.3) !important;
+  border-radius: 8px !important;
+  color: var(--text) !important;
+  font-family: var(--font-mono);
+  transition: all 0.3s ease;
+}
+
+.form-control:focus,
+.form-select:focus {
+  background: rgba(30, 41, 59, 0.95) !important;
+  border-color: var(--pri) !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
+  animation: typingCursor 1s infinite;
+}
+
+@keyframes typingCursor {
+  0%, 100% { border-color: var(--pri); }
+  50% { border-color: var(--pri-2); }
+}
+
+/* =======================
+   LOADING STATES - CIRCUIT SPINNERS
+   ======================= */
+
+.loading-spinner {
+  display: inline-block;
+  width: 40px;
+  height: 40px;
+  position: relative;
+}
+
+.loading-spinner::before,
+.loading-spinner::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 50%;
+  border: 3px solid transparent;
+}
+
+.loading-spinner::before {
+  border-top: 3px solid var(--pri);
+  animation: spin 1s linear infinite;
+}
+
+.loading-spinner::after {
+  border-bottom: 3px solid var(--gold);
+  animation: spinReverse 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes spinReverse {
+  to { transform: rotate(-360deg); }
+}
+
+/* =======================
+   RESPONSIVE BREAKPOINTS
+   ======================= */
+
+/* Mobile (≤ 768px) */
+@media (max-width: 768px) {
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    border-right: none;
+    border-top: 1px solid rgba(96, 165, 250, 0.3);
+    display: flex;
+    justify-content: space-around;
+    padding: 10px;
+  }
+  
+  .sidebar > a {
+    padding: 8px 12px;
+    font-size: 12px;
+    text-align: center;
+    border-left: none;
+    border-bottom: 3px solid transparent;
+  }
+  
+  .sidebar > a:hover,
+  .sidebar > a.active {
+    border-left-color: transparent;
+    border-bottom-color: var(--pri);
+    transform: translateY(-5px);
+  }
+  
+  .card {
+    margin-bottom: 15px;
+  }
+  
+  .kpi-value {
+    font-size: 22px;
+  }
+}
+
+/* Tablet (769px - 1024px) */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .container {
+    max-width: 95%;
+  }
+  
+  .card {
+    margin-bottom: 20px;
+  }
+  
+  .row > div {
+    margin-bottom: 20px;
+  }
+}
+
+/* Desktop (≥ 1025px) */
+@media (min-width: 1025px) {
+  .container {
+    max-width: 1400px;
+  }
+  
+  .grid-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+  }
+}
+
+/* =======================
+   PERFORMANCE OPTIMIZATION
+   ======================= */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Print optimization */
+@media print {
+  .matrix-rain,
+  .floating-nodes,
+  .circuit-grid,
+  .neural-lines,
+  .kpi-orbs,
+  .card::before,
+  .btn::before,
+  .table::before {
+    display: none !important;
+  }
+  
+  .card {
+    box-shadow: none !important;
+    border: 1px solid #ddd !important;
+  }
+}
+
+/* =======================
+   UTILITY CLASSES
+   ======================= */
+
+.text-gradient {
+  background: linear-gradient(90deg, var(--pri), var(--gold));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.glow {
+  text-shadow: 0 0 20px currentColor;
+}
+
+.digital-font {
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+}
+
+.cyber-border {
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  box-shadow: 0 0 15px rgba(96, 165, 250, 0.2);
+}
+

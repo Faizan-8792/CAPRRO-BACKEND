@@ -400,6 +400,49 @@ async function initAdminPage() {
         console.log('Task board detected, waiting for hashchange to init');
     }
 
+    let currentFirm = null; // Store firm globally for delete operations
+
+    async function loadAndRenderUsers() {
+        if (!currentFirm || !currentFirm._id) return;
+        
+        const tbody = qs('usersTbody');
+        if (!tbody) return;
+
+        try {
+            const usersResp = await api(`/firms/${currentFirm._id}/users`);
+            const users = usersResp?.users || [];
+
+            // Update KPI
+            if (qs('kpiTotalUsers')) qs('kpiTotalUsers').textContent = String(users.length);
+            const activeCount = users.filter(u => u.isActive !== false).length;
+            if (qs('kpiActiveUsers')) qs('kpiActiveUsers').textContent = String(activeCount);
+
+            // Render table with delete buttons
+            if (!users.length) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No users</td></tr>';
+            } else {
+                tbody.innerHTML = users.map(u => `
+                    <tr>
+                        <td>${escapeHtml(u.name)}</td>
+                        <td>${escapeHtml(u.email)}</td>
+                        <td><span class="badge bg-${u.role === 'FIRM_ADMIN' ? 'warning' : 'secondary'}">${escapeHtml(u.role)}</span></td>
+                        <td>${escapeHtml(u.accountType)}</td>
+                        <td>${u.isActive !== false ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-warning">Inactive</span>'}</td>
+                        <td>${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : ''}</td>
+                        <td>
+                            <button class="btn btn-sm btn-danger delete-user-btn" data-userid="${u._id}">
+                                Delete
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+        } catch (e) {
+            console.error('Users load error:', e);
+            if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Failed to load users</td></tr>';
+        }
+    }
+
     try {
         const meResp = await api('/auth/me');
         const me = meResp.user;
@@ -455,6 +498,7 @@ async function initAdminPage() {
                 const firmResp = await api(`/firms/${firmId}`);
                 if (firmResp?.ok && firmResp.firm) {
                     firm = firmResp.firm;
+                    currentFirm = firm; // Store for delete operations
                 }
             }
         } catch (e) {
@@ -484,38 +528,8 @@ async function initAdminPage() {
                 : firm?.practiceAreas || '';
         }
 
-        // ✅ USERS table
-        let users = [];
-        if (firm && firm._id) {
-            try {
-                const usersResp = await api(`/firms/${firm._id}/users`);
-                users = usersResp?.users || [];
-            } catch (e) {
-                console.error('Users load error:', e);
-            }
-        }
-
-        if (qs('kpiTotalUsers')) qs('kpiTotalUsers').textContent = String(users.length);
-        const activeCount = users.filter(u => u.isActive !== false).length;
-        if (qs('kpiActiveUsers')) qs('kpiActiveUsers').textContent = String(activeCount);
-
-        const tbody = qs('usersTbody');
-        if (tbody) {
-            if (!users.length) {
-                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No users</td></tr>';
-            } else {
-                tbody.innerHTML = users.map(u => `
-                    <tr>
-                        <td>${escapeHtml(u.name)}</td>
-                        <td>${escapeHtml(u.email)}</td>
-                        <td><span class="badge bg-secondary">${escapeHtml(u.role)}</span></td>
-                        <td>${escapeHtml(u.accountType)}</td>
-                        <td>${u.isActive === false ? '<span class="badge bg-warning">Inactive</span>' : '<span class="badge bg-success">Active</span>'}</td>
-                        <td>${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : ''}</td>
-                    </tr>
-                `).join('');
-            }
-        }
+        // ✅ USERS table - Load users
+        await loadAndRenderUsers();
 
         // ✅ COMPLETE JOIN CODE SECTION
         const joinField = qs('joinCodeField');
@@ -632,6 +646,27 @@ async function initAdminPage() {
                 }
             } catch (e) {
                 if (firmStatus) firmStatus.textContent = e.message;
+            }
+        });
+
+        // ✅ Delete user handler
+        document.getElementById('usersTbody')?.addEventListener('click', async (e) => {
+            if (e.target.classList.contains('delete-user-btn')) {
+                const userId = e.target.dataset.userid;
+                const confirmed = confirm(`Delete user ${userId}? This removes them from firm only.`);
+                if (!confirmed) return;
+                
+                try {
+                    e.target.textContent = 'Deleting...';
+                    e.target.disabled = true;
+                    await api(`/firms/${firm._id}/users/${userId}`, { method: 'DELETE' });
+                    await loadAndRenderUsers();  // Refresh list
+                } catch (err) {
+                    alert(err.message || 'Delete failed');
+                } finally {
+                    e.target.disabled = false;
+                    e.target.textContent = 'Delete';
+                }
             }
         });
 
