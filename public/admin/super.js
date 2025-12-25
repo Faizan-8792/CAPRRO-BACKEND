@@ -3,6 +3,53 @@
 const API_BASE = "https://caprro-backend-1.onrender.com/api";
 const TOKEN_KEY = "caproadminjwt";
 
+// AUTH HELPER FUNCTIONS
+function getToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+async function apiGetMe() {
+  const token = getToken();
+  if (!token) throw new Error("No token");
+
+  const res = await fetch(`${API_BASE}/auth/me`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }
+  });
+
+  if (!res.ok) throw new Error("Unauthorized");
+  return res.json();
+}
+
+// AUTH GUARD FUNCTION
+async function ensureSuperAdminAuth() {
+  try {
+    const data = await apiGetMe();
+
+    if (!data.ok) throw new Error("Invalid user");
+
+    // ❌ ONLY SUPER_ADMIN allowed
+    if (data.user.role !== "SUPER_ADMIN") {
+      window.location.href = "/admin/admin.html";
+      return false;
+    }
+
+    console.log("Super admin authenticated:", data.user.email);
+    return true;
+  } catch (err) {
+    console.error("Auth error:", err);
+    clearToken();
+    window.location.href = "/index.html";
+    return false;
+  }
+}
+
 function qs(id) {
   return document.getElementById(id);
 }
@@ -14,14 +61,6 @@ function escapeHtml(s) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
-}
-
-function getToken() {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-function clearToken() {
-  localStorage.removeItem(TOKEN_KEY);
 }
 
 async function api(path, opts = {}) {
@@ -503,6 +542,10 @@ async function handleDeleteFirm(firmId, rowEl) {
 
 async function initSuperPage() {
   if (!qs("superLogoutBtn")) return;
+
+  // AUTH CHECK FIRST
+  const isAuthenticated = await ensureSuperAdminAuth();
+  if (!isAuthenticated) return;
 
   const token = getToken();
   if (!token) {

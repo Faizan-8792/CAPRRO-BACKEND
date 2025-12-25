@@ -1,8 +1,61 @@
 const API_BASE = "https://caprro-backend-1.onrender.com/api";
-
 const TOKEN_KEY = 'caproadminjwt';
 let __clientsChaseLoading = false;
 let __lastHash = null; // NEW: prevents repeated hash handling
+
+// AUTH HELPER FUNCTIONS
+function getToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+async function apiGetMe() {
+  const token = getToken();
+  if (!token) throw new Error("No token");
+
+  const res = await fetch(`${API_BASE}/auth/me`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }
+  });
+
+  if (!res.ok) throw new Error("Unauthorized");
+  return res.json();
+}
+
+// AUTH GUARD FUNCTION
+async function ensureAdminAuth() {
+  try {
+    const data = await apiGetMe();
+
+    if (!data.ok) throw new Error("Invalid user");
+
+    // ❌ Super admin should not stay on admin page
+    if (data.user.role === "SUPER_ADMIN") {
+      window.location.href = "/admin/super.html";
+      return false;
+    }
+
+    // ✅ Only FIRM_ADMIN allowed
+    if (data.user.role !== "FIRM_ADMIN") {
+      clearToken();
+      window.location.href = "/index.html";
+      return false;
+    }
+
+    console.log("Admin authenticated:", data.user.email);
+    return true;
+  } catch (err) {
+    console.error("Auth error:", err);
+    clearToken();
+    window.location.href = "/index.html";
+    return false;
+  }
+}
 
 function qs(id) {
     return document.getElementById(id);
@@ -19,14 +72,6 @@ function escapeHtml(s) {
 
 function saveToken(token) {
     localStorage.setItem(TOKEN_KEY, token);
-}
-
-function getToken() {
-    return localStorage.getItem(TOKEN_KEY);
-}
-
-function clearToken() {
-    localStorage.removeItem(TOKEN_KEY);
 }
 
 function ensureFirmAdmin(role) {
@@ -367,6 +412,10 @@ async function loadClientsToChaseToday() {
 // ---------- Firm Admin page (admin.html) ----------
 async function initAdminPage() {
     if (!qs('logoutBtn')) return;
+
+    // AUTH CHECK FIRST
+    const isAuthenticated = await ensureAdminAuth();
+    if (!isAuthenticated) return;
 
     const token = getToken();
     if (!token) {
