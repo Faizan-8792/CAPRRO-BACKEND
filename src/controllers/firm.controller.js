@@ -247,6 +247,54 @@ export const listFirmUsers = async (req, res, next) => {
   }
 };
 
+// POST /api/firms/request-admin
+// Current user wants to become FIRM_ADMIN of their linked firm
+export const requestFirmAdmin = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({ ok: false, error: "User not found" });
+    }
+
+    if (!user.firmId) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "User is not linked to any firm" });
+    }
+
+    // Agar already firm admin hai
+    if (user.role === "FIRM_ADMIN") {
+      if (user.isActive) {
+        return res.json({
+          ok: true,
+          alreadyAdmin: true,
+          message: "Already an approved Firm Admin",
+        });
+      }
+      return res.json({
+        ok: true,
+        alreadyPending: true,
+        message: "Firm Admin approval is already pending",
+      });
+    }
+
+    // Yahin pe request create karte hain:
+    user.role = "FIRM_ADMIN";
+    user.accountType = "FIRM_USER";
+    user.isActive = false; // pending approval
+    await user.save();
+
+    return res.json({
+      ok: true,
+      message: "Firm Admin request created. Wait for Super Admin approval.",
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export default {
   createFirm,
   getMyFirm,
@@ -255,4 +303,5 @@ export default {
   rotateJoinCode,
   joinFirmByCode,
   listFirmUsers,
+  requestFirmAdmin, // NEW
 };

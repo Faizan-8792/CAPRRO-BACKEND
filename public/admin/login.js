@@ -189,20 +189,62 @@ async function initLoginPage() {
         return;
       }
 
+      // 1) Agar already FIRM_ADMIN hai but pending
       if (user.role === 'FIRM_ADMIN' && user.isActive === false) {
         statusEl.innerHTML =
           'Successfully signed up for Firm Admin! ' +
           'Your request is now pending Super Admin approval. ' +
-          'Check back later or contact Super Admin at saifullahfaizan786@gmail.com.';
+          'Check back later or contact Super Admin at ' +
+          'saifullahfaizan786@gmail.com.';
         setTimeout(() => {
           window.location.href = '/admin/admin.html#dashboard';
         }, 2500);
         return;
       }
 
+      // 2) USER with NO firm → truly new person
+      if (user.role === 'USER' && !user.firmId) {
+        statusEl.innerHTML =
+          'First create a firm from the admin panel, then come back to this page to sign in as Firm Admin.';
+        clearToken();
+        return;
+      }
+
+      // 3) USER already linked to a firm → yahan se admin request create karenge
+      if (user.role === 'USER' && user.firmId && user.isActive === true) {
+        try {
+          statusEl.textContent = 'Creating Firm Admin request...';
+          const resp = await api('/firms/request-admin', { method: 'POST' });
+
+          if (resp.ok) {
+            statusEl.textContent =
+              'Request as Firm Admin has been successfully sent. Please wait for approval from your existing admin.';
+          } else {
+            statusEl.textContent =
+              resp.error || 'Failed to create Firm Admin request.';
+          }
+        } catch (err) {
+          console.error('request-admin error:', err);
+          statusEl.textContent =
+            err.message || 'Failed to create Firm Admin request.';
+        }
+
+        clearToken();
+        return;
+      }
+
+      // 4) General case: linked firm + already pending
+      if ((user.role === 'USER' || user.role === 'FIRM_ADMIN') &&
+          user.firmId && user.isActive === false) {
+        statusEl.textContent =
+          'Request as Firm Admin has been successfully sent. Please wait for approval from your existing admin.';
+        clearToken();
+        return;
+      }
+
+      // fallback
       clearToken();
-      // Either fully hide:
-      statusEl.textContent = '';  // no message
+      statusEl.textContent = '';
     } catch (e) {
       console.error('Login / verify OTP error:', e);
       statusEl.textContent = e.message || 'Login failed.';

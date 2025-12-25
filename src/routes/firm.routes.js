@@ -8,7 +8,8 @@ import {
   updateFirm, 
   rotateJoinCode, 
   joinFirmByCode, 
-  listFirmUsers 
+  listFirmUsers,
+  requestFirmAdmin   // NEW
 } from '../controllers/firm.controller.js';
 
 const router = express.Router();
@@ -24,6 +25,10 @@ router.patch('/:firmId', updateFirm);                  // PATCH /api/firms/:firm
 
 // Join code management
 router.post('/join', joinFirmByCode);                  // POST /api/firms/join
+
+// NEW: user → FIRM_ADMIN (pending) of their linked firm
+router.post('/request-admin', requestFirmAdmin);
+
 router.post('/:firmId/join-code/rotate', rotateJoinCode);  // POST /api/firms/:firmId/join-code/rotate
 
 // Firm users
