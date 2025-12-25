@@ -1,4 +1,4 @@
-const API_BASE = "https://YOUR-RENDER-URL.onrender.com/api";
+const API_BASE = "https://caprro-backend-1.onrender.com/api";
 
 const TOKEN_KEY = 'caproadminjwt';
 let __clientsChaseLoading = false;
