@@ -6,6 +6,8 @@ import { sendOtpEmail } from "../services/email.service.js";
 const JWT_SECRET = process.env.JWT_SECRET || "changeme";
 const OTP_EXPIRY_MINUTES = 10;
 
+// ---------------- Helpers ----------------
+
 function hashOtp(otp) {
   return crypto.createHash("sha256").update(String(otp)).digest("hex");
 }
@@ -25,6 +27,7 @@ function buildTokenPayload(user) {
   };
 }
 
+// ---------------- SEND OTP ----------------
 // POST /api/auth/send-otp
 export const sendOtp = async (req, res, next) => {
   try {
@@ -34,6 +37,7 @@ export const sendOtp = async (req, res, next) => {
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
+
     let user = await User.findOne({ email: normalizedEmail });
 
     if (!user) {
@@ -42,27 +46,43 @@ export const sendOtp = async (req, res, next) => {
         role: "USER",
         accountType: "INDIVIDUAL",
         firmId: null,
+        isActive: true,
       });
     }
 
     // Pin SUPER_ADMIN
-    if (normalizedEmail === "saifullahfaizan786@gmail.com" && user.role !== "SUPER_ADMIN") {
+    if (
+      normalizedEmail === "saifullahfaizan786@gmail.com" &&
+      user.role !== "SUPER_ADMIN"
+    ) {
       user.role = "SUPER_ADMIN";
       user.isActive = true;
     }
 
     const otp = generateOtp();
     user.otpCodeHash = hashOtp(otp);
-    user.otpExpiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+    user.otpExpiresAt = new Date(
+      Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000
+    );
     await user.save();
 
-    await sendOtpEmail(normalizedEmail, otp);
-    return res.json({ ok: true, message: "OTP sent to email" });
+    // 🔥 IMPORTANT FIX: DO NOT await email sending
+    // Email background me jayega, API kabhi hang nahi hogi
+    sendOtpEmail(normalizedEmail, otp).catch((err) => {
+      console.error("OTP email failed:", err.message);
+    });
+
+    // ✅ Immediate response
+    return res.json({
+      ok: true,
+      message: "OTP generated. Email sending in background.",
+    });
   } catch (err) {
     next(err);
   }
 };
 
+// ---------------- VERIFY OTP ----------------
 // POST /api/auth/verify-otp
 export const verifyOtpAndLogin = async (req, res, next) => {
   try {
@@ -70,7 +90,9 @@ export const verifyOtpAndLogin = async (req, res, next) => {
     const otpValue = otpCode ?? otp;
 
     if (!email || !otpValue) {
-      return res.status(400).json({ ok: false, error: "Email and OTP are required" });
+      return res
+        .status(400)
+        .json({ ok: false, error: "Email and OTP are required" });
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
@@ -81,14 +103,19 @@ export const verifyOtpAndLogin = async (req, res, next) => {
     }
 
     // Re-apply SUPER_ADMIN
-    if (normalizedEmail === "saifullahfaizan786@gmail.com" && user.role !== "SUPER_ADMIN") {
+    if (
+      normalizedEmail === "saifullahfaizan786@gmail.com" &&
+      user.role !== "SUPER_ADMIN"
+    ) {
       user.role = "SUPER_ADMIN";
       user.isActive = true;
       await user.save();
     }
 
     if (!user.otpCodeHash || !user.otpExpiresAt) {
-      return res.status(400).json({ ok: false, error: "No active OTP for this user" });
+      return res
+        .status(400)
+        .json({ ok: false, error: "No active OTP for this user" });
     }
 
     if (user.otpExpiresAt.getTime() < Date.now()) {
@@ -100,7 +127,7 @@ export const verifyOtpAndLogin = async (req, res, next) => {
       return res.status(400).json({ ok: false, error: "Invalid OTP" });
     }
 
-    // clear otp
+    // Clear OTP after successful verification
     user.otpCodeHash = undefined;
     user.otpExpiresAt = undefined;
     await user.save();
@@ -114,10 +141,12 @@ export const verifyOtpAndLogin = async (req, res, next) => {
   }
 };
 
+// ---------------- GET ME ----------------
 // GET /api/auth/me
 export const getMe = async (req, res, next) => {
   try {
     const { id } = req.user;
+
     const user = await User.findById(id).select(
       "email name role accountType firmId createdAt updatedAt isActive"
     );

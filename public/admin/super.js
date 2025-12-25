@@ -1,6 +1,6 @@
 // public/admin/super.js
 
-const API_BASE = "/api";
+const API_BASE = "https://YOUR-RENDER-URL.onrender.com/api";
 const TOKEN_KEY = "caproadminjwt";
 
 function qs(id) {

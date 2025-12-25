@@ -1,4 +1,5 @@
-const API_BASE = "/api";
+const API_BASE = "https://YOUR-RENDER-URL.onrender.com/api";
+
 const TOKEN_KEY = 'caproadminjwt';
 let __clientsChaseLoading = false;
 let __lastHash = null; // NEW: prevents repeated hash handling
