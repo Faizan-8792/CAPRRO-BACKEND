@@ -60,22 +60,24 @@ export const sendOtp = async (req, res, next) => {
     }
 
     const otp = generateOtp();
+
+    // 🔥 DEV MODE: PRINT OTP IN RENDER LOGS
+    console.log("🔐 OTP GENERATED for", normalizedEmail, "=>", otp);
+
     user.otpCodeHash = hashOtp(otp);
     user.otpExpiresAt = new Date(
       Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000
     );
     await user.save();
 
-    // 🔥 IMPORTANT FIX: DO NOT await email sending
-    // Email background me jayega, API kabhi hang nahi hogi
+    // 🔥 IMPORTANT: DO NOT await email
     sendOtpEmail(normalizedEmail, otp).catch((err) => {
       console.error("OTP email failed:", err.message);
     });
 
-    // ✅ Immediate response
     return res.json({
       ok: true,
-      message: "OTP generated. Email sending in background.",
+      message: "OTP generated. Please check email (or dev logs).",
     });
   } catch (err) {
     next(err);
@@ -127,7 +129,7 @@ export const verifyOtpAndLogin = async (req, res, next) => {
       return res.status(400).json({ ok: false, error: "Invalid OTP" });
     }
 
-    // Clear OTP after successful verification
+    // Clear OTP
     user.otpCodeHash = undefined;
     user.otpExpiresAt = undefined;
     await user.save();
