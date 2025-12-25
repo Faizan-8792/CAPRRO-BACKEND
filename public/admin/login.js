@@ -1,7 +1,8 @@
 // public/admin/login.js
 // Used by public/index.html
 
-const API_BASE = window.location.hostname === 'localhost' ? '/api' : '/capro/api';
+const API_BASE = "/api";
+
 const TOKEN_KEY = 'caproadminjwt';
 
 function saveToken(token) {

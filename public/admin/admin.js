@@ -1,4 +1,4 @@
-const API_BASE = window.location.hostname === 'localhost' ? '/api' : '/capro/api';
+const API_BASE = "/api";
 const TOKEN_KEY = 'caproadminjwt';
 let __clientsChaseLoading = false;
 let __lastHash = null; // NEW: prevents repeated hash handling
