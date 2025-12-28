@@ -6,7 +6,8 @@ import { Resend } from "resend";
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Default Resend sender (no custom domain required)
-const FROM_EMAIL = "CA PRO Toolkit <onboarding@resend.dev>";
+const FROM_EMAIL = "CA PRO Toolkit <noreply@caprotoolkit.in>";
+
 
 // ---------- Helper ----------
 function escHtml(s) {
