@@ -25,7 +25,7 @@ async function api(path) {
   return res.json();
 }
 
-export async function loadAdminComplianceAssistant() {
+async function loadAdminComplianceAssistant() {
   const tbody = qs('caTaskTbody');
   const statusEl = qs('caStatus');
   if (!tbody) return;
@@ -34,6 +34,9 @@ export async function loadAdminComplianceAssistant() {
     statusEl.textContent = 'Analyzing today’s compliance workload...';
 
     const resp = await api('/tasks/board');
+    if (!resp || !resp.columns) {
+      throw new Error('Invalid task board response');
+    }
     const allTasks = Object.values(resp.columns || {}).flat();
 
     const enriched = allTasks.map(t => {
@@ -84,3 +87,5 @@ export async function loadAdminComplianceAssistant() {
     statusEl.textContent = 'Failed to load compliance assistant';
   }
 }
+
+window.loadAdminComplianceAssistant = loadAdminComplianceAssistant;
