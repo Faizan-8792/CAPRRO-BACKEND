@@ -104,7 +104,10 @@
         <section id="clientsToChaseCard" class="card">
           <h3>Clients to Chase Today</h3>
           <p class="muted">
-            Auto-generated follow-up list from Tasks. Pending Docs shows items stuck in ‘Waiting Docs/Open’ for 3+ days; High Risk shows clients late in the last periods. <br>Click Done to mark handled and remove from this list.- automatic smart list
+            Auto-generated follow-up list from Tasks. Pending Docs shows items stuck in
+            ‘Waiting Docs/Open’ for 3+ days; High Risk shows clients late in the last periods.
+            <br>
+            Click Done to mark handled and remove from this list.
           </p>
 
           <div class="smart-section">
@@ -117,6 +120,48 @@
             <h4>Habitual late clients (High risk)</h4>
             <div id="chaseRiskStatus" class="status-text"></div>
             <ul id="chaseRiskList" class="smart-list"></ul>
+          </div>
+        </section>
+
+        <!-- ============================= -->
+        <!-- 🧠 Compliance Assistant (Admin) -->
+        <!-- ============================= -->
+        <section id="adminComplianceAssistant" class="card">
+          <h3>🧠 Compliance Assistant – Today’s Work</h3>
+          <p class="muted">
+            Auto-prioritized compliance workload for today based on due dates,
+            overdue status, and task risk signals.
+          </p>
+
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            <span class="badge bg-danger" id="caOverdueCount">Overdue: 0</span>
+            <span class="badge bg-warning" id="caTodayCount">Due Today: 0</span>
+            <span class="badge bg-primary" id="caUpcomingCount">Upcoming: 0</span>
+          </div>
+
+          <div id="caStatus" class="small-label mb-2">
+            Loading today’s compliance priorities...
+          </div>
+
+          <div class="table-responsive">
+            <table class="table align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Client</th>
+                  <th>Service</th>
+                  <th>Due Date</th>
+                  <th>Assigned</th>
+                  <th>Priority</th>
+                </tr>
+              </thead>
+              <tbody id="caTaskTbody">
+                <tr>
+                  <td colspan="5" class="text-center text-muted">
+                    Loading tasks…
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </section>
       </section>
@@ -341,5 +386,7 @@
   <!-- SCRIPTS -->
   <script src="admin.js"></script>
   <script src="admin-tasks.js"></script>
+  <script type="module" src="compliance-assistant/assistant.js"></script>
+
 </body>
 </html>

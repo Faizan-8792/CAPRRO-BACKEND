@@ -165,6 +165,10 @@ function onHashChange() {
     if (hash === '#dashboard') {
         if (window.loadTodayReminders) loadTodayReminders();
         if (!__clientsChaseLoading) loadClientsToChaseToday();
+
+        if (window.loadAdminComplianceAssistant) {
+            window.loadAdminComplianceAssistant();
+        }
     }
 }
 
