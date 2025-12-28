@@ -122,7 +122,7 @@ async function api(path, opts) {
  * UPDATED: includes 'tasks' page + correct nav highlight
  */
 function showPage(hash) {
-    const pages = ['dashboard', 'tasks', 'firm', 'users', 'join', 'settings'];
+    const pages = ['dashboard', 'tasks', 'assistant', 'firm', 'users', 'join', 'settings'];
     for (const p of pages) {
         const el = qs(`page-${p}`);
         if (el) {
@@ -161,14 +161,17 @@ function onHashChange() {
         if (window.refreshTaskBoard) window.refreshTaskBoard();
     }
 
+    // Assistant page open hone par load assistant
+    if (hash === '#assistant') {
+        if (window.loadAdminComplianceAssistant) {
+            window.loadAdminComplianceAssistant();
+        }
+    }
+
     // Dashboard open hone par smart widgets
     if (hash === '#dashboard') {
         if (window.loadTodayReminders) loadTodayReminders();
         if (!__clientsChaseLoading) loadClientsToChaseToday();
-
-        if (window.loadAdminComplianceAssistant) {
-            window.loadAdminComplianceAssistant();
-        }
     }
 }
 

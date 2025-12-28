@@ -41,6 +41,7 @@
       <div class="px-3 mb-2 small-label text-muted">Navigation</div>
       <a href="#dashboard" class="active">Dashboard</a>
       <a href="#tasks">Compliance board</a>
+      <a href="#assistant">Compliance Assistant</a>
       <a href="#firm">Firm profile</a>
       <a href="#users">Users</a>
       <a href="#join">Join code</a>
@@ -105,7 +106,7 @@
           <h3>Clients to Chase Today</h3>
           <p class="muted">
             Auto-generated follow-up list from Tasks. Pending Docs shows items stuck in
-            ‘Waiting Docs/Open’ for 3+ days; High Risk shows clients late in the last periods.
+            'Waiting Docs/Open' for 3+ days; High Risk shows clients late in the last periods.
             <br>
             Click Done to mark handled and remove from this list.
           </p>
@@ -123,47 +124,6 @@
           </div>
         </section>
 
-        <!-- ============================= -->
-        <!-- 🧠 Compliance Assistant (Admin) -->
-        <!-- ============================= -->
-        <section id="adminComplianceAssistant" class="card">
-          <h3>🧠 Compliance Assistant – Today’s Work</h3>
-          <p class="muted">
-            Auto-prioritized compliance workload for today based on due dates,
-            overdue status, and task risk signals.
-          </p>
-
-          <div class="d-flex flex-wrap gap-2 mb-3">
-            <span class="badge bg-danger" id="caOverdueCount">Overdue: 0</span>
-            <span class="badge bg-warning" id="caTodayCount">Due Today: 0</span>
-            <span class="badge bg-primary" id="caUpcomingCount">Upcoming: 0</span>
-          </div>
-
-          <div id="caStatus" class="small-label mb-2">
-            Loading today’s compliance priorities...
-          </div>
-
-          <div class="table-responsive">
-            <table class="table align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Client</th>
-                  <th>Service</th>
-                  <th>Due Date</th>
-                  <th>Assigned</th>
-                  <th>Priority</th>
-                </tr>
-              </thead>
-              <tbody id="caTaskTbody">
-                <tr>
-                  <td colspan="5" class="text-center text-muted">
-                    Loading tasks…
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
       </section>
 
       <!-- TASK BOARD (page-tasks) -->
@@ -266,6 +226,43 @@
 
         <!-- Board columns -->
         <div id="taskBoardColumns" class="row g-3"></div>
+      </section>
+
+      <!-- COMPLIANCE ASSISTANT (page-assistant) -->
+      <section id="page-assistant" style="display:none">
+        <h4 class="mb-3">🧠 Compliance Assistant</h4>
+
+        <section id="adminComplianceAssistant" class="card">
+          <p class="muted">
+            Auto-prioritized compliance workload for today based on due dates,
+            overdue status, and task risk signals.
+          </p>
+
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            <span class="badge bg-danger" id="caOverdueCount">Overdue: 0</span>
+            <span class="badge bg-warning" id="caTodayCount">Due Today: 0</span>
+            <span class="badge bg-primary" id="caUpcomingCount">Upcoming: 0</span>
+          </div>
+
+          <div id="caStatus" class="small-label mb-2">
+            Loading today's compliance priorities...
+          </div>
+
+          <div class="table-responsive">
+            <table class="table align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Client</th>
+                  <th>Service</th>
+                  <th>Due Date</th>
+                  <th>Assigned</th>
+                  <th>Priority</th>
+                </tr>
+              </thead>
+              <tbody id="caTaskTbody"></tbody>
+            </table>
+          </div>
+        </section>
       </section>
 
       <!-- FIRM PROFILE (page-firm) -->
