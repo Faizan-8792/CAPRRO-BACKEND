@@ -21,12 +21,21 @@ async function viewDetail(id) {
     <p><b>Score:</b> ${r.readinessScore}%</p>
     <p><b>Source:</b> ${r.source || "MANUAL"}</p>
 
-    ${r.intelligence?.conclusion ? `
-      <div class="audit-conclusion-box">
-        <h4>Audit Conclusion & Recommended Next Steps</h4>
-        <p>${r.intelligence.conclusion}</p>
-      </div>
-    ` : ""}
+    <div class="audit-conclusion-box">
+      <h4>Audit Conclusion & Recommended Next Steps</h4>
+      <p>
+        ${r.intelligence?.conclusion ||
+          (r.readinessScore >= 85
+            ? "Accounting records appear reliable. Proceed with routine audit procedures and standard compliance checks."
+            : r.readinessScore >= 70
+            ? "Minor risk indicators observed. Perform focused verification on high-value and period-end transactions."
+            : r.readinessScore >= 40
+            ? "Moderate risk detected. Detailed scrutiny of ledgers, supporting documents, and adjustments is recommended."
+            : "High risk detected. Conduct an in-depth audit with expanded sampling and thorough document verification."
+          )
+        }
+      </p>
+    </div>
 
     ${r.csvExtractionMeta ? `
       <hr/>
