@@ -1,4 +1,7 @@
-// ---------------- TOKEN HELPER ----------------
+// ---------------- CONFIG ----------------
+const API_BASE_URL = "https://caprro-backend-1.onrender.com";
+
+// ---------------- TOKEN ----------------
 function getToken() {
   const params = new URLSearchParams(window.location.search);
   return params.get("token");
@@ -12,7 +15,7 @@ async function loadRecords() {
     return;
   }
 
-  const res = await fetch("/api/accounting", {
+  const res = await fetch(`${API_BASE_URL}/api/accounting`, {
     headers: {
       Authorization: `Bearer ${token}`
     }
@@ -48,7 +51,7 @@ async function deleteRecord(id) {
   if (!confirm("Delete this record permanently?")) return;
 
   const token = getToken();
-  await fetch(`/api/accounting/${id}`, {
+  await fetch(`${API_BASE_URL}/api/accounting/${id}`, {
     method: "DELETE",
     headers: {
       Authorization: `Bearer ${token}`
