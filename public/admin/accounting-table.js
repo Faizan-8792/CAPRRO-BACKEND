@@ -39,11 +39,21 @@ async function loadRecords() {
       <b>${r.clientName}</b> | ${r.periodKey}<br/>
       Health: ${r.health} | Score: ${r.readinessScore}%
       <div style="margin-top:6px;">
-        <button onclick="viewDetail('${r._id}')">View</button>
-        <button onclick="deleteRecord('${r._id}')">Delete</button>
+        <button class="view-btn" data-id="${r._id}">View</button>
+        <button class="delete-btn" data-id="${r._id}">Delete</button>
       </div>
     </div>
   `).join("");
+
+  // Add event listeners for view buttons
+  div.querySelectorAll(".view-btn").forEach(btn => {
+    btn.addEventListener("click", () => viewDetail(btn.dataset.id));
+  });
+
+  // Add event listeners for delete buttons
+  div.querySelectorAll(".delete-btn").forEach(btn => {
+    btn.addEventListener("click", () => deleteRecord(btn.dataset.id));
+  });
 }
 
 // ---------------- DELETE ----------------
