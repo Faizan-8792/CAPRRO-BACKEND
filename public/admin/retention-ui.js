@@ -22,17 +22,17 @@ function analyzeAccounting(q) {
     score -= 20;
   }
 
-  if (q.roundFigureLevel === "HIGH") {
+  if (q.roundFigureLevel === "high") {
     flags.push("ROUND_FIGURE_OVERUSE");
     score -= 25;
   }
 
-  if (q.monthEndLoad === "HIGH") {
+  if (q.monthEndLoad === "high") {
     flags.push("YEAR_END_PRESSURE");
     score -= 25;
   }
 
-  if (q.maturity === "BASIC") {
+  if (q.maturity === "basic") {
     flags.push("LOW_MATURITY");
     score -= 15;
   }
@@ -262,13 +262,13 @@ async function createSnapshot() {
     qualitativeMetrics = {
       totalEntries: csv.totalEntries <= 50 ? "0-50" : "50+",
       roundFigureLevel:
-        csv.totalEntries > 0 && (csv.roundFigureCount / csv.totalEntries) > 0.2 ? "HIGH" : "LOW",
-      monthEndLoad: csv.monthEndRatio > 0.25 ? "HIGH" : "LOW",
+        csv.totalEntries > 0 && (csv.roundFigureCount / csv.totalEntries) > 0.2 ? "high" : "low",
+      monthEndLoad: csv.monthEndRatio > 0.25 ? "high" : "low",
       maturity: csv.totalEntries > 200
-        ? "ADVANCED"
+        ? "advanced"
         : csv.totalEntries > 50
-          ? "INTERMEDIATE"
-          : "BASIC",
+          ? "intermediate"
+          : "basic",
     };
   }
 
@@ -287,16 +287,16 @@ async function createSnapshot() {
         rawMetrics.totalEntries <= 50 ? "0-50" : "50+",
       roundFigureLevel:
         document.getElementById("roundFigures")?.value === "high"
-          ? "HIGH"
-          : "LOW",
+          ? "high"
+          : "low",
       monthEndLoad:
         document.getElementById("monthEnd")?.value === "high"
-          ? "HIGH"
-          : "LOW",
+          ? "high"
+          : "low",
       maturity:
         document.getElementById("maturity")?.value === "basic"
-          ? "BASIC"
-          : "ADVANCED",
+          ? "basic"
+          : "advanced",
     };
   }
 
