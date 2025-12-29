@@ -19,6 +19,16 @@ async function viewDetail(id) {
     <p><b>Period:</b> ${r.periodKey}</p>
     <p><b>Health:</b> ${r.health}</p>
     <p><b>Score:</b> ${r.readinessScore}%</p>
+    <p><b>Source:</b> ${r.source || "MANUAL"}</p>
+
+    ${r.csvExtractionMeta ? `
+      <hr/>
+      <b>CSV Extraction Details</b>
+      <p>Date column used: ${r.csvExtractionMeta.dateColumn || "Not detected"}</p>
+      <p>Debit column used: ${r.csvExtractionMeta.debitColumn || "Not detected"}</p>
+      <p>Credit column used: ${r.csvExtractionMeta.creditColumn || "Not detected"}</p>
+      <p>Confidence: ${r.csvExtractionMeta.extractionConfidence}</p>
+    ` : ""}
 
     <div class="score-box">
       <b>Score Breakdown</b>

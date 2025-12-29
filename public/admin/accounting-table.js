@@ -45,6 +45,11 @@ async function loadRecords() {
           <div class="muted">
             Health: ${r.health} · Score: ${r.readinessScore}%
           </div>
+          
+          <div class="muted">
+            Source: ${r.source || "MANUAL"}
+            ${r.csvExtractionMeta ? `· Confidence: ${r.csvExtractionMeta.extractionConfidence}` : ""}
+          </div>
 
           <div class="record-actions">
             <button class="btn-view" data-id="${r._id}">View</button>

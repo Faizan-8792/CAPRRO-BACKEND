@@ -51,40 +51,100 @@ function analyzeAccounting(q) {
   };
 }
 
+// ---------------- CSV COLUMN KEYWORDS ----------------
+const CSV_COLUMN_KEYWORDS = {
+  date: ["date", "txn date", "transaction date", "entry date", "voucher date"],
+  debit: ["debit", "dr", "withdrawal", "expense", "paid", "outflow"],
+  credit: ["credit", "cr", "deposit", "receipt", "income", "inflow"]
+};
+
 // ---------------- CSV PARSER ----------------
 async function parseCSV(file) {
   const text = await file.text();
-  const rows = text.split("\n").slice(1).filter(Boolean);
+  const rows = text.split("\n").filter(Boolean);
+  
+  if (rows.length < 2) {
+    return {
+      totalEntries: 0,
+      totalDebit: 0,
+      totalCredit: 0,
+      roundFigureCount: 0,
+      monthEndRatio: 0,
+      lastEntryDate: null,
+      csvExtractionMeta: {
+        dateColumn: null,
+        debitColumn: null,
+        creditColumn: null,
+        extractionConfidence: "LOW"
+      }
+    };
+  }
 
+  // Read header row
+  const headers = rows[0].split(",").map(h => h.trim().toLowerCase());
+
+  // Detect column indexes
+  const detectedColumns = {};
+
+  headers.forEach((header, index) => {
+    Object.entries(CSV_COLUMN_KEYWORDS).forEach(([type, keywords]) => {
+      if (!detectedColumns[type]) {
+        if (keywords.some(k => header.includes(k))) {
+          detectedColumns[type] = { index, header };
+        }
+      }
+    });
+  });
+
+  // Process data rows
+  const dataRows = rows.slice(1);
   let totalDebit = 0;
   let totalCredit = 0;
   let roundFigureCount = 0;
   let monthEndCount = 0;
 
-  rows.forEach((r) => {
-    const [date, , , debit, credit] = r.split(",");
-    const d = Number(debit || 0);
-    const c = Number(credit || 0);
+  dataRows.forEach((row) => {
+    const columns = row.split(",");
+    const cols = detectedColumns;
 
-    totalDebit += d;
-    totalCredit += c;
+    const date = cols.date ? columns[cols.date.index] : null;
+    const debit = cols.debit ? Number(columns[cols.debit.index] || 0) : 0;
+    const credit = cols.credit ? Number(columns[cols.credit.index] || 0) : 0;
 
-    if ((d && d % 1000 === 0) || (c && c % 1000 === 0)) {
+    totalDebit += debit;
+    totalCredit += credit;
+
+    if ((debit && debit % 1000 === 0) || (credit && credit % 1000 === 0)) {
       roundFigureCount++;
     }
 
-    if (date?.endsWith("-28") || date?.endsWith("-29") || date?.endsWith("-30") || date?.endsWith("-31")) {
+    if (date && (date.endsWith("-28") || date.endsWith("-29") || date.endsWith("-30") || date.endsWith("-31"))) {
       monthEndCount++;
     }
   });
 
+  // Calculate extraction confidence
+  let extractionConfidence = "LOW";
+
+  if (detectedColumns.date && detectedColumns.debit && detectedColumns.credit) {
+    extractionConfidence = "HIGH";
+  } else if (detectedColumns.date && (detectedColumns.debit || detectedColumns.credit)) {
+    extractionConfidence = "MEDIUM";
+  }
+
   return {
-    totalEntries: rows.length,
+    totalEntries: dataRows.length,
     totalDebit,
     totalCredit,
     roundFigureCount,
-    monthEndRatio: rows.length ? monthEndCount / rows.length : 0,
-    lastEntryDate: rows.length ? rows[rows.length - 1].split(",")[0] : null,
+    monthEndRatio: dataRows.length ? monthEndCount / dataRows.length : 0,
+    lastEntryDate: dataRows.length ? dataRows[dataRows.length - 1].split(",")[0] : null,
+    csvExtractionMeta: {
+      dateColumn: detectedColumns.date?.header || null,
+      debitColumn: detectedColumns.debit?.header || null,
+      creditColumn: detectedColumns.credit?.header || null,
+      extractionConfidence
+    }
   };
 }
 
@@ -141,12 +201,19 @@ async function createSnapshot() {
     source = "CSV";
     const csv = await parseCSV(file);
 
-    rawMetrics = csv;
+    rawMetrics = {
+      totalEntries: csv.totalEntries,
+      totalDebit: csv.totalDebit,
+      totalCredit: csv.totalCredit,
+      roundFigureCount: csv.roundFigureCount,
+      monthEndRatio: csv.monthEndRatio,
+      lastEntryDate: csv.lastEntryDate
+    };
 
     qualitativeMetrics = {
       totalEntries: csv.totalEntries <= 50 ? "0-50" : "50+",
       roundFigureLevel:
-        csv.roundFigureCount / csv.totalEntries > 0.4 ? "HIGH" : "LOW",
+        csv.totalEntries > 0 && (csv.roundFigureCount / csv.totalEntries) > 0.4 ? "HIGH" : "LOW",
       monthEndLoad: csv.monthEndRatio > 0.4 ? "HIGH" : "LOW",
       maturity: "BASIC",
     };
@@ -166,11 +233,11 @@ async function createSnapshot() {
       totalEntries:
         rawMetrics.totalEntries <= 50 ? "0-50" : "50+",
       roundFigureLevel:
-        document.getElementById("roundFigures")?.value === "many"
+        document.getElementById("roundFigures")?.value === "high"
           ? "HIGH"
           : "LOW",
       monthEndLoad:
-        document.getElementById("monthEnd")?.value === ">50"
+        document.getElementById("monthEnd")?.value === "high"
           ? "HIGH"
           : "LOW",
       maturity:
@@ -191,6 +258,12 @@ async function createSnapshot() {
     remarks: document.getElementById("remarks")?.value || "",
     retentionDays: getRetentionDays(),
   };
+
+  // Add CSV extraction metadata if available
+  if (file) {
+    const csv = await parseCSV(file);
+    payload.csvExtractionMeta = csv.csvExtractionMeta;
+  }
 
   try {
     const res = await fetch(`${API_BASE_URL}/api/accounting`, {
