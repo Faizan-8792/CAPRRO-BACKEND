@@ -203,6 +203,27 @@ function removeCSV() {
   document.getElementById("removeCsvBtn").style.display = "none";
 }
 
+// ---------------- RESET FORM FUNCTION ----------------
+function resetForm() {
+  const form = document.querySelector('.form-card');
+  const inputs = form.querySelectorAll('input, select, textarea');
+  inputs.forEach(input => {
+    if (input.type === 'file') {
+      input.value = '';
+      document.getElementById('removeCsvBtn').style.display = 'none';
+    } else if (input.type === 'select-one') {
+      // Keep retention value as 30 (default)
+      if (input.id === 'retention') {
+        input.value = '30';
+      } else {
+        input.selectedIndex = 0;
+      }
+    } else {
+      input.value = '';
+    }
+  });
+}
+
 // ---------------- CREATE SNAPSHOT ----------------
 async function createSnapshot() {
   const token = getToken();
