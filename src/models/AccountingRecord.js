@@ -64,6 +64,11 @@ const AccountingRecordSchema = new mongoose.Schema(
       default: "",
     },
 
+    conclusion: {
+      type: String,
+      default: "",
+    },
+
     // CSV extraction metadata
     csvExtractionMeta: {
       type: mongoose.Schema.Types.Mixed,

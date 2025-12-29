@@ -46,6 +46,7 @@ export const createAccountingRecord = async (req, res) => {
       readinessScore: intelligence.readinessScore,
       riskFlags: intelligence.riskFlags || [],
       summaryNotes: intelligence.summaryNotes || "",
+      conclusion: intelligence.conclusion || "",
       csvExtractionMeta,
       expiresAt,
       meta,
