@@ -1,5 +1,5 @@
 // ---------------- CONFIG ----------------
-const API_BASE_URL = "https://caprro-backend-1.onrender.com";
+
 
 // ---------------- TOKEN ----------------
 function getToken() {

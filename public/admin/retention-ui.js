@@ -1,8 +1,7 @@
 // retention-ui.js — Accounting Intelligence Snapshot Creator
 // ✅ Fully aligned with backend AccountingRecord schema
 
-// ---------------- CONFIG ----------------
-const API_BASE_URL = "https://caprro-backend-1.onrender.com";
+
 
 // ---------------- TOKEN ----------------
 function getToken() {

@@ -2,12 +2,15 @@ function analyzeAccounting(metrics) {
   let score = 100;
   let flags = [];
 
-  if (metrics.roundFigureCount > metrics.totalEntries * 0.4) {
+  const totalEntries = Number(metrics.totalEntries || 0);
+  const roundFigureCount = Number(metrics.roundFigureCount || 0);
+
+  if (totalEntries > 0 && roundFigureCount > totalEntries * 0.4) {
     flags.push("ROUND_FIGURE_OVERUSE");
     score -= 25;
   }
 
-  if (metrics.totalEntries < 10) {
+  if (totalEntries < 10) {
     flags.push("LOW_ACTIVITY");
     score -= 20;
   }
@@ -18,8 +21,10 @@ function analyzeAccounting(metrics) {
 
   return {
     health,
-    readinessScore: score,
-    riskFlags: flags,
-    summaryNotes: flags.join(", ") || "No major risk detected",
+    readinessScore: Math.max(score, 0),
+    flags, // ✅ BACKEND EXPECTS THIS KEY
+    summaryNotes: flags.length
+      ? flags.join(", ")
+      : "No major risk detected",
   };
 }
