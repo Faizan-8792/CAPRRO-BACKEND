@@ -116,7 +116,11 @@
             <div class="form-row full-width">
               <label>Upload CSV (Optional)</label>
               <div class="file-upload-wrapper">
-                <input type="file" id="csvFile" />
+                <input type="file" id="csvFile" accept=".csv" />
+                <button type="button" id="removeCsvBtn" class="btn-secondary" style="margin-top: 8px; padding: 8px 16px; display: none;">
+                  <span class="btn-icon">🗑️</span>
+                  Remove CSV
+                </button>
                 <div class="file-upload-hint">Supports .csv files up to 5MB</div>
               </div>
             </div>
@@ -181,8 +185,14 @@
     inputs.forEach(input => {
       if (input.type === 'file') {
         input.value = '';
+        document.getElementById('removeCsvBtn').style.display = 'none';
       } else if (input.type === 'select-one') {
-        input.selectedIndex = 0;
+        // Keep retention value as 30 (default)
+        if (input.id === 'retention') {
+          input.value = '30';
+        } else {
+          input.selectedIndex = 0;
+        }
       } else {
         input.value = '';
       }

@@ -88,6 +88,33 @@ async function parseCSV(file) {
   };
 }
 
+// ---------------- CLEAR FORM FUNCTION ----------------
+function clearFormFields() {
+  // Clear all form fields except retention
+  document.getElementById("clientName").value = "";
+  document.getElementById("periodKey").value = "";
+  document.getElementById("totalEntries").selectedIndex = 0;
+  document.getElementById("roundFigures").selectedIndex = 0;
+  document.getElementById("monthEnd").selectedIndex = 0;
+  document.getElementById("lastEntryDate").value = "";
+  document.getElementById("maturity").selectedIndex = 0;
+  document.getElementById("remarks").value = "";
+  
+  // Clear CSV file input and hide remove button
+  const csvFileInput = document.getElementById("csvFile");
+  csvFileInput.value = "";
+  document.getElementById("removeCsvBtn").style.display = "none";
+  
+  // Retention field remains unchanged as per requirement
+}
+
+// ---------------- REMOVE CSV FUNCTION ----------------
+function removeCSV() {
+  const csvFileInput = document.getElementById("csvFile");
+  csvFileInput.value = "";
+  document.getElementById("removeCsvBtn").style.display = "none";
+}
+
 // ---------------- CREATE SNAPSHOT ----------------
 async function createSnapshot() {
   const token = getToken();
@@ -181,6 +208,10 @@ async function createSnapshot() {
     }
 
     alert("✅ Accounting snapshot saved");
+    
+    // Clear form fields after successful submission
+    clearFormFields();
+    
     if (typeof loadRecords === "function") loadRecords();
   } catch (err) {
     console.error("Snapshot save failed:", err);
@@ -190,7 +221,25 @@ async function createSnapshot() {
 
 // ---------------- INIT ----------------
 document.addEventListener("DOMContentLoaded", () => {
-  document
-    .getElementById("saveSnapshotBtn")
-    ?.addEventListener("click", createSnapshot);
+  const saveBtn = document.getElementById("saveSnapshotBtn");
+  const csvFileInput = document.getElementById("csvFile");
+  const removeCsvBtn = document.getElementById("removeCsvBtn");
+  
+  if (saveBtn) {
+    saveBtn.addEventListener("click", createSnapshot);
+  }
+  
+  if (csvFileInput && removeCsvBtn) {
+    // Show remove button when file is selected
+    csvFileInput.addEventListener("change", () => {
+      if (csvFileInput.files.length > 0) {
+        removeCsvBtn.style.display = "inline-flex";
+      } else {
+        removeCsvBtn.style.display = "none";
+      }
+    });
+    
+    // Remove CSV when button is clicked
+    removeCsvBtn.addEventListener("click", removeCSV);
+  }
 });
