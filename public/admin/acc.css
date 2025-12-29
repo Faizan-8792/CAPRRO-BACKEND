@@ -834,38 +834,70 @@ select {
   background-color: var(--danger);
   box-shadow: 0 0 8px var(--danger);
 }
+/* CSV Extraction Summary Box */
 .csv-extraction-box {
-  background: #f8f9fb;
-  border: 1px solid #e0e3eb;
+  background-color: #f1f5f9;   /* same family as modal bg */
+  border: 1px solid #cbd5e1;
   border-radius: 8px;
-  padding: 12px 14px;
+  padding: 14px;
   margin-top: 12px;
+  color: #0f172a;              /* FORCE DARK TEXT */
 }
 
+/* Heading */
 .csv-extraction-box h4 {
-  margin: 0 0 8px;
-  font-size: 14px;
-  color: #333;
+  margin: 0 0 10px;
+  font-size: 15px;
+  color: #020617;
 }
 
+/* Normal rows */
 .csv-meta-row {
   font-size: 13px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+  color: #0f172a;
 }
 
-.ignored-columns span {
+/* Extracted list */
+.csv-meta-row ul {
+  margin: 6px 0 0 18px;
+  padding: 0;
+}
+
+.csv-meta-row li {
+  color: #020617;
+}
+
+/* Ignored column badges */
+.ignored-columns .badge {
   display: inline-block;
-  background: #e5e7eb;
+  background-color: #e2e8f0;
+  color: #020617;
   border-radius: 12px;
-  padding: 3px 8px;
+  padding: 4px 10px;
   font-size: 12px;
-  margin: 2px;
+  margin: 3px 4px 0 0;
+  white-space: nowrap;
 }
 
+/* Confidence label */
 .csv-confidence {
-  margin-top: 8px;
+  margin-top: 10px;
   font-weight: 600;
 }
+
+.csv-confidence.HIGH {
+  color: #166534;
+}
+
+.csv-confidence.MEDIUM {
+  color: #92400e;
+}
+
+.csv-confidence.LOW {
+  color: #991b1b;
+}
+
 
 .csv-confidence.HIGH { color: #15803d; }
 .csv-confidence.MEDIUM { color: #b45309; }
