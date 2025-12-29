@@ -64,10 +64,30 @@ function cleanCSVValue(v) {
   return v.toString().replace(/^"|"$/g, "").trim();
 }
 
+// ---------------- FILE READER ----------------
+async function readFileAsTextRows(file) {
+  // CSV
+  if (file.name.toLowerCase().endsWith(".csv")) {
+    const text = await file.text();
+    return text.split("\n").filter(Boolean);
+  }
+
+  // XLSX
+  if (file.name.toLowerCase().endsWith(".xlsx")) {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: "array" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+
+    const csvText = XLSX.utils.sheet_to_csv(sheet);
+    return csvText.split("\n").filter(Boolean);
+  }
+
+  throw new Error("Unsupported file type. Please upload CSV or XLSX.");
+}
+
 // ---------------- CSV PARSER ----------------
 async function parseCSV(file) {
-  const text = await file.text();
-  const rows = text.split("\n").filter(Boolean);
+  const rows = await readFileAsTextRows(file);
   
   if (rows.length < 2) {
     return {
@@ -252,6 +272,12 @@ async function createSnapshot() {
 
   if (!clientName || !periodKey) {
     alert("Client name and period are required.");
+    return;
+  }
+
+  // File extension guard
+  if (file && !file.name.match(/\.(csv|xlsx)$/i)) {
+    alert("Please upload a CSV or Excel (.xlsx) file only.");
     return;
   }
 

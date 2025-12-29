@@ -114,14 +114,14 @@
             </div>
 
             <div class="form-row full-width">
-              <label>Upload CSV (Optional)</label>
+              <label>Upload CSV/Excel (Optional)</label>
               <div class="file-upload-wrapper">
-                <input type="file" id="csvFile" accept=".csv" />
+                <input type="file" id="csvFile" accept=".csv,.xlsx" />
                 <button type="button" id="removeCsvBtn" class="btn-secondary" style="margin-top: 8px; padding: 8px 16px; display: none;">
                   <span class="btn-icon">🗑️</span>
-                  Remove CSV
+                  Remove File
                 </button>
-                <div class="file-upload-hint">Supports .csv files up to 5MB</div>
+                <div class="file-upload-hint">Supports .csv and .xlsx files up to 5MB</div>
               </div>
             </div>
 
@@ -174,6 +174,7 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="config.js"></script>
 <script src="accounting-table.js"></script>
 <script src="retention-ui.js"></script>
