@@ -1,12 +1,12 @@
 // retention-ui.js — Accounting Intelligence Snapshot Creator
-// ✅ Firm-aware
-// ✅ Uses latest token from chrome.storage
-// ✅ No API_BASE_URL redeclaration
+// ✅ Web-page safe (NO chrome APIs)
+// ✅ Uses token from URL
+// ✅ Backend-aligned
 
-// ---------------- TOKEN (FIXED) ----------------
-async function getToken() {
-  const { caproAuth } = await chrome.storage.local.get("caproAuth");
-  return caproAuth?.token || null;
+// ---------------- TOKEN ----------------
+function getToken() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("token");
 }
 
 // ---------------- RETENTION ----------------
@@ -75,9 +75,9 @@ function analyzeAccounting(metrics) {
 
 // ---------------- CREATE SNAPSHOT ----------------
 async function createSnapshot() {
-  const token = await getToken();
+  const token = getToken();
   if (!token) {
-    alert("Authentication missing. Please login again.");
+    alert("Authentication missing. Please reopen from extension.");
     return;
   }
 
@@ -127,7 +127,7 @@ async function createSnapshot() {
     const data = await res.json();
 
     if (!res.ok || !data.ok) {
-      throw new Error(data?.error || "Failed to save accounting snapshot");
+      throw new Error(data?.error || "Failed to save snapshot");
     }
 
     alert("✅ Accounting snapshot saved");
