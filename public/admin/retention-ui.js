@@ -1,5 +1,5 @@
 // retention-ui.js — Accounting Intelligence Snapshot Creator
-// SAFE: no chrome APIs, no duplicate globals
+// SAFE: no chrome APIs, no duplicate globals, backend-aligned
 
 // ---------------- TOKEN ----------------
 function getToken() {
@@ -22,15 +22,18 @@ async function parseCSV(file) {
   let totalCredit = 0;
   let roundFigureCount = 0;
 
-  rows.forEach(r => {
-    const [, debit, credit] = r.split(",");
-    const d = Number(debit || 0);
-    const c = Number(credit || 0);
+  rows.forEach((r) => {
+    const cols = r.split(",");
+    const debit = Number(cols[1] || 0);
+    const credit = Number(cols[2] || 0);
 
-    totalDebit += d;
-    totalCredit += c;
+    totalDebit += debit;
+    totalCredit += credit;
 
-    if (d % 1000 === 0 || c % 1000 === 0) {
+    if (
+      (debit !== 0 && debit % 1000 === 0) ||
+      (credit !== 0 && credit % 1000 === 0)
+    ) {
       roundFigureCount++;
     }
   });
@@ -40,32 +43,51 @@ async function parseCSV(file) {
     totalDebit,
     totalCredit,
     roundFigureCount,
-    lastEntryDate: rows[rows.length - 1]?.split(",")[0] || null,
+    lastEntryDate: rows.length
+      ? rows[rows.length - 1].split(",")[0]
+      : null,
   };
 }
 
 // ---------------- CREATE SNAPSHOT ----------------
 async function createSnapshot() {
   const token = getToken();
-  if (!token) return;
+  if (!token) {
+    console.warn("Auth token missing");
+    return;
+  }
 
   const clientName = document.getElementById("clientName")?.value.trim();
   const periodKey = document.getElementById("periodKey")?.value.trim();
   const file = document.getElementById("csvFile")?.files?.[0];
 
-  if (!clientName || !periodKey) return;
-
-  // 🔹 NEW MANUAL METRICS
-  let metrics = {
-    totalEntries: document.getElementById("totalEntries")?.value || null,
-    roundFigureLevel: document.getElementById("roundFigures")?.value || null,
-    monthEndLoad: document.getElementById("monthEnd")?.value || null,
-    lastEntryDate: document.getElementById("lastEntryDate")?.value || null,
-    maturity: document.getElementById("maturity")?.value || null,
-  };
+  if (!clientName || !periodKey) {
+    console.warn("Client name or period missing");
+    return;
+  }
 
   let source = "MANUAL";
 
+  // ---------------- MANUAL METRICS (SAFE DEFAULTS) ----------------
+  let metrics = {
+    totalEntries:
+      document.getElementById("totalEntries")?.value || null,
+    roundFigureLevel:
+      document.getElementById("roundFigures")?.value || null,
+    monthEndLoad:
+      document.getElementById("monthEnd")?.value || null,
+    lastEntryDate:
+      document.getElementById("lastEntryDate")?.value || null,
+    maturity:
+      document.getElementById("maturity")?.value || null,
+
+    // backend-consistency placeholders
+    totalDebit: null,
+    totalCredit: null,
+    roundFigureCount: null,
+  };
+
+  // ---------------- CSV MODE OVERRIDE ----------------
   if (file) {
     metrics = await parseCSV(file);
     source = "CSV";
@@ -91,9 +113,15 @@ async function createSnapshot() {
     });
 
     const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data?.error);
 
-    if (typeof loadRecords === "function") loadRecords();
+    if (!res.ok || !data?.ok) {
+      throw new Error(data?.error || "Snapshot save failed");
+    }
+
+    // Refresh list safely
+    if (typeof loadRecords === "function") {
+      loadRecords();
+    }
   } catch (err) {
     console.error("Snapshot save failed:", err);
   }
@@ -101,7 +129,8 @@ async function createSnapshot() {
 
 // ---------------- INIT ----------------
 document.addEventListener("DOMContentLoaded", () => {
-  document
-    .getElementById("saveSnapshotBtn")
-    ?.addEventListener("click", createSnapshot);
+  const btn = document.getElementById("saveSnapshotBtn");
+  if (btn) {
+    btn.addEventListener("click", createSnapshot);
+  }
 });
