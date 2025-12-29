@@ -11,6 +11,7 @@ import firmRoutes from "./routes/firm.routes.js";
 import statsRoutes from "./routes/stats.routes.js";
 import superRoutes from "./routes/super.routes.js";
 import taskRoutes from "./routes/task.routes.js";
+import routes from "./routes/index.js";
 
 const app = express();
 
@@ -121,5 +122,5 @@ app.use("/api/firms", firmRoutes);
 app.use("/api/stats", statsRoutes);
 app.use("/api/super", superRoutes);
 app.use("/api/tasks", taskRoutes);
-
+app.use(routes);
 export default app;
