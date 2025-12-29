@@ -74,6 +74,10 @@ async function readFileAsTextRows(file) {
 
   // XLSX
   if (file.name.toLowerCase().endsWith(".xlsx")) {
+    if (typeof XLSX === "undefined") {
+      throw new Error("Excel support not loaded. Please reload extension.");
+    }
+
     const buffer = await file.arrayBuffer();
     const workbook = XLSX.read(buffer, { type: "array" });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -161,7 +165,7 @@ async function parseCSV(file) {
       roundFigureCount++;
     }
 
-    if (date && /-(28|29|30|31)$/.test(date)) {
+    if (date && /(28|29|30|31)$/.test(date.replace(/\D/g, ""))) {
       monthEndCount++;
     }
   });
@@ -284,31 +288,36 @@ async function createSnapshot() {
   let source = "MANUAL";
   let rawMetrics = {};
   let qualitativeMetrics = {};
+  let parsedCSV = null;
 
   // ---------------- CSV MODE ----------------
   if (file) {
     source = "CSV";
-    const csv = await parseCSV(file);
+    parsedCSV = await parseCSV(file);
 
     rawMetrics = {
-      totalEntries: csv.totalEntries,
-      totalDebit: csv.totalDebit,
-      totalCredit: csv.totalCredit,
-      roundFigureCount: csv.roundFigureCount,
-      monthEndRatio: csv.monthEndRatio,
-      lastEntryDate: csv.lastEntryDate
+      totalEntries: parsedCSV.totalEntries,
+      totalDebit: parsedCSV.totalDebit,
+      totalCredit: parsedCSV.totalCredit,
+      roundFigureCount: parsedCSV.roundFigureCount,
+      monthEndRatio: parsedCSV.monthEndRatio,
+      lastEntryDate: parsedCSV.lastEntryDate
     };
 
     qualitativeMetrics = {
-      totalEntries: csv.totalEntries <= 50 ? "0-50" : "50+",
+      totalEntries: parsedCSV.totalEntries <= 50 ? "0-50" : "50+",
       roundFigureLevel:
-        csv.totalEntries > 0 && (csv.roundFigureCount / csv.totalEntries) > 0.2 ? "high" : "low",
-      monthEndLoad: csv.monthEndRatio > 0.25 ? "high" : "low",
-      maturity: csv.totalEntries > 200
-        ? "advanced"
-        : csv.totalEntries > 50
-          ? "intermediate"
-          : "basic",
+        parsedCSV.totalEntries > 0 &&
+        (parsedCSV.roundFigureCount / parsedCSV.totalEntries) > 0.2
+          ? "high"
+          : "low",
+      monthEndLoad: parsedCSV.monthEndRatio > 0.25 ? "high" : "low",
+      maturity:
+        parsedCSV.totalEntries > 200
+          ? "advanced"
+          : parsedCSV.totalEntries > 50
+            ? "intermediate"
+            : "basic",
     };
   }
 
@@ -353,9 +362,8 @@ async function createSnapshot() {
   };
 
   // Add CSV extraction metadata if available
-  if (file) {
-    const csv = await parseCSV(file);
-    payload.csvExtractionMeta = csv.csvExtractionMeta;
+  if (parsedCSV) {
+    payload.csvExtractionMeta = parsedCSV.csvExtractionMeta;
   }
 
   try {
