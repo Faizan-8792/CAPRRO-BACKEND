@@ -37,9 +37,30 @@ function analyzeAccounting(q) {
     score -= 15;
   }
 
+  // ---- Realism floor for large datasets ----
+  if (q.totalEntries === "50+" && score === 100) {
+    score = 95; // cap perfect score for realism
+  }
+
   let health = "GREEN";
   if (score < 70) health = "AMBER";
   if (score < 40) health = "RED";
+
+  let conclusion = "";
+
+  if (score >= 85) {
+    conclusion =
+      "Accounting records appear reliable. Proceed with routine audit procedures, sample-based verification, and standard compliance checks.";
+  } else if (score >= 70) {
+    conclusion =
+      "Accounting data is generally acceptable but shows minor risk indicators. Perform focused review on high-value and month-end transactions.";
+  } else if (score >= 40) {
+    conclusion =
+      "Moderate risk detected. Perform detailed scrutiny of ledgers, verify supporting documents, and review adjustments and round-figure entries.";
+  } else {
+    conclusion =
+      "High risk detected. Conduct in-depth audit, expand sample size, verify source documents thoroughly, and consider management representations.";
+  }
 
   return {
     health,
@@ -47,7 +68,10 @@ function analyzeAccounting(q) {
     riskFlags: flags,
     summaryNotes: flags.length
       ? flags.join(", ")
-      : "No major risk detected",
+      : score < 70
+        ? "Moderate risk indicators present"
+        : "No major risk detected",
+    conclusion
   };
 }
 

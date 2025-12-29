@@ -902,3 +902,23 @@ select {
 .csv-confidence.HIGH { color: #15803d; }
 .csv-confidence.MEDIUM { color: #b45309; }
 .csv-confidence.LOW { color: #b91c1c; }
+.audit-conclusion-box {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border-left: 4px solid #2563eb;
+  border-radius: 6px;
+}
+
+.audit-conclusion-box h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: #1e3a8a;
+}
+
+.audit-conclusion-box p {
+  margin: 0;
+  font-size: 13px;
+  color: #0f172a;
+  line-height: 1.5;
+}

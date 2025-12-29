@@ -21,6 +21,13 @@ async function viewDetail(id) {
     <p><b>Score:</b> ${r.readinessScore}%</p>
     <p><b>Source:</b> ${r.source || "MANUAL"}</p>
 
+    ${r.intelligence?.conclusion ? `
+      <div class="audit-conclusion-box">
+        <h4>Audit Conclusion & Recommended Next Steps</h4>
+        <p>${r.intelligence.conclusion}</p>
+      </div>
+    ` : ""}
+
     ${r.csvExtractionMeta ? `
       <hr/>
       <b>CSV Extraction Details</b>
