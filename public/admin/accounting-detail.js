@@ -24,9 +24,9 @@ async function viewDetail(id) {
     ${r.csvExtractionMeta ? `
       <hr/>
       <b>CSV Extraction Details</b>
-      <p>Date column used: ${r.csvExtractionMeta.dateColumn || "Not detected"}</p>
-      <p>Debit column used: ${r.csvExtractionMeta.debitColumn || "Not detected"}</p>
-      <p>Credit column used: ${r.csvExtractionMeta.creditColumn || "Not detected"}</p>
+      <p>Date column used: ${r.csvExtractionMeta.extractedColumns?.date?.header || "Not detected"}</p>
+      <p>Debit column used: ${r.csvExtractionMeta.extractedColumns?.debit?.header || "Not detected"}</p>
+      <p>Credit column used: ${r.csvExtractionMeta.extractedColumns?.credit?.header || "Not detected"}</p>
       <p>Confidence: ${r.csvExtractionMeta.extractionConfidence}</p>
     ` : ""}
 
@@ -52,9 +52,9 @@ async function viewDetail(id) {
         <div class="csv-meta-row">
           <span>Extracted columns:</span>
           <ul>
-            <li>Date → ${r.csvExtractionMeta.dateColumn || "Not detected"}</li>
-            <li>Debit → ${r.csvExtractionMeta.debitColumn || "Not detected"}</li>
-            <li>Credit → ${r.csvExtractionMeta.creditColumn || "Not detected"}</li>
+            <li>Date → ${r.csvExtractionMeta.extractedColumns?.date?.header || "Not detected"}</li>
+            <li>Debit → ${r.csvExtractionMeta.extractedColumns?.debit?.header || "Not detected"}</li>
+            <li>Credit → ${r.csvExtractionMeta.extractedColumns?.credit?.header || "Not detected"}</li>
           </ul>
         </div>
 
@@ -68,8 +68,7 @@ async function viewDetail(id) {
           </div>
         </div>
 
-        <div class="csv-confidence ${r.csvExtractionMeta.extractionConfidence >= 80 ? 'high-confidence' : 
-                                   r.csvExtractionMeta.extractionConfidence >= 60 ? 'medium-confidence' : 'low-confidence'}">
+        <div class="csv-confidence ${r.csvExtractionMeta.extractionConfidence}">
           Confidence: ${r.csvExtractionMeta.extractionConfidence}
         </div>
       </div>
