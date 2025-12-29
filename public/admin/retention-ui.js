@@ -53,7 +53,7 @@ async function parseCSV(file) {
 async function createSnapshot() {
   const token = getToken();
   if (!token) {
-    console.warn("Auth token missing");
+    alert("Authentication missing. Please reopen from extension.");
     return;
   }
 
@@ -62,42 +62,68 @@ async function createSnapshot() {
   const file = document.getElementById("csvFile")?.files?.[0];
 
   if (!clientName || !periodKey) {
-    console.warn("Client name or period missing");
+    alert("Client name and period are required.");
     return;
   }
 
   let source = "MANUAL";
 
-  // ---------------- MANUAL METRICS (SAFE DEFAULTS) ----------------
+  // ---------------- MANUAL METRICS (BACKEND SAFE) ----------------
   let metrics = {
-    totalEntries:
-      document.getElementById("totalEntries")?.value || null,
-    roundFigureLevel:
-      document.getElementById("roundFigures")?.value || null,
-    monthEndLoad:
-      document.getElementById("monthEnd")?.value || null,
+    totalEntries: Number(
+      document.getElementById("totalEntries")?.value || 0
+    ),
+    totalDebit: 0,
+    totalCredit: 0,
+    roundFigureCount: Number(
+      document.getElementById("roundFigures")?.value || 0
+    ),
     lastEntryDate:
       document.getElementById("lastEntryDate")?.value || null,
-    maturity:
-      document.getElementById("maturity")?.value || null,
-
-    // backend-consistency placeholders
-    totalDebit: null,
-    totalCredit: null,
-    roundFigureCount: null,
   };
 
-  // ---------------- CSV MODE OVERRIDE ----------------
+  // ---------------- CSV OVERRIDE ----------------
   if (file) {
     metrics = await parseCSV(file);
     source = "CSV";
   }
 
+  // ---------------- INTELLIGENCE (REQUIRED BY BACKEND) ----------------
+  let readinessScore = 100;
+  const flags = [];
+
+  if (metrics.totalEntries < 10) {
+    flags.push("LOW_ACTIVITY");
+    readinessScore -= 20;
+  }
+
+  if (Math.abs(metrics.totalDebit - metrics.totalCredit) > 1) {
+    flags.push("DEBIT_CREDIT_MISMATCH");
+    readinessScore -= 40;
+  }
+
+  if (metrics.roundFigureCount > metrics.totalEntries * 0.4) {
+    flags.push("ROUND_FIGURE_OVERUSE");
+    readinessScore -= 20;
+  }
+
+  let health = "GREEN";
+  if (readinessScore < 70) health = "AMBER";
+  if (readinessScore < 40) health = "RED";
+
+  const intelligence = {
+    health,
+    readinessScore,
+    flags,
+  };
+
+  // ---------------- PAYLOAD ----------------
   const payload = {
     clientName,
     periodKey,
     source,
     metrics,
+    intelligence,
     remarks: document.getElementById("remarks")?.value || "",
     retentionDays: getRetentionDays(),
   };
@@ -118,12 +144,14 @@ async function createSnapshot() {
       throw new Error(data?.error || "Snapshot save failed");
     }
 
-    // Refresh list safely
+    alert("✅ Accounting snapshot saved successfully");
+
     if (typeof loadRecords === "function") {
       loadRecords();
     }
   } catch (err) {
     console.error("Snapshot save failed:", err);
+    alert("❌ " + err.message);
   }
 }
 
