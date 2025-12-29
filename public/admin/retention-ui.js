@@ -1,59 +1,58 @@
 // retention-ui.js — Accounting Intelligence Snapshot Creator
-// ✅ Fully aligned with backend AccountingRecord schema
+// ✅ Firm-aware
+// ✅ Uses latest token from chrome.storage
+// ✅ No API_BASE_URL redeclaration
 
-
-
-// ---------------- TOKEN ----------------
-function getToken() {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("token");
+// ---------------- TOKEN (FIXED) ----------------
+async function getToken() {
+  const { caproAuth } = await chrome.storage.local.get("caproAuth");
+  return caproAuth?.token || null;
 }
 
 // ---------------- RETENTION ----------------
-// Backend expects retentionDays (NUMBER)
 function getRetentionDays() {
   const el = document.getElementById("retention");
-  if (!el) return 30;
-  return parseInt(el.value, 10) || 30;
+  return parseInt(el?.value || "30", 10);
 }
 
-// ---------------- CSV PARSER (BASIC) ----------------
+// ---------------- CSV PARSER ----------------
 async function parseCSV(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+
     reader.onload = () => {
       try {
-        const lines = reader.result.split("\n").filter(Boolean);
-        let debit = 0;
-        let credit = 0;
+        const rows = reader.result.split("\n").filter(Boolean);
+        let totalDebit = 0;
+        let totalCredit = 0;
 
-        for (let i = 1; i < lines.length; i++) {
-          const cols = lines[i].split(",");
-          debit += Number(cols[1] || 0);
-          credit += Number(cols[2] || 0);
+        for (let i = 1; i < rows.length; i++) {
+          const [, debit, credit] = rows[i].split(",");
+          totalDebit += Number(debit || 0);
+          totalCredit += Number(credit || 0);
         }
 
         resolve({
-          entryCount: lines.length - 1,
-          totalDebit: debit,
-          totalCredit: credit,
+          totalEntries: rows.length - 1,
+          totalDebit,
+          totalCredit,
         });
-      } catch (e) {
-        reject(e);
+      } catch (err) {
+        reject(err);
       }
     };
+
     reader.onerror = reject;
     reader.readAsText(file);
   });
 }
 
 // ---------------- INTELLIGENCE ENGINE ----------------
-// MUST return { health, readinessScore, flags }
 function analyzeAccounting(metrics) {
-  const flags = [];
   let score = 100;
+  const flags = [];
 
-  if (metrics.entryCount < 5) {
+  if (metrics.totalEntries < 5) {
     flags.push("LOW_ACTIVITY");
     score -= 20;
   }
@@ -69,22 +68,22 @@ function analyzeAccounting(metrics) {
 
   return {
     health,
-    readinessScore: score,
+    readinessScore: Math.max(score, 0),
     flags,
   };
 }
 
 // ---------------- CREATE SNAPSHOT ----------------
 async function createSnapshot() {
-  const token = getToken();
+  const token = await getToken();
   if (!token) {
-    alert("Authentication missing. Please reopen from extension.");
+    alert("Authentication missing. Please login again.");
     return;
   }
 
-  const clientName = document.getElementById("clientName").value.trim();
-  const periodKey = document.getElementById("periodKey").value.trim();
-  const file = document.getElementById("csvFile").files[0];
+  const clientName = document.getElementById("clientName")?.value.trim();
+  const periodKey = document.getElementById("periodKey")?.value.trim();
+  const file = document.getElementById("csvFile")?.files?.[0];
 
   if (!clientName || !periodKey) {
     alert("Client name and period are required.");
@@ -92,7 +91,7 @@ async function createSnapshot() {
   }
 
   let metrics = {
-    entryCount: 0,
+    totalEntries: 0,
     totalDebit: 0,
     totalCredit: 0,
   };
@@ -128,7 +127,7 @@ async function createSnapshot() {
     const data = await res.json();
 
     if (!res.ok || !data.ok) {
-      throw new Error(data?.error || "Failed to save snapshot");
+      throw new Error(data?.error || "Failed to save accounting snapshot");
     }
 
     alert("✅ Accounting snapshot saved");
@@ -137,7 +136,7 @@ async function createSnapshot() {
       loadRecords();
     }
   } catch (err) {
-    console.error(err);
+    console.error("Snapshot error:", err);
     alert("❌ " + err.message);
   }
 }
@@ -145,5 +144,7 @@ async function createSnapshot() {
 // ---------------- INIT ----------------
 document.addEventListener("DOMContentLoaded", () => {
   const btn = document.getElementById("saveSnapshotBtn");
-  if (btn) btn.addEventListener("click", createSnapshot);
+  if (btn) {
+    btn.addEventListener("click", createSnapshot);
+  }
 });
