@@ -37,6 +37,43 @@ async function viewDetail(id) {
         : "<div>No major risk detected</div>"
       }
     </div>
+
+    ${r.csvExtractionMeta ? `
+      <hr/>
+
+      <div class="csv-extraction-box">
+        <h4>CSV Extraction Summary</h4>
+
+        <div class="csv-meta-row">
+          <span>Total columns in CSV:</span>
+          <b>${r.csvExtractionMeta.totalColumns || "N/A"}</b>
+        </div>
+
+        <div class="csv-meta-row">
+          <span>Extracted columns:</span>
+          <ul>
+            <li>Date → ${r.csvExtractionMeta.dateColumn || "Not detected"}</li>
+            <li>Debit → ${r.csvExtractionMeta.debitColumn || "Not detected"}</li>
+            <li>Credit → ${r.csvExtractionMeta.creditColumn || "Not detected"}</li>
+          </ul>
+        </div>
+
+        <div class="csv-meta-row">
+          <span>Ignored columns:</span>
+          <div class="ignored-columns">
+            ${r.csvExtractionMeta.ignoredColumns && r.csvExtractionMeta.ignoredColumns.length
+              ? r.csvExtractionMeta.ignoredColumns.map(col => `<span class="badge">${col}</span>`).join("")
+              : "None"
+            }
+          </div>
+        </div>
+
+        <div class="csv-confidence ${r.csvExtractionMeta.extractionConfidence >= 80 ? 'high-confidence' : 
+                                   r.csvExtractionMeta.extractionConfidence >= 60 ? 'medium-confidence' : 'low-confidence'}">
+          Confidence: ${r.csvExtractionMeta.extractionConfidence}
+        </div>
+      </div>
+    ` : ""}
   `;
 
   // -------- PERIOD COMPARE --------

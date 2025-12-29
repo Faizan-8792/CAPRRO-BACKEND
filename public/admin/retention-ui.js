@@ -72,9 +72,13 @@ async function parseCSV(file) {
       monthEndRatio: 0,
       lastEntryDate: null,
       csvExtractionMeta: {
-        dateColumn: null,
-        debitColumn: null,
-        creditColumn: null,
+        totalColumns: 0,
+        extractedColumns: {
+          date: null,
+          debit: null,
+          credit: null
+        },
+        ignoredColumns: [],
         extractionConfidence: "LOW"
       }
     };
@@ -82,6 +86,8 @@ async function parseCSV(file) {
 
   // Read header row
   const headers = rows[0].split(",").map(h => h.trim().toLowerCase());
+  const totalColumns = headers.length;
+  const headerNames = headers;
 
   // Detect column indexes
   const detectedColumns = {};
@@ -90,7 +96,10 @@ async function parseCSV(file) {
     Object.entries(CSV_COLUMN_KEYWORDS).forEach(([type, keywords]) => {
       if (!detectedColumns[type]) {
         if (keywords.some(k => header.includes(k))) {
-          detectedColumns[type] = { index, header };
+          detectedColumns[type] = { 
+            header: headerNames[index], 
+            index 
+          };
         }
       }
     });
@@ -132,6 +141,21 @@ async function parseCSV(file) {
     extractionConfidence = "MEDIUM";
   }
 
+  // Identify ignored columns
+  const ignoredColumns = [];
+  headerNames.forEach((header, index) => {
+    let isExtracted = false;
+    Object.values(detectedColumns).forEach(col => {
+      if (col && col.index === index) {
+        isExtracted = true;
+      }
+    });
+    
+    if (!isExtracted && header) {
+      ignoredColumns.push(header);
+    }
+  });
+
   return {
     totalEntries: dataRows.length,
     totalDebit,
@@ -140,9 +164,13 @@ async function parseCSV(file) {
     monthEndRatio: dataRows.length ? monthEndCount / dataRows.length : 0,
     lastEntryDate: dataRows.length ? dataRows[dataRows.length - 1].split(",")[0] : null,
     csvExtractionMeta: {
-      dateColumn: detectedColumns.date?.header || null,
-      debitColumn: detectedColumns.debit?.header || null,
-      creditColumn: detectedColumns.credit?.header || null,
+      totalColumns,
+      extractedColumns: {
+        date: detectedColumns.date || null,
+        debit: detectedColumns.debit || null,
+        credit: detectedColumns.credit || null
+      },
+      ignoredColumns,
       extractionConfidence
     }
   };

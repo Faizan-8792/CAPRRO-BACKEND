@@ -834,3 +834,39 @@ select {
   background-color: var(--danger);
   box-shadow: 0 0 8px var(--danger);
 }
+.csv-extraction-box {
+  background: #f8f9fb;
+  border: 1px solid #e0e3eb;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-top: 12px;
+}
+
+.csv-extraction-box h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #333;
+}
+
+.csv-meta-row {
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.ignored-columns span {
+  display: inline-block;
+  background: #e5e7eb;
+  border-radius: 12px;
+  padding: 3px 8px;
+  font-size: 12px;
+  margin: 2px;
+}
+
+.csv-confidence {
+  margin-top: 8px;
+  font-weight: 600;
+}
+
+.csv-confidence.HIGH { color: #15803d; }
+.csv-confidence.MEDIUM { color: #b45309; }
+.csv-confidence.LOW { color: #b91c1c; }
