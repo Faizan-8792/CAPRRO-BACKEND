@@ -7,15 +7,22 @@ const JWT_SECRET = process.env.JWT_SECRET || "changeme";
 /**
  * authRequired
  * Checks Bearer token, verifies JWT, and attaches user info to req.user.
+ * Now also accepts token from query string for browser tab openings.
  */
 export const authRequired = async (req, res, next) => {
   try {
     // Log what actually arrives (temporary debug, remove later if noisy)
     console.log("Auth middleware headers.authorization:", req.headers.authorization);
 
-    // Accept typical lowercase header; Node/Express normalizes to lowercase
-    const authHeader =
-      req.headers.authorization || req.headers.Authorization || "";
+    // CHANGED: Accept token from Authorization header OR query string
+    let authHeader = req.headers.authorization || req.headers.Authorization || "";
+    
+    // If no Authorization header, check for query token
+    if (!authHeader && req.query && req.query.token) {
+      // Construct a fake Bearer token string for consistent processing
+      authHeader = `Bearer ${req.query.token}`;
+      console.log("Auth: Using token from query string");
+    }
 
     const parts = String(authHeader).trim().split(" ");
 
@@ -23,7 +30,7 @@ export const authRequired = async (req, res, next) => {
     if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer") {
       return res
         .status(401)
-        .json({ ok: false, error: "Missing or invalid Authorization header" });
+        .json({ ok: false, error: "Missing or invalid Authorization header or token" });
     }
 
     const token = parts[1];
