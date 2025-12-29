@@ -58,6 +58,12 @@ const CSV_COLUMN_KEYWORDS = {
   credit: ["credit", "cr", "deposit", "receipt", "income", "inflow"]
 };
 
+// ---------------- CSV CELL CLEANER ----------------
+function cleanCSVValue(v) {
+  if (v == null) return "";
+  return v.toString().replace(/^"|"$/g, "").trim();
+}
+
 // ---------------- CSV PARSER ----------------
 async function parseCSV(file) {
   const text = await file.text();
@@ -116,9 +122,17 @@ async function parseCSV(file) {
     const columns = row.split(",");
     const cols = detectedColumns;
 
-    const date = cols.date ? columns[cols.date.index] : null;
-    const debit = cols.debit ? Number(columns[cols.debit.index] || 0) : 0;
-    const credit = cols.credit ? Number(columns[cols.credit.index] || 0) : 0;
+    const date = cols.date
+      ? cleanCSVValue(columns[cols.date.index])
+      : null;
+
+    const debit = cols.debit
+      ? parseFloat(cleanCSVValue(columns[cols.debit.index])) || 0
+      : 0;
+
+    const credit = cols.credit
+      ? parseFloat(cleanCSVValue(columns[cols.credit.index])) || 0
+      : 0;
 
     totalDebit += debit;
     totalCredit += credit;
@@ -127,7 +141,7 @@ async function parseCSV(file) {
       roundFigureCount++;
     }
 
-    if (date && (date.endsWith("-28") || date.endsWith("-29") || date.endsWith("-30") || date.endsWith("-31"))) {
+    if (date && /-(28|29|30|31)$/.test(date)) {
       monthEndCount++;
     }
   });
