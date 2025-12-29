@@ -262,9 +262,13 @@ async function createSnapshot() {
     qualitativeMetrics = {
       totalEntries: csv.totalEntries <= 50 ? "0-50" : "50+",
       roundFigureLevel:
-        csv.totalEntries > 0 && (csv.roundFigureCount / csv.totalEntries) > 0.4 ? "HIGH" : "LOW",
-      monthEndLoad: csv.monthEndRatio > 0.4 ? "HIGH" : "LOW",
-      maturity: "BASIC",
+        csv.totalEntries > 0 && (csv.roundFigureCount / csv.totalEntries) > 0.2 ? "HIGH" : "LOW",
+      monthEndLoad: csv.monthEndRatio > 0.25 ? "HIGH" : "LOW",
+      maturity: csv.totalEntries > 200
+        ? "ADVANCED"
+        : csv.totalEntries > 50
+          ? "INTERMEDIATE"
+          : "BASIC",
     };
   }
 
