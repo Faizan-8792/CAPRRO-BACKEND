@@ -1,29 +1,32 @@
+// accounting-engine.js
+// Qualitative scoring for MANUAL snapshots
+
 function analyzeAccounting(metrics) {
   let score = 100;
-  const flags = [];
+  let flags = [];
 
-  // -------- ENTRY VOLUME --------
+  // LOW ACTIVITY
   if (metrics.totalEntries === "0-50") {
     flags.push("LOW_ACTIVITY");
     score -= 20;
   }
 
-  // -------- ROUND FIGURE PATTERN --------
+  // ROUND FIGURE OVERUSE
   if (metrics.roundFigureLevel === "high") {
     flags.push("ROUND_FIGURE_OVERUSE");
     score -= 25;
   }
 
-  // -------- MONTH END RUSH --------
+  // MONTH END PRESSURE
   if (metrics.monthEndLoad === "high") {
-    flags.push("MONTH_END_DUMPING");
-    score -= 15;
+    flags.push("YEAR_END_PRESSURE");
+    score -= 25;
   }
 
-  // -------- ACCOUNTING MATURITY --------
+  // ACCOUNTING MATURITY
   if (metrics.maturity === "basic") {
-    flags.push("WEAK_ACCOUNTING_PRACTICE");
-    score -= 20;
+    flags.push("LOW_MATURITY");
+    score -= 15;
   }
 
   let health = "GREEN";
@@ -32,10 +35,13 @@ function analyzeAccounting(metrics) {
 
   return {
     health,
-    readinessScore: Math.max(score, 0),
+    readinessScore: score,
     flags,
     summaryNotes: flags.length
       ? flags.join(", ")
-      : "Accounting appears stable",
+      : "No major risk detected",
   };
 }
+
+// 🔑 expose to window so retention-ui.js can use it
+window.analyzeAccounting = analyzeAccounting;

@@ -13,6 +13,49 @@ function getRetentionDays() {
   return parseInt(el?.value || "30", 10);
 }
 
+// ---------------- QUALITATIVE ACCOUNTING ANALYSIS ----------------
+function analyzeAccounting(metrics) {
+  let score = 100;
+  let flags = [];
+
+  // LOW ACTIVITY
+  if (metrics.totalEntries === "0-50") {
+    flags.push("LOW_ACTIVITY");
+    score -= 20;
+  }
+
+  // ROUND FIGURE OVERUSE
+  if (metrics.roundFigureLevel === "high") {
+    flags.push("ROUND_FIGURE_OVERUSE");
+    score -= 25;
+  }
+
+  // MONTH END PRESSURE
+  if (metrics.monthEndLoad === "high") {
+    flags.push("YEAR_END_PRESSURE");
+    score -= 25;
+  }
+
+  // ACCOUNTING MATURITY
+  if (metrics.maturity === "basic") {
+    flags.push("LOW_MATURITY");
+    score -= 15;
+  }
+
+  let health = "GREEN";
+  if (score < 70) health = "AMBER";
+  if (score < 40) health = "RED";
+
+  return {
+    health,
+    readinessScore: score,
+    flags,
+    summaryNotes: flags.length
+      ? flags.join(", ")
+      : "No major risk detected",
+  };
+}
+
 // ---------------- CSV PARSER ----------------
 async function parseCSV(file) {
   const text = await file.text();
@@ -89,33 +132,48 @@ async function createSnapshot() {
   }
 
   // ---------------- INTELLIGENCE (REQUIRED BY BACKEND) ----------------
-  let readinessScore = 100;
-  const flags = [];
+  let intelligence;
+  
+  if (source === "MANUAL") {
+    // Convert manual metrics to qualitative format for analysis
+    const qualitativeMetrics = {
+      totalEntries: metrics.totalEntries <= 50 ? "0-50" : "51+",
+      roundFigureLevel: metrics.roundFigureCount > metrics.totalEntries * 0.4 ? "high" : "low",
+      monthEndLoad: "high", // Default assumption for manual entries
+      maturity: "basic" // Default assumption for manual entries
+    };
+    
+    intelligence = analyzeAccounting(qualitativeMetrics);
+  } else {
+    // CSV mode - use existing logic
+    let readinessScore = 100;
+    const flags = [];
 
-  if (metrics.totalEntries < 10) {
-    flags.push("LOW_ACTIVITY");
-    readinessScore -= 20;
+    if (metrics.totalEntries < 10) {
+      flags.push("LOW_ACTIVITY");
+      readinessScore -= 20;
+    }
+
+    if (Math.abs(metrics.totalDebit - metrics.totalCredit) > 1) {
+      flags.push("DEBIT_CREDIT_MISMATCH");
+      readinessScore -= 40;
+    }
+
+    if (metrics.roundFigureCount > metrics.totalEntries * 0.4) {
+      flags.push("ROUND_FIGURE_OVERUSE");
+      readinessScore -= 20;
+    }
+
+    let health = "GREEN";
+    if (readinessScore < 70) health = "AMBER";
+    if (readinessScore < 40) health = "RED";
+
+    intelligence = {
+      health,
+      readinessScore,
+      flags,
+    };
   }
-
-  if (Math.abs(metrics.totalDebit - metrics.totalCredit) > 1) {
-    flags.push("DEBIT_CREDIT_MISMATCH");
-    readinessScore -= 40;
-  }
-
-  if (metrics.roundFigureCount > metrics.totalEntries * 0.4) {
-    flags.push("ROUND_FIGURE_OVERUSE");
-    readinessScore -= 20;
-  }
-
-  let health = "GREEN";
-  if (readinessScore < 70) health = "AMBER";
-  if (readinessScore < 40) health = "RED";
-
-  const intelligence = {
-    health,
-    readinessScore,
-    flags,
-  };
 
   // ---------------- PAYLOAD ----------------
   const payload = {
