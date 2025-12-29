@@ -1,10 +1,9 @@
 // retention-ui.js — Accounting Intelligence Snapshot Creator
-// SAFE: no chrome APIs, no duplicate globals, backend-aligned
+// FIXED: stable metrics, CSV scoring works, backend-safe
 
 // ---------------- TOKEN ----------------
 function getToken() {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("token");
+  return new URLSearchParams(window.location.search).get("token");
 }
 
 // ---------------- RETENTION ----------------
@@ -13,31 +12,27 @@ function getRetentionDays() {
   return parseInt(el?.value || "30", 10);
 }
 
-// ---------------- QUALITATIVE ACCOUNTING ANALYSIS ----------------
-function analyzeAccounting(metrics) {
+// ---------------- QUALITATIVE ENGINE ----------------
+function analyzeAccounting(q) {
   let score = 100;
   let flags = [];
 
-  // LOW ACTIVITY
-  if (metrics.totalEntries === "0-50") {
+  if (q.totalEntries === "0-50") {
     flags.push("LOW_ACTIVITY");
     score -= 20;
   }
 
-  // ROUND FIGURE OVERUSE
-  if (metrics.roundFigureLevel === "high") {
+  if (q.roundFigureLevel === "HIGH") {
     flags.push("ROUND_FIGURE_OVERUSE");
     score -= 25;
   }
 
-  // MONTH END PRESSURE
-  if (metrics.monthEndLoad === "high") {
+  if (q.monthEndLoad === "HIGH") {
     flags.push("YEAR_END_PRESSURE");
     score -= 25;
   }
 
-  // ACCOUNTING MATURITY
-  if (metrics.maturity === "basic") {
+  if (q.maturity === "BASIC") {
     flags.push("LOW_MATURITY");
     score -= 15;
   }
@@ -49,7 +44,7 @@ function analyzeAccounting(metrics) {
   return {
     health,
     readinessScore: score,
-    flags,
+    riskFlags: flags,
     summaryNotes: flags.length
       ? flags.join(", ")
       : "No major risk detected",
@@ -64,20 +59,22 @@ async function parseCSV(file) {
   let totalDebit = 0;
   let totalCredit = 0;
   let roundFigureCount = 0;
+  let monthEndCount = 0;
 
   rows.forEach((r) => {
-    const cols = r.split(",");
-    const debit = Number(cols[1] || 0);
-    const credit = Number(cols[2] || 0);
+    const [date, , , debit, credit] = r.split(",");
+    const d = Number(debit || 0);
+    const c = Number(credit || 0);
 
-    totalDebit += debit;
-    totalCredit += credit;
+    totalDebit += d;
+    totalCredit += c;
 
-    if (
-      (debit !== 0 && debit % 1000 === 0) ||
-      (credit !== 0 && credit % 1000 === 0)
-    ) {
+    if ((d && d % 1000 === 0) || (c && c % 1000 === 0)) {
       roundFigureCount++;
+    }
+
+    if (date?.endsWith("-28") || date?.endsWith("-29") || date?.endsWith("-30") || date?.endsWith("-31")) {
+      monthEndCount++;
     }
   });
 
@@ -86,9 +83,8 @@ async function parseCSV(file) {
     totalDebit,
     totalCredit,
     roundFigureCount,
-    lastEntryDate: rows.length
-      ? rows[rows.length - 1].split(",")[0]
-      : null,
+    monthEndRatio: rows.length ? monthEndCount / rows.length : 0,
+    lastEntryDate: rows.length ? rows[rows.length - 1].split(",")[0] : null,
   };
 }
 
@@ -110,65 +106,60 @@ async function createSnapshot() {
   }
 
   let source = "MANUAL";
+  let rawMetrics = {};
+  let qualitativeMetrics = {};
 
-  // ---------------- MANUAL METRICS (BACKEND SAFE) ----------------
-  let metrics = {
-    totalEntries: Number(
-      document.getElementById("totalEntries")?.value || 0
-    ),
-    totalDebit: 0,
-    totalCredit: 0,
-    roundFigureCount: Number(
-      document.getElementById("roundFigures")?.value || 0
-    ),
-    lastEntryDate:
-      document.getElementById("lastEntryDate")?.value || null,
-  };
-
-  // ---------------- CSV OVERRIDE ----------------
+  // ---------------- CSV MODE ----------------
   if (file) {
-    const csvMetrics = await parseCSV(file);
     source = "CSV";
+    const csv = await parseCSV(file);
 
-    // Convert CSV quantitative metrics to qualitative format
-    metrics = {
-      totalEntries: csvMetrics.totalEntries <= 50 ? "0-50" : "50+",
-      roundFigureLevel: csvMetrics.roundFigureCount / csvMetrics.totalEntries > 0.4
-        ? "high"
-        : "low",
-      monthEndLoad: "low", // CSV doesn't have month-end data, default to low
-      maturity: "basic", // CSV assumed basic unless ERP data exists
-      // Keep original metrics for backend payload
-      totalDebit: csvMetrics.totalDebit,
-      totalCredit: csvMetrics.totalCredit,
-      roundFigureCount: csvMetrics.roundFigureCount,
-      lastEntryDate: csvMetrics.lastEntryDate,
-    };
-  } else {
-    // For manual entries, convert to qualitative format
-    metrics = {
-      totalEntries: metrics.totalEntries <= 50 ? "0-50" : "50+",
-      roundFigureLevel: metrics.roundFigureCount > metrics.totalEntries * 0.4 ? "high" : "low",
-      monthEndLoad: "high", // Default assumption for manual entries
-      maturity: "basic", // Default assumption for manual entries
-      // Keep original metrics for backend payload
-      totalDebit: metrics.totalDebit,
-      totalCredit: metrics.totalCredit,
-      roundFigureCount: metrics.roundFigureCount,
-      lastEntryDate: metrics.lastEntryDate,
+    rawMetrics = csv;
+
+    qualitativeMetrics = {
+      totalEntries: csv.totalEntries <= 50 ? "0-50" : "50+",
+      roundFigureLevel:
+        csv.roundFigureCount / csv.totalEntries > 0.4 ? "HIGH" : "LOW",
+      monthEndLoad: csv.monthEndRatio > 0.4 ? "HIGH" : "LOW",
+      maturity: "BASIC",
     };
   }
 
-  // ---------------- INTELLIGENCE (REQUIRED BY BACKEND) ----------------
-  // Use analyzeAccounting for both MANUAL and CSV modes
-  const intelligence = analyzeAccounting(metrics);
+  // ---------------- MANUAL MODE ----------------
+  else {
+    rawMetrics = {
+      totalEntries: Number(document.getElementById("totalEntries")?.value || 0),
+      roundFigureCount: 0,
+      totalDebit: 0,
+      totalCredit: 0,
+      lastEntryDate: document.getElementById("lastEntryDate")?.value || null,
+    };
 
-  // ---------------- PAYLOAD ----------------
+    qualitativeMetrics = {
+      totalEntries:
+        rawMetrics.totalEntries <= 50 ? "0-50" : "50+",
+      roundFigureLevel:
+        document.getElementById("roundFigures")?.value === "many"
+          ? "HIGH"
+          : "LOW",
+      monthEndLoad:
+        document.getElementById("monthEnd")?.value === ">50"
+          ? "HIGH"
+          : "LOW",
+      maturity:
+        document.getElementById("maturity")?.value === "basic"
+          ? "BASIC"
+          : "ADVANCED",
+    };
+  }
+
+  const intelligence = analyzeAccounting(qualitativeMetrics);
+
   const payload = {
     clientName,
     periodKey,
     source,
-    metrics, // This now contains both qualitative and quantitative metrics
+    metrics: rawMetrics,
     intelligence,
     remarks: document.getElementById("remarks")?.value || "",
     retentionDays: getRetentionDays(),
@@ -185,16 +176,12 @@ async function createSnapshot() {
     });
 
     const data = await res.json();
-
     if (!res.ok || !data?.ok) {
-      throw new Error(data?.error || "Snapshot save failed");
+      throw new Error(data?.error || "Failed to create record");
     }
 
-    alert("✅ Accounting snapshot saved successfully");
-
-    if (typeof loadRecords === "function") {
-      loadRecords();
-    }
+    alert("✅ Accounting snapshot saved");
+    if (typeof loadRecords === "function") loadRecords();
   } catch (err) {
     console.error("Snapshot save failed:", err);
     alert("❌ " + err.message);
@@ -203,8 +190,7 @@ async function createSnapshot() {
 
 // ---------------- INIT ----------------
 document.addEventListener("DOMContentLoaded", () => {
-  const btn = document.getElementById("saveSnapshotBtn");
-  if (btn) {
-    btn.addEventListener("click", createSnapshot);
-  }
+  document
+    .getElementById("saveSnapshotBtn")
+    ?.addEventListener("click", createSnapshot);
 });
