@@ -1,6 +1,3 @@
-// ---------------- CONFIG ----------------
-
-
 // ---------------- TOKEN ----------------
 function getToken() {
   const params = new URLSearchParams(window.location.search);
@@ -10,66 +7,97 @@ function getToken() {
 // ---------------- LOAD RECORDS ----------------
 async function loadRecords() {
   const token = getToken();
+  const container = document.getElementById("recordsTable");
+
+  if (!container) return;
+
   if (!token) {
-    alert("Auth token missing. Please open from extension.");
+    container.innerHTML = `<p class="muted">Authentication missing.</p>`;
     return;
   }
 
-  const res = await fetch(`${API_BASE_URL}/api/accounting`, {
-    headers: {
-      Authorization: `Bearer ${token}`
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/accounting`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) {
+      container.innerHTML = `<p class="muted">Failed to load accounting records.</p>`;
+      return;
     }
-  });
 
-  const data = await res.json();
-  const div = document.getElementById("recordsTable");
+    if (!data.records || !data.records.length) {
+      container.innerHTML = `<p class="muted">No accounting records found.</p>`;
+      return;
+    }
 
-  if (!data.ok) {
-    div.innerHTML = "<p>Error loading records</p>";
-    return;
+    container.innerHTML = data.records
+      .map(
+        (r) => `
+        <div class="record-card">
+          <div>
+            <b>${r.clientName}</b> | ${r.periodKey}
+          </div>
+          <div class="muted">
+            Health: ${r.health} · Score: ${r.readinessScore}%
+          </div>
+
+          <div class="record-actions">
+            <button class="btn-view" data-id="${r._id}">View</button>
+            <button class="btn-delete" data-id="${r._id}">Delete</button>
+          </div>
+        </div>
+      `
+      )
+      .join("");
+
+    // View handlers
+    container.querySelectorAll(".btn-view").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.id;
+        if (id && typeof viewDetail === "function") {
+          viewDetail(id);
+        }
+      });
+    });
+
+    // Delete handlers
+    container.querySelectorAll(".btn-delete").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.id;
+        if (id) deleteRecord(id);
+      });
+    });
+  } catch (err) {
+    console.error("Load records failed:", err);
+    container.innerHTML = `<p class="muted">Error loading records.</p>`;
   }
-
-  if (!data.records.length) {
-    div.innerHTML = "<p>No accounting records found.</p>";
-    return;
-  }
-
-  div.innerHTML = data.records.map(r => `
-    <div style="border:1px solid #334155; padding:8px; margin-bottom:6px;">
-      <b>${r.clientName}</b> | ${r.periodKey}<br/>
-      Health: ${r.health} | Score: ${r.readinessScore}%
-      <div style="margin-top:6px;">
-        <button class="view-btn" data-id="${r._id}">View</button>
-        <button class="delete-btn" data-id="${r._id}">Delete</button>
-      </div>
-    </div>
-  `).join("");
-
-  // Add event listeners for view buttons
-  div.querySelectorAll(".view-btn").forEach(btn => {
-    btn.addEventListener("click", () => viewDetail(btn.dataset.id));
-  });
-
-  // Add event listeners for delete buttons
-  div.querySelectorAll(".delete-btn").forEach(btn => {
-    btn.addEventListener("click", () => deleteRecord(btn.dataset.id));
-  });
 }
 
 // ---------------- DELETE ----------------
 async function deleteRecord(id) {
-  if (!confirm("Delete this record permanently?")) return;
+  if (!confirm("Delete this accounting snapshot permanently?")) return;
 
   const token = getToken();
-  await fetch(`${API_BASE_URL}/api/accounting/${id}`, {
-    method: "DELETE",
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
-  });
+  if (!token) return;
 
-  loadRecords();
+  try {
+    await fetch(`${API_BASE_URL}/api/accounting/${id}`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    loadRecords();
+  } catch (err) {
+    console.error("Delete failed:", err);
+  }
 }
 
-// Auto load
+// ---------------- INIT ----------------
 loadRecords();

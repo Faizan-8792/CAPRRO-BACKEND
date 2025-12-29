@@ -1,47 +1,124 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8" />
   <title>Accounting Intelligence | CA PRO Toolkit</title>
-  <link rel="stylesheet" href="admin.css">
+  <link rel="stylesheet" href="acc.css" />
 </head>
 <body>
 
 <h1>📊 Accounting Intelligence</h1>
+<p class="page-desc">
+  Store high-level accounting snapshots to assess audit and tax readiness.
+  This is an intelligence layer — not a ledger or accounting software.
+</p>
 
-<section>
+<section class="card">
   <h3>Create Accounting Snapshot</h3>
 
-  <input id="clientName" placeholder="Client Name" />
-  <input id="periodKey" placeholder="Period (e.g. 2024-04 / FY2023-24)" />
+  <div class="form-row">
+    <label>Client / Label</label>
+    <input id="clientName" placeholder="e.g. ABC Traders" />
+  </div>
 
-  <select id="source">
-    <option value="MANUAL">Manual Entry</option>
-    <option value="CSV">CSV Upload</option>
-  </select>
+  <div class="form-row">
+    <label>Period</label>
+    <input id="periodKey" placeholder="e.g. 2024-04 / FY2023-24" />
+  </div>
 
-  <input type="file" id="csvFile" />
+  <div class="form-row">
+    <label>Approx. Total Entries</label>
+    <select id="totalEntries">
+      <option value="">Not sure</option>
+      <option value="0-50">0 – 50</option>
+      <option value="50-200">50 – 200</option>
+      <option value="200-500">200 – 500</option>
+      <option value="500+">500+</option>
+    </select>
+  </div>
 
-  <select id="retention">
-    <option value="1">1 day</option>
-    <option value="7">7 days</option>
-    <option value="30" selected>30 days</option>
-    <option value="90">90 days</option>
-    <option value="FOREVER">Store until I delete</option>
-  </select>
+  <div class="form-row">
+    <label>Round Figure Entries</label>
+    <select id="roundFigures">
+      <option value="">Not sure</option>
+      <option value="low">Very few</option>
+      <option value="medium">Moderate</option>
+      <option value="high">Many round figures</option>
+    </select>
+  </div>
 
-  <!-- ❌ NO INLINE JS -->
-  <button id="saveSnapshotBtn">Save Snapshot</button>
+  <div class="form-row">
+    <label>Month-end Entry Percentage</label>
+    <select id="monthEnd">
+      <option value="">Not sure</option>
+      <option value="low">&lt; 20%</option>
+      <option value="medium">20% – 50%</option>
+      <option value="high">&gt; 50%</option>
+    </select>
+  </div>
+
+  <div class="form-row">
+    <label>Last Entry Date</label>
+    <input type="date" id="lastEntryDate" />
+  </div>
+
+  <div class="form-row">
+    <label>Accounting Maturity</label>
+    <select id="maturity">
+      <option value="">Select</option>
+      <option value="basic">Basic (Irregular)</option>
+      <option value="average">Average (Monthly)</option>
+      <option value="good">Good (Weekly)</option>
+      <option value="excellent">Excellent (Daily)</option>
+    </select>
+  </div>
+
+  <div class="form-row">
+    <label>Remarks (Optional)</label>
+    <textarea id="remarks" placeholder="Any CA observation..."></textarea>
+  </div>
+
+  <div class="form-row file-upload">
+    <label>Upload CSV (Optional)</label>
+    <input type="file" id="csvFile" />
+  </div>
+
+  <div class="form-row">
+    <label>Data Retention</label>
+    <select id="retention">
+      <option value="1">1 day</option>
+      <option value="7">7 days</option>
+      <option value="30" selected>30 days (Recommended)</option>
+      <option value="90">90 days</option>
+    </select>
+  </div>
+
+  <button id="saveSnapshotBtn" class="btn-primary">
+    💾 Save Snapshot
+  </button>
 </section>
 
-<hr/>
-
-<section>
+<section class="card">
   <h3>Stored Accounting Records</h3>
   <div id="recordsTable"></div>
 </section>
+<!-- Existing content stays same -->
+
+<!-- 🔍 VIEW MODAL -->
+<div id="viewModal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Accounting Snapshot</h3>
+      <button id="closeModal">✕</button>
+    </div>
+
+    <div id="modalContent"></div>
+
+    <div id="compareSection" class="compare-box hidden"></div>
+  </div>
+</div>
+
 <script src="config.js"></script>
-<script src="accounting-engine.js"></script>
-<script src="csv-parser.js"></script>
 <script src="accounting-table.js"></script>
 <script src="retention-ui.js"></script>
 <script src="accounting-detail.js"></script>

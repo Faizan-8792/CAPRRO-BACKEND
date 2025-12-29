@@ -1,7 +1,5 @@
 // retention-ui.js — Accounting Intelligence Snapshot Creator
-// ✅ Web-page safe (NO chrome APIs)
-// ✅ Uses token from URL
-// ✅ Backend-aligned
+// SAFE: no chrome APIs, no duplicate globals
 
 // ---------------- TOKEN ----------------
 function getToken() {
@@ -17,83 +15,53 @@ function getRetentionDays() {
 
 // ---------------- CSV PARSER ----------------
 async function parseCSV(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
+  const text = await file.text();
+  const rows = text.split("\n").slice(1).filter(Boolean);
 
-    reader.onload = () => {
-      try {
-        const rows = reader.result.split("\n").filter(Boolean);
-        let totalDebit = 0;
-        let totalCredit = 0;
+  let totalDebit = 0;
+  let totalCredit = 0;
+  let roundFigureCount = 0;
 
-        for (let i = 1; i < rows.length; i++) {
-          const [, debit, credit] = rows[i].split(",");
-          totalDebit += Number(debit || 0);
-          totalCredit += Number(credit || 0);
-        }
+  rows.forEach(r => {
+    const [, debit, credit] = r.split(",");
+    const d = Number(debit || 0);
+    const c = Number(credit || 0);
 
-        resolve({
-          totalEntries: rows.length - 1,
-          totalDebit,
-          totalCredit,
-        });
-      } catch (err) {
-        reject(err);
-      }
-    };
+    totalDebit += d;
+    totalCredit += c;
 
-    reader.onerror = reject;
-    reader.readAsText(file);
+    if (d % 1000 === 0 || c % 1000 === 0) {
+      roundFigureCount++;
+    }
   });
-}
-
-// ---------------- INTELLIGENCE ENGINE ----------------
-function analyzeAccounting(metrics) {
-  let score = 100;
-  const flags = [];
-
-  if (metrics.totalEntries < 5) {
-    flags.push("LOW_ACTIVITY");
-    score -= 20;
-  }
-
-  if (Math.abs(metrics.totalDebit - metrics.totalCredit) > 1) {
-    flags.push("IMBALANCE");
-    score -= 40;
-  }
-
-  let health = "GREEN";
-  if (score < 70) health = "AMBER";
-  if (score < 40) health = "RED";
 
   return {
-    health,
-    readinessScore: Math.max(score, 0),
-    flags,
+    totalEntries: rows.length,
+    totalDebit,
+    totalCredit,
+    roundFigureCount,
+    lastEntryDate: rows[rows.length - 1]?.split(",")[0] || null,
   };
 }
 
 // ---------------- CREATE SNAPSHOT ----------------
 async function createSnapshot() {
   const token = getToken();
-  if (!token) {
-    alert("Authentication missing. Please reopen from extension.");
-    return;
-  }
+  if (!token) return;
 
   const clientName = document.getElementById("clientName")?.value.trim();
   const periodKey = document.getElementById("periodKey")?.value.trim();
   const file = document.getElementById("csvFile")?.files?.[0];
 
-  if (!clientName || !periodKey) {
-    alert("Client name and period are required.");
-    return;
-  }
+  if (!clientName || !periodKey) return;
 
+  // 🔹 NEW MANUAL METRICS
   let metrics = {
-    totalEntries: 0,
-    totalDebit: 0,
-    totalCredit: 0,
+    totalEntries: document.getElementById("totalEntries")?.value || null,
+    roundFigureLevel: document.getElementById("roundFigures")?.value || null,
+    monthEndLoad: document.getElementById("monthEnd")?.value || null,
+    lastEntryDate: document.getElementById("lastEntryDate")?.value || null,
+    maturity: document.getElementById("maturity")?.value || null,
   };
 
   let source = "MANUAL";
@@ -103,14 +71,12 @@ async function createSnapshot() {
     source = "CSV";
   }
 
-  const intelligence = analyzeAccounting(metrics);
-
   const payload = {
     clientName,
     periodKey,
     source,
     metrics,
-    intelligence,
+    remarks: document.getElementById("remarks")?.value || "",
     retentionDays: getRetentionDays(),
   };
 
@@ -125,26 +91,17 @@ async function createSnapshot() {
     });
 
     const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data?.error);
 
-    if (!res.ok || !data.ok) {
-      throw new Error(data?.error || "Failed to save snapshot");
-    }
-
-    alert("✅ Accounting snapshot saved");
-
-    if (typeof loadRecords === "function") {
-      loadRecords();
-    }
+    if (typeof loadRecords === "function") loadRecords();
   } catch (err) {
-    console.error("Snapshot error:", err);
-    alert("❌ " + err.message);
+    console.error("Snapshot save failed:", err);
   }
 }
 
 // ---------------- INIT ----------------
 document.addEventListener("DOMContentLoaded", () => {
-  const btn = document.getElementById("saveSnapshotBtn");
-  if (btn) {
-    btn.addEventListener("click", createSnapshot);
-  }
+  document
+    .getElementById("saveSnapshotBtn")
+    ?.addEventListener("click", createSnapshot);
 });

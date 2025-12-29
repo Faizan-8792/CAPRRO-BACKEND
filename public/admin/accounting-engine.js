@@ -1,17 +1,28 @@
 function analyzeAccounting(metrics) {
   let score = 100;
-  let flags = [];
+  const flags = [];
 
-  const totalEntries = Number(metrics.totalEntries || 0);
-  const roundFigureCount = Number(metrics.roundFigureCount || 0);
+  // -------- ENTRY VOLUME --------
+  if (metrics.totalEntries === "0-50") {
+    flags.push("LOW_ACTIVITY");
+    score -= 20;
+  }
 
-  if (totalEntries > 0 && roundFigureCount > totalEntries * 0.4) {
+  // -------- ROUND FIGURE PATTERN --------
+  if (metrics.roundFigureLevel === "high") {
     flags.push("ROUND_FIGURE_OVERUSE");
     score -= 25;
   }
 
-  if (totalEntries < 10) {
-    flags.push("LOW_ACTIVITY");
+  // -------- MONTH END RUSH --------
+  if (metrics.monthEndLoad === "high") {
+    flags.push("MONTH_END_DUMPING");
+    score -= 15;
+  }
+
+  // -------- ACCOUNTING MATURITY --------
+  if (metrics.maturity === "basic") {
+    flags.push("WEAK_ACCOUNTING_PRACTICE");
     score -= 20;
   }
 
@@ -22,9 +33,9 @@ function analyzeAccounting(metrics) {
   return {
     health,
     readinessScore: Math.max(score, 0),
-    flags, // ✅ BACKEND EXPECTS THIS KEY
+    flags,
     summaryNotes: flags.length
       ? flags.join(", ")
-      : "No major risk detected",
+      : "Accounting appears stable",
   };
 }
