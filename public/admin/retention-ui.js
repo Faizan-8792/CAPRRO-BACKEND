@@ -127,60 +127,48 @@ async function createSnapshot() {
 
   // ---------------- CSV OVERRIDE ----------------
   if (file) {
-    metrics = await parseCSV(file);
+    const csvMetrics = await parseCSV(file);
     source = "CSV";
+
+    // Convert CSV quantitative metrics to qualitative format
+    metrics = {
+      totalEntries: csvMetrics.totalEntries <= 50 ? "0-50" : "50+",
+      roundFigureLevel: csvMetrics.roundFigureCount / csvMetrics.totalEntries > 0.4
+        ? "high"
+        : "low",
+      monthEndLoad: "low", // CSV doesn't have month-end data, default to low
+      maturity: "basic", // CSV assumed basic unless ERP data exists
+      // Keep original metrics for backend payload
+      totalDebit: csvMetrics.totalDebit,
+      totalCredit: csvMetrics.totalCredit,
+      roundFigureCount: csvMetrics.roundFigureCount,
+      lastEntryDate: csvMetrics.lastEntryDate,
+    };
+  } else {
+    // For manual entries, convert to qualitative format
+    metrics = {
+      totalEntries: metrics.totalEntries <= 50 ? "0-50" : "50+",
+      roundFigureLevel: metrics.roundFigureCount > metrics.totalEntries * 0.4 ? "high" : "low",
+      monthEndLoad: "high", // Default assumption for manual entries
+      maturity: "basic", // Default assumption for manual entries
+      // Keep original metrics for backend payload
+      totalDebit: metrics.totalDebit,
+      totalCredit: metrics.totalCredit,
+      roundFigureCount: metrics.roundFigureCount,
+      lastEntryDate: metrics.lastEntryDate,
+    };
   }
 
   // ---------------- INTELLIGENCE (REQUIRED BY BACKEND) ----------------
-  let intelligence;
-  
-  if (source === "MANUAL") {
-    // Convert manual metrics to qualitative format for analysis
-    const qualitativeMetrics = {
-      totalEntries: metrics.totalEntries <= 50 ? "0-50" : "51+",
-      roundFigureLevel: metrics.roundFigureCount > metrics.totalEntries * 0.4 ? "high" : "low",
-      monthEndLoad: "high", // Default assumption for manual entries
-      maturity: "basic" // Default assumption for manual entries
-    };
-    
-    intelligence = analyzeAccounting(qualitativeMetrics);
-  } else {
-    // CSV mode - use existing logic
-    let readinessScore = 100;
-    const flags = [];
-
-    if (metrics.totalEntries < 10) {
-      flags.push("LOW_ACTIVITY");
-      readinessScore -= 20;
-    }
-
-    if (Math.abs(metrics.totalDebit - metrics.totalCredit) > 1) {
-      flags.push("DEBIT_CREDIT_MISMATCH");
-      readinessScore -= 40;
-    }
-
-    if (metrics.roundFigureCount > metrics.totalEntries * 0.4) {
-      flags.push("ROUND_FIGURE_OVERUSE");
-      readinessScore -= 20;
-    }
-
-    let health = "GREEN";
-    if (readinessScore < 70) health = "AMBER";
-    if (readinessScore < 40) health = "RED";
-
-    intelligence = {
-      health,
-      readinessScore,
-      flags,
-    };
-  }
+  // Use analyzeAccounting for both MANUAL and CSV modes
+  const intelligence = analyzeAccounting(metrics);
 
   // ---------------- PAYLOAD ----------------
   const payload = {
     clientName,
     periodKey,
     source,
-    metrics,
+    metrics, // This now contains both qualitative and quantitative metrics
     intelligence,
     remarks: document.getElementById("remarks")?.value || "",
     retentionDays: getRetentionDays(),
