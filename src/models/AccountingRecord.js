@@ -64,6 +64,12 @@ const AccountingRecordSchema = new mongoose.Schema(
       default: "",
     },
 
+    // CSV extraction metadata
+    csvExtractionMeta: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
     // Retention
     expiresAt: {
       type: Date,
