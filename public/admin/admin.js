@@ -186,9 +186,7 @@ function onHashChange() {
 
     // ✅ Analytics page open hone par chart load
     if (hash === '#analytics') {
-        loadEmployeeProductivity(
-            document.getElementById("productivityPeriod")?.value || "month"
-        );
+        loadEmployeeProductivity();
     }
 }
 
@@ -764,62 +762,64 @@ document.addEventListener('DOMContentLoaded', () => {
 
 let __productivityChart = null;
 
-async function loadEmployeeProductivity(period = "month") {
-    try {
-        const res = await fetch(
-            `${API_BASE}/stats/employee-productivity?period=${period}`,
-            {
-                headers: {
-                    Authorization: `Bearer ${getToken()}`
-                }
-            }
-        );
+async function loadEmployeeProductivity() {
+  const period = document.getElementById('productivityPeriod')?.value || 'month';
 
-        const json = await res.json();
-        if (!json.data || !json.data.length) {
-            console.warn("No productivity data");
-            return;
+  const resp = await api(`/stats/employee-productivity?period=${period}`);
+  const data = resp.data || [];
+
+  const labels = data.map(d => d.label);
+  const values = data.map(d => d.tasksCompleted);
+
+  const canvas = document.getElementById('employeeProductivityChart');
+  const ctx = canvas.getContext('2d');
+
+  if (__productivityChart) __productivityChart.destroy();
+
+  __productivityChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: '#198754',   // green
+        borderRadius: 8,
+        barThickness: 26
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      indexAxis: 'y',
+
+      layout: {
+        padding: {
+          left: 140   // 🔥 MOST IMPORTANT FIX (label space)
         }
+      },
 
-        const labels = json.data.map(x => x.label);
-        const values = json.data.map(x => x.tasksCompleted);
+      plugins: {
+        legend: { display: false }
+      },
 
-        const canvas = document.getElementById("employeeProductivityChart");
-        if (!canvas) return;
-
-        const ctx = canvas.getContext("2d");
-
-        if (__productivityChart) {
-            __productivityChart.destroy();
-        }
-
-        __productivityChart = new Chart(ctx, {
-            type: "bar",
-            data: {
-                labels,
-                datasets: [{
-                    label: "Tasks Completed",
-                    data: values
-                }]
+      scales: {
+        x: {
+          beginAtZero: true,
+          ticks: { precision: 0 }
+        },
+        y: {
+          ticks: {
+            autoSkip: false,          // 🔥 STOP HIDING LABELS
+            font: {
+              size: 14,
+              weight: '600'
             },
-            options: {
-                indexAxis: "y",
-                responsive: true,
-                plugins: {
-                    legend: { display: false }
-                },
-                scales: {
-                    x: {
-                        beginAtZero: true,
-                        ticks: { precision: 0 }
-                    }
-                }
-            }
-        });
-
-    } catch (err) {
-        console.error("Productivity chart error:", err);
+            color: '#212529'          // 🔥 label color
+          }
+        }
+      }
     }
+  });
 }
 
 // Period dropdown handler
@@ -828,12 +828,3 @@ document.addEventListener("change", (e) => {
         loadEmployeeProductivity(e.target.value);
     }
 });
-
-// ✅ REMOVED: Auto-load when dashboard opens (chart is now in Analytics page)
-// window.addEventListener("hashchange", () => {
-//     if (window.location.hash === "#dashboard") {
-//         loadEmployeeProductivity(
-//             document.getElementById("productivityPeriod")?.value || "month"
-//         );
-//     }
-// });
