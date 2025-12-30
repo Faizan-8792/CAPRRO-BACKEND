@@ -2411,3 +2411,31 @@ table.table.align-middle.mb-0 tbody tr.highlighted {
 .no-data-action {
   margin-top: 16px;
 }
+/* =========================
+   EMPLOYEE PRODUCTIVITY GRAPH
+========================= */
+
+#employeeProductivityChart {
+  width: 100% !important;
+  max-height: 320px;
+}
+
+/* Chart container card */
+#page-dashboard section.card {
+  overflow-x: auto;
+}
+
+/* Fix canvas rendering blur */
+canvas {
+  image-rendering: auto;
+}
+
+/* Axis labels visibility */
+.chartjs-render-monitor {
+  font-size: 13px !important;
+}
+
+/* Tooltip better visibility */
+.chartjs-tooltip {
+  opacity: 1 !important;
+}
