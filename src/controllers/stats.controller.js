@@ -32,7 +32,6 @@ export async function getClientsToChaseToday(req, res, next) {
 
     const today = startOfToday();
 
-    // Pending docs
     const pendingFilter = {
       firmId,
       isActive: true,
@@ -66,7 +65,6 @@ export async function getClientsToChaseToday(req, res, next) {
       .filter((x) => x.daysPending >= 3)
       .slice(0, 50);
 
-    // Chronic late
     const lateFilter = {
       firmId,
       isActive: true,
@@ -121,14 +119,9 @@ export async function getClientsToChaseToday(req, res, next) {
 
 /**
  * POST /api/stats/clients-to-chase-today/complete
- * ✅ RAW MONGODB COLLECTION UPDATE - 100% NO ERRORS
  */
 export async function postChaseComplete(req, res, next) {
   try {
-    console.log("=== postChaseComplete START ===");
-    console.log("Input:", req.body);
-    console.log("User firmId:", req.user.firmId);
-
     const { type, taskId } = req.body;
     const userFirmId = req.user.firmId;
 
@@ -136,15 +129,10 @@ export async function postChaseComplete(req, res, next) {
       return res.status(400).json({ ok: false, error: "Missing taskId or type" });
     }
 
-    // ✅ RAW COLLECTION UPDATE - BYPASSES ALL Mongoose validation
     const db = mongoose.connection.db;
     const tasksCollection = db.collection('tasks');
 
-    let updateFields = {
-      $set: {
-        updatedAt: new Date()
-      }
-    };
+    let updateFields = { $set: { updatedAt: new Date() } };
 
     if (type === "pending") {
       updateFields.$set['meta.docsStatus'] = "DONE";
@@ -154,40 +142,23 @@ export async function postChaseComplete(req, res, next) {
       updateFields.$set.status = "CLOSED";
     }
 
-    console.log("Raw MongoDB update:", updateFields);
-
     const result = await tasksCollection.updateOne(
-      { 
+      {
         _id: new mongoose.Types.ObjectId(taskId),
         firmId: new mongoose.Types.ObjectId(userFirmId)
       },
       updateFields
     );
 
-    console.log("Raw MongoDB result:", {
-      matchedCount: result.matchedCount,
-      modifiedCount: result.modifiedCount
-    });
-
     if (result.matchedCount === 0) {
       return res.status(404).json({ ok: false, error: "Task not found" });
     }
 
-    console.log("✅ SUCCESS - Raw MongoDB update complete");
-    return res.json({ 
-      ok: true, 
-      message: "Task marked complete ✅",
-      matchedCount: result.matchedCount,
-      modifiedCount: result.modifiedCount
-    });
+    return res.json({ ok: true, message: "Task marked complete ✅" });
 
   } catch (err) {
-    console.error("💥 Raw MongoDB ERROR:", err.message);
-    res.status(500).json({ 
-      ok: false, 
-      error: "Database update failed",
-      debug: err.message 
-    });
+    console.error("postChaseComplete error:", err);
+    res.status(500).json({ ok: false, error: "Database update failed" });
   }
 }
 
@@ -231,6 +202,9 @@ export async function getEmployeeProductivityStats(req, res) {
       return res.status(400).json({ error: "Firm not linked" });
     }
 
+    // ✅ REQUIRED FIX: convert firmId to ObjectId
+    const firmObjectId = new mongoose.Types.ObjectId(firmId);
+
     const now = new Date();
     let startDate;
 
@@ -240,22 +214,21 @@ export async function getEmployeeProductivityStats(req, res) {
     } else if (period === "year") {
       startDate = new Date(now.getFullYear(), 0, 1);
     } else {
-      // month (default)
       startDate = new Date(now.getFullYear(), now.getMonth(), 1);
     }
 
     const results = await Task.aggregate([
       {
         $match: {
-          firmId: firmId,
+          firmId: firmObjectId, // ✅ FIX APPLIED
           status: "CLOSED",
           updatedAt: { $gte: startDate },
-          assignedTo: { $ne: null },
+          "assignedTo.id": { $exists: true, $ne: null },
         },
       },
       {
         $group: {
-          _id: "$assignedTo",
+          _id: "$assignedTo.id",
           tasksCompleted: { $sum: 1 },
         },
       },
@@ -281,7 +254,7 @@ export async function getEmployeeProductivityStats(req, res) {
       return {
         userId: r._id,
         email,
-        label: email.split("@")[0], // 👈 as you asked
+        label: email.split("@")[0],
         tasksCompleted: r.tasksCompleted,
       };
     });
