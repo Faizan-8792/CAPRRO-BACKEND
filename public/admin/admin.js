@@ -740,3 +740,83 @@ async function initAdminPage() {
 document.addEventListener('DOMContentLoaded', () => {
     initAdminPage();
 });
+
+/* ===============================
+   EMPLOYEE PRODUCTIVITY CHART
+================================ */
+
+let __productivityChart = null;
+
+async function loadEmployeeProductivity(period = "month") {
+    try {
+        const res = await fetch(
+            `${API_BASE}/stats/employee-productivity?period=${period}`,
+            {
+                headers: {
+                    Authorization: `Bearer ${getToken()}`
+                }
+            }
+        );
+
+        const json = await res.json();
+        if (!json.data || !json.data.length) {
+            console.warn("No productivity data");
+            return;
+        }
+
+        const labels = json.data.map(x => x.label);
+        const values = json.data.map(x => x.tasksCompleted);
+
+        const canvas = document.getElementById("employeeProductivityChart");
+        if (!canvas) return;
+
+        const ctx = canvas.getContext("2d");
+
+        if (__productivityChart) {
+            __productivityChart.destroy();
+        }
+
+        __productivityChart = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels,
+                datasets: [{
+                    label: "Tasks Completed",
+                    data: values
+                }]
+            },
+            options: {
+                indexAxis: "y",
+                responsive: true,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true,
+                        ticks: { precision: 0 }
+                    }
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error("Productivity chart error:", err);
+    }
+}
+
+// Period dropdown handler
+document.addEventListener("change", (e) => {
+    if (e.target && e.target.id === "productivityPeriod") {
+        loadEmployeeProductivity(e.target.value);
+    }
+});
+
+// Auto-load when dashboard opens
+window.addEventListener("hashchange", () => {
+    if (window.location.hash === "#dashboard") {
+        loadEmployeeProductivity(
+            document.getElementById("productivityPeriod")?.value || "month"
+        );
+    }
+});

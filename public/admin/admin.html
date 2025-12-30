@@ -126,6 +126,19 @@
           </div>
         </section>
 
+        <!-- Employee Productivity -->
+        <section class="card">
+          <h3>Employee Productivity</h3>
+
+          <select id="productivityPeriod">
+            <option value="week">This Week</option>
+            <option value="month" selected>This Month</option>
+            <option value="year">This Year</option>
+          </select>
+
+          <canvas id="employeeProductivityChart" height="180"></canvas>
+        </section>
+
       </section>
 
       <!-- TASK BOARD (page-tasks) -->
@@ -383,6 +396,7 @@
   </div>
 
   <!-- SCRIPTS -->
+  <script src="./libs/chart.min.js"></script>
   <script src="admin.js"></script>
   <script src="admin-tasks.js"></script>
   <script type="module" src="compliance-assistant/assistant.js"></script>
