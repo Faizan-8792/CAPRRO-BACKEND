@@ -222,7 +222,7 @@ export async function getEmployeeProductivityStats(req, res) {
         $match: {
           firmId: firmObjectId, // ✅ FIX APPLIED
           status: "CLOSED",
-          updatedAt: { $gte: startDate },
+          "meta.completedAt": { $gte: startDate },
           "assignedTo.id": { $exists: true, $ne: null },
         },
       },
