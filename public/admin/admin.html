@@ -40,6 +40,7 @@
     <aside class="sidebar">
       <div class="px-3 mb-2 small-label text-muted">Navigation</div>
       <a href="#dashboard" class="active">Dashboard</a>
+      <a href="#analytics">📊 Analytics</a>
       <a href="#tasks">Compliance board</a>
       <a href="#assistant">Compliance Assistant</a>
 
@@ -126,19 +127,23 @@
           </div>
         </section>
 
-        <!-- Employee Productivity -->
-        <section class="card">
-          <h3>Employee Productivity</h3>
+      </section>
 
-          <select id="productivityPeriod">
-            <option value="week">This Week</option>
-            <option value="month" selected>This Month</option>
-            <option value="year">This Year</option>
-          </select>
+      <!-- ANALYTICS PAGE (page-analytics) -->
+      <section id="page-analytics" style="display:none">
+        <h4 class="mb-3">📊 Employee Productivity</h4>
 
-          <canvas id="employeeProductivityChart" height="180"></canvas>
-        </section>
+        <div class="card p-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <select id="productivityPeriod">
+              <option value="week">This Week</option>
+              <option value="month" selected>This Month</option>
+              <option value="year">This Year</option>
+            </select>
+          </div>
 
+          <canvas id="employeeProductivityChart" height="240"></canvas>
+        </div>
       </section>
 
       <!-- TASK BOARD (page-tasks) -->

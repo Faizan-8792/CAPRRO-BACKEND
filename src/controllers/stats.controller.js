@@ -224,12 +224,8 @@ export const getFirmOverviewStats = async (req, res, next) => {
  */
 export async function getEmployeeProductivityStats(req, res) {
   try {
-    const { firmId } = req.user;
+    const firmId = new mongoose.Types.ObjectId(req.user.firmId);
     const { period = "month" } = req.query;
-
-    if (!firmId) {
-      return res.status(400).json({ error: "Firm not linked" });
-    }
 
     const now = new Date();
     let startDate;
@@ -240,63 +236,55 @@ export async function getEmployeeProductivityStats(req, res) {
     } else if (period === "year") {
       startDate = new Date(now.getFullYear(), 0, 1);
     } else {
-      // month (default)
       startDate = new Date(now.getFullYear(), now.getMonth(), 1);
     }
 
-    // Convert string firmId to ObjectId for aggregation
-    const firmObjectId = new mongoose.Types.ObjectId(firmId);
-
-    const results = await Task.aggregate([
-      {
-        $match: {
-          firmId: firmObjectId,
-          status: "CLOSED",
-          assignedTo: { $ne: null },      // ✅ ObjectId exists
-          updatedAt: { $gte: startDate }  // ✅ real Date field
-        },
-      },
-      {
-        $group: {
-          _id: "$assignedTo",             // ✅ group by ObjectId
-          tasksCompleted: { $sum: 1 },
-        },
-      },
-      {
-        $sort: { tasksCompleted: -1 },
-      },
-    ]);
-
-    const userIds = results.map(r => r._id);
-
+    // 1️⃣ Get all active users of firm
     const users = await User.find(
-      { _id: { $in: userIds } },
+      { firmId, isActive: true },
       { email: 1 }
     ).lean();
 
-    const userMap = {};
-    users.forEach(u => {
-      userMap[u._id.toString()] = u.email;
+    // 2️⃣ Get closed task counts
+    const taskCounts = await Task.aggregate([
+      {
+        $match: {
+          firmId,
+          status: "CLOSED",
+          assignedTo: { $ne: null },
+          updatedAt: { $gte: startDate }
+        }
+      },
+      {
+        $group: {
+          _id: "$assignedTo",
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const taskMap = {};
+    taskCounts.forEach(t => {
+      taskMap[t._id.toString()] = t.count;
     });
 
-    const response = results.map(r => {
-      const email = userMap[r._id.toString()] || "unknown";
-      return {
-        userId: r._id,
-        email,
-        label: email.split("@")[0], // 👈 as you asked
-        tasksCompleted: r.tasksCompleted,
-      };
-    });
+    // 3️⃣ Merge → ensure 0-task users appear
+    const data = users.map(u => ({
+      userId: u._id,
+      email: u.email,
+      label: u.email.split("@")[0],
+      tasksCompleted: taskMap[u._id.toString()] || 0
+    }));
 
     res.json({
       period,
       startDate,
-      totalEmployees: response.length,
-      data: response,
+      totalEmployees: data.length,
+      data
     });
+
   } catch (err) {
-    console.error("Employee productivity error", err);
+    console.error("Employee productivity error:", err);
     res.status(500).json({ error: "Failed to load employee stats" });
   }
 }
