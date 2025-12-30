@@ -216,3 +216,84 @@ export const getFirmOverviewStats = async (req, res, next) => {
     next(err);
   }
 };
+
+/**
+ * Employee productivity stats
+ * Count of CLOSED tasks per employee
+ * period = week | month | year
+ */
+export async function getEmployeeProductivityStats(req, res) {
+  try {
+    const { firmId } = req.user;
+    const { period = "month" } = req.query;
+
+    if (!firmId) {
+      return res.status(400).json({ error: "Firm not linked" });
+    }
+
+    const now = new Date();
+    let startDate;
+
+    if (period === "week") {
+      startDate = new Date(now);
+      startDate.setDate(now.getDate() - 7);
+    } else if (period === "year") {
+      startDate = new Date(now.getFullYear(), 0, 1);
+    } else {
+      // month (default)
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    }
+
+    const results = await Task.aggregate([
+      {
+        $match: {
+          firmId: firmId,
+          status: "CLOSED",
+          updatedAt: { $gte: startDate },
+          assignedTo: { $ne: null },
+        },
+      },
+      {
+        $group: {
+          _id: "$assignedTo",
+          tasksCompleted: { $sum: 1 },
+        },
+      },
+      {
+        $sort: { tasksCompleted: -1 },
+      },
+    ]);
+
+    const userIds = results.map(r => r._id);
+
+    const users = await User.find(
+      { _id: { $in: userIds } },
+      { email: 1 }
+    ).lean();
+
+    const userMap = {};
+    users.forEach(u => {
+      userMap[u._id.toString()] = u.email;
+    });
+
+    const response = results.map(r => {
+      const email = userMap[r._id.toString()] || "unknown";
+      return {
+        userId: r._id,
+        email,
+        label: email.split("@")[0], // 👈 as you asked
+        tasksCompleted: r.tasksCompleted,
+      };
+    });
+
+    res.json({
+      period,
+      startDate,
+      totalEmployees: response.length,
+      data: response,
+    });
+  } catch (err) {
+    console.error("Employee productivity error", err);
+    res.status(500).json({ error: "Failed to load employee stats" });
+  }
+}
