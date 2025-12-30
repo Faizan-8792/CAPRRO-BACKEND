@@ -119,10 +119,20 @@ async function api(path, opts) {
 }
 
 /**
- * UPDATED: includes 'tasks' page + correct nav highlight
+ * UPDATED: includes 'analytics' and 'tasks' page + correct nav highlight
  */
 function showPage(hash) {
-    const pages = ['dashboard', 'tasks', 'assistant', 'firm', 'users', 'join', 'settings'];
+    const pages = [
+      'dashboard',
+      'analytics', // ✅ ADD THIS
+      'tasks',
+      'assistant',
+      'firm',
+      'users',
+      'join',
+      'settings'
+    ];
+    
     for (const p of pages) {
         const el = qs(`page-${p}`);
         if (el) {
@@ -172,6 +182,13 @@ function onHashChange() {
     if (hash === '#dashboard') {
         if (window.loadTodayReminders) loadTodayReminders();
         if (!__clientsChaseLoading) loadClientsToChaseToday();
+    }
+
+    // ✅ Analytics page open hone par chart load
+    if (hash === '#analytics') {
+        loadEmployeeProductivity(
+            document.getElementById("productivityPeriod")?.value || "month"
+        );
     }
 }
 
@@ -812,11 +829,11 @@ document.addEventListener("change", (e) => {
     }
 });
 
-// Auto-load when dashboard opens
-window.addEventListener("hashchange", () => {
-    if (window.location.hash === "#dashboard") {
-        loadEmployeeProductivity(
-            document.getElementById("productivityPeriod")?.value || "month"
-        );
-    }
-});
+// ✅ REMOVED: Auto-load when dashboard opens (chart is now in Analytics page)
+// window.addEventListener("hashchange", () => {
+//     if (window.location.hash === "#dashboard") {
+//         loadEmployeeProductivity(
+//             document.getElementById("productivityPeriod")?.value || "month"
+//         );
+//     }
+// });
