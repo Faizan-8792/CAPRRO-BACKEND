@@ -172,6 +172,43 @@ export const updateTask = async (req, res) => {
   }
 };
 
+/* ---------------- DELETE TASK ---------------- */
+
+export const deleteTask = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const firmId = req.user.firmId;
+
+    const task = await Task.findOne({
+      _id: id,
+      firmId,
+      isActive: true,
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        ok: false,
+        error: "Task not found",
+      });
+    }
+
+    // ✅ Soft delete (recommended)
+    task.isActive = false;
+    await task.save();
+
+    return res.json({
+      ok: true,
+      message: "Task deleted",
+    });
+  } catch (err) {
+    console.error("deleteTask error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: "Delete failed",
+    });
+  }
+};
+
 /* ---------------- USER TASKS ---------------- */
 
 export const getMyOpenTasks = async (req, res) => {
