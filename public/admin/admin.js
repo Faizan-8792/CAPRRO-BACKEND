@@ -837,6 +837,7 @@ async function loadEmployeeProductivity() {
         y: {
           ticks: {
             autoSkip: false,          // 🔥 STOP HIDING LABELS
+            color: '#ffffff',
             font: {
               size: 14,
               weight: '600'
