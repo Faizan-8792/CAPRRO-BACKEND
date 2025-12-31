@@ -52,6 +52,9 @@ export async function getClientsToChaseToday(req, res, next) {
         const created = t.createdAt ? new Date(t.createdAt) : today;
         const d = daysDiff(today, created);
         const daysPending = d >= 0 ? d : 0;
+        
+        // Calculate suggestedAction based on waiting days
+        const suggestedAction = daysPending >= 7 ? "ESCALATE" : "CHASE";
 
         return {
           taskId: t._id.toString(),
@@ -60,7 +63,10 @@ export async function getClientsToChaseToday(req, res, next) {
           title: t.title || "No title",
           dueDateISO: t.dueDateISO,
           daysPending,
-          status: t.status
+          status: t.status,
+          delayReason: t.meta?.delayReason || null,
+          waitingDays: daysPending,
+          suggestedAction: suggestedAction
         };
       })
       .filter((x) => x.daysPending >= 3)

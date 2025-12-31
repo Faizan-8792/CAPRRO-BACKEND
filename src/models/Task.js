@@ -83,6 +83,10 @@ const TaskSchema = new mongoose.Schema(
     // docsStatus: "PENDING" / "RECEIVED"
     // periodKey: e.g. "2025-04_GSTR1_ABC" (client + period identify karne ke liye)
     // delayDays: number (days late, 0 ya negative matlab time par / early)
+    // delayReason: String,        // "CLIENT", "DOCS", "INTERNAL", "PORTAL"
+    // lastFollowUpAt: Date,       // last chase kab hua
+    // waitingSince: Date,         // WAITING_DOCS start date
+    // escalated: Boolean          // partner ko escalate hua ya nahi
     meta: {
       type: mongoose.Schema.Types.Mixed,
     },

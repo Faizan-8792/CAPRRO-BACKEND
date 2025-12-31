@@ -8,6 +8,8 @@ import {
   archiveTask,
   getMyOpenTasks,
   completeTaskFromUser,
+  postTaskFollowup,
+  postTaskEscalate,
 } from "../controllers/task.controller.js";
 
 const router = express.Router();
@@ -20,6 +22,10 @@ router.post("/", createTask);
 router.get("/board", getTaskBoard);
 router.patch("/:id", updateTask);
 router.delete("/:id", archiveTask);
+
+// -------- NEW: Follow-up and Escalate routes --------
+router.post("/:id/followup", postTaskFollowup);
+router.post("/:id/escalate", postTaskEscalate);
 
 // -------- User-side tasks (for Chrome extension) --------
 

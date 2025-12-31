@@ -357,6 +357,171 @@ function initAddTaskUI() {
   btn.addEventListener('click', createTaskFromAdminUI);
 }
 
+// -------------------- COMPLIANCE ASSISTANT UI --------------------
+
+async function loadAdminComplianceAssistant() {
+  try {
+    const tbody = qs('caTaskTbody');
+    const statusEl = qs('caStatus');
+    
+    if (!tbody) return;
+    
+    if (statusEl) statusEl.textContent = 'Loading compliance priorities...';
+    
+    // Fetch clients to chase data
+    const resp = await apiTasks('/stats/clients-to-chase-today');
+    const { pendingDocsClients = [] } = resp;
+    
+    if (pendingDocsClients.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No pending tasks requiring attention.</td></tr>';
+      if (statusEl) statusEl.textContent = 'All caught up!';
+      return;
+    }
+    
+    // Render table rows with new columns and action buttons
+    tbody.innerHTML = pendingDocsClients.map((task, index) => {
+      const dueDate = task.dueDateISO ? new Date(task.dueDateISO).toLocaleDateString('en-IN') : '';
+      const priorityBadge = task.suggestedAction === 'ESCALATE' 
+        ? '<span class="badge bg-danger">ESCALATE</span>' 
+        : '<span class="badge bg-warning">CHASE</span>';
+      
+      return `
+        <tr data-task-id="${esc(task.taskId)}">
+          <td>${esc(task.clientName)}</td>
+          <td>${esc(task.serviceType)}</td>
+          <td>${esc(dueDate)}</td>
+          <td>Unassigned</td>
+          <td>${priorityBadge}</td>
+          <td>${esc(task.delayReason || 'Not specified')}</td>
+          <td>${esc(task.waitingDays)} days</td>
+          <td>
+            <div class="btn-group btn-group-sm">
+              <button class="btn btn-outline-secondary btn-sm" data-action="copy" data-task-id="${esc(task.taskId)}">
+                Copy
+              </button>
+              <button class="btn btn-outline-primary btn-sm" data-action="done" data-task-id="${esc(task.taskId)}">
+                Done
+              </button>
+              <button class="btn btn-outline-danger btn-sm" data-action="escalate" data-task-id="${esc(task.taskId)}">
+                Escalate
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+    
+    if (statusEl) statusEl.textContent = `Found ${pendingDocsClients.length} tasks requiring attention`;
+    
+    // Attach action button handlers
+    attachComplianceAssistantActions();
+    
+  } catch (err) {
+    console.error('loadAdminComplianceAssistant error:', err);
+    const tbody = qs('caTaskTbody');
+    if (tbody) {
+      tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger">Error loading data: ${err.message}</td></tr>`;
+    }
+  }
+}
+
+function attachComplianceAssistantActions() {
+  // Copy button - reuse existing clipboard logic
+  document.querySelectorAll('[data-action="copy"]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const taskId = btn.getAttribute('data-task-id');
+      const row = btn.closest('tr');
+      const clientName = row.cells[0].textContent;
+      const serviceType = row.cells[1].textContent;
+      const dueDate = row.cells[2].textContent;
+      
+      const text = `Client: ${clientName}\nService: ${serviceType}\nDue: ${dueDate}\nTask ID: ${taskId}`;
+      
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.textContent = 'Copied!';
+        btn.classList.remove('btn-outline-secondary');
+        btn.classList.add('btn-success');
+        setTimeout(() => {
+          btn.textContent = 'Copy';
+          btn.classList.remove('btn-success');
+          btn.classList.add('btn-outline-secondary');
+        }, 1500);
+      } catch (err) {
+        console.error('Copy failed:', err);
+        alert('Failed to copy to clipboard');
+      }
+    });
+  });
+  
+  // Done button - call followup endpoint
+  document.querySelectorAll('[data-action="done"]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const taskId = btn.getAttribute('data-task-id');
+      
+      try {
+        btn.disabled = true;
+        btn.textContent = 'Processing...';
+        
+        await apiTasks(`/tasks/${taskId}/followup`, {
+          method: 'POST',
+        });
+        
+        btn.textContent = 'Done ✓';
+        btn.classList.remove('btn-outline-primary');
+        btn.classList.add('btn-success');
+        
+        // Optionally refresh the list after a delay
+        setTimeout(() => {
+          loadAdminComplianceAssistant();
+        }, 1000);
+        
+      } catch (err) {
+        console.error('Followup action failed:', err);
+        alert(err.message || 'Failed to mark as done');
+        btn.disabled = false;
+        btn.textContent = 'Done';
+      }
+    });
+  });
+  
+  // Escalate button - call escalate endpoint
+  document.querySelectorAll('[data-action="escalate"]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const taskId = btn.getAttribute('data-task-id');
+      
+      if (!confirm('Escalate this task to partner/manager?')) return;
+      
+      try {
+        btn.disabled = true;
+        btn.textContent = 'Escalating...';
+        
+        await apiTasks(`/tasks/${taskId}/escalate`, {
+          method: 'POST',
+        });
+        
+        btn.textContent = 'Escalated ✓';
+        btn.classList.remove('btn-outline-danger');
+        btn.classList.add('btn-dark');
+        
+        // Update the row to show it's escalated
+        const row = btn.closest('tr');
+        const delayReasonCell = row.cells[5];
+        delayReasonCell.innerHTML = '<span class="badge bg-danger">ESCALATED</span>';
+        
+      } catch (err) {
+        console.error('Escalate action failed:', err);
+        alert(err.message || 'Failed to escalate task');
+        btn.disabled = false;
+        btn.textContent = 'Escalate';
+      }
+    });
+  });
+}
+
 // -------------------- INIT --------------------
 
 async function initTaskBoard() {
@@ -370,3 +535,4 @@ async function initTaskBoard() {
 
 window.initTaskBoard = initTaskBoard;
 window.refreshTaskBoard = refreshTaskBoard;
+window.loadAdminComplianceAssistant = loadAdminComplianceAssistant;

@@ -75,6 +75,19 @@ export const createTask = async (req, res) => {
       }
     }
 
+    // Prepare meta with WAITING_DOCS logic
+    const taskMeta = { ...meta };
+    
+    // Agar status = WAITING_DOCS, set waitingSince
+    if (status === "WAITING_DOCS") {
+      taskMeta.waitingSince = new Date().toISOString();
+    }
+    
+    // delayReason optional allow karo
+    if (meta.delayReason) {
+      taskMeta.delayReason = meta.delayReason;
+    }
+
     const task = new Task({
       firmId,
       createdBy: user.id,
@@ -85,7 +98,7 @@ export const createTask = async (req, res) => {
       assignedTo: assignedToUserId,
       status: status || "NOT_STARTED",
       reminderId: reminderId || null,
-      meta,
+      meta: taskMeta,
       isActive: true,
     });
 
@@ -206,8 +219,22 @@ export const updateTask = async (req, res) => {
       return res.status(404).json({ ok: false, error: "Task not found" });
     }
 
+    const oldStatus = task.status;
+
     if (status) {
       task.status = status;
+      
+      // Handle WAITING_DOCS waitingSince logic
+      if (status === "WAITING_DOCS") {
+        // Set waitingSince if becoming WAITING_DOCS
+        task.meta = task.meta || {};
+        task.meta.waitingSince = new Date().toISOString();
+      } else if (oldStatus === "WAITING_DOCS" && (status === "IN_PROGRESS" || status === "CLOSED")) {
+        // Clear waitingSince when moving out of WAITING_DOCS to IN_PROGRESS or CLOSED
+        if (task.meta && task.meta.waitingSince) {
+          delete task.meta.waitingSince;
+        }
+      }
     }
 
     if (title) {
@@ -236,6 +263,7 @@ export const updateTask = async (req, res) => {
     }
 
     if (meta && typeof meta === "object") {
+      // Merge meta, including delayReason
       task.meta = { ...(task.meta || {}), ...meta };
     }
 
@@ -354,5 +382,71 @@ export const completeTaskFromUser = async (req, res) => {
   } catch (err) {
     console.error("completeTaskFromUser error:", err);
     res.status(500).json({ ok: false, error: "Failed to complete task" });
+  }
+};
+
+// -------- NEW: Follow-up action --------
+
+export const postTaskFollowup = async (req, res) => {
+  try {
+    const user = req.user;
+    const firmId = user.firmId;
+    const { id } = req.params;
+
+    if (!firmId) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Firm not linked to this user" });
+    }
+
+    const task = await Task.findOne({ _id: id, firmId, isActive: true });
+    if (!task) {
+      return res.status(404).json({ ok: false, error: "Task not found" });
+    }
+
+    // Update lastFollowUpAt in meta
+    task.meta = task.meta || {};
+    task.meta.lastFollowUpAt = new Date().toISOString();
+
+    await task.save();
+
+    res.json({ ok: true, task });
+  } catch (err) {
+    console.error("postTaskFollowup error:", err);
+    res.status(500).json({ ok: false, error: "Failed to record follow-up" });
+  }
+};
+
+// -------- NEW: Escalate action --------
+
+export const postTaskEscalate = async (req, res) => {
+  try {
+    const user = req.user;
+    const firmId = user.firmId;
+    const { id } = req.params;
+
+    if (!firmId) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Firm not linked to this user" });
+    }
+
+    const task = await Task.findOne({ _id: id, firmId, isActive: true });
+    if (!task) {
+      return res.status(404).json({ ok: false, error: "Task not found" });
+    }
+
+    // Mark as escalated in meta
+    task.meta = task.meta || {};
+    task.meta.escalated = true;
+    task.meta.escalatedAt = new Date().toISOString();
+    task.meta.escalatedBy = user.id;
+
+    await task.save();
+
+    res.json({ ok: true, task });
+  } catch (err) {
+    console.error("postTaskEscalate error:", err);
+    res.status(500).json({ ok: false, error: "Failed to escalate task" });
   }
 };
