@@ -6,6 +6,7 @@ import {
   createClient,
   listClients,
   deleteClient,
+  getClientChecklist,
   saveClientChecklist
 } from "../controllers/taxwork.controller.js";
 
@@ -19,6 +20,7 @@ router.post("/", authRequired, saveTaxWork);
 router.post("/client", authRequired, createClient);
 router.get("/clients/:service", authRequired, listClients);
 router.delete("/client/:id", authRequired, deleteClient);
+router.get("/client/:id", authRequired, getClientChecklist);
 router.post("/client/:id", authRequired, saveClientChecklist);
 
 export default router;

@@ -47,9 +47,6 @@ const checklistEl = document.getElementById("checklist");
 const progressBox = document.getElementById("progressBox");
 
 // B) Service select hone par checklist nahi, client UI dikhao
-// 🔁 MODIFY THIS LINE:
-// selector.addEventListener("change", loadChecklist);
-// 🔁 CHANGE TO:
 selector.addEventListener("change", loadClientsForService);
 
 // ➕ ADD NEW FUNCTION (loadClientsForService)
@@ -73,7 +70,10 @@ async function loadClientsForService() {
   const list = document.getElementById("clientList");
   list.innerHTML = "";
 
+  // SAFETY CHECK: Clear list and guard against empty records
   clients.forEach(c => {
+    if (!c || !c.clientName) return;  // VERY IMPORTANT
+
     const div = document.createElement("div");
     div.className = "client-row";
 
@@ -99,6 +99,25 @@ async function loadClientsForService() {
   });
 }
 
+// DELETE CLIENT FUNCTION
+window.deleteClient = async function (clientId) {
+  if (!confirm("Are you sure you want to delete this client?")) return;
+
+  const token = getToken();
+  await fetch(
+    `https://caprro-backend-1.onrender.com/api/tax-work/client/${clientId}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+
+  // refresh list
+  loadClientsForService();
+};
+
 // 🔹 C) Add Client button ka logic add karo
 document.getElementById("addClientBtn").addEventListener("click", async () => {
   const name = document.getElementById("clientName").value;
@@ -119,7 +138,7 @@ document.getElementById("addClientBtn").addEventListener("click", async () => {
   loadClientsForService();
 });
 
-// 🔹 D) Client open karne par EXISTING checklist load karo
+// 🔹 D) Client open karne par CLIENT-WISE checklist load karo
 window.openClient = async function (clientId) {
   activeClientId = clientId;
 
@@ -130,9 +149,64 @@ window.openClient = async function (clientId) {
   // show checklist + done
   document.getElementById("doneBtn").classList.remove("hidden");
 
-  loadChecklist(); // EXISTING FUNCTION REUSED
+  // Load client-specific checklist instead of service-based
+  loadClientChecklist(clientId);
 };
 
+// NEW FUNCTION: Load client-specific checklist
+async function loadClientChecklist(clientId) {
+  checklistDraft = {};
+
+  const token = getToken();
+  const res = await fetch(
+    `https://caprro-backend-1.onrender.com/api/tax-work/client/${clientId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+
+  const saved = await res.json();
+
+  checklistEl.innerHTML = "";
+  progressBox.innerHTML = "";
+
+  const service = selector.value;
+  const steps = checklistMap[service] || [];
+  
+  let completed = 0;
+
+  steps.forEach(step => {
+    const checked = saved.checklist ? saved.checklist[step] : false;
+    checklistDraft[step] = checked;
+    if (checked) completed++;
+
+    const li = document.createElement("li");
+    if (checked) li.classList.add("completed");
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = checked;
+
+    cb.addEventListener("change", () => {
+      checklistDraft[step] = cb.checked;
+      li.classList.toggle("completed", cb.checked);
+    });
+
+    li.appendChild(cb);
+    li.appendChild(document.createTextNode(step));
+    checklistEl.appendChild(li);
+  });
+
+  // Update progress
+  let status = "NOT STARTED";
+  if (completed > 0 && completed < steps.length) status = "IN PROGRESS";
+  if (completed === steps.length) status = "COMPLETED";
+  progressBox.innerText = `Progress: ${completed}/${steps.length} — ${status}`;
+}
+
+// Keep old loadChecklist function but it won't be used for client mode
 async function loadChecklist() {
   const service = selector.value;
   checklistEl.innerHTML = "";
@@ -140,7 +214,6 @@ async function loadChecklist() {
 
   if (!service) return;
 
-  // B) Update GET fetch - Check token first
   const token = getToken();
   if (!token) {
     progressBox.innerHTML =
@@ -163,7 +236,6 @@ async function loadChecklist() {
     return;
   }
 
-  // 🔴 AUTH FAILURE HANDLING (VERY IMPORTANT)
   if (res.status === 401) {
     progressBox.innerHTML = `
       <span style="color:#f59e0b">
@@ -182,7 +254,6 @@ async function loadChecklist() {
     return;
   }
 
-  // 🛑 SAFETY: backend must return array
   if (!Array.isArray(saved)) {
     progressBox.innerText = "Unable to load checklist data.";
     return;

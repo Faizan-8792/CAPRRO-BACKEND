@@ -78,6 +78,16 @@ export const deleteClient = async (req, res) => {
   }
 };
 
+// GET client checklist
+export const getClientChecklist = async (req, res) => {
+  try {
+    const doc = await TaxWork.findById(req.params.id);
+    res.json(doc || {});
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load client checklist" });
+  }
+};
+
 // SAVE FULL CHECKLIST FOR A CLIENT (DONE BUTTON)
 export const saveClientChecklist = async (req, res) => {
   try {
