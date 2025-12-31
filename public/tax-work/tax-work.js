@@ -75,13 +75,25 @@ async function loadClientsForService() {
   clients.forEach(c => {
     const div = document.createElement("div");
     div.className = "client-row";
-    div.innerHTML = `
-      <span>${c.clientName}</span>
-      <div>
-        <button onclick="openClient('${c._id}')">View / Edit</button>
-        <button onclick="deleteClient('${c._id}')">Delete</button>
-      </div>
-    `;
+
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = c.clientName;
+
+    const viewBtn = document.createElement("button");
+    viewBtn.textContent = "View / Edit";
+    viewBtn.addEventListener("click", () => openClient(c._id));
+
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "Delete";
+    delBtn.addEventListener("click", () => deleteClient(c._id));
+
+    const btnWrap = document.createElement("div");
+    btnWrap.appendChild(viewBtn);
+    btnWrap.appendChild(delBtn);
+
+    div.innerHTML = "";
+    div.appendChild(nameSpan);
+    div.appendChild(btnWrap);
     list.appendChild(div);
   });
 }
