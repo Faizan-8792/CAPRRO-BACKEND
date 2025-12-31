@@ -32,14 +32,11 @@ export async function getClientsToChaseToday(req, res, next) {
 
     const today = startOfToday();
 
-    // Pending docs
+    // Pending docs - FIXED: Only get WAITING_DOCS tasks
     const pendingFilter = {
       firmId,
       isActive: true,
-      $or: [
-        { status: { $in: ["WAITING_DOCS", "IN_PROGRESS"] } },
-        { "meta.docsStatus": "PENDING" }
-      ]
+      status: "WAITING_DOCS"
     };
 
     const pendingTasks = await Task.find(pendingFilter)
@@ -47,11 +44,12 @@ export async function getClientsToChaseToday(req, res, next) {
       .limit(200)
       .lean();
 
+    // FIXED: Only include tasks with waitingSince date and calculate from that date
     const pendingDocsClients = pendingTasks
+      .filter(t => t.status === "WAITING_DOCS" && t.meta?.waitingSince)
       .map((t) => {
-        const created = t.createdAt ? new Date(t.createdAt) : today;
-        const d = daysDiff(today, created);
-        const daysPending = d >= 0 ? d : 0;
+        const waitingSince = new Date(t.meta.waitingSince);
+        const daysPending = daysDiff(today, waitingSince);
         
         // Calculate suggestedAction based on waiting days
         const suggestedAction = daysPending >= 7 ? "ESCALATE" : "CHASE";
@@ -69,7 +67,7 @@ export async function getClientsToChaseToday(req, res, next) {
           suggestedAction: suggestedAction
         };
       })
-      .filter((x) => x.daysPending >= 3)
+      .filter((x) => x.daysPending >= 0)  // FIXED: Include all WAITING_DOCS tasks, not just >= 3 days
       .slice(0, 50);
 
     // Chronic late
