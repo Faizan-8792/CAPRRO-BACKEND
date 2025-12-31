@@ -33,6 +33,11 @@ const checklistMap = {
   ]
 };
 
+// A) Add token helper (TOP OF FILE)
+function getToken() {
+  return new URLSearchParams(window.location.search).get("token");
+}
+
 const selector = document.getElementById("serviceSelector");
 const checklistEl = document.getElementById("checklist");
 const progressBox = document.getElementById("progressBox");
@@ -46,11 +51,23 @@ async function loadChecklist() {
 
   if (!service) return;
 
+  // B) Update GET fetch - Check token first
+  const token = getToken();
+  if (!token) {
+    progressBox.innerHTML =
+      "⚠ Authentication missing. Please reopen from extension.";
+    return;
+  }
+
   let res;
   try {
     res = await fetch(
       `https://caprro-backend-1.onrender.com/api/tax-work/${service}`,
-      { credentials: "include" }
+      {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
     );
   } catch (e) {
     progressBox.innerText = "Network error. Please try again.";
@@ -113,12 +130,21 @@ async function loadChecklist() {
 }
 
 async function updateStep(service, step, completed) {
+  // C) Update POST fetch - Check token first
+  const token = getToken();
+  if (!token) {
+    alert("Authentication missing.");
+    return;
+  }
+
   const res = await fetch(
     "https://caprro-backend-1.onrender.com/api/tax-work",
     {
       method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
       body: JSON.stringify({
         serviceType: service,
         checklistStep: step,
