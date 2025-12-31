@@ -37,7 +37,7 @@ export async function getClientsToChaseToday(req, res, next) {
       firmId,
       isActive: true,
       $or: [
-        { status: { $in: ["WAITING_DOCS", "OPEN"] } },
+        { status: { $in: ["WAITING_DOCS", "IN_PROGRESS"] } },
         { "meta.docsStatus": "PENDING" }
       ]
     };
