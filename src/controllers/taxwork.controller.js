@@ -1,44 +1,79 @@
-import TaxWork from "../models/TaxWork.js";
+const TaxWork = require("../models/TaxWork");
 
-export const createClient = async (req, res) => {
-  const doc = await TaxWork.create({
-    firmId: req.user.firmId,
-    userId: req.user.id,
-    serviceType: req.body.serviceType,
-    clientName: req.body.name,
-    dueDate: req.body.dueDate,
-    checklist: {}
-  });
-  res.json(doc);
+// GET checklist for service
+exports.getTaxWork = async (req, res) => {
+  try {
+    const { service } = req.params;
+
+    const data = await TaxWork.find({
+      firmId: req.user.firmId,
+      userId: req.user.id,
+      serviceType: service
+    });
+
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load tax work" });
+  }
 };
 
-export const listClients = async (req, res) => {
-  const data = await TaxWork.find({
-    firmId: req.user.firmId,
-    userId: req.user.id,
-    serviceType: req.params.service
-  }).sort({ updatedAt: -1 });
+// SAVE / UPDATE checklist step
+exports.saveTaxWork = async (req, res) => {
+  try {
+    const { serviceType, checklistStep, completed } = req.body;
 
-  res.json(data.map(d => ({
-    _id: d._id,
-    name: d.clientName,
-    dueDate: d.dueDate
-  })));
+    await TaxWork.findOneAndUpdate(
+      {
+        firmId: req.user.firmId,
+        userId: req.user.id,
+        serviceType,
+        checklistStep
+      },
+      { completed },
+      { upsert: true }
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to save tax work" });
+  }
 };
 
-export const getChecklist = async (req, res) => {
-  const doc = await TaxWork.findById(req.params.clientId);
-  res.json(doc.checklist || {});
+// ADD NEW FUNCTIONS
+exports.createClient = async (req, res) => {
+  try {
+    const doc = await TaxWork.create({
+      firmId: req.user.firmId,
+      userId: req.user.id,
+      serviceType: req.body.serviceType,
+      clientName: req.body.clientName,
+      dueDate: req.body.dueDate
+    });
+    res.json(doc);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to create client" });
+  }
 };
 
-export const saveChecklist = async (req, res) => {
-  await TaxWork.findByIdAndUpdate(req.params.clientId, {
-    checklist: req.body
-  });
-  res.json({ ok: true });
+exports.listClients = async (req, res) => {
+  try {
+    const data = await TaxWork.find({
+      firmId: req.user.firmId,
+      userId: req.user.id,
+      serviceType: req.params.service
+    }).sort({ createdAt: -1 });
+
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to list clients" });
+  }
 };
 
-export const deleteClient = async (req, res) => {
-  await TaxWork.findByIdAndDelete(req.params.clientId);
-  res.json({ ok: true });
+exports.deleteClient = async (req, res) => {
+  try {
+    await TaxWork.findByIdAndDelete(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to delete client" });
+  }
 };
