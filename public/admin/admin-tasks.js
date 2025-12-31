@@ -410,14 +410,18 @@ async function loadAdminComplianceAssistant() {
     }
     
     // Render table rows with new columns and action buttons
-    tbody.innerHTML = pendingDocsClients.map((task, index) => {
-      const dueDate = task.dueDateISO ? new Date(task.dueDateISO).toLocaleDateString('en-IN') : '';
-      const priorityBadge = task.suggestedAction === 'ESCALATE' 
-        ? '<span class="badge bg-danger">ESCALATE</span>' 
-        : '<span class="badge bg-warning">CHASE</span>';
-      
+    tbody.innerHTML = pendingDocsClients.map(task => {
+      const dueDate = task.dueDateISO
+        ? new Date(task.dueDateISO).toLocaleDateString('en-IN')
+        : '';
+
+      const priorityBadge =
+        task.suggestedAction === 'ESCALATE'
+          ? '<span class="badge bg-danger">ESCALATE</span>'
+          : '<span class="badge bg-warning">CHASE</span>';
+
       return `
-        <tr data-task-id="${esc(task.taskId)}">
+        <tr>
           <td>${esc(task.clientName)}</td>
           <td>${esc(task.serviceType)}</td>
           <td>${esc(dueDate)}</td>
@@ -427,15 +431,9 @@ async function loadAdminComplianceAssistant() {
           <td>${esc(task.waitingDays)} days</td>
           <td>
             <div class="btn-group btn-group-sm">
-              <button class="btn btn-outline-secondary btn-sm" data-action="copy" data-task-id="${esc(task.taskId)}">
-                Copy
-              </button>
-              <button class="btn btn-outline-primary btn-sm" data-action="done" data-task-id="${esc(task.taskId)}">
-                Done
-              </button>
-              <button class="btn btn-outline-danger btn-sm" data-action="escalate" data-task-id="${esc(task.taskId)}">
-                Escalate
-              </button>
+              <button class="btn btn-outline-secondary btn-sm">Copy</button>
+              <button class="btn btn-outline-primary btn-sm">Done</button>
+              <button class="btn btn-outline-danger btn-sm">Escalate</button>
             </div>
           </td>
         </tr>
