@@ -2,6 +2,7 @@ const API_BASE = "https://caprro-backend-1.onrender.com/api";
 const TOKEN_KEY = 'caproadminjwt';
 let __clientsChaseLoading = false;
 let __lastHash = null; // NEW: prevents repeated hash handling
+let currentFirm = null; // 🔥 MOVE THIS TO GLOBAL SCOPE (was inside initAdminPage)
 
 // AUTH HELPER FUNCTIONS
 function getToken() {
@@ -446,7 +447,19 @@ function attachUserDeleteHandlers() {
         btn.disabled = true;
         btn.textContent = 'Deleting...';
 
-        await api(`/users/${userId}`, {
+        // ✅ ADD DEBUG LOG
+        console.log('Deleting user', {
+          firmId: currentFirm?._id,
+          userId
+        });
+
+        // ✅ FIXED API URL - Check firm context first
+        if (!currentFirm?._id) {
+          throw new Error('Firm context missing');
+        }
+
+        // ✅ CORRECT DELETE ENDPOINT
+        await api(`/firms/${currentFirm._id}/users/${userId}`, {
           method: 'DELETE'
         });
 
@@ -504,7 +517,7 @@ async function initAdminPage() {
         console.log('Task board detected, waiting for hashchange to init');
     }
 
-    let currentFirm = null; // Store firm globally for delete operations
+    // ❌ REMOVED: let currentFirm = null; (now declared at top)
 
     async function loadAndRenderUsers() {
         if (!currentFirm || !currentFirm._id) return;
@@ -606,7 +619,7 @@ async function initAdminPage() {
                 const firmResp = await api(`/firms/${firmId}`);
                 if (firmResp?.ok && firmResp.firm) {
                     firm = firmResp.firm;
-                    currentFirm = firm; // Store for delete operations
+                    currentFirm = firm; // ✅ THIS IS REQUIRED - Using global currentFirm
                 }
             }
         } catch (e) {
