@@ -2,50 +2,40 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Tax Work Tracker | CA PRO Toolkit</title>
+  <title>Tax Work Tracker</title>
 
-  <!-- Core theme variables + background animation feel -->
-  <link rel="stylesheet" href="../admin/admin.css">
-  <!-- Tax Work specific styling -->
-  <link rel="stylesheet" href="tax-work.css">
+  <link rel="stylesheet" href="tax-work.css" />
 </head>
-
 <body>
-
-<!-- Background layers (same visual language) -->
-<div class="neural-network"></div>
-<div class="data-streams"></div>
-<div class="holographic-grid"></div>
-<div class="circuit-board"></div>
-<div class="orbiting-particles"></div>
 
 <div class="tax-container">
 
-  <h2 class="page-title">📋 Tax Work Tracker</h2>
-  <p class="page-subtitle">
-    Track real tax work progress — no AI, no automation, just execution.
-  </p>
+  <h2>Tax Work Tracker</h2>
 
-  <!-- Service Selector -->
-  <div class="card card-hover-glow">
-    <div class="card-body">
+  <!-- SERVICE SELECT -->
+  <select id="serviceSelector">
+    <option value="">Select Service</option>
+    <option value="GST">GST</option>
+    <option value="ITR">ITR</option>
+    <option value="AUDIT">Audit</option>
+    <option value="ROC">ROC</option>
+  </select>
 
-      <label class="form-label">Select Service</label>
-      <select id="serviceSelector" class="form-select">
-        <option value="">-- Choose Service --</option>
-        <option value="GST">GST</option>
-        <option value="ITR">ITR</option>
-        <option value="AUDIT">Audit</option>
-        <option value="ROC">ROC</option>
-      </select>
+  <!-- CLIENT ADD FORM -->
+  <div id="clientForm" class="client-form hidden">
+    <input type="text" id="clientName" placeholder="Client Name" />
+    <input type="date" id="dueDate" />
+    <button id="addClientBtn">Submit</button>
+  </div>
 
-      <!-- Progress -->
-      <div id="progressBox" class="progress-box"></div>
+  <!-- CLIENT LIST -->
+  <div id="clientList" class="client-list"></div>
 
-      <!-- Checklist -->
-      <ul id="checklist" class="checklist"></ul>
-
-    </div>
+  <!-- CHECKLIST -->
+  <div id="checklistSection" class="hidden">
+    <h3 id="clientTitle"></h3>
+    <ul id="checklist"></ul>
+    <button id="saveChecklistBtn">✅ Done / Save Progress</button>
   </div>
 
 </div>

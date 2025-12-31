@@ -1,28 +1,19 @@
 import express from "express";
 import { authRequired } from "../middleware/auth.middleware.js";
 import {
-  createTask,
-  getTaskBoard,
-  updateTask,
-  getMyOpenTasks,
-  postTaskFollowup,
-  postTaskEscalate,
-  deleteTask,          // ✅ ADD THIS
-} from "../controllers/task.controller.js";
+  createClient,
+  listClients,
+  getChecklist,
+  saveChecklist,
+  deleteClient
+} from "../controllers/taxwork.controller.js";
 
 const router = express.Router();
-router.use(authRequired);
 
-router.post("/", createTask);
-router.get("/board", getTaskBoard);
-router.patch("/:id", updateTask);
-
-router.post("/:id/followup", postTaskFollowup);
-router.post("/:id/escalate", postTaskEscalate);
-
-router.get("/my-open", getMyOpenTasks);
-
-// ✅ ADD DELETE ROUTE (at the bottom)
-router.delete("/:id", deleteTask);
+router.post("/client", authRequired, createClient);
+router.get("/client/:service", authRequired, listClients);
+router.get("/:clientId/checklist", authRequired, getChecklist);
+router.post("/:clientId/save", authRequired, saveChecklist);
+router.delete("/client/:clientId", authRequired, deleteClient);
 
 export default router;
