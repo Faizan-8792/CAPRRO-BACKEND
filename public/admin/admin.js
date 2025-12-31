@@ -307,7 +307,7 @@ async function loadClientsToChaseToday() {
             pendingList.innerHTML = pending
                 .map((item, idx) => {
                     const label = escapeHtml(
-                        `${idx + 1}. ${item.clientName} – ${item.serviceType || ""} · ${item.daysPending} din se pending`
+                       `${idx + 1}. ${item.clientName} – ${item.serviceType || ""} · pending for ${item.daysPending} days`
                     );
                     return `
                         <li>
