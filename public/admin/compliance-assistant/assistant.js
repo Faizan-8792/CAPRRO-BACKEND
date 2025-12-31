@@ -55,7 +55,7 @@ async function loadAdminComplianceAssistant() {
 
     if (!today.length) {
       tbody.innerHTML =
-        `<tr><td colspan="5" class="text-center text-muted">No critical work today 🎉</td></tr>`;
+        `<tr><td colspan="8" class="text-center text-muted">No critical work today 🎉</td></tr>`;
       statusEl.textContent = '';
       return;
     }
@@ -69,11 +69,26 @@ async function loadAdminComplianceAssistant() {
           <td>${escapeHtml(t.serviceType)}</td>
           <td>${new Date(t.dueDateISO).toLocaleDateString('en-IN')}</td>
           <td>${escapeHtml(t.assignedTo?.email || 'Unassigned')}</td>
+
           <td>
             <span class="badge bg-${t.priority === 'CRITICAL' ? 'danger' :
                                    t.priority === 'HIGH' ? 'warning' :
                                    'secondary'}">
               ${t.priority}
+            </span>
+          </td>
+
+          <td>${escapeHtml(t.meta?.delayReason || '-')}</td>
+
+          <td>
+            ${t.meta?.waitingSince
+              ? Math.floor((Date.now() - new Date(t.meta.waitingSince)) / 86400000) + ' days'
+              : '-'}
+          </td>
+
+          <td>
+            <span class="badge bg-${t.score >= 60 ? 'warning' : 'secondary'}">
+              ${t.score >= 60 ? 'CHASE' : 'OK'}
             </span>
           </td>
         </tr>
