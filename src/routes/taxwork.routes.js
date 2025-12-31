@@ -5,7 +5,8 @@ import {
   saveTaxWork,
   createClient,
   listClients,
-  deleteClient
+  deleteClient,
+  saveClientChecklist
 } from "../controllers/taxwork.controller.js";
 
 const router = express.Router();
