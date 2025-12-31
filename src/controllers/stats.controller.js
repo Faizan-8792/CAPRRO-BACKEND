@@ -67,7 +67,7 @@ export async function getClientsToChaseToday(req, res, next) {
           suggestedAction: suggestedAction
         };
       })
-      .filter((x) => x.daysPending >= 0)  // FIXED: Include all WAITING_DOCS tasks, not just >= 3 days
+      .filter(x => x.daysPending >= 0)  // FIXED: Include all WAITING_DOCS tasks, not just >= 3 days
       .slice(0, 50);
 
     // Chronic late
