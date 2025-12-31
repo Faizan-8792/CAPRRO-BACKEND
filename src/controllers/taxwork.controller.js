@@ -1,7 +1,7 @@
-const TaxWork = require("../models/TaxWork");
+import TaxWork from "../models/TaxWork.js";
 
 // GET checklist for service
-exports.getTaxWork = async (req, res) => {
+export const getTaxWork = async (req, res) => {
   try {
     const { service } = req.params;
 
@@ -18,7 +18,7 @@ exports.getTaxWork = async (req, res) => {
 };
 
 // SAVE / UPDATE checklist step
-exports.saveTaxWork = async (req, res) => {
+export const saveTaxWork = async (req, res) => {
   try {
     const { serviceType, checklistStep, completed } = req.body;
 
@@ -40,7 +40,7 @@ exports.saveTaxWork = async (req, res) => {
 };
 
 // ADD NEW FUNCTIONS
-exports.createClient = async (req, res) => {
+export const createClient = async (req, res) => {
   try {
     const doc = await TaxWork.create({
       firmId: req.user.firmId,
@@ -55,7 +55,7 @@ exports.createClient = async (req, res) => {
   }
 };
 
-exports.listClients = async (req, res) => {
+export const listClients = async (req, res) => {
   try {
     const data = await TaxWork.find({
       firmId: req.user.firmId,
@@ -69,7 +69,7 @@ exports.listClients = async (req, res) => {
   }
 };
 
-exports.deleteClient = async (req, res) => {
+export const deleteClient = async (req, res) => {
   try {
     await TaxWork.findByIdAndDelete(req.params.id);
     res.json({ ok: true });
