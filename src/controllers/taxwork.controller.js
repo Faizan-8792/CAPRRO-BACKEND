@@ -1,7 +1,6 @@
-const TaxWork = require("../models/TaxWork");
+import TaxWork from "../models/TaxWork.js";
 
-// GET checklist for service
-exports.getTaxWork = async (req, res) => {
+export const getTaxWork = async (req, res) => {
   try {
     const { service } = req.params;
 
@@ -17,8 +16,7 @@ exports.getTaxWork = async (req, res) => {
   }
 };
 
-// SAVE / UPDATE checklist step
-exports.saveTaxWork = async (req, res) => {
+export const saveTaxWork = async (req, res) => {
   try {
     const { serviceType, checklistStep, completed } = req.body;
 

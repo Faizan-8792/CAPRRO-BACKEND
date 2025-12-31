@@ -7,6 +7,7 @@ import statsRoutes from "./stats.routes.js";
 import superRoutes from "./super.routes.js";
 import taskRoutes from "./task.routes.js";
 import accountingRoutes from "./accounting.routes.js";
+import taxWorkRoutes from "./taxwork.routes.js";
 
 const router = express.Router();
 
@@ -20,6 +21,8 @@ router.use("/api/stats", statsRoutes);
 router.use("/api/super", superRoutes);
 router.use("/api/tasks", taskRoutes);
 router.use("/api/accounting", accountingRoutes);
-router.use("/tax-work", require("./taxwork.routes"));
+
+/* ✅ TAX WORK TRACKER */
+router.use("/api/tax-work", taxWorkRoutes);
 
 export default router;

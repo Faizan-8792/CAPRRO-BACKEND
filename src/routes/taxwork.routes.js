@@ -1,8 +1,13 @@
-const router = require("express").Router();
-const auth = require("../middleware/auth.middleware");
-const controller = require("../controllers/taxwork.controller");
+import express from "express";
+import auth from "../middleware/auth.middleware.js";
+import {
+  getTaxWork,
+  saveTaxWork
+} from "../controllers/taxwork.controller.js";
 
-router.get("/:service", auth, controller.getTaxWork);
-router.post("/", auth, controller.saveTaxWork);
+const router = express.Router();
 
-module.exports = router;
+router.get("/:service", auth, getTaxWork);
+router.post("/", auth, saveTaxWork);
+
+export default router;
