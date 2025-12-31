@@ -803,6 +803,9 @@ async function loadEmployeeProductivity() {
 
   if (__productivityChart) __productivityChart.destroy();
 
+  // 🔥 FORCE ALL TEXT TO WHITE
+  Chart.defaults.color = '#ffffff';
+
   __productivityChart = new Chart(ctx, {
     type: 'bar',
     data: {
@@ -832,17 +835,25 @@ async function loadEmployeeProductivity() {
       scales: {
         x: {
           beginAtZero: true,
-          ticks: { precision: 0 }
+          ticks: {
+            precision: 0,
+            color: '#ffffff'
+          },
+          grid: {
+            color: 'rgba(255,255,255,0.08)'
+          }
         },
         y: {
           ticks: {
-            autoSkip: false,          // 🔥 STOP HIDING LABELS
+            autoSkip: false,
             color: '#ffffff',
             font: {
               size: 14,
               weight: '600'
-            },
-            color: '#212529'          // 🔥 label color
+            }
+          },
+          grid: {
+            color: 'rgba(255,255,255,0.08)'
           }
         }
       }
