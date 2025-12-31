@@ -1,13 +1,15 @@
 import express from "express";
 import { authRequired } from "../middleware/auth.middleware.js";
-import {
+import taskController from "../controllers/task.controller.js";
+
+const {
   createTask,
   getTaskBoard,
   updateTask,
   getMyOpenTasks,
   postTaskFollowup,
   postTaskEscalate,
-} from "../controllers/task.controller.js";
+} = taskController;
 
 const router = express.Router();
 router.use(authRequired);
