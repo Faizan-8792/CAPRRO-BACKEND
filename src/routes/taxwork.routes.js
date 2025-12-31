@@ -18,5 +18,6 @@ router.post("/", authRequired, saveTaxWork);
 router.post("/client", authRequired, createClient);
 router.get("/clients/:service", authRequired, listClients);
 router.delete("/client/:id", authRequired, deleteClient);
+router.post("/client/:id", authRequired, saveClientChecklist);
 
 export default router;

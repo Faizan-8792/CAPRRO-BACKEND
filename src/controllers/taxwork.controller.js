@@ -77,3 +77,16 @@ export const deleteClient = async (req, res) => {
     res.status(500).json({ error: "Failed to delete client" });
   }
 };
+
+// SAVE FULL CHECKLIST FOR A CLIENT (DONE BUTTON)
+export const saveClientChecklist = async (req, res) => {
+  try {
+    await TaxWork.findByIdAndUpdate(req.params.id, {
+      checklist: req.body.checklist
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to save client checklist" });
+  }
+};

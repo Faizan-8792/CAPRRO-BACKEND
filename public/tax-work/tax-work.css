@@ -116,3 +116,37 @@
   background: rgba(17,24,39,0.85);
   border: 1px solid rgba(96,165,250,0.25);
 }
+.btn-primary {
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-weight: 600;
+  background: linear-gradient(
+    135deg,
+    var(--pri),
+    #2563eb
+  );
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  box-shadow: 0 8px 25px rgba(59,130,246,0.35);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 35px rgba(59,130,246,0.45);
+}
+
+.client-row button {
+  margin-left: 8px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgba(59,130,246,0.15);
+  border: 1px solid rgba(59,130,246,0.35);
+  color: #e0f2fe;
+  cursor: pointer;
+}
+
+.client-row button:hover {
+  background: rgba(59,130,246,0.35);
+}

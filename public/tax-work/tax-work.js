@@ -40,6 +40,7 @@ function getToken() {
 
 // A) TOP OF FILE — VARIABLES ADD KARO
 let activeClientId = null;
+let checklistDraft = {};
 
 const selector = document.getElementById("serviceSelector");
 const checklistEl = document.getElementById("checklist");
@@ -121,6 +122,14 @@ document.getElementById("addClientBtn").addEventListener("click", async () => {
 // 🔹 D) Client open karne par EXISTING checklist load karo
 window.openClient = async function (clientId) {
   activeClientId = clientId;
+
+  // hide client UI
+  document.getElementById("clientForm").classList.add("hidden");
+  document.getElementById("clientList").classList.add("hidden");
+
+  // show checklist + done
+  document.getElementById("doneBtn").classList.remove("hidden");
+
   loadChecklist(); // EXISTING FUNCTION REUSED
 };
 
@@ -196,7 +205,8 @@ async function loadChecklist() {
     `;
 
     li.querySelector("input").addEventListener("change", e => {
-      updateStep(service, step, e.target.checked);
+      // CHANGE TO local state only
+      checklistDraft[step] = e.target.checked;
     });
 
     checklistEl.appendChild(li);
@@ -208,6 +218,34 @@ async function loadChecklist() {
 
   progressBox.innerText = `Progress: ${completed}/${steps.length} — ${status}`;
 }
+
+// DONE button logic
+document.getElementById("doneBtn").addEventListener("click", async () => {
+  if (!activeClientId) return;
+
+  const token = getToken();
+
+  await fetch(
+    `https://caprro-backend-1.onrender.com/api/tax-work/client/${activeClientId}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ checklist: checklistDraft })
+    }
+  );
+
+  // reset UI
+  checklistDraft = {};
+  activeClientId = null;
+  checklistEl.innerHTML = "";
+  document.getElementById("doneBtn").classList.add("hidden");
+
+  // show client list again
+  loadClientsForService();
+});
 
 async function updateStep(service, step, completed) {
   // C) Update POST fetch - Check token first

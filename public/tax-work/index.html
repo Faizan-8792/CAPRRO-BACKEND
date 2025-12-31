@@ -39,22 +39,29 @@
         <option value="ROC">ROC</option>
       </select>
 
-      <!-- CLIENT ADD FORM -->
-      <div id="clientForm" class="client-form hidden">
-        <input type="text" id="clientName" placeholder="Client Name" />
-        <input type="date" id="dueDate" />
-        <button type="button" id="addClientBtn">Submit</button>
+      <!-- CLIENT SECTION -->
+      <div id="clientSection">
+        <!-- CLIENT ADD FORM -->
+        <div id="clientForm" class="client-form hidden">
+          <input type="text" id="clientName" placeholder="Client Name" />
+          <input type="date" id="dueDate" />
+          <button type="button" id="addClientBtn">Submit</button>
+        </div>
 
+        <!-- CLIENT LIST -->
+        <div id="clientList" class="client-list hidden"></div>
       </div>
-
-      <!-- CLIENT LIST -->
-      <div id="clientList" class="client-list hidden"></div>
 
       <!-- Progress -->
       <div id="progressBox" class="progress-box"></div>
 
       <!-- Checklist -->
       <ul id="checklist" class="checklist"></ul>
+
+      <!-- DONE Button -->
+      <button id="doneBtn" class="btn-primary hidden">
+        DONE
+      </button>
 
     </div>
   </div>
