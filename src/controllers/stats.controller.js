@@ -32,42 +32,41 @@ export async function getClientsToChaseToday(req, res, next) {
 
     const today = startOfToday();
 
-    // Pending docs - FIXED: Only get WAITING_DOCS tasks
-    const pendingFilter = {
+    // Get all WAITING_DOCS tasks
+    const pendingTasks = await Task.find({
       firmId,
       isActive: true,
       status: "WAITING_DOCS"
-    };
-
-    const pendingTasks = await Task.find(pendingFilter)
+    })
       .sort({ createdAt: 1 })
       .limit(200)
       .lean();
 
-    // FIXED: Only include tasks with waitingSince date and calculate from that date
+    // SIMPLIFIED LOGIC: Include all WAITING_DOCS tasks with waitingSince
     const pendingDocsClients = pendingTasks
-      .filter(t => t.status === "WAITING_DOCS" && t.meta?.waitingSince)
-      .map((t) => {
-        const waitingSince = new Date(t.meta.waitingSince);
-        const daysPending = daysDiff(today, waitingSince);
-        
-        // Calculate suggestedAction based on waiting days
-        const suggestedAction = daysPending >= 7 ? "ESCALATE" : "CHASE";
+      .filter(task => task.status === 'WAITING_DOCS' && task.meta?.waitingSince)
+      .map(task => {
+        const waitingSince = task.meta?.waitingSince;
+        if (!waitingSince) return null;
+
+        const waitingDays = Math.floor(
+          (Date.now() - new Date(waitingSince).getTime()) / (1000 * 60 * 60 * 24)
+        );
 
         return {
-          taskId: t._id.toString(),
-          clientName: t.clientName || "Unknown",
-          serviceType: t.serviceType || "OTHER",
-          title: t.title || "No title",
-          dueDateISO: t.dueDateISO,
-          daysPending,
-          status: t.status,
-          delayReason: t.meta?.delayReason || null,
-          waitingDays: daysPending,
-          suggestedAction: suggestedAction
+          taskId: task._id.toString(),
+          clientName: task.clientName || "Unknown",
+          serviceType: task.serviceType || "OTHER",
+          title: task.title || "No title",
+          dueDateISO: task.dueDateISO,
+          daysPending: waitingDays,
+          status: task.status,
+          delayReason: task.meta?.delayReason || null,
+          waitingDays: waitingDays,
+          suggestedAction: waitingDays >= 7 ? 'ESCALATE' : 'CHASE'
         };
       })
-      .filter(x => x.daysPending >= 0)  // FIXED: Include all WAITING_DOCS tasks, not just >= 3 days
+      .filter(Boolean) // Remove any null entries
       .slice(0, 50);
 
     // Chronic late
