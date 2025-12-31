@@ -206,7 +206,7 @@ export const updateTask = async (req, res) => {
     const user = req.user;
     const firmId = user.firmId;
     const { id } = req.params;
-    const { status, assignedTo, title, dueDateISO, meta } = req.body || {};
+    const { status, assignedTo, dueDateISO, title, meta } = req.body;
 
     if (!firmId) {
       return res
@@ -223,26 +223,17 @@ export const updateTask = async (req, res) => {
 
     if (status) {
       task.status = status;
-      
-      // Handle WAITING_DOCS waitingSince logic
-      if (status === "WAITING_DOCS") {
-        // Set waitingSince if becoming WAITING_DOCS
+
+      // set waitingSince automatically
+      if (status === 'WAITING_DOCS' && !task.meta?.waitingSince) {
         task.meta = task.meta || {};
         task.meta.waitingSince = new Date().toISOString();
-      } else if (oldStatus === "WAITING_DOCS" && (status === "IN_PROGRESS" || status === "CLOSED")) {
-        // Clear waitingSince when moving out of WAITING_DOCS to IN_PROGRESS or CLOSED
-        if (task.meta && task.meta.waitingSince) {
-          delete task.meta.waitingSince;
-        }
       }
-    }
 
-    if (title) {
-      task.title = title;
-    }
-
-    if (dueDateISO) {
-      task.dueDateISO = new Date(dueDateISO).toISOString();
+      // clear waitingSince if moved forward
+      if (status !== 'WAITING_DOCS' && task.meta?.waitingSince) {
+        task.meta.waitingSince = undefined;
+      }
     }
 
     if (assignedTo !== undefined) {
@@ -262,9 +253,15 @@ export const updateTask = async (req, res) => {
       }
     }
 
-    if (meta && typeof meta === "object") {
-      // Merge meta, including delayReason
-      task.meta = { ...(task.meta || {}), ...meta };
+    if (dueDateISO) task.dueDateISO = new Date(dueDateISO).toISOString();
+    if (title) task.title = title;
+
+    // 🔥 THIS WAS MISSING - Properly handle meta merging
+    if (meta) {
+      task.meta = {
+        ...(task.meta || {}),
+        ...meta
+      };
     }
 
     await task.save();
