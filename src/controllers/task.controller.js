@@ -163,8 +163,12 @@ export const updateTask = async (req, res) => {
     await task.save();
     res.json({ ok: true, task });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ ok: false, error: "Update failed" });
+    console.error("updateTask error FULL 👉", err);
+    return res.status(500).json({
+      ok: false,
+      error: err.message,
+      stack: err.stack
+    });
   }
 };
 
