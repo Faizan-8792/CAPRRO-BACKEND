@@ -38,11 +38,79 @@ function getToken() {
   return new URLSearchParams(window.location.search).get("token");
 }
 
+// A) TOP OF FILE — VARIABLES ADD KARO
+let activeClientId = null;
+
 const selector = document.getElementById("serviceSelector");
 const checklistEl = document.getElementById("checklist");
 const progressBox = document.getElementById("progressBox");
 
-selector.addEventListener("change", loadChecklist);
+// B) Service select hone par checklist nahi, client UI dikhao
+// 🔁 MODIFY THIS LINE:
+// selector.addEventListener("change", loadChecklist);
+// 🔁 CHANGE TO:
+selector.addEventListener("change", loadClientsForService);
+
+// ➕ ADD NEW FUNCTION (loadClientsForService)
+async function loadClientsForService() {
+  const service = selector.value;
+  checklistEl.innerHTML = "";
+  progressBox.innerHTML = "";
+
+  if (!service) return;
+
+  document.getElementById("clientForm").classList.remove("hidden");
+  document.getElementById("clientList").classList.remove("hidden");
+
+  const token = getToken();
+  const res = await fetch(
+    `https://caprro-backend-1.onrender.com/api/tax-work/clients/${service}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+
+  const clients = await res.json();
+  const list = document.getElementById("clientList");
+  list.innerHTML = "";
+
+  clients.forEach(c => {
+    const div = document.createElement("div");
+    div.className = "client-row";
+    div.innerHTML = `
+      <span>${c.clientName}</span>
+      <div>
+        <button onclick="openClient('${c._id}')">View / Edit</button>
+        <button onclick="deleteClient('${c._id}')">Delete</button>
+      </div>
+    `;
+    list.appendChild(div);
+  });
+}
+
+// 🔹 C) Add Client button ka logic add karo
+document.getElementById("addClientBtn").addEventListener("click", async () => {
+  const name = document.getElementById("clientName").value;
+  const dueDate = document.getElementById("dueDate").value;
+  const service = selector.value;
+
+  if (!name || !dueDate) return alert("Fill all fields");
+
+  await fetch("https://caprro-backend-1.onrender.com/api/tax-work/client", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`
+    },
+    body: JSON.stringify({ clientName: name, dueDate, serviceType: service })
+  });
+
+  loadClientsForService();
+});
+
+// 🔹 D) Client open karne par EXISTING checklist load karo
+window.openClient = async function (clientId) {
+  activeClientId = clientId;
+  loadChecklist(); // EXISTING FUNCTION REUSED
+};
 
 async function loadChecklist() {
   const service = selector.value;

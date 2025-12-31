@@ -1,23 +1,106 @@
-body {
-  font-family: Arial, sans-serif;
-  background: #0f172a;
-  color: #fff;
-}
-
+/* Container */
 .tax-container {
   max-width: 900px;
   margin: 40px auto;
+  padding: 20px;
+  position: relative;
+  z-index: 10;
 }
 
-select, input, button {
-  padding: 10px;
-  margin: 5px;
+/* Title */
+.page-title {
+  text-align: center;
+  margin-bottom: 6px;
+  text-shadow: 0 0 15px rgba(59,130,246,0.4);
 }
 
+.page-subtitle {
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 24px;
+}
+
+/* Progress box */
+.progress-box {
+  margin: 16px 0;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid var(--border);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 12px;
+}
+
+/* Checklist */
+.checklist {
+  list-style: none;
+  padding: 0;
+  margin-top: 12px;
+}
+
+.checklist li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: rgba(17, 24, 39, 0.85);
+  border: 1px solid rgba(96, 165, 250, 0.25);
+  transition: all 0.3s ease;
+}
+
+.checklist li:hover {
+  background: rgba(59, 130, 246, 0.12);
+  transform: translateX(6px);
+  box-shadow: 0 8px 25px rgba(59,130,246,0.25);
+}
+
+/* Checkbox glow */
+.checklist input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--pri);
+  cursor: pointer;
+}
+
+/* Completed state */
+.checklist li.completed {
+  border-color: rgba(16,185,129,0.5);
+  background: linear-gradient(
+    135deg,
+    rgba(16,185,129,0.15),
+    rgba(16,185,129,0.05)
+  );
+}
+
+.checklist li.completed span {
+  text-decoration: line-through;
+  color: #a7f3d0;
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .tax-container {
+    margin: 20px 10px;
+    padding: 10px;
+  }
+}
+/* 🔒 Background animation layers ko non-clickable banane ke liye */
+.neural-network,
+.data-streams,
+.holographic-grid,
+.circuit-board,
+.orbiting-particles {
+  pointer-events: none !important;
+}
 .client-form {
   display: flex;
   gap: 10px;
-  margin-top: 15px;
+  margin-top: 16px;
 }
 
 .client-list {
@@ -27,29 +110,9 @@ select, input, button {
 .client-row {
   display: flex;
   justify-content: space-between;
-  background: #1e293b;
   padding: 10px;
   margin-bottom: 8px;
-  border-radius: 6px;
-}
-
-.client-row button {
-  margin-left: 5px;
-}
-
-.hidden {
-  display: none;
-}
-
-#checklist li {
-  list-style: none;
-  padding: 8px;
-  background: #020617;
-  margin-bottom: 6px;
-  border-radius: 5px;
-}
-
-.completed {
-  background: #064e3b !important;
-  text-decoration: line-through;
+  border-radius: 8px;
+  background: rgba(17,24,39,0.85);
+  border: 1px solid rgba(96,165,250,0.25);
 }
