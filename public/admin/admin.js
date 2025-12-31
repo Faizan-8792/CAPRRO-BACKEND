@@ -431,6 +431,38 @@ async function loadClientsToChaseToday() {
     }
 }
 
+// Function to attach delete button handlers for users
+function attachUserDeleteHandlers() {
+  document.querySelectorAll('.delete-user-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+
+      const userId = btn.dataset.userid;
+      if (!userId) return;
+
+      if (!confirm('Delete this user permanently?')) return;
+
+      try {
+        btn.disabled = true;
+        btn.textContent = 'Deleting...';
+
+        await api(`/users/${userId}`, {
+          method: 'DELETE'
+        });
+
+        // 🔁 Reload users table
+        btn.closest('tr')?.remove();
+
+      } catch (err) {
+        console.error('User delete failed:', err);
+        alert(err.message || 'Failed to delete user');
+        btn.disabled = false;
+        btn.textContent = 'Delete';
+      }
+    });
+  });
+}
+
 // ---------- Firm Admin page (admin.html) ----------
 async function initAdminPage() {
     if (!qs('logoutBtn')) return;
@@ -509,6 +541,10 @@ async function initAdminPage() {
                     </tr>
                 `).join('');
             }
+            
+            // ✅ ADD THIS LINE: Attach event handlers to delete buttons
+            attachUserDeleteHandlers();
+            
         } catch (e) {
             console.error('Users load error:', e);
             if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Failed to load users</td></tr>';
