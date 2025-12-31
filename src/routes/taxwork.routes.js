@@ -1,5 +1,5 @@
 import express from "express";
-import auth from "../middleware/auth.middleware.js";
+import { authRequired } from "../middleware/auth.middleware.js";
 import {
   getTaxWork,
   saveTaxWork
@@ -7,7 +7,7 @@ import {
 
 const router = express.Router();
 
-router.get("/:service", auth, getTaxWork);
-router.post("/", auth, saveTaxWork);
+router.get("/:service", authRequired, getTaxWork);
+router.post("/", authRequired, saveTaxWork);
 
 export default router;
