@@ -2,24 +2,53 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Tax Work Tracker</title>
-  <link rel="stylesheet" href="tax-work.css" />
+  <title>Tax Work Tracker | CA PRO Toolkit</title>
+
+  <!-- Core theme variables + background animation feel -->
+  <link rel="stylesheet" href="../admin/admin.css">
+  <!-- Tax Work specific styling -->
+  <link rel="stylesheet" href="tax-work.css">
 </head>
+
 <body>
 
-<h2>Tax Work Tracker</h2>
+<!-- Background layers (same visual language) -->
+<div class="neural-network"></div>
+<div class="data-streams"></div>
+<div class="holographic-grid"></div>
+<div class="circuit-board"></div>
+<div class="orbiting-particles"></div>
 
-<select id="serviceSelector">
-  <option value="">Select Service</option>
-  <option value="GST">GST</option>
-  <option value="ITR">ITR</option>
-  <option value="AUDIT">Audit</option>
-  <option value="ROC">ROC</option>
-</select>
+<div class="tax-container">
 
-<div id="progress"></div>
+  <h2 class="page-title">📋 Tax Work Tracker</h2>
+  <p class="page-subtitle">
+    Track real tax work progress — no AI, no automation, just execution.
+  </p>
 
-<ul id="checklist"></ul>
+  <!-- Service Selector -->
+  <div class="card card-hover-glow">
+    <div class="card-body">
+
+      <label class="form-label">Select Service</label>
+      <select id="serviceSelector" class="form-select">
+        <option value="">-- Choose Service --</option>
+        <option value="GST">GST</option>
+        <option value="ITR">ITR</option>
+        <option value="AUDIT">Audit</option>
+        <option value="ROC">ROC</option>
+      </select>
+
+      <!-- Progress -->
+      <div id="progressBox" class="progress-box"></div>
+
+      <!-- Checklist -->
+      <ul id="checklist" class="checklist"></ul>
+
+    </div>
+  </div>
+
+</div>
 
 <script src="tax-work.js"></script>
 </body>

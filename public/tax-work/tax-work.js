@@ -34,15 +34,16 @@ const checklistMap = {
 };
 
 const selector = document.getElementById("serviceSelector");
-const checklist = document.getElementById("checklist");
-const progress = document.getElementById("progress");
+const checklistEl = document.getElementById("checklist");
+const progressBox = document.getElementById("progressBox");
 
 selector.addEventListener("change", loadChecklist);
 
 async function loadChecklist() {
   const service = selector.value;
-  checklist.innerHTML = "";
-  progress.innerHTML = "";
+  checklistEl.innerHTML = "";
+  progressBox.innerHTML = "";
+
   if (!service) return;
 
   const res = await fetch(
@@ -52,31 +53,34 @@ async function loadChecklist() {
 
   const saved = await res.json();
   const steps = checklistMap[service];
-  let done = 0;
+
+  let completed = 0;
 
   steps.forEach(step => {
     const record = saved.find(r => r.checklistStep === step);
-    const checked = record?.completed || false;
-    if (checked) done++;
+    const isDone = record?.completed || false;
+    if (isDone) completed++;
 
     const li = document.createElement("li");
+    if (isDone) li.classList.add("completed");
+
     li.innerHTML = `
-      <input type="checkbox" ${checked ? "checked" : ""}/>
-      ${step}
+      <input type="checkbox" ${isDone ? "checked" : ""} />
+      <span>${step}</span>
     `;
 
     li.querySelector("input").addEventListener("change", e => {
       updateStep(service, step, e.target.checked);
     });
 
-    checklist.appendChild(li);
+    checklistEl.appendChild(li);
   });
 
   let status = "NOT STARTED";
-  if (done > 0 && done < steps.length) status = "IN PROGRESS";
-  if (done === steps.length) status = "COMPLETED";
+  if (completed > 0 && completed < steps.length) status = "IN PROGRESS";
+  if (completed === steps.length) status = "COMPLETED";
 
-  progress.innerText = `Progress: ${done}/${steps.length} — ${status}`;
+  progressBox.innerText = `Progress: ${completed}/${steps.length} — ${status}`;
 }
 
 async function updateStep(service, step, completed) {
