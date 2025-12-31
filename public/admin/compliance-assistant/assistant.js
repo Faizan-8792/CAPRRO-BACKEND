@@ -1,4 +1,4 @@
-// assistant.js (Admin Compliance Assistant)
+// assistant.js (Admin Compliance Assistant) — DATE BASED
 import { computePriority } from './priority-engine.js';
 
 const API_BASE = "https://caprro-backend-1.onrender.com/api";
@@ -34,20 +34,22 @@ async function loadAdminComplianceAssistant() {
     statusEl.textContent = 'Analyzing today’s compliance workload...';
 
     const resp = await api('/tasks/board');
-    if (!resp || !resp.columns) {
-      throw new Error('Invalid task board response');
-    }
     const allTasks = Object.values(resp.columns || {}).flat();
 
+    // ✅ DATE BASED PRIORITY
     const enriched = allTasks.map(t => {
       const p = computePriority(t);
-      return { ...t, priority: p.level, score: p.score };
+      return { ...t, priority: p.level };
     });
 
-    const today = enriched.filter(t => t.score >= 30);
+    // ✅ SHOW ONLY RELEVANT TASKS
+    const today = enriched.filter(t =>
+      ['CRITICAL', 'HIGH', 'MEDIUM'].includes(t.priority)
+    );
 
+    // 🔢 Counters
     qs('caOverdueCount').textContent =
-      `Overdue: ${today.filter(t => t.score >= 90).length}`;
+      `Critical: ${today.filter(t => t.priority === 'CRITICAL').length}`;
     qs('caTodayCount').textContent =
       `High: ${today.filter(t => t.priority === 'HIGH').length}`;
     qs('caUpcomingCount').textContent =
@@ -55,13 +57,15 @@ async function loadAdminComplianceAssistant() {
 
     if (!today.length) {
       tbody.innerHTML =
-        `<tr><td colspan="8" class="text-center text-muted">No critical work today 🎉</td></tr>`;
+        `<tr><td colspan="8" class="text-center text-muted">No work to do today 🎉</td></tr>`;
       statusEl.textContent = '';
       return;
     }
 
+    const priorityOrder = { CRITICAL: 1, HIGH: 2, MEDIUM: 3 };
+
     tbody.innerHTML = today
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority])
       .slice(0, 10)
       .map(t => `
         <tr>
@@ -71,9 +75,10 @@ async function loadAdminComplianceAssistant() {
           <td>${escapeHtml(t.assignedTo?.email || 'Unassigned')}</td>
 
           <td>
-            <span class="badge bg-${t.priority === 'CRITICAL' ? 'danger' :
-                                   t.priority === 'HIGH' ? 'warning' :
-                                   'secondary'}">
+            <span class="badge bg-${
+              t.priority === 'CRITICAL' ? 'danger' :
+              t.priority === 'HIGH' ? 'warning' : 'secondary'
+            }">
               ${t.priority}
             </span>
           </td>
@@ -87,15 +92,17 @@ async function loadAdminComplianceAssistant() {
           </td>
 
           <td>
-            <span class="badge bg-${t.score >= 60 ? 'warning' : 'secondary'}">
-              ${t.score >= 60 ? 'CHASE' : 'OK'}
+            <span class="badge bg-${
+              t.priority === 'CRITICAL' ? 'danger' : 'secondary'
+            }">
+              ${t.priority === 'CRITICAL' ? 'CHASE' : 'OK'}
             </span>
           </td>
         </tr>
       `)
       .join('');
 
-    statusEl.textContent = `Showing top ${today.length} priority tasks`;
+    statusEl.textContent = `Showing ${today.length} priority tasks`;
 
   } catch (e) {
     console.error(e);
