@@ -20,5 +20,6 @@ router.use("/api/stats", statsRoutes);
 router.use("/api/super", superRoutes);
 router.use("/api/tasks", taskRoutes);
 router.use("/api/accounting", accountingRoutes);
+router.use("/tax-work", require("./taxwork.routes"));
 
 export default router;

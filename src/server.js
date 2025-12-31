@@ -1,5 +1,7 @@
 import dotenv from "dotenv";
 import connectDB from "./config/db.js";
+import path from "path";
+import { fileURLToPath } from "url";
 
 import Reminder from "./models/Reminder.js";
 import { processReminderForNow } from "./controllers/reminder.controller.js";
@@ -10,6 +12,13 @@ dotenv.config();
 await connectDB();
 
 const PORT = Number(process.env.PORT || 4001);
+
+// Get __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Serve static files from the public directory
+app.use(express.static(path.join(__dirname, "../public")));
 
 const server = app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);

@@ -1,0 +1,19 @@
+body {
+  font-family: Arial, sans-serif;
+  padding: 20px;
+}
+
+select {
+  padding: 6px;
+  margin-bottom: 12px;
+}
+
+li {
+  list-style: none;
+  margin: 6px 0;
+}
+
+#progress {
+  font-weight: bold;
+  margin: 10px 0;
+}
