@@ -105,6 +105,19 @@ function renderTaskColumn(title, key, items) {
                 <option value="CLOSED" ${t.status === 'CLOSED' ? 'selected' : ''}>Closed</option>
               </select>
             </div>
+
+            ${t.status === 'WAITING_DOCS' ? `
+              <div class="mt-2">
+                <select class="form-select form-select-sm task-delay-reason"
+                        data-task-id="${esc(t.id)}">
+                  <option value="">Select delay reason</option>
+                  <option value="CLIENT" ${t.meta?.delayReason === 'CLIENT' ? 'selected' : ''}>Client not responding</option>
+                  <option value="DOCS" ${t.meta?.delayReason === 'DOCS' ? 'selected' : ''}>Documents incomplete</option>
+                  <option value="INTERNAL" ${t.meta?.delayReason === 'INTERNAL' ? 'selected' : ''}>Internal delay</option>
+                  <option value="PORTAL" ${t.meta?.delayReason === 'PORTAL' ? 'selected' : ''}>Govt portal issue</option>
+                </select>
+              </div>
+            ` : ''}
           </div>
         </div>
       `;
@@ -168,6 +181,7 @@ async function refreshTaskBoard() {
     attachStatusChangeHandlers();
     attachCardToggleHandlers();
     attachDeleteHandlers();
+    attachDelayReasonHandlers();
   } catch (e) {
     console.error('refreshTaskBoard error:', e);
     if (statusEl) statusEl.textContent = e.message || 'Failed to load task board.';
@@ -202,6 +216,7 @@ function attachCardToggleHandlers() {
     card.addEventListener('click', (e) => {
       if (e.target.closest('.task-delete-btn')) return;
       if (e.target.closest('.task-status-select')) return;
+      if (e.target.closest('.task-delay-reason')) return;
       card.classList.toggle('task-card-expanded');
     });
   });
@@ -226,6 +241,22 @@ function attachDeleteHandlers() {
         console.error('Delete error:', err);
         alert(err.message || 'Failed to delete task');
       }
+    });
+  });
+}
+
+// -------------------- DELAY REASON HANDLER --------------------
+function attachDelayReasonHandlers() {
+  document.querySelectorAll('.task-delay-reason').forEach((sel) => {
+    sel.addEventListener('change', async () => {
+      const taskId = sel.getAttribute('data-task-id');
+      const delayReason = sel.value;
+      if (!taskId) return;
+
+      await apiTasks(`/tasks/${taskId}`, {
+        method: 'PUT',
+        body: { meta: { delayReason } }
+      });
     });
   });
 }
