@@ -720,28 +720,6 @@ async function initAdminPage() {
                 if (firmStatus) firmStatus.textContent = e.message;
             }
         });
-
-        // ✅ Delete user handler
-        document.getElementById('usersTbody')?.addEventListener('click', async (e) => {
-            if (e.target.classList.contains('delete-user-btn')) {
-                const userId = e.target.dataset.userid;
-                const confirmed = confirm(`Delete user ${userId}? This removes them from firm only.`);
-                if (!confirmed) return;
-                
-                try {
-                    e.target.textContent = 'Deleting...';
-                    e.target.disabled = true;
-                    await api(`/firms/${firm._id}/users/${userId}`, { method: 'DELETE' });
-                    await loadAndRenderUsers();  // Refresh list
-                } catch (err) {
-                    alert(err.message || 'Delete failed');
-                } finally {
-                    e.target.disabled = false;
-                    e.target.textContent = 'Delete';
-                }
-            }
-        });
-
     } catch (e) {
         console.error('Dashboard error:', e);
         if (e.status === 401 || e.status === 403) {
