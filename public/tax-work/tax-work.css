@@ -89,3 +89,11 @@
     padding: 10px;
   }
 }
+/* 🔒 Background animation layers ko non-clickable banane ke liye */
+.neural-network,
+.data-streams,
+.holographic-grid,
+.circuit-board,
+.orbiting-particles {
+  pointer-events: none !important;
+}
