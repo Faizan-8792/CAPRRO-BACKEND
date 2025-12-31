@@ -46,14 +46,43 @@ async function loadChecklist() {
 
   if (!service) return;
 
-  const res = await fetch(
-    `https://caprro-backend-1.onrender.com/api/tax-work/${service}`,
-    { credentials: "include" }
-  );
+  let res;
+  try {
+    res = await fetch(
+      `https://caprro-backend-1.onrender.com/api/tax-work/${service}`,
+      { credentials: "include" }
+    );
+  } catch (e) {
+    progressBox.innerText = "Network error. Please try again.";
+    return;
+  }
 
-  const saved = await res.json();
+  // 🔴 AUTH FAILURE HANDLING (VERY IMPORTANT)
+  if (res.status === 401) {
+    progressBox.innerHTML = `
+      <span style="color:#f59e0b">
+        ⚠ You are not logged in.  
+        Please login in CA PRO Toolkit first, then reopen this page.
+      </span>
+    `;
+    return;
+  }
+
+  let saved;
+  try {
+    saved = await res.json();
+  } catch {
+    progressBox.innerText = "Unexpected server response.";
+    return;
+  }
+
+  // 🛑 SAFETY: backend must return array
+  if (!Array.isArray(saved)) {
+    progressBox.innerText = "Unable to load checklist data.";
+    return;
+  }
+
   const steps = checklistMap[service];
-
   let completed = 0;
 
   steps.forEach(step => {
@@ -84,7 +113,7 @@ async function loadChecklist() {
 }
 
 async function updateStep(service, step, completed) {
-  await fetch(
+  const res = await fetch(
     "https://caprro-backend-1.onrender.com/api/tax-work",
     {
       method: "POST",
@@ -97,6 +126,11 @@ async function updateStep(service, step, completed) {
       })
     }
   );
+
+  if (res.status === 401) {
+    alert("You are not logged in. Please login and try again.");
+    return;
+  }
 
   loadChecklist();
 }
