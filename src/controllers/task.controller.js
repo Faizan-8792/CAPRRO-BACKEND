@@ -143,12 +143,16 @@ export const updateTask = async (req, res) => {
 
     if (status) {
       task.status = status;
-      if (status === "WAITING_DOCS" && !task.meta?.waitingSince) {
-        task.meta = task.meta || {};
+
+      // ✅ ALWAYS ensure meta exists
+      task.meta = task.meta || {};
+
+      if (status === "WAITING_DOCS" && !task.meta.waitingSince) {
         task.meta.waitingSince = new Date().toISOString();
       }
+
       if (status !== "WAITING_DOCS") {
-        task.meta.waitingSince = undefined;
+        delete task.meta.waitingSince; // ✅ SAFE
       }
     }
 
