@@ -41,6 +41,8 @@ function getToken() {
 // A) TOP OF FILE — VARIABLES ADD KARO
 let activeClientId = null;
 let checklistDraft = {};
+let isChecklistOpen = false;
+let isDirty = false;
 
 const selector = document.getElementById("serviceSelector");
 const checklistEl = document.getElementById("checklist");
@@ -51,6 +53,21 @@ selector.addEventListener("change", loadClientsForService);
 
 // ➕ ADD NEW FUNCTION (loadClientsForService)
 async function loadClientsForService() {
+  // If checklist is open, confirm and close it
+  if (isChecklistOpen) {
+    if (isDirty) {
+      const ok = confirm("Do you want to discard changes?");
+      if (!ok) return;
+    }
+    // force close checklist
+    checklistDraft = {};
+    activeClientId = null;
+    isChecklistOpen = false;
+    isDirty = false;
+    checklistEl.innerHTML = "";
+    document.getElementById("doneBtn").classList.add("hidden");
+  }
+
   const service = selector.value;
   checklistEl.innerHTML = "";
   progressBox.innerHTML = "";
@@ -140,6 +157,25 @@ document.getElementById("addClientBtn").addEventListener("click", async () => {
 
 // 🔹 D) Client open karne par CLIENT-WISE checklist load karo
 window.openClient = async function (clientId) {
+  // TOGGLE: agar same client open hai
+  if (isChecklistOpen && activeClientId === clientId) {
+    if (isDirty) {
+      const ok = confirm("Do you want to discard changes?");
+      if (!ok) return;
+    }
+
+    // CLOSE checklist
+    checklistDraft = {};
+    activeClientId = null;
+    isChecklistOpen = false;
+    isDirty = false;
+
+    checklistEl.innerHTML = "";
+    document.getElementById("doneBtn").classList.add("hidden");
+    loadClientsForService();
+    return;
+  }
+
   activeClientId = clientId;
 
   // hide client UI
@@ -150,6 +186,8 @@ window.openClient = async function (clientId) {
   document.getElementById("doneBtn").classList.remove("hidden");
 
   // Load client-specific checklist instead of service-based
+  isChecklistOpen = true;
+  isDirty = false;
   loadClientChecklist(clientId);
 };
 
@@ -192,6 +230,14 @@ async function loadClientChecklist(clientId) {
     cb.addEventListener("change", () => {
       checklistDraft[step] = cb.checked;
       li.classList.toggle("completed", cb.checked);
+      isDirty = true;
+
+      // 🔽 ADD THIS (progress recalc)
+      const doneCount = Object.values(checklistDraft).filter(Boolean).length;
+      let status = "NOT STARTED";
+      if (doneCount > 0 && doneCount < steps.length) status = "IN PROGRESS";
+      if (doneCount === steps.length) status = "COMPLETED";
+      progressBox.innerText = `Progress: ${doneCount}/${steps.length} — ${status}`;
     });
 
     li.appendChild(cb);
@@ -313,6 +359,12 @@ document.getElementById("doneBtn").addEventListener("click", async () => {
   activeClientId = null;
   checklistEl.innerHTML = "";
   document.getElementById("doneBtn").classList.add("hidden");
+  isChecklistOpen = false;
+  isDirty = false;
+
+  // clear client form fields
+  document.getElementById("clientName").value = "";
+  document.getElementById("dueDate").value = "";
 
   // show client list again
   loadClientsForService();
