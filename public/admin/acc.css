@@ -922,3 +922,32 @@ select {
   color: #0f172a;
   line-height: 1.5;
 }
+/* ===========================
+   FIX: Dropdown option text invisible
+   =========================== */
+
+/* Dropdown menu background */
+select option {
+  background-color: #020617;   /* dark background */
+  color: #e5e7eb;              /* visible light text */
+}
+
+/* Selected option (important for Chrome) */
+select option:checked {
+  background-color: #0ea5e9;
+  color: #020617;
+}
+
+/* Hovered option */
+select option:hover {
+  background-color: #334155;
+  color: #e5e7eb;
+}
+
+/* Fix Firefox dropdown text */
+select {
+  color-scheme: dark;
+}
+select {
+  cursor: pointer;
+}
