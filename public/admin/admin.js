@@ -206,19 +206,45 @@ async function loadAdminExternalPage(href, activatingLink) {
         }
 
         // Execute any scripts referenced in the loaded HTML
+        // First, execute scripts that were part of the injected fragment (inside the container)
         const scripts = Array.from(container.querySelectorAll('script'));
+        const executedSrc = new Set();
         for (const s of scripts) {
             const newScript = document.createElement('script');
             if (s.src) {
                 const src = s.getAttribute('src');
                 const abs = src.startsWith('http') || src.startsWith('/') ? src : `/admin/${src}`;
+                // avoid adding the same src twice
+                if (document.querySelector(`script[src="${abs}"]`) || executedSrc.has(abs)) { s.remove(); continue; }
                 newScript.src = abs;
                 newScript.async = false;
+                executedSrc.add(abs);
             } else {
                 newScript.textContent = s.textContent;
             }
             document.body.appendChild(newScript);
             s.remove();
+        }
+
+        // As a fallback, if the page's HTML had script tags outside the fragment root
+        // (some pages may put scripts after the fragment), also execute those.
+        const docScripts = Array.from(doc.querySelectorAll('script'));
+        for (const s of docScripts) {
+            const src = s.getAttribute && s.getAttribute('src');
+            if (src) {
+                const abs = src.startsWith('http') || src.startsWith('/') ? src : `/admin/${src}`;
+                if (document.querySelector(`script[src="${abs}"]`) || executedSrc.has(abs)) continue;
+                const newScript = document.createElement('script');
+                newScript.src = abs;
+                newScript.async = false;
+                document.body.appendChild(newScript);
+                executedSrc.add(abs);
+            } else if (s.textContent && s.textContent.trim()) {
+                // inline scripts outside fragment
+                const newScript = document.createElement('script');
+                newScript.textContent = s.textContent;
+                document.body.appendChild(newScript);
+            }
         }
 
         // Update active link styling
