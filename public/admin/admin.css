@@ -1771,6 +1771,7 @@ table.table.align-middle.mb-0 tbody tr:nth-child(even) {
 
 .page-content {
   padding: 8px 0 24px 0;
+  color: #ffffff !important;
 }
 
 .tc-grid, .dr-grid {
@@ -1787,11 +1788,21 @@ table.table.align-middle.mb-0 tbody tr:nth-child(even) {
   padding: 14px;
   flex: 1 1 280px;
   box-shadow: var(--shadow);
+  color: #ffffff !important;
+}
+
+.tc-card *, .dr-form *, .dr-list *, .dr-left *, .dr-right * {
+  color: #ffffff !important;
 }
 
 .tc-list, .dr-items, #requestsList, #dueToday, #overdue, #pendingDocs, #newAssigned, #agg {
   max-height: 420px;
   overflow: auto;
+  color: #ffffff !important;
+}
+
+.tc-list *, .dr-items *, #requestsList *, #dueToday *, #overdue *, #pendingDocs *, #newAssigned *, #agg * {
+  color: #ffffff !important;
 }
 
 .chip {
@@ -1799,10 +1810,14 @@ table.table.align-middle.mb-0 tbody tr:nth-child(even) {
   padding: 4px 8px;
   border-radius: 12px;
   background: linear-gradient(135deg, var(--pri), var(--pri-2));
-  color: #fff;
+  color: #fff !important;
   margin-right: 6px;
   font-size: 12px;
   font-weight: 700;
+}
+
+.muted {
+  color: #cbd5e1 !important;
 }
 
 @media (max-width: 768px) {
