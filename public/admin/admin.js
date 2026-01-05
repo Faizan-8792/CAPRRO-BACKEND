@@ -930,14 +930,12 @@ async function initAdminPage() {
             if (badge) {
                 const planRaw = String(firm?.planType || 'FREE').toUpperCase();
                 const isPremium = planRaw === 'PREMIUM';
-                badge.textContent = isPremium ? 'PREMIUM' : 'STANDARD';
+                // badge text is wrapped in a nested span for shimmer layering
+                const label = badge.querySelector('span') || badge;
+                label.textContent = isPremium ? 'PREMIUM' : 'STANDARD';
                 badge.style.display = 'inline-flex';
-                badge.classList.remove('bg-light', 'bg-warning');
-                if (isPremium) {
-                    badge.classList.add('bg-warning', 'text-dark');
-                } else {
-                    badge.classList.add('bg-light', 'text-dark');
-                }
+                badge.classList.toggle('plan-badge--premium', isPremium);
+                badge.classList.toggle('plan-badge--standard', !isPremium);
             }
         } catch (e) {
             // ignore UI-only badge failures
