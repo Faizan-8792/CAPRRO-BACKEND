@@ -5,6 +5,7 @@
 
   async function loadBoard(){
     try{
+      if (window.caproShowLoader) window.caproShowLoader('Loading Today Control...');
       const resp = await fetch(API + '/tasks/board', { headers: { Authorization: 'Bearer '+token } });
       const data = await resp.json();
       if(!data.ok) { const el = document.getElementById('dueToday'); if (el) el.innerText='Failed to load'; return; }
@@ -27,6 +28,7 @@
       const overdueEl = document.getElementById('overdue'); if (overdueEl) overdueEl.innerHTML = renderList(overdue);
       const newAssignedEl = document.getElementById('newAssigned'); if (newAssignedEl) newAssignedEl.innerHTML = renderList(newly);
     }catch(e){ console.error('loadBoard', e); }
+    finally { if (window.caproHideLoader) window.caproHideLoader(); }
   }
 
   function renderList(items){
@@ -36,6 +38,7 @@
 
   async function loadPendingDocs(){
     try{
+      if (window.caproShowLoader) window.caproShowLoader('Loading pending docs...');
       const res = await fetch(API + '/document-requests/pending-summary', { headers: { Authorization: 'Bearer '+token } });
       const d = await res.json();
       if(!d.ok) { const el = document.getElementById('pendingDocs'); if (el) el.innerText='Failed'; return; }
@@ -43,6 +46,7 @@
       const html = Object.keys(counts).map(k=>`<div><strong>${k}</strong>: ${counts[k]}</div>`).join('');
       const pendingEl = document.getElementById('pendingDocs'); if (pendingEl) pendingEl.innerHTML = html + '<hr/>' + ((d.recent||[]).map(r=>`<div class="muted">${r.clientName||r.clientId} • ${new Date(r.createdAt).toLocaleString()}</div>`).join(''));
     }catch(e){ console.error('loadPendingDocs', e); }
+    finally { if (window.caproHideLoader) window.caproHideLoader(); }
   }
 
   function initTodayControl(){

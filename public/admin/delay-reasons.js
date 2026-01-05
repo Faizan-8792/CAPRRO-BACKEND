@@ -15,6 +15,7 @@
 
   async function loadTasks(){
     try{
+      if (window.caproShowLoader) window.caproShowLoader('Loading tasks...');
       const res = await fetch(API + '/tasks/board', { headers: { Authorization: 'Bearer '+token } });
       const d = await res.json();
       if(!d.ok) { console.error('loadTasks failed:', d); return; }
@@ -42,6 +43,7 @@
           return `<option value="${id}">${t.clientName || 'Unknown'} • ${t.title}</option>`;
         }).join('');
     }catch(e){ console.error('loadTasks error', e); }
+    finally { if (window.caproHideLoader) window.caproHideLoader(); }
   }
 
   function isValidObjectIdString(s){
@@ -50,6 +52,7 @@
 
   async function loadAgg(){
     try{
+      if (window.caproShowLoader) window.caproShowLoader('Loading delay reasons...');
       const res = await fetch(API + '/delay-logs/aggregate', { headers: { Authorization: 'Bearer '+token } });
       const d = await res.json();
       if(!d.ok) return; // leave agg element as-is
@@ -77,6 +80,7 @@
 
       aggEl.innerHTML = aggHtml + '<hr/>' + recentHtml;
     }catch(e){ console.error('loadAgg', e); const aggEl = document.getElementById('agg'); if (aggEl) aggEl.innerText='Failed'; }
+    finally { if (window.caproHideLoader) window.caproHideLoader(); }
   }
 
   function initDelayReasons(){
@@ -104,6 +108,7 @@
           }
           if (st) { st.textContent='Adding...'; }
           try{
+            if (window.caproShowLoader) window.caproShowLoader('Adding delay log...');
             const res = await fetch(API + '/delay-logs', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization: 'Bearer '+token }, body: JSON.stringify({ taskId:id, reason, note }) });
             const d = await res.json().catch(()=>null);
             console.log('[DelayLog] Response:', { status: res.status, data: d });
@@ -123,6 +128,7 @@
             console.error('Add delay log failed:', e);
             if (st) { st.textContent = e.message || String(e); st.className='small-label err'; }
           }
+          finally { if (window.caproHideLoader) window.caproHideLoader(); }
         });
       }
       loadTasks();
