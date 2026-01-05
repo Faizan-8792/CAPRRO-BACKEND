@@ -6,8 +6,13 @@
   async function loadBoard(){
     try{
       if (window.caproShowLoader) window.caproShowLoader('Loading Today Control...');
-      const resp = await fetch(API + '/tasks/board', { headers: { Authorization: 'Bearer '+token } });
-      const data = await resp.json();
+      let data;
+      if (window.caproDemoMode && window.caproDemoData) {
+        data = window.caproDemoData.taskBoard;
+      } else {
+        const resp = await fetch(API + '/tasks/board', { headers: { Authorization: 'Bearer '+token } });
+        data = await resp.json();
+      }
       if(!data.ok) { const el = document.getElementById('dueToday'); if (el) el.innerText='Failed to load'; return; }
       const cols = data.columns || {};
       const all = [].concat(cols.NOT_STARTED||[], cols.WAITING_DOCS||[], cols.IN_PROGRESS||[], cols.FILED||[], cols.CLOSED||[]);
@@ -39,8 +44,13 @@
   async function loadPendingDocs(){
     try{
       if (window.caproShowLoader) window.caproShowLoader('Loading pending docs...');
-      const res = await fetch(API + '/document-requests/pending-summary', { headers: { Authorization: 'Bearer '+token } });
-      const d = await res.json();
+      let d;
+      if (window.caproDemoMode && window.caproDemoData) {
+        d = window.caproDemoData.pendingDocsSummary;
+      } else {
+        const res = await fetch(API + '/document-requests/pending-summary', { headers: { Authorization: 'Bearer '+token } });
+        d = await res.json();
+      }
       if(!d.ok) { const el = document.getElementById('pendingDocs'); if (el) el.innerText='Failed'; return; }
       const counts = d.counts || {};
       const html = Object.keys(counts).map(k=>`<div><strong>${k}</strong>: ${counts[k]}</div>`).join('');

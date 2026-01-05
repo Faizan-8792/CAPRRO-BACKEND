@@ -9,8 +9,13 @@
     el.innerHTML = 'Loading…';
     if (window.caproShowLoader) window.caproShowLoader('Loading document requests...');
     try{
-      const res = await fetch(API_BASE + '/document-requests', { headers: { Authorization: 'Bearer ' + token } });
-      const data = await res.json();
+      let data;
+      if (window.caproDemoMode && window.caproDemoData) {
+        data = window.caproDemoData.documentRequests;
+      } else {
+        const res = await fetch(API_BASE + '/document-requests', { headers: { Authorization: 'Bearer ' + token } });
+        data = await res.json();
+      }
       if(!data.ok) throw new Error(data.error||'Failed');
       const rows = data.data || [];
       if(!rows.length) { el.innerHTML = '<div class="muted">No requests</div>'; return; }
@@ -35,6 +40,9 @@
         try{
           if (statusEl) statusEl.textContent = 'Creating...';
           if (window.caproShowLoader) window.caproShowLoader('Creating request...');
+          if (window.caproDemoMode) {
+            throw new Error('Demo Mode: write actions are disabled');
+          }
           const res = await fetch(API_BASE + '/document-requests', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify({ clientId: cid, clientName: cid, items, dueDateISO: due? new Date(due+'T00:00:00').toISOString():undefined }) });
           const data = await res.json();
           if(!data.ok) throw new Error(data.error||'Failed');

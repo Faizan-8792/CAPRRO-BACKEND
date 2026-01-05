@@ -16,8 +16,13 @@
   async function loadTasks(){
     try{
       if (window.caproShowLoader) window.caproShowLoader('Loading tasks...');
-      const res = await fetch(API + '/tasks/board', { headers: { Authorization: 'Bearer '+token } });
-      const d = await res.json();
+      let d;
+      if (window.caproDemoMode && window.caproDemoData) {
+        d = window.caproDemoData.taskBoard;
+      } else {
+        const res = await fetch(API + '/tasks/board', { headers: { Authorization: 'Bearer '+token } });
+        d = await res.json();
+      }
       if(!d.ok) { console.error('loadTasks failed:', d); return; }
       const cols = d.columns || {};
       const allTasks = [].concat(cols.NOT_STARTED||[], cols.WAITING_DOCS||[], cols.IN_PROGRESS||[], cols.FILED||[], cols.CLOSED||[]);
@@ -53,8 +58,13 @@
   async function loadAgg(){
     try{
       if (window.caproShowLoader) window.caproShowLoader('Loading delay reasons...');
-      const res = await fetch(API + '/delay-logs/aggregate', { headers: { Authorization: 'Bearer '+token } });
-      const d = await res.json();
+      let d;
+      if (window.caproDemoMode && window.caproDemoData) {
+        d = window.caproDemoData.delayLogsAggregate;
+      } else {
+        const res = await fetch(API + '/delay-logs/aggregate', { headers: { Authorization: 'Bearer '+token } });
+        d = await res.json();
+      }
       if(!d.ok) return; // leave agg element as-is
       const aggEl = document.getElementById('agg');
       if (!aggEl) return;
@@ -108,6 +118,9 @@
           }
           if (st) { st.textContent='Adding...'; }
           try{
+            if (window.caproDemoMode) {
+              throw new Error('Demo Mode: write actions are disabled');
+            }
             if (window.caproShowLoader) window.caproShowLoader('Adding delay log...');
             const res = await fetch(API + '/delay-logs', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization: 'Bearer '+token }, body: JSON.stringify({ taskId:id, reason, note }) });
             const d = await res.json().catch(()=>null);

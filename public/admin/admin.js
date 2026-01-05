@@ -3,6 +3,8 @@ const TOKEN_KEY = 'caproadminjwt';
 let __clientsChaseLoading = false;
 let __lastHash = null; // NEW: prevents repeated hash handling
 let currentFirm = null; // 🔥 MOVE THIS TO GLOBAL SCOPE (was inside initAdminPage)
+let __demoMode = false;
+let __demoData = null;
 
 // AUTH HELPER FUNCTIONS
 function getToken() {
@@ -90,6 +92,46 @@ function isSuperAdmin(user) {
 }
 
 async function api(path, opts) {
+    // DEMO MODE (Pending approval): return frontend-only sample data.
+    // Strict rules:
+    // - Do not call backend for data reads we want to protect
+    // - Never write anything (writes are already disabled in UI)
+    if (__demoMode) {
+        const method = (opts?.method || 'GET').toUpperCase();
+        if (method !== 'GET') {
+            const err = new Error('Demo Mode: write actions are disabled');
+            err.status = 403;
+            throw err;
+        }
+
+        const demo = __demoData || window.caproDemoData;
+        // Known reads used across admin UI
+        if (path === '/firms/me' || path.startsWith('/firms/')) {
+            return { ok: true, firm: demo?.firm };
+        }
+        if (path.startsWith('/tasks/board')) {
+            return demo?.taskBoard;
+        }
+        if (path === '/document-requests') {
+            return demo?.documentRequests;
+        }
+        if (path === '/document-requests/pending-summary') {
+            return demo?.pendingDocsSummary;
+        }
+        if (path === '/delay-logs/aggregate') {
+            return demo?.delayLogsAggregate;
+        }
+        if (path === '/stats/clients-to-chase-today') {
+            // keep dashboard widgets calm in demo mode
+            return { ok: true, pendingDocsClients: [], chronicLateClients: [] };
+        }
+        if (path === '/reminders/today') {
+            return { ok: true, reminders: [] };
+        }
+        // Fallback: safe empty response
+        return { ok: true };
+    }
+
     const token = getToken();
     const headers = Object.assign({
         'Content-Type': 'application/json',
@@ -748,10 +790,24 @@ async function initAdminPage() {
         // PENDING APPROVAL - View-only mode
         const pendingBanner = qs('pendingBanner');
         if (!me.isActive) {
+            __demoMode = true;
+            __demoData = window.caproDemoData || null;
             if (pendingBanner) {
                 pendingBanner.style.display = 'block';
                 pendingBanner.classList.remove('d-none');
             }
+
+            const demoHint = qs('demoModeHint');
+            if (demoHint) demoHint.style.display = 'block';
+
+            // Replace banner text to make it clear this is demo data
+            try {
+                const msg = pendingBanner?.querySelector('strong');
+                if (msg) msg.textContent = 'Demo Mode – Pending Approval';
+                const p = pendingBanner?.querySelector('br')?.nextSibling;
+                // (leave existing text if structure differs)
+            } catch {}
+
             document.querySelectorAll('button[id$="Btn"]').forEach(btn => {
                 btn.disabled = true;
                 btn.classList.add('opacity-50');
@@ -762,20 +818,30 @@ async function initAdminPage() {
         if (qs('emailBadge')) qs('emailBadge').textContent = me.email;
         if (qs('roleBadge')) qs('roleBadge').textContent = me.isActive ? 'FIRM_ADMIN' : 'FIRM_ADMIN (Pending)';
 
+    // Expose mode for external pages
+    window.caproDemoMode = __demoMode;
+    window.caproDemoData = window.caproDemoData || __demoData;
+
         // FIRM LOADING
+        // In demo mode, never fetch real firm data.
         let firm = null;
-        try {
-            const myFirmResp = await api('/firms/me');
-            if (myFirmResp?.ok && myFirmResp.firm && myFirmResp.firm._id) {
-                const firmId = myFirmResp.firm._id;
-                const firmResp = await api(`/firms/${firmId}`);
-                if (firmResp?.ok && firmResp.firm) {
-                    firm = firmResp.firm;
-                    currentFirm = firm; // ✅ THIS IS REQUIRED - Using global currentFirm
+        if (__demoMode) {
+            firm = __demoData?.firm || { displayName: 'Demo Firm', handle: 'demo-firm', planType: 'FREE' };
+            currentFirm = firm;
+        } else {
+            try {
+                const myFirmResp = await api('/firms/me');
+                if (myFirmResp?.ok && myFirmResp.firm && myFirmResp.firm._id) {
+                    const firmId = myFirmResp.firm._id;
+                    const firmResp = await api(`/firms/${firmId}`);
+                    if (firmResp?.ok && firmResp.firm) {
+                        firm = firmResp.firm;
+                        currentFirm = firm; // ✅ THIS IS REQUIRED - Using global currentFirm
+                    }
                 }
+            } catch (e) {
+                console.error('Firm load error:', e);
             }
-        } catch (e) {
-            console.error('Firm load error:', e);
         }
 
         if (qs('topSub')) {
