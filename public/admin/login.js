@@ -57,6 +57,18 @@ function isSuperAdmin(user) {
          user.email === 'saifullahfaizan786@gmail.com';
 }
 
+function getExtEmailFromQuery() {
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    const v = params.get('extEmail');
+    if (!v) return null;
+    const email = String(v).trim().toLowerCase();
+    return email || null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------- LOGIN PAGE (public/index.html) ----------------
 
 async function initLoginPage() {
@@ -70,9 +82,17 @@ async function initLoginPage() {
   const goVerify = document.getElementById('goVerify');
   const verifyBtn = document.getElementById('verifyOtp');
 
+  const extEmail = getExtEmailFromQuery();
+
   // Default hint (so the status area is never confusing/empty)
   if (statusEl && !statusEl.textContent) {
-    statusEl.textContent = 'Enter your email, click “Send OTP”, then verify.';
+    if (extEmail) {
+      statusEl.innerHTML =
+        `You are logged in the Chrome extension as <b>${extEmail}</b>.<br/>` +
+        'Please use the <b>same email</b> here to open the Admin Panel.';
+    } else {
+      statusEl.textContent = 'Enter your email, click “Send OTP”, then verify.';
+    }
   }
 
   // ---------- UI handlers ----------
@@ -87,6 +107,13 @@ async function initLoginPage() {
       const email = emailEl.value.trim();
       if (!email) {
         statusEl.textContent = 'Email required.';
+        return;
+      }
+
+      if (extEmail && String(email).trim().toLowerCase() !== extEmail) {
+        statusEl.innerHTML =
+          `You are currently logged into the Chrome extension as <b>${extEmail}</b>.<br/>` +
+          `Please login here using the <b>same email</b>.`;
         return;
       }
 
@@ -122,6 +149,13 @@ async function initLoginPage() {
 
       if (!email || !otpCode) {
         statusEl.textContent = 'Email & OTP required.';
+        return;
+      }
+
+      if (extEmail && String(email).trim().toLowerCase() !== extEmail) {
+        statusEl.innerHTML =
+          `You are currently logged into the Chrome extension as <b>${extEmail}</b>.<br/>` +
+          `Please verify OTP using the <b>same email</b>.`;
         return;
       }
 
