@@ -10,9 +10,9 @@ import {
 const router = express.Router();
 router.use(authRequired);
 
-router.post("/document-requests", createDocumentRequest);
-router.get("/document-requests", listDocumentRequests);
-router.patch("/document-requests/:id", updateDocumentRequest);
-router.get("/document-requests/pending-summary", pendingSummary);
+router.post("/", createDocumentRequest);
+router.get("/", listDocumentRequests);
+router.patch("/:id", updateDocumentRequest);
+router.get("/pending-summary", pendingSummary);
 
 export default router;

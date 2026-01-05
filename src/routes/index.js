@@ -8,6 +8,8 @@ import superRoutes from "./super.routes.js";
 import taskRoutes from "./task.routes.js";
 import accountingRoutes from "./accounting.routes.js";
 import taxWorkRoutes from "./taxwork.routes.js";
+import documentRequestRoutes from "./documentRequest.routes.js";
+import delayLogRoutes from "./delayLog.routes.js";
 
 const router = express.Router();
 
@@ -24,5 +26,11 @@ router.use("/api/accounting", accountingRoutes);
 
 /* ✅ TAX WORK TRACKER */
 router.use("/api/tax-work", taxWorkRoutes);
+
+/* ===============================
+   NEW: Document Requests & Delay Logs
+================================ */
+router.use("/api/document-requests", documentRequestRoutes);
+router.use("/api/delay-logs", delayLogRoutes);
 
 export default router;

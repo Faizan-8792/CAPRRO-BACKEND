@@ -5,8 +5,8 @@ import { createDelayLog, aggregateDelayReasons, getTaskDelayLogs } from "../cont
 const router = express.Router();
 router.use(authRequired);
 
-router.post("/delay-logs", createDelayLog);
-router.get("/delay-logs/aggregate", aggregateDelayReasons);
-router.get("/delay-logs/task/:taskId", getTaskDelayLogs);
+router.post("/", createDelayLog);
+router.get("/aggregate", aggregateDelayReasons);
+router.get("/task/:taskId", getTaskDelayLogs);
 
 export default router;
