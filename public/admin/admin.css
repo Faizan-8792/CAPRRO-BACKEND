@@ -3,6 +3,11 @@
    FUTURISTIC PROFESSIONAL WITH LIVING BACKGROUNDS
    ========================= */
 
+/* =======================
+  IMPORT FONTS (moved to top to satisfy CSP/stylesheet rules)
+  ======================= */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap');
+
 /* 🔥 ROOT VARIABLES - CYBERPUNK FINANCE PALETTE */
 :root{
   --bg: #0a0e17;               /* Deep space blue */
@@ -45,10 +50,7 @@
   }
 }
 
-/* =======================
-   IMPORT FONTS
-   ======================= */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap');
+/* (fonts already imported at top) */
 
 /* 🌌 FIXED BACKGROUND ANIMATIONS */
 body {
