@@ -27,27 +27,68 @@
       planExpiryLabel: 'Expires NA',
     },
 
+    users: {
+      ok: true,
+      users: [
+        { _id: 'u111111111111111111111111', name: 'Ayesha Khan', email: 'ayesha.demo@example.com', role: 'FIRM_ADMIN', accountType: 'FIRM', isActive: false, createdAt: daysFromNow(-12) },
+        { _id: 'u222222222222222222222222', name: 'Rohit Sharma', email: 'rohit.demo@example.com', role: 'USER', accountType: 'FIRM', isActive: true, createdAt: daysFromNow(-40) },
+        { _id: 'u333333333333333333333333', name: 'Neha Verma', email: 'neha.demo@example.com', role: 'USER', accountType: 'FIRM', isActive: true, createdAt: daysFromNow(-25) },
+        { _id: 'u444444444444444444444444', name: 'Karan Singh', email: 'karan.demo@example.com', role: 'USER', accountType: 'FIRM', isActive: true, createdAt: daysFromNow(-10) },
+        { _id: 'u555555555555555555555555', name: 'Fatima Ali', email: 'fatima.demo@example.com', role: 'USER', accountType: 'FIRM', isActive: true, createdAt: daysFromNow(-6) },
+        { _id: 'u666666666666666666666666', name: 'Arjun Mehta', email: 'arjun.demo@example.com', role: 'USER', accountType: 'FIRM', isActive: true, createdAt: daysFromNow(-3) },
+      ],
+    },
+
     taskBoard: {
       ok: true,
       plan: 'FREE',
       columns: {
         NOT_STARTED: [
-          { id: 'aaaaaaaaaaaaaaaaaaaaaaaa', clientName: 'Sample Client A', title: 'ITR Filing FY 24-25', dueDateISO: daysFromNow(5), status: 'NOT_STARTED', meta: {} },
-          { id: 'bbbbbbbbbbbbbbbbbbbbbbbb', clientName: 'Sample Client B', title: 'GST Return (GSTR-3B)', dueDateISO: daysFromNow(2), status: 'NOT_STARTED', meta: {} },
+          { id: 'aaaaaaaaaaaaaaaaaaaaaaaa', clientName: 'Sample Client A', title: 'ITR Filing FY 24-25', serviceType: 'ITR', dueDateISO: daysFromNow(5), status: 'NOT_STARTED', meta: {} },
+          { id: 'bbbbbbbbbbbbbbbbbbbbbbbb', clientName: 'Sample Client B', title: 'GST Return (GSTR-3B)', serviceType: 'GST', dueDateISO: daysFromNow(2), status: 'NOT_STARTED', meta: {} },
         ],
         WAITING_DOCS: [
-          { id: 'cccccccccccccccccccccccc', clientName: 'Sample Client C', title: 'TDS Quarterly Return', dueDateISO: daysFromNow(1), status: 'WAITING_DOCS', meta: { waitingSince: daysFromNow(-6) } },
+          { id: 'cccccccccccccccccccccccc', clientName: 'Sample Client C', title: 'TDS Quarterly Return', serviceType: 'TDS', dueDateISO: daysFromNow(1), status: 'WAITING_DOCS', meta: { waitingSince: daysFromNow(-6), delayReason: 'DOCUMENTS_PENDING' }, assignedTo: { email: 'neha.demo@example.com' } },
         ],
         IN_PROGRESS: [
-          { id: 'dddddddddddddddddddddddd', clientName: 'Sample Client D', title: 'ROC Annual Filing', dueDateISO: daysFromNow(8), status: 'IN_PROGRESS', meta: {} },
+          { id: 'dddddddddddddddddddddddd', clientName: 'Sample Client D', title: 'ROC Annual Filing', serviceType: 'ROC', dueDateISO: daysFromNow(8), status: 'IN_PROGRESS', meta: {}, assignedTo: { email: 'rohit.demo@example.com' } },
         ],
         FILED: [
-          { id: 'eeeeeeeeeeeeeeeeeeeeeeee', clientName: 'Sample Client E', title: 'GST Annual Return', dueDateISO: daysFromNow(-3), status: 'FILED', meta: {} },
+          { id: 'eeeeeeeeeeeeeeeeeeeeeeee', clientName: 'Sample Client E', title: 'GST Annual Return', serviceType: 'GST', dueDateISO: daysFromNow(-3), status: 'FILED', meta: {}, assignedTo: { email: 'karan.demo@example.com' } },
         ],
         CLOSED: [
-          { id: 'ffffffffffffffffffffffff', clientName: 'Sample Client F', title: 'Client Onboarding', dueDateISO: daysFromNow(-30), status: 'CLOSED', meta: {} },
+          { id: 'ffffffffffffffffffffffff', clientName: 'Sample Client F', title: 'Client Onboarding', serviceType: 'Onboarding', dueDateISO: daysFromNow(-30), status: 'CLOSED', meta: {}, assignedTo: { email: 'fatima.demo@example.com' } },
         ],
       },
+    },
+
+    productivity: {
+      ok: true,
+      data: [
+        { label: 'Neha', tasksCompleted: 14 },
+        { label: 'Rohit', tasksCompleted: 11 },
+        { label: 'Karan', tasksCompleted: 9 },
+        { label: 'Fatima', tasksCompleted: 7 },
+        { label: 'Arjun', tasksCompleted: 5 },
+      ],
+    },
+
+    remindersToday: {
+      ok: true,
+      reminders: [
+        { typeId: 'GST', clientLabel: 'Sample Client B', status: 'PENDING', dueDateISO: daysFromNow(1) },
+        { typeId: 'TDS', clientLabel: 'Sample Client C', status: 'PENDING', dueDateISO: daysFromNow(1) },
+      ]
+    },
+
+    clientsToChaseToday: {
+      ok: true,
+      pendingDocsClients: [
+        { taskId: 'cccccccccccccccccccccccc', clientName: 'Sample Client C', serviceType: 'TDS', daysPending: 6, dueDateISO: daysFromNow(1) },
+      ],
+      chronicLateClients: [
+        { taskId: 'bbbbbbbbbbbbbbbbbbbbbbbb', clientName: 'Sample Client B', serviceType: 'GST', lastPeriodDelayDays: 4, dueDateISO: daysFromNow(2) },
+      ],
     },
 
     documentRequests: {

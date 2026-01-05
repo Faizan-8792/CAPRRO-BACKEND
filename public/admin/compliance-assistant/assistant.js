@@ -1,8 +1,6 @@
 // assistant.js (Admin Compliance Assistant) — DATE BASED
 import { computePriority } from './priority-engine.js';
 
-const API_BASE = "https://caprro-backend-1.onrender.com/api";
-
 function qs(id) {
   return document.getElementById(id);
 }
@@ -16,10 +14,17 @@ function escapeHtml(s) {
     .replaceAll("'", '&#39;');
 }
 
-async function api(path) {
+async function api(path, opts) {
+  // Prefer the shared admin.js api() wrapper so demo mode can intercept.
+  if (typeof window.api === 'function') {
+    return window.api(path, opts);
+  }
+
+  // Fallback (should be rare): local fetch.
   const token = localStorage.getItem('caproadminjwt');
   if (window.caproShowLoader) window.caproShowLoader('Loading assistant...');
   try {
+    const API_BASE = "https://caprro-backend-1.onrender.com/api";
     const res = await fetch(`${API_BASE}${path}`, {
       headers: { Authorization: `Bearer ${token}` }
     });

@@ -137,6 +137,20 @@ async function api(path, opts) {
         }
 
         const demo = __demoData || window.caproDemoData;
+        // Always allow auth/me in demo mode so base UI can render identity.
+        // NOTE: We don't override ensureAdminAuth()'s initial /auth/me call because
+        // demo mode is only enabled after that call determines the user is pending.
+        if (path === '/auth/me') {
+            return {
+                ok: true,
+                user: {
+                    name: 'Pending Admin',
+                    email: 'pending.admin@example.com',
+                    role: 'FIRM_ADMIN',
+                    isActive: false,
+                }
+            };
+        }
         // Known reads used across admin UI
         if (path === '/firms/me' || path.startsWith('/firms/')) {
             return { ok: true, firm: demo?.firm };
@@ -154,11 +168,21 @@ async function api(path, opts) {
             return demo?.delayLogsAggregate;
         }
         if (path === '/stats/clients-to-chase-today') {
-            // keep dashboard widgets calm in demo mode
-            return { ok: true, pendingDocsClients: [], chronicLateClients: [] };
+            return demo?.clientsToChaseToday || { ok: true, pendingDocsClients: [], chronicLateClients: [] };
+        }
+        if (path.startsWith('/stats/clients-to-chase-today/')) {
+            // “complete” etc. are writes in real life; in demo mode we keep it no-op.
+            return { ok: true };
         }
         if (path === '/reminders/today') {
-            return { ok: true, reminders: [] };
+            return demo?.remindersToday || { ok: true, reminders: [] };
+        }
+        if (/^\/firms\/[^/]+\/users(\/.*)?$/.test(path)) {
+            // Users page (list) and any future read endpoints.
+            return demo?.users || { ok: true, users: [] };
+        }
+        if (path.startsWith('/stats/employee-productivity')) {
+            return demo?.productivity || { ok: true, data: [] };
         }
         // Fallback: safe empty response
         return { ok: true };
@@ -202,6 +226,9 @@ async function api(path, opts) {
         if (window.caproHideLoader) window.caproHideLoader();
     }
 }
+
+// Expose wrapper for other admin modules (e.g., compliance assistant).
+window.api = api;
 
 /**
  * UPDATED: includes 'analytics' and 'tasks' page + correct nav highlight
@@ -283,13 +310,17 @@ async function loadAdminExternalPage(href, activatingLink) {
         // First, execute scripts that were part of the injected fragment (inside the container)
         const scripts = Array.from(container.querySelectorAll('script'));
         const executedSrc = new Set();
+        const shouldReExecuteExternalScripts = /\b(doc-requests\.html|today-control\.html|delay-reasons\.html)\b/i.test(href);
         const loadPromises = [];
         for (const s of scripts) {
             if (s.src) {
                 const src = s.getAttribute('src');
                 const abs = src.startsWith('http') || src.startsWith('/') ? src : `/admin/${src}`;
-                // avoid adding the same src twice
-                if (document.querySelector(`script[src="${abs}"]`) || executedSrc.has(abs)) { s.remove(); continue; }
+                // Avoid adding the same src twice (but for external fragment pages we *do* want
+                // the script to re-run when you revisit the page).
+                if (!shouldReExecuteExternalScripts) {
+                    if (document.querySelector(`script[src="${abs}"]`) || executedSrc.has(abs)) { s.remove(); continue; }
+                }
                 const newScript = document.createElement('script');
                 newScript.src = abs;
                 newScript.async = false;
@@ -343,16 +374,28 @@ async function loadAdminExternalPage(href, activatingLink) {
             console.warn('Some scripts failed to load', e);
         }
 
-        // Attempt to call known init functions if they exist (makes injected pages initialize)
-        const inits = ['initDocRequestsPage', 'initTodayControl', 'initDelayReasons'];
-        for (const fnName of inits) {
-            try {
-                const fn = window[fnName];
-                if (typeof fn === 'function') {
-                    try { fn(); } catch (e) { console.warn(`init ${fnName} threw`, e); }
+        // Attempt to call init function for the active external page.
+        // IMPORTANT: on revisits, scripts may not re-run by themselves (because the browser
+        // caches loaded JS and we de-dupe <script src=...>), so we always call init explicitly.
+        const pageInitMap = {
+            'doc-requests.html': 'initDocRequestsPage',
+            'today-control.html': 'initTodayControl',
+            'delay-reasons.html': 'initDelayReasons',
+        };
+
+        const normalized = String(href || '').split('?')[0].split('#')[0];
+        const pageKey = normalized.split('/').pop();
+        const initName = pageInitMap[pageKey];
+        if (initName) {
+            const fn = window[initName];
+            if (typeof fn === 'function') {
+                try {
+                    fn();
+                } catch (e) {
+                    console.warn(`init ${initName} threw`, e);
                 }
-            } catch (e) {
-                // ignore
+            } else {
+                console.warn(`External page loaded but init function not found: ${initName}`);
             }
         }
 
