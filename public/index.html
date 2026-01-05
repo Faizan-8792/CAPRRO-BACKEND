@@ -21,6 +21,9 @@
   <!-- Hi-Tech Theme CSS -->
   <link rel="stylesheet" href="index-style.css" />
   
+  <!-- Loader CSS -->
+  <link rel="stylesheet" href="loader.css" />
+  
   <!-- Custom Login Styles -->
   <style>
     /* Login Page Specific Styles */
@@ -219,8 +222,10 @@
       min-height: 20px;
     }
     
+    /* Keep status box present so long messages don't jump layout */
     #status:empty {
-      display: none;
+      display: block;
+      opacity: 0.65;
     }
     
     /* Background elements visibility */

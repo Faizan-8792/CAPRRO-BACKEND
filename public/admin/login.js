@@ -70,6 +70,11 @@ async function initLoginPage() {
   const goVerify = document.getElementById('goVerify');
   const verifyBtn = document.getElementById('verifyOtp');
 
+  // Default hint (so the status area is never confusing/empty)
+  if (statusEl && !statusEl.textContent) {
+    statusEl.textContent = 'Enter your email, click “Send OTP”, then verify.';
+  }
+
   // ---------- UI handlers ----------
 
   goVerify?.addEventListener('click', () => {
@@ -122,6 +127,9 @@ async function initLoginPage() {
 
       statusEl.textContent = 'Verifying OTP...';
       if (window.caproShowLoader) window.caproShowLoader('Verifying OTP...');
+      
+      let user = null;
+      
       try {
         const res = await fetch(`${API_BASE}/auth/verify-otp`, {
           method: 'POST',
@@ -139,11 +147,18 @@ async function initLoginPage() {
 
         // Fetch user and redirect
         const me = await api('/auth/me');
-        const user = me.user;
+        user = me.user;
       } finally {
         if (window.caproHideLoader) window.caproHideLoader();
       }
+      
       console.log('Login successful user:', user);
+
+      if (!user) {
+        clearToken();
+        statusEl.textContent = 'Login failed: user profile not found. Please try again.';
+        return;
+      }
 
       if (isSuperAdmin(user)) {
         statusEl.textContent = 'Super Admin login successful. Redirecting...';
@@ -162,10 +177,9 @@ async function initLoginPage() {
       // 1) Agar already FIRM_ADMIN hai but pending
       if (user.role === 'FIRM_ADMIN' && user.isActive === false) {
         statusEl.innerHTML =
-          'Successfully signed up for Firm Admin! ' +
-          'Your request is now pending Super Admin approval. ' +
-          'Check back later or contact Super Admin at ' +
-          'saifullahfaizan786@gmail.com.';
+          'Your Firm Admin account is created, but it is <b>pending Super Admin approval</b>.<br/>' +
+          'You can open the Admin Panel in <b>view-only demo mode</b> for now.<br/>' +
+          'Please wait until Super Admin approves your request.';
         setTimeout(() => {
           window.location.href = '/admin/admin.html#dashboard';
         }, 2500);
@@ -175,7 +189,10 @@ async function initLoginPage() {
       // 2) USER with NO firm → truly new person
       if (user.role === 'USER' && !user.firmId) {
         statusEl.innerHTML =
-          'First create a firm from the admin panel, then come back to this page to sign in as Firm Admin.';
+          'You are signed in as a normal user.<br/>' +
+          '<b>Step 1:</b> Create your Firm from the <b>Chrome extension</b> (Create Firm).<br/>' +
+          '<b>Step 2:</b> Come back here and sign in again using OTP.<br/>' +
+          'After that, you will be taken to the Admin Panel (view-only) until Super Admin approves.';
         clearToken();
         return;
       }
