@@ -209,20 +209,29 @@ async function loadAdminExternalPage(href, activatingLink) {
         // First, execute scripts that were part of the injected fragment (inside the container)
         const scripts = Array.from(container.querySelectorAll('script'));
         const executedSrc = new Set();
+        const loadPromises = [];
         for (const s of scripts) {
-            const newScript = document.createElement('script');
             if (s.src) {
                 const src = s.getAttribute('src');
                 const abs = src.startsWith('http') || src.startsWith('/') ? src : `/admin/${src}`;
                 // avoid adding the same src twice
                 if (document.querySelector(`script[src="${abs}"]`) || executedSrc.has(abs)) { s.remove(); continue; }
+                const newScript = document.createElement('script');
                 newScript.src = abs;
                 newScript.async = false;
+                const p = new Promise((resolve) => {
+                    newScript.onload = () => resolve({ src: abs, ok: true });
+                    newScript.onerror = () => resolve({ src: abs, ok: false });
+                });
+                loadPromises.push(p);
+                document.body.appendChild(newScript);
                 executedSrc.add(abs);
             } else {
+                // inline script: execute immediately
+                const newScript = document.createElement('script');
                 newScript.textContent = s.textContent;
+                document.body.appendChild(newScript);
             }
-            document.body.appendChild(newScript);
             s.remove();
         }
 
@@ -237,6 +246,11 @@ async function loadAdminExternalPage(href, activatingLink) {
                 const newScript = document.createElement('script');
                 newScript.src = abs;
                 newScript.async = false;
+                const p = new Promise((resolve) => {
+                    newScript.onload = () => resolve({ src: abs, ok: true });
+                    newScript.onerror = () => resolve({ src: abs, ok: false });
+                });
+                loadPromises.push(p);
                 document.body.appendChild(newScript);
                 executedSrc.add(abs);
             } else if (s.textContent && s.textContent.trim()) {
@@ -244,6 +258,27 @@ async function loadAdminExternalPage(href, activatingLink) {
                 const newScript = document.createElement('script');
                 newScript.textContent = s.textContent;
                 document.body.appendChild(newScript);
+            }
+        }
+
+        // After all external scripts finish loading, try to call known init functions
+        try {
+            await Promise.all(loadPromises);
+        } catch (e) {
+            // ignore - we'll still attempt to call init functions
+            console.warn('Some scripts failed to load', e);
+        }
+
+        // Attempt to call known init functions if they exist (makes injected pages initialize)
+        const inits = ['initDocRequestsPage', 'initTodayControl', 'initDelayReasons'];
+        for (const fnName of inits) {
+            try {
+                const fn = window[fnName];
+                if (typeof fn === 'function') {
+                    try { fn(); } catch (e) { console.warn(`init ${fnName} threw`, e); }
+                }
+            } catch (e) {
+                // ignore
             }
         }
 

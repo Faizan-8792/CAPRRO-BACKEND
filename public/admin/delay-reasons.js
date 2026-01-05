@@ -22,12 +22,24 @@
         const st=document.getElementById('addStatus'); if(!id || !reason){ if (st) { st.textContent='TaskId and reason required'; st.className='small-label err'; } return; }
         if (st) { st.textContent='Adding...'; }
         try{
-          const res=await fetch(API + '/delay-logs', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization: 'Bearer '+token }, body: JSON.stringify({ taskId:id, reason, note }) });
-          const d=await res.json(); if(!d.ok) throw new Error(d.error||'Failed');
+          const res = await fetch(API + '/delay-logs', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization: 'Bearer '+token }, body: JSON.stringify({ taskId:id, reason, note }) });
+          const d = await res.json().catch(()=>null);
+          if (!res.ok) {
+            // Show detailed validation errors when available
+            const msg = (d && (d.error || (d.details && JSON.stringify(d.details)))) || `Request failed (${res.status})`;
+            throw new Error(msg);
+          }
+          if (d && d.ok === false) {
+            const details = d.details ? `: ${JSON.stringify(d.details)}` : '';
+            throw new Error((d.error || 'Validation failed') + details);
+          }
           if (st) { st.textContent='Added'; st.className='small-label ok'; }
           document.getElementById('taskId').value=''; document.getElementById('note').value='';
           loadAgg();
-        }catch(e){ if (st) { st.textContent=e.message || e; st.className='small-label err'; } }
+        } catch(e) {
+          console.error('Add delay log failed:', e);
+          if (st) { st.textContent = e.message || String(e); st.className='small-label err'; }
+        }
       });
     }
     loadAgg();
