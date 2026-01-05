@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import TaskDelayLog from "../models/TaskDelayLog.js";
 
 export const createDelayLog = async (req, res) => {
@@ -7,6 +8,17 @@ export const createDelayLog = async (req, res) => {
     console.log("[DelayLog] Request received:", { taskId, reason, note, firmId });
     
     if (!taskId || !reason) return res.status(400).json({ ok: false, error: "taskId and reason required" });
+
+    // Validate ObjectId early so we can return a clear 400 (Mongoose otherwise throws CastError)
+    if (!mongoose.Types.ObjectId.isValid(taskId)) {
+      return res.status(400).json({ ok: false, error: "Invalid taskId", details: { taskId: "Must be a valid ObjectId" } });
+    }
+
+    // Validate reason enum early so UI gets clear error
+    const allowedReasons = ["CLIENT_DELAY", "DOCUMENTS_PENDING", "STAFF_WORKLOAD", "TECHNICAL"]; 
+    if (!allowedReasons.includes(reason)) {
+      return res.status(400).json({ ok: false, error: "Invalid reason", details: { reason: `Must be one of: ${allowedReasons.join(", ")}` } });
+    }
 
     if (!firmId) {
       // More explicit error when user's firm context is missing
@@ -25,6 +37,11 @@ export const createDelayLog = async (req, res) => {
         }, {});
         console.error("[DelayLog] Validation error details:", details);
         return res.status(400).json({ ok: false, error: 'Validation failed', details });
+      }
+
+      // CastError (commonly thrown for invalid ObjectId)
+      if (saveErr && saveErr.name === 'CastError') {
+        return res.status(400).json({ ok: false, error: 'Validation failed', details: { [saveErr.path]: saveErr.message } });
       }
       throw saveErr;
     }
