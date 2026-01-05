@@ -492,19 +492,19 @@ function buildReminderMessage(item, type) {
     if (type === "pending") {
         return (
             `Hi ${item.clientName},\n\n` +
-            `Hum aapke ${item.serviceType || "compliance"} ke documents ka wait kar rahe hain. ` +
-            `Last 3+ din se documents pending hain.\n` +
+            `We are waiting for your ${item.serviceType || "compliance"} documents. ` +
+            `Your documents have been pending for 3+ days.\n` +
             `Due: ${dueText}.\n\n` +
-            `Kripya documents jaldi share karein.\n\n- CA PRO Toolkit`
+            `Please share the documents at the earliest.\n\n- CA PRO Toolkit`
         );
     }
 
     // high risk
     return (
         `Hi ${item.clientName},\n\n` +
-        `Pichle 2 periods me aapke ${item.serviceType || "compliance"} filings ` +
-        `due date ke baad submit hue the. Is baar time se complete karne ke liye ` +
-        `documents thoda pehle bhejne ka request hai.\n` +
+        `In the last 2 periods, your ${item.serviceType || "compliance"} filings ` +
+        `were submitted after the due date. To complete this on time, ` +
+        `please share the documents a bit earlier.\n` +
         `Current due: ${dueText}.\n\n` +
         `Thanks.\n\n- CA PRO Toolkit`
     );
@@ -594,7 +594,7 @@ async function loadClientsToChaseToday() {
             riskList.innerHTML = risk
                 .map((item, idx) => {
                     const label = escapeHtml(
-                        `${idx + 1}. ${item.clientName} – ${item.serviceType || ""} · last delay ${item.lastPeriodDelayDays} din`
+                        `${idx + 1}. ${item.clientName} – ${item.serviceType || ""} · last delay ${item.lastPeriodDelayDays} days`
                     );
                     return `
                         <li>

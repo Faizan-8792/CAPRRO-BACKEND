@@ -68,7 +68,7 @@
         CLOSED: [
           { id: 'ffffffffffffffffffffffff', clientName: 'Sample Client F', title: 'Client Onboarding', serviceType: 'Onboarding', dueDateISO: daysFromNow(-30), status: 'CLOSED', meta: {}, assignedTo: { email: 'fatima.demo@example.com' } },
           { id: '010101010101010101010101', clientName: 'Sample Client P', title: 'GST – Initial setup & checklist', serviceType: 'GST', dueDateISO: daysFromNow(-20), status: 'CLOSED', meta: {}, assignedTo: { email: 'rohit.demo@example.com' } },
-          { id: '020202020202020202020202', clientName: 'Sample Client Q', title: 'ROC – DIN KYC completed', serviceType: 'ROC', dueDateISO: daysFromNow(-15), status: 'CLOSED', meta: {}, assignedTo: { email: 'karan.demo@example.com' } },
+          { id: '020202020202020202020202', clientName: 'Sample Client Q', title: 'ROC – Director KYC completed', serviceType: 'ROC', dueDateISO: daysFromNow(-15), status: 'CLOSED', meta: {}, assignedTo: { email: 'karan.demo@example.com' } },
         ],
       },
     },
