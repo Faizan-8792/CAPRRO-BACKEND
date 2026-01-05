@@ -193,7 +193,11 @@ async function loadAdminExternalPage(href, activatingLink) {
         const parser = new DOMParser();
         const doc = parser.parseFromString(text, 'text/html');
 
-        // Insert the body content of the external page
+        // Remove external stylesheet and style tags from fetched doc so we rely on admin shell CSS
+        doc.querySelectorAll('link[rel="stylesheet"]').forEach(n => n.remove());
+        doc.querySelectorAll('style').forEach(n => n.remove());
+
+        // Insert the body content of the external page (now without its own styles)
         container.innerHTML = doc.body ? doc.body.innerHTML : text;
 
         // Execute any scripts referenced in the loaded HTML
