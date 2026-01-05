@@ -15,6 +15,38 @@ function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+// If the Chrome extension logs out, it can notify this page to force logout.
+// This only works when this admin panel is opened from the extension and the
+// content script bridge is available.
+try {
+    // Path A: if this page is running inside an extension context (rare)
+    if (window.chrome?.runtime?.onMessage?.addListener) {
+        window.chrome.runtime.onMessage.addListener((msg) => {
+            if (msg && msg.type === 'CAPRO_FORCE_LOGOUT') {
+                try {
+                    clearToken();
+                    window.location.href = '/index.html?reason=extension-logout';
+                } catch (e) {}
+            }
+        });
+    }
+
+    // Path B: normal hosted page — listen to bridge messages via window.postMessage
+    window.addEventListener('message', (ev) => {
+        const data = ev?.data;
+        if (!data || data.source !== 'CAPRO_EXTENSION') return;
+        const msg = data.payload;
+        if (msg && msg.type === 'CAPRO_FORCE_LOGOUT') {
+            try {
+                clearToken();
+                window.location.href = '/index.html?reason=extension-logout';
+            } catch (e) {}
+        }
+    });
+} catch (e) {
+    // ignore if not running inside an extension-injected context
+}
+
 async function apiGetMe() {
   const token = getToken();
   if (!token) throw new Error("No token");
