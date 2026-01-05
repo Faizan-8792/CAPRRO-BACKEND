@@ -989,15 +989,17 @@ input:focus, textarea:focus, select:focus, .form-control:focus, .form-select:foc
 
 /* Rectangular modern cards */
 .task-card {
-  background: rgba(17, 24, 39, 0.9) !important;
-  border: 1px solid rgba(96, 165, 250, 0.25) !important;
-  border-radius: 10px !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+  background: rgba(17, 24, 39, 0.96) !important;
+  border: 1px solid rgba(96, 165, 250, 0.20) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 20px rgba(2, 6, 23, 0.45) !important;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  padding: 12px 14px;
-  margin-bottom: 10px;
-  font-size: 12px;
+  transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 16px 18px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  line-height: 1.35;
+  min-height: 72px;
 }
 
 .task-card:hover {
@@ -1009,13 +1011,13 @@ input:focus, textarea:focus, select:focus, .form-control:focus, .form-select:foc
 .task-summary-title {
   color: #ffffff !important;
   font-weight: 700;
-  font-size: 13px;
-  margin-bottom: 4px;
+  font-size: 14px;
+  margin-bottom: 6px;
 }
 
 .task-summary-sub {
   color: var(--muted) !important;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .task-meta {

@@ -130,7 +130,7 @@ function renderTaskColumn(title, key, items) {
     .join('');
 
   return `
-    <div class="col-md-4 col-lg-2">
+    <div class="col-12 col-md-6 col-lg-3">
       <div class="task-column">
         <div class="task-column-header">
           <span>${esc(title)}</span>
