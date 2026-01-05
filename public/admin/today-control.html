@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Today Control Center</title>
+  <link rel="stylesheet" href="admin.css" />
+  <style>
+    .tc-grid { display:flex; gap:18px; align-items:flex-start; }
+    .tc-card { background: rgba(255,255,255,0.03); padding:14px; border-radius:8px; flex:1 }
+    .tc-list { max-height:380px; overflow:auto }
+  </style>
+</head>
+<body>
+  <h3>Today Control Center</h3>
+  <div class="tc-grid">
+    <div class="tc-card">
+      <h4>Tasks due today</h4>
+      <div id="dueToday" class="tc-list">Loading…</div>
+    </div>
+    <div class="tc-card">
+      <h4>Overdue tasks</h4>
+      <div id="overdue" class="tc-list">Loading…</div>
+    </div>
+    <div class="tc-card">
+      <h4>Pending documents</h4>
+      <div id="pendingDocs" class="tc-list">Loading…</div>
+    </div>
+    <div class="tc-card">
+      <h4>Newly assigned (24h)</h4>
+      <div id="newAssigned" class="tc-list">Loading…</div>
+    </div>
+  </div>
+
+  <script>
+    const API = '/api';
+    const token = localStorage.getItem('caproadminjwt');
+
+    async function loadBoard(){
+      const resp = await fetch(API + '/tasks/board', { headers: { Authorization: 'Bearer '+token } });
+      const data = await resp.json();
+      if(!data.ok) { document.getElementById('dueToday').innerText='Failed to load'; return; }
+      const cols = data.columns || {};
+      const all = [].concat(cols.NOT_STARTED||[], cols.WAITING_DOCS||[], cols.IN_PROGRESS||[], cols.FILED||[], cols.CLOSED||[]);
+
+      const today = new Date(); today.setHours(0,0,0,0);
+      const tomorrow = new Date(today.getTime()+24*3600*1000);
+
+      const dueToday = all.filter(t=>{
+        try{ const d=new Date(t.dueDateISO); return d>=today && d<tomorrow; }catch(e){return false}
+      });
+
+      const overdue = all.filter(t=>{ try{ return new Date(t.dueDateISO) < new Date(); }catch(e){return false} });
+
+      const since = new Date(Date.now() - 24*3600*1000);
+      const newly = all.filter(t=> new Date(t.createdAt || Date.now()) >= since);
+
+      document.getElementById('dueToday').innerHTML = renderList(dueToday);
+      document.getElementById('overdue').innerHTML = renderList(overdue);
+      document.getElementById('newAssigned').innerHTML = renderList(newly);
+    }
+
+    function renderList(items){
+      if(!items || !items.length) return '<div class="muted">No items</div>';
+      return items.slice(0,20).map(t=>`<div style="padding:8px;border-bottom:1px solid rgba(255,255,255,0.03)"><a href="/admin/admin.html#tasks" target="_blank">${t.title}</a> <div class="muted small">${t.clientName||''} • Due: ${t.dueDateISO? new Date(t.dueDateISO).toLocaleDateString(): '-'}</div></div>`).join('');
+    }
+
+    async function loadPendingDocs(){
+      const res = await fetch(API + '/document-requests/pending-summary', { headers: { Authorization: 'Bearer '+token } });
+      const d = await res.json();
+      if(!d.ok) { document.getElementById('pendingDocs').innerText='Failed'; return; }
+      const counts = d.counts || {};
+      const html = Object.keys(counts).map(k=>`<div><strong>${k}</strong>: ${counts[k]}</div>`).join('');
+      document.getElementById('pendingDocs').innerHTML = html + '<hr/>' + ((d.recent||[]).map(r=>`<div class="muted">${r.clientName||r.clientId} • ${new Date(r.createdAt).toLocaleString()}</div>`).join(''));
+    }
+
+    (async function(){ try{ await loadBoard(); await loadPendingDocs(); }catch(e){ console.error(e); } })();
+  </script>
+</body>
+</html>

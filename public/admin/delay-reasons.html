@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Delay Reasons - Admin</title>
+  <link rel="stylesheet" href="admin.css" />
+  <style>
+    .dr-grid { display:flex; gap:18px }
+    .dr-left, .dr-right { background: rgba(255,255,255,0.03); padding:12px; border-radius:8px }
+  </style>
+</head>
+<body>
+  <h3>Delay Reasons</h3>
+  <div class="dr-grid">
+    <div class="dr-left" style="flex:1">
+      <h4>Aggregated Reasons (30d)</h4>
+      <div id="agg">Loading…</div>
+    </div>
+    <div class="dr-right" style="width:380px">
+      <h4>Add Delay Log</h4>
+      <label>Task ID</label>
+      <input id="taskId" style="width:100%" />
+      <label>Reason</label>
+      <select id="reason" style="width:100%">
+        <option value="CLIENT_DELAY">Client delay</option>
+        <option value="DOCUMENTS_PENDING">Documents pending</option>
+        <option value="STAFF_WORKLOAD">Staff workload</option>
+        <option value="TECHNICAL">Technical</option>
+      </select>
+      <label>Note</label>
+      <textarea id="note" rows="4" style="width:100%"></textarea>
+      <div style="text-align:right;margin-top:8px"><button id="addBtn" class="btn btn-primary">Add</button></div>
+      <div id="addStatus" class="small-label" style="margin-top:6px"></div>
+    </div>
+  </div>
+
+  <script>
+    const API='/api'; const token=localStorage.getItem('caproadminjwt');
+    async function loadAgg(){
+      const res = await fetch(API + '/delay-logs/aggregate', { headers: { Authorization: 'Bearer '+token } });
+      const d = await res.json(); if(!d.ok) return document.getElementById('agg').innerText='Failed';
+      document.getElementById('agg').innerHTML = (d.aggregate||[]).map(x=>`<div><strong>${x._id}</strong>: ${x.count}</div>`).join('') + '<hr/>' + (d.recent||[]).map(r=>`<div class="muted small">${r.taskId} • ${r.reason} • ${new Date(r.createdAt).toLocaleString()}</div>`).join('');
+    }
+    document.getElementById('addBtn').addEventListener('click', async()=>{
+      const id=document.getElementById('taskId').value.trim(); const reason=document.getElementById('reason').value; const note=document.getElementById('note').value;
+      const st=document.getElementById('addStatus'); if(!id || !reason){ st.textContent='TaskId and reason required'; st.className='small-label err'; return; }
+      st.textContent='Adding...'; try{ const res=await fetch(API + '/delay-logs', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization: 'Bearer '+token }, body: JSON.stringify({ taskId:id, reason, note }) }); const d=await res.json(); if(!d.ok) throw new Error(d.error||'Failed'); st.textContent='Added'; st.className='small-label ok'; document.getElementById('taskId').value=''; document.getElementById('note').value=''; loadAgg(); }catch(e){ st.textContent=e.message || e; st.className='small-label err'; }
+    });
+    loadAgg();
+  </script>
+</body>
+</html>
