@@ -30,7 +30,10 @@
   function initDocRequestsPage(){
     const btn = document.getElementById('createReqBtn');
     if (btn) {
-      btn.addEventListener('click', async()=>{
+      // Important for SPA fragment navigation:
+      // this page's DOM is replaced on each visit, and init may run multiple times.
+      // Replace the handler to avoid duplicate binds or stale closures.
+      btn.onclick = async()=>{
         const cid = document.getElementById('clientId').value.trim();
         const due = document.getElementById('dueDate').value;
         const itemsRaw = document.getElementById('items').value.trim();
@@ -51,7 +54,7 @@
           loadRequests();
         }catch(e){ if (statusEl) { statusEl.textContent = e.message || e; statusEl.className='small-label err'; } }
         finally { if (window.caproHideLoader) window.caproHideLoader(); }
-      });
+      };
     }
 
     loadRequests();

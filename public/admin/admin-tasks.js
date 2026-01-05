@@ -21,6 +21,12 @@ function esc(s) {
 }
 
 async function apiTasks(path, opts) {
+  // Prefer the shared admin.js api() wrapper so demo mode can intercept.
+  // This keeps existing behaviour for approved admins, and fixes demo/pending admins.
+  if (typeof window.api === 'function') {
+    return window.api(path, opts);
+  }
+
   const token = getAdminToken();
   const headers = Object.assign(
     { 'Content-Type': 'application/json' },

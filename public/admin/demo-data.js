@@ -46,18 +46,29 @@
         NOT_STARTED: [
           { id: 'aaaaaaaaaaaaaaaaaaaaaaaa', clientName: 'Sample Client A', title: 'ITR Filing FY 24-25', serviceType: 'ITR', dueDateISO: daysFromNow(5), status: 'NOT_STARTED', meta: {} },
           { id: 'bbbbbbbbbbbbbbbbbbbbbbbb', clientName: 'Sample Client B', title: 'GST Return (GSTR-3B)', serviceType: 'GST', dueDateISO: daysFromNow(2), status: 'NOT_STARTED', meta: {} },
+          { id: 'abababababababababababab', clientName: 'Sample Client G', title: 'TDS Payment Challan (Jan)', serviceType: 'TDS', dueDateISO: daysFromNow(4), status: 'NOT_STARTED', meta: {}, assignedTo: { email: 'arjun.demo@example.com' } },
+          { id: 'bcbcbcbcbcbcbcbcbcbcbcbc', clientName: 'Sample Client H', title: 'GST Registration Amendment', serviceType: 'GST', dueDateISO: daysFromNow(10), status: 'NOT_STARTED', meta: {}, assignedTo: { email: 'rohit.demo@example.com' } },
+          { id: 'cdcdcdcdcdcdcdcdcdcdcdcd', clientName: 'Sample Client I', title: 'ROC Board Resolution Filing', serviceType: 'ROC', dueDateISO: daysFromNow(7), status: 'NOT_STARTED', meta: {}, assignedTo: { email: 'karan.demo@example.com' } },
         ],
         WAITING_DOCS: [
           { id: 'cccccccccccccccccccccccc', clientName: 'Sample Client C', title: 'TDS Quarterly Return', serviceType: 'TDS', dueDateISO: daysFromNow(1), status: 'WAITING_DOCS', meta: { waitingSince: daysFromNow(-6), delayReason: 'DOCUMENTS_PENDING' }, assignedTo: { email: 'neha.demo@example.com' } },
+          { id: 'dededededededededededede', clientName: 'Sample Client J', title: 'ITR – Capital gains details', serviceType: 'ITR', dueDateISO: daysFromNow(3), status: 'WAITING_DOCS', meta: { waitingSince: daysFromNow(-4), delayReason: 'CLIENT_DELAY' }, assignedTo: { email: 'fatima.demo@example.com' } },
+          { id: 'efefefefefefefefefefefef', clientName: 'Sample Client K', title: 'GST – Purchase invoices (missing)', serviceType: 'GST', dueDateISO: daysFromNow(2), status: 'WAITING_DOCS', meta: { waitingSince: daysFromNow(-8), delayReason: 'DOCUMENTS_PENDING' }, assignedTo: { email: 'rohit.demo@example.com' } },
         ],
         IN_PROGRESS: [
           { id: 'dddddddddddddddddddddddd', clientName: 'Sample Client D', title: 'ROC Annual Filing', serviceType: 'ROC', dueDateISO: daysFromNow(8), status: 'IN_PROGRESS', meta: {}, assignedTo: { email: 'rohit.demo@example.com' } },
+          { id: 'f0f0f0f0f0f0f0f0f0f0f0f0', clientName: 'Sample Client L', title: 'Audit – Vouching & ledger review', serviceType: 'AUDIT', dueDateISO: daysFromNow(12), status: 'IN_PROGRESS', meta: {}, assignedTo: { email: 'karan.demo@example.com' } },
+          { id: 'f1f1f1f1f1f1f1f1f1f1f1f1', clientName: 'Sample Client M', title: 'TDS – Form 26Q preparation', serviceType: 'TDS', dueDateISO: daysFromNow(6), status: 'IN_PROGRESS', meta: {}, assignedTo: { email: 'neha.demo@example.com' } },
         ],
         FILED: [
           { id: 'eeeeeeeeeeeeeeeeeeeeeeee', clientName: 'Sample Client E', title: 'GST Annual Return', serviceType: 'GST', dueDateISO: daysFromNow(-3), status: 'FILED', meta: {}, assignedTo: { email: 'karan.demo@example.com' } },
+          { id: 'f2f2f2f2f2f2f2f2f2f2f2f2', clientName: 'Sample Client N', title: 'ITR – Computation & upload', serviceType: 'ITR', dueDateISO: daysFromNow(-1), status: 'FILED', meta: {}, assignedTo: { email: 'fatima.demo@example.com' } },
+          { id: 'f3f3f3f3f3f3f3f3f3f3f3f3', clientName: 'Sample Client O', title: 'TDS – TRACES correction', serviceType: 'TDS', dueDateISO: daysFromNow(-10), status: 'FILED', meta: {}, assignedTo: { email: 'arjun.demo@example.com' } },
         ],
         CLOSED: [
           { id: 'ffffffffffffffffffffffff', clientName: 'Sample Client F', title: 'Client Onboarding', serviceType: 'Onboarding', dueDateISO: daysFromNow(-30), status: 'CLOSED', meta: {}, assignedTo: { email: 'fatima.demo@example.com' } },
+          { id: '010101010101010101010101', clientName: 'Sample Client P', title: 'GST – Initial setup & checklist', serviceType: 'GST', dueDateISO: daysFromNow(-20), status: 'CLOSED', meta: {}, assignedTo: { email: 'rohit.demo@example.com' } },
+          { id: '020202020202020202020202', clientName: 'Sample Client Q', title: 'ROC – DIN KYC completed', serviceType: 'ROC', dueDateISO: daysFromNow(-15), status: 'CLOSED', meta: {}, assignedTo: { email: 'karan.demo@example.com' } },
         ],
       },
     },
