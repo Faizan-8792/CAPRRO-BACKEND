@@ -18,49 +18,42 @@
   <!-- Animate.css -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
   
-  <!-- Hi-Tech Dashboard CSS -->
-  <link rel="stylesheet" href="admin.css" />
+  <!-- Hi-Tech Theme CSS -->
+  <link rel="stylesheet" href="index-style.css" />
   
   <!-- Custom Login Styles -->
   <style>
-    /* Override Bootstrap light theme with dark futuristic theme */
-    body.bg-light {
+    /* Login Page Specific Styles */
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
       background: linear-gradient(135deg, #0a0e17, #1a1f38) !important;
       color: #ffffff !important;
     }
     
-    .text-muted {
-      color: #cbd5e1 !important;
+    .login-wrapper {
+      width: 100%;
+      max-width: 480px;
+      padding: 20px;
+      z-index: 10;
     }
     
-    .form-label {
-      color: #e2e8f0 !important;
-      font-family: 'Rajdhani', sans-serif;
-      font-weight: 500;
-      font-size: 14px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-    
-    h3 {
-      color: #ffffff !important;
-      font-family: 'Orbitron', sans-serif;
-      font-weight: 700;
-      letter-spacing: 0.05em;
-      background: linear-gradient(90deg, #3b82f6, #60a5fa);
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      text-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
-    }
-    
-    .card {
-      background: rgba(15, 23, 42, 0.9) !important;
+    .login-card {
+      background: rgba(15, 23, 42, 0.95) !important;
       backdrop-filter: blur(20px);
       border: 1px solid rgba(96, 165, 250, 0.3) !important;
       border-radius: 16px !important;
       box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4),
                   inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+      padding: 32px;
       animation: loginGlow 3s ease-in-out infinite alternate;
     }
     
@@ -77,13 +70,49 @@
       }
     }
     
+    .login-title {
+      color: #ffffff !important;
+      font-family: 'Orbitron', sans-serif;
+      font-weight: 700;
+      font-size: 28px;
+      letter-spacing: 0.05em;
+      background: linear-gradient(90deg, #3b82f6, #60a5fa);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+      margin-bottom: 8px;
+    }
+    
+    .login-subtitle {
+      color: #94a3b8 !important;
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 14px;
+      margin-bottom: 24px;
+    }
+    
+    .form-label {
+      color: #e2e8f0 !important;
+      font-family: 'Rajdhani', sans-serif;
+      font-weight: 500;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 6px;
+      display: block;
+    }
+    
     .form-control {
+      width: 100%;
       background: rgba(30, 41, 59, 0.9) !important;
       border: 1px solid rgba(96, 165, 250, 0.3) !important;
       border-radius: 10px !important;
       color: #ffffff !important;
       font-family: 'Exo 2', monospace;
+      font-size: 15px;
+      padding: 12px 16px;
       transition: all 0.3s ease;
+      box-sizing: border-box;
     }
     
     .form-control:focus {
@@ -91,22 +120,37 @@
       border-color: #60a5fa !important;
       box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.2) !important;
       color: #ffffff !important;
+      outline: none;
     }
     
     .form-control::placeholder {
-      color: #94a3b8 !important;
+      color: #64748b !important;
+    }
+    
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    
+    .btn {
+      flex: 1;
+      padding: 12px 20px;
+      border-radius: 10px !important;
+      font-family: 'Rajdhani', sans-serif;
+      font-weight: 600;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      border: none;
     }
     
     .btn-outline-secondary {
       background: rgba(30, 41, 59, 0.8) !important;
       border: 1px solid rgba(148, 163, 184, 0.4) !important;
       color: #e2e8f0 !important;
-      border-radius: 10px !important;
-      font-family: 'Rajdhani', sans-serif;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      transition: all 0.3s ease;
     }
     
     .btn-outline-secondary:hover {
@@ -119,16 +163,9 @@
     
     .btn-primary {
       background: linear-gradient(135deg, #3b82f6, #60a5fa) !important;
-      border: none !important;
       color: #ffffff !important;
-      border-radius: 10px !important;
-      font-family: 'Rajdhani', sans-serif;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
       position: relative;
       overflow: hidden;
-      transition: all 0.3s ease;
     }
     
     .btn-primary::before {
@@ -153,15 +190,8 @@
     
     .btn-success {
       background: linear-gradient(135deg, #10b981, #34d399) !important;
-      border: none !important;
       color: #ffffff !important;
-      border-radius: 10px !important;
-      font-family: 'Rajdhani', sans-serif;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      position: relative;
-      overflow: hidden;
+      width: 100%;
     }
     
     .btn-success:hover {
@@ -170,14 +200,37 @@
       box-shadow: 0 15px 30px rgba(16, 185, 129, 0.4);
     }
     
+    #otpBlock {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(96, 165, 250, 0.15);
+    }
+    
     #status {
-      color: #cbd5e1 !important;
+      color: #94a3b8 !important;
       font-family: 'Exo 2', monospace;
       font-size: 13px;
-      padding: 10px;
+      padding: 12px;
       border-radius: 8px;
       background: rgba(30, 41, 59, 0.6);
-      border: 1px solid rgba(96, 165, 250, 0.2);
+      border: 1px solid rgba(96, 165, 250, 0.15);
+      margin-top: 20px;
+      text-align: center;
+      min-height: 20px;
+    }
+    
+    #status:empty {
+      display: none;
+    }
+    
+    /* Background elements visibility */
+    .matrix-rain,
+    .floating-nodes,
+    .circuit-grid,
+    .neural-lines,
+    .kpi-orbs {
+      position: fixed;
+      pointer-events: none;
     }
     
     /* Custom scrollbar */
@@ -187,7 +240,6 @@
     
     ::-webkit-scrollbar-track {
       background: rgba(15, 23, 42, 0.6);
-      border-radius: 4px;
     }
     
     ::-webkit-scrollbar-thumb {
@@ -195,8 +247,8 @@
       border-radius: 4px;
     }
     
-    /* Animation for the login container */
-    .container {
+    /* Animation for login card */
+    .login-wrapper {
       animation: fadeInUp 0.8s ease-out;
     }
     
@@ -211,25 +263,29 @@
       }
     }
     
-    /* Responsive adjustments */
-    @media (max-width: 768px) {
-      .container {
-        padding: 20px !important;
+    /* Responsive */
+    @media (max-width: 540px) {
+      .login-wrapper {
+        padding: 16px;
       }
       
-      .card {
-        padding: 24px !important;
+      .login-card {
+        padding: 24px;
       }
       
-      h3 {
-        font-size: 24px;
+      .login-title {
+        font-size: 22px;
+      }
+      
+      .btn-row {
+        flex-direction: column;
       }
     }
   </style>
 </head>
-<body class="bg-light">
+<body>
 
-  <!-- Background animations for hi-tech theme -->
+  <!-- Background animations -->
   <div class="matrix-rain"></div>
   <div class="floating-nodes"></div>
   <div class="circuit-grid"></div>
@@ -241,29 +297,28 @@
     <div class="kpi-orb"></div>
   </div>
 
-  <div class="container" style="max-width:520px; padding-top:40px;">
-    <div class="card shadow-sm p-4">
-      <h3 class="mb-1">CA PRO Admin</h3>
-      <p class="text-muted small mb-3">Login using OTP (JWT will be stored in browser for this admin panel).</p>
+  <div class="login-wrapper">
+    <div class="login-card">
+      <h1 class="login-title">CA PRO Admin</h1>
+      <p class="login-subtitle">Login using OTP – Secure access to your admin panel</p>
 
-      <label class="form-label">Email</label>
+      <label class="form-label">Email Address</label>
       <input id="email" type="email" class="form-control" placeholder="you@office.com" />
 
-      <div class="d-flex gap-2 mt-3">
-        <button id="sendOtp" class="btn btn-outline-secondary w-100" type="button">Send OTP</button>
-        <button id="goVerify" class="btn btn-primary w-100" type="button">I have OTP</button>
+      <div class="btn-row">
+        <button id="sendOtp" class="btn btn-outline-secondary" type="button">Send OTP</button>
+        <button id="goVerify" class="btn btn-primary" type="button">I Have OTP</button>
       </div>
 
-      <div id="otpBlock" style="display:none; margin-top:12px;">
-        <label class="form-label mt-2">OTP Code</label>
-        <input id="otp" type="text" class="form-control" placeholder="6-digit OTP" />
-
-        <button id="verifyOtp" class="btn btn-success w-100 mt-3" type="button">
+      <div id="otpBlock" style="display:none;">
+        <label class="form-label">OTP Code</label>
+        <input id="otp" type="text" class="form-control" placeholder="Enter 6-digit OTP" maxlength="6" />
+        <button id="verifyOtp" class="btn btn-success" style="margin-top:16px;" type="button">
           Verify & Login
         </button>
       </div>
 
-      <div id="status" class="small text-muted mt-3"></div>
+      <div id="status"></div>
     </div>
   </div>
 
