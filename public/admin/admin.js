@@ -923,6 +923,26 @@ async function initAdminPage() {
             qs('topSub').textContent = firm ? `Firm: ${firm.displayName} (@${firm.handle})` : 'No firm linked';
         }
 
+        // Navbar plan badge (PREMIUM vs STANDARD)
+        // Note: legacy values in codebase include FREE/PREMIUM; user asked for STANDARD/PREMIUM.
+        try {
+            const badge = qs('planBadge');
+            if (badge) {
+                const planRaw = String(firm?.planType || '').toUpperCase();
+                const isPremium = planRaw === 'PREMIUM' || planRaw === 'PRO';
+                badge.textContent = isPremium ? 'PREMIUM' : 'STANDARD';
+                badge.style.display = 'inline-flex';
+                badge.classList.remove('bg-light', 'text-dark', 'bg-warning', 'text-dark');
+                if (isPremium) {
+                    badge.classList.add('bg-warning', 'text-dark');
+                } else {
+                    badge.classList.add('bg-light', 'text-dark');
+                }
+            }
+        } catch (e) {
+            // ignore UI-only badge failures
+        }
+
         // ✅ DASHBOARD KPIs
         if (qs('kpiFirmName')) qs('kpiFirmName').textContent = firm?.displayName || 'Individual';
         if (qs('kpiFirmHandle')) qs('kpiFirmHandle').textContent = firm?.handle || '';

@@ -15,7 +15,12 @@
   <!-- TOP NAVBAR — IDs exactly as admin.js expects -->
   <nav class="navbar navbar-expand-lg navbar-dark bg-primary topbar">
     <div class="container-fluid">
-      <span class="navbar-brand mb-0 h1">CA PRO</span>
+      <div class="d-flex align-items-center gap-2 navbar-brand mb-0 h1" style="margin:0">
+        <span>CA PRO</span>
+        <span id="planBadge" class="badge rounded-pill bg-light text-dark" style="display:none; font-size: .75rem; letter-spacing: .4px;">
+          STANDARD
+        </span>
+      </div>
 
       <div class="d-flex flex-column flex-sm-row align-items-sm-center ms-auto gap-1">
         <span id="topSub" class="topbar-sub small-label">

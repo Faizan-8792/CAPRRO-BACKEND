@@ -1163,6 +1163,16 @@ input:focus, textarea:focus, select:focus, .form-control:focus, .form-select:foc
   font-weight: 500;
 }
 
+/* Today reminders (tomorrow due) list should stay readable on dark cards */
+#todayRemindersList,
+#todayRemindersList li {
+  color: #ffffff;
+}
+
+#todayRemindersList li {
+  margin-bottom: 6px;
+}
+
 /* Copy reminder buttons */
 #chasePendingList .btn-small,
 #chaseRiskList .btn-small {
