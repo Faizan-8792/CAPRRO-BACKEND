@@ -1,17 +1,4 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Document Requests - Admin</title>
-  <link rel="stylesheet" href="admin.css" />
-  <style>
-    .dr-grid { display:flex; gap:18px; align-items:flex-start }
-    .dr-form, .dr-list { background: rgba(255,255,255,0.03); padding:16px; border-radius:8px; flex:1 }
-    .dr-items { margin-top:8px }
-    .chip { display:inline-block; padding:4px 8px; border-radius:12px; background:#0ea5e9; color:#fff; margin-right:6px; font-size:12px }
-  </style>
-</head>
-<body>
+<div id="page-root" class="page-content">
   <h3>Document Requests</h3>
   <div class="dr-grid">
     <div class="dr-form">
@@ -33,7 +20,6 @@
       <div id="requestsList">Loading…</div>
     </div>
   </div>
+</div>
 
-  <script src="doc-requests.js"></script>
-</body>
-</html>
+<script src="doc-requests.js"></script>

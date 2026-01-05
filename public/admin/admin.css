@@ -1769,6 +1769,47 @@ table.table.align-middle.mb-0 tbody tr:nth-child(even) {
   background: rgba(30, 41, 59, 0.6) !important;
 }
 
+.page-content {
+  padding: 8px 0 24px 0;
+}
+
+.tc-grid, .dr-grid {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.tc-card, .dr-form, .dr-list, .dr-left, .dr-right {
+  background: rgba(17, 24, 39, 0.9) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 10px;
+  padding: 14px;
+  flex: 1 1 280px;
+  box-shadow: var(--shadow);
+}
+
+.tc-list, .dr-items, #requestsList, #dueToday, #overdue, #pendingDocs, #newAssigned, #agg {
+  max-height: 420px;
+  overflow: auto;
+}
+
+.chip {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--pri), var(--pri-2));
+  color: #fff;
+  margin-right: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 768px) {
+  .tc-grid, .dr-grid {
+    flex-direction: column;
+  }
+}
 table.table.align-middle.mb-0 tbody tr:nth-child(even):hover {
   background: rgba(59, 130, 246, 0.15) !important;
 }

@@ -197,8 +197,13 @@ async function loadAdminExternalPage(href, activatingLink) {
         doc.querySelectorAll('link[rel="stylesheet"]').forEach(n => n.remove());
         doc.querySelectorAll('style').forEach(n => n.remove());
 
-        // Insert the body content of the external page (now without its own styles)
-        container.innerHTML = doc.body ? doc.body.innerHTML : text;
+        // Prefer a fragment root (#page-root) if the page provides it, otherwise fall back to body
+        const fragmentRoot = doc.getElementById('page-root') || doc.querySelector('.page-content');
+        if (fragmentRoot) {
+            container.innerHTML = fragmentRoot.innerHTML;
+        } else {
+            container.innerHTML = doc.body ? doc.body.innerHTML : text;
+        }
 
         // Execute any scripts referenced in the loaded HTML
         const scripts = Array.from(container.querySelectorAll('script'));
