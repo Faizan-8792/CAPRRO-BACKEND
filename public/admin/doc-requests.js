@@ -18,7 +18,7 @@ async function loadRequests(){
   }catch(e){ el.innerHTML = '<div class="error">'+(e.message||e)+'</div>' }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function initDocRequestsPage(){
   const btn = document.getElementById('createReqBtn');
   if (btn) {
     btn.addEventListener('click', async()=>{
@@ -41,4 +41,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   loadRequests();
-});
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initDocRequestsPage); else initDocRequestsPage();

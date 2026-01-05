@@ -12,7 +12,7 @@ async function loadAgg(){
   }catch(e){ console.error('loadAgg', e); const aggEl = document.getElementById('agg'); if (aggEl) aggEl.innerText='Failed'; }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function initDelayReasons(){
   const addBtn = document.getElementById('addBtn');
   if (addBtn) {
     addBtn.addEventListener('click', async()=>{
@@ -29,4 +29,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
   loadAgg();
-});
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initDelayReasons); else initDelayReasons();

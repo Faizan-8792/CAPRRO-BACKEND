@@ -43,6 +43,8 @@ async function loadPendingDocs(){
   }catch(e){ console.error('loadPendingDocs', e); }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function initTodayControl(){
   (async function(){ try{ await loadBoard(); await loadPendingDocs(); }catch(e){ console.error(e); } })();
-});
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initTodayControl); else initTodayControl();

@@ -151,6 +151,10 @@ function showPage(hash) {
         }
     }
 
+    // If an external page container was loaded, hide it when navigating to SPA sections
+    const externalContainer = qs('externalPageContainer');
+    if (externalContainer) externalContainer.style.display = 'none';
+
     // FIXED: Target sidebar links (.sidebar a), not <nav>
     const sidebar = document.querySelector('.sidebar');
     if (sidebar) {
@@ -158,6 +162,65 @@ function showPage(hash) {
             const targetHash = a.getAttribute('href');
             a.classList.toggle('active', targetHash === hash);
         });
+    }
+}
+
+// Load an external admin HTML page into the main content area without navigating away
+async function loadAdminExternalPage(href, activatingLink) {
+    const containerId = 'externalPageContainer';
+    let container = qs(containerId);
+    if (!container) {
+        container = document.createElement('div');
+        container.id = containerId;
+        container.className = 'card p-3 mb-3';
+        const main = document.querySelector('main.content');
+        if (main) main.appendChild(container);
+    }
+
+    // Hide SPA sections
+    document.querySelectorAll('main.content > section').forEach(s => s.style.display = 'none');
+    container.style.display = 'block';
+    container.innerHTML = '<div class="small-label">Loading page...</div>';
+
+    try {
+        const path = href.startsWith('/') ? href : `/admin/${href}`;
+        const res = await fetch(path, { credentials: 'same-origin' });
+        if (!res.ok) {
+            container.innerHTML = `<div class="alert alert-danger">Failed to load page: ${res.status}</div>`;
+            return;
+        }
+        const text = await res.text();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(text, 'text/html');
+
+        // Insert the body content of the external page
+        container.innerHTML = doc.body ? doc.body.innerHTML : text;
+
+        // Execute any scripts referenced in the loaded HTML
+        const scripts = Array.from(container.querySelectorAll('script'));
+        for (const s of scripts) {
+            const newScript = document.createElement('script');
+            if (s.src) {
+                const src = s.getAttribute('src');
+                const abs = src.startsWith('http') || src.startsWith('/') ? src : `/admin/${src}`;
+                newScript.src = abs;
+                newScript.async = false;
+            } else {
+                newScript.textContent = s.textContent;
+            }
+            document.body.appendChild(newScript);
+            s.remove();
+        }
+
+        // Update active link styling
+        if (activatingLink) {
+            document.querySelectorAll('.sidebar a').forEach(a => a.classList.toggle('active', a === activatingLink));
+        }
+
+        window.scrollTo(0, 0);
+    } catch (err) {
+        console.error('loadAdminExternalPage error', err);
+        container.innerHTML = `<div class="alert alert-danger">Error loading page</div>`;
     }
 }
 
@@ -516,6 +579,15 @@ async function initAdminPage() {
             e.preventDefault();
             const hash = link.getAttribute('href');
             window.location.hash = hash;
+        });
+    });
+
+    // Intercept sidebar links that point to separate admin HTML pages and load them into the SPA
+    document.querySelectorAll('.sidebar a[href$=".html"]').forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const href = link.getAttribute('href');
+            loadAdminExternalPage(href, link);
         });
     });
 
