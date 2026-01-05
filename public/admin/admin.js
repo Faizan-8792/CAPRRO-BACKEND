@@ -866,11 +866,9 @@ async function loadEmployeeProductivity() {
             color: 'rgba(255,255,255,0.08)'
           }
         }
-       <li><a href="/admin/doc-requests.html">Document Requests</a></li>
-    <li><a href="/admin/today-control.html">Today Control</a></li>
-    <li><a href="/admin/delay-reasons.html">Delay Reasons</a></li>   }
-    }
-  });
+            }
+        }
+    });
 }
 
 // Period dropdown handler
