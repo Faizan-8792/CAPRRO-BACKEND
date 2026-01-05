@@ -4,6 +4,8 @@ export const createDelayLog = async (req, res) => {
   try {
     const firmId = req.user.firmId;
     const { taskId, reason, note } = req.body || {};
+    console.log("[DelayLog] Request received:", { taskId, reason, note, firmId });
+    
     if (!taskId || !reason) return res.status(400).json({ ok: false, error: "taskId and reason required" });
 
     if (!firmId) {
@@ -21,11 +23,13 @@ export const createDelayLog = async (req, res) => {
           acc[k] = saveErr.errors[k].message;
           return acc;
         }, {});
+        console.error("[DelayLog] Validation error details:", details);
         return res.status(400).json({ ok: false, error: 'Validation failed', details });
       }
       throw saveErr;
     }
 
+    console.log("[DelayLog] Successfully created:", log._id);
     return res.json({ ok: true, id: log._id });
   } catch (err) {
     console.error("createDelayLog error", err);

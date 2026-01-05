@@ -45,9 +45,10 @@
           try{
             const res = await fetch(API + '/delay-logs', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization: 'Bearer '+token }, body: JSON.stringify({ taskId:id, reason, note }) });
             const d = await res.json().catch(()=>null);
+            console.log('[DelayLog] Response:', { status: res.status, data: d });
             if (!res.ok) {
               // Show detailed validation errors when available
-              const msg = (d && (d.error || (d.details && JSON.stringify(d.details)))) || `Request failed (${res.status})`;
+              let msg = (d && (d.error || (d.details && JSON.stringify(d.details)))) || `Request failed (${res.status})`;
               throw new Error(msg);
             }
             if (d && d.ok === false) {
