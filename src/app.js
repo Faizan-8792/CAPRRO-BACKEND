@@ -32,7 +32,8 @@ app.use(
         // Allow Google Fonts stylesheet and CDN for styles
   styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
   // Explicitly allow style elements from Google Fonts (some browsers check style-src-elem)
-  styleSrcElem: ["'self'", "https://fonts.googleapis.com"],
+  // Also allow inline styles for admin UI since scripts create style attributes dynamically
+  styleSrcElem: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         scriptSrc: ["'self'"],
         connectSrc: [
           "'self'",
