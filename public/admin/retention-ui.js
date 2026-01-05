@@ -332,44 +332,19 @@ async function createSnapshot() {
       totalEntries: parsedCSV.totalEntries <= 50 ? "0-50" : "50+",
       roundFigureLevel:
         parsedCSV.totalEntries > 0 &&
-        (parsedCSV.roundFigureCount / parsedCSV.totalEntries) > 0.2
-          ? "high"
-          : "low",
-      monthEndLoad: parsedCSV.monthEndRatio > 0.25 ? "high" : "low",
-      maturity:
-        parsedCSV.totalEntries > 200
-          ? "advanced"
-          : parsedCSV.totalEntries > 50
-            ? "intermediate"
-            : "basic",
-    };
-  }
-
-  // ---------------- MANUAL MODE ----------------
-  else {
-    rawMetrics = {
-      totalEntries: Number(document.getElementById("totalEntries")?.value || 0),
-      roundFigureCount: 0,
-      totalDebit: 0,
-      totalCredit: 0,
-      lastEntryDate: document.getElementById("lastEntryDate")?.value || null,
-    };
-
-    qualitativeMetrics = {
-      totalEntries:
-        rawMetrics.totalEntries <= 50 ? "0-50" : "50+",
-      roundFigureLevel:
-        document.getElementById("roundFigures")?.value === "high"
+        (parsedCSV.roundFigureCount / Math.max(1, parsedCSV.totalEntries)) > 0.2
           ? "high"
           : "low",
       monthEndLoad:
-        document.getElementById("monthEnd")?.value === "high"
+        (parsedCSV.monthEndRatio || 0) > 0.4
           ? "high"
+          : (parsedCSV.monthEndRatio || 0) > 0.15
+          ? "medium"
           : "low",
       maturity:
-        document.getElementById("maturity")?.value === "basic"
-          ? "basic"
-          : "advanced",
+        parsedCSV.totalEntries && parsedCSV.totalEntries > 200
+          ? "good"
+          : "average",
     };
   }
 
@@ -391,7 +366,9 @@ async function createSnapshot() {
   }
 
   try {
-    const res = await fetch(`${API_BASE_URL}/api/accounting`, {
+    if (window.caproShowLoader) window.caproShowLoader('Saving snapshot...');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/accounting`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -399,18 +376,20 @@ async function createSnapshot() {
       },
       body: JSON.stringify(payload),
     });
+      const data = await res.json();
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "Failed to create record");
+      }
 
-    const data = await res.json();
-    if (!res.ok || !data?.ok) {
-      throw new Error(data?.error || "Failed to create record");
+      alert("✅ Accounting snapshot saved");
+      
+      // Clear form fields after successful submission
+      clearFormFields();
+      
+      if (typeof loadRecords === "function") loadRecords();
+    } finally {
+      if (window.caproHideLoader) window.caproHideLoader();
     }
-
-    alert("✅ Accounting snapshot saved");
-    
-    // Clear form fields after successful submission
-    clearFormFields();
-    
-    if (typeof loadRecords === "function") loadRecords();
   } catch (err) {
     console.error("Snapshot save failed:", err);
     alert("❌ " + err.message);

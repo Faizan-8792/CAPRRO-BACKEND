@@ -78,12 +78,17 @@ async function loadClientsForService() {
   document.getElementById("clientList").classList.remove("hidden");
 
   const token = getToken();
-  const res = await fetch(
-    `https://caprro-backend-1.onrender.com/api/tax-work/clients/${service}`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
+  try {
+    if (window.caproShowLoader) window.caproShowLoader('Loading clients...');
+    const res = await fetch(
+      `https://caprro-backend-1.onrender.com/api/tax-work/clients/${service}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
 
-  const clients = await res.json();
+    var clients = await res.json();
+  } finally {
+    if (window.caproHideLoader) window.caproHideLoader();
+  }
   const list = document.getElementById("clientList");
   list.innerHTML = "";
 
@@ -121,15 +126,20 @@ window.deleteClient = async function (clientId) {
   if (!confirm("Are you sure you want to delete this client?")) return;
 
   const token = getToken();
-  await fetch(
-    `https://caprro-backend-1.onrender.com/api/tax-work/client/${clientId}`,
-    {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${token}`
+  try {
+    if (window.caproShowLoader) window.caproShowLoader('Deleting client...');
+    await fetch(
+      `https://caprro-backend-1.onrender.com/api/tax-work/client/${clientId}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
       }
-    }
-  );
+    );
+  } finally {
+    if (window.caproHideLoader) window.caproHideLoader();
+  }
 
   // refresh list
   loadClientsForService();
@@ -142,18 +152,23 @@ document.getElementById("addClientBtn").addEventListener("click", async () => {
   const service = selector.value;
 
   if (!name || !dueDate) return alert("Fill all fields");
-
-  await fetch("https://caprro-backend-1.onrender.com/api/tax-work/client", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken()}`
-    },
-    body: JSON.stringify({ clientName: name, dueDate, serviceType: service })
-  });
+  try {
+    if (window.caproShowLoader) window.caproShowLoader('Creating client...');
+    await fetch("https://caprro-backend-1.onrender.com/api/tax-work/client", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${getToken()}`
+      },
+      body: JSON.stringify({ clientName: name, dueDate, serviceType: service })
+    });
+  } finally {
+    if (window.caproHideLoader) window.caproHideLoader();
+  }
 
   loadClientsForService();
 });
+
 
 // 🔹 D) Client open karne par CLIENT-WISE checklist load karo
 window.openClient = async function (clientId) {
@@ -196,16 +211,21 @@ async function loadClientChecklist(clientId) {
   checklistDraft = {};
 
   const token = getToken();
-  const res = await fetch(
-    `https://caprro-backend-1.onrender.com/api/tax-work/client/${clientId}`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`
+  try {
+    if (window.caproShowLoader) window.caproShowLoader('Loading checklist...');
+    const res = await fetch(
+      `https://caprro-backend-1.onrender.com/api/tax-work/client/${clientId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
       }
-    }
-  );
+    );
 
-  const saved = await res.json();
+    var saved = await res.json();
+  } finally {
+    if (window.caproHideLoader) window.caproHideLoader();
+  }
 
   checklistEl.innerHTML = "";
   progressBox.innerHTML = "";
@@ -269,6 +289,7 @@ async function loadChecklist() {
 
   let res;
   try {
+    if (window.caproShowLoader) window.caproShowLoader('Loading checklist...');
     res = await fetch(
       `https://caprro-backend-1.onrender.com/api/tax-work/${service}`,
       {
@@ -342,17 +363,22 @@ document.getElementById("doneBtn").addEventListener("click", async () => {
 
   const token = getToken();
 
-  await fetch(
-    `https://caprro-backend-1.onrender.com/api/tax-work/client/${activeClientId}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify({ checklist: checklistDraft })
-    }
-  );
+  try {
+    if (window.caproShowLoader) window.caproShowLoader('Saving checklist...');
+    await fetch(
+      `https://caprro-backend-1.onrender.com/api/tax-work/client/${activeClientId}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ checklist: checklistDraft })
+      }
+    );
+  } finally {
+    if (window.caproHideLoader) window.caproHideLoader();
+  }
 
   // reset UI
   checklistDraft = {};
@@ -378,26 +404,31 @@ async function updateStep(service, step, completed) {
     return;
   }
 
-  const res = await fetch(
-    "https://caprro-backend-1.onrender.com/api/tax-work",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        serviceType: service,
-        checklistStep: step,
-        completed
-      })
+  try {
+    if (window.caproShowLoader) window.caproShowLoader('Updating step...');
+    const res = await fetch(
+      "https://caprro-backend-1.onrender.com/api/tax-work",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          serviceType: service,
+          checklistStep: step,
+          completed
+        })
+      }
+    );
+
+    if (res.status === 401) {
+      alert("You are not logged in. Please login and try again.");
+      return;
     }
-  );
 
-  if (res.status === 401) {
-    alert("You are not logged in. Please login and try again.");
-    return;
+    loadChecklist();
+  } finally {
+    if (window.caproHideLoader) window.caproHideLoader();
   }
-
-  loadChecklist();
 }

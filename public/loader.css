@@ -1,0 +1,35 @@
+/* Shared loader for capro-backend public pages */
+.capro-loader-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2,6,23,0.55);
+  z-index: 9999999;
+  backdrop-filter: blur(2px);
+}
+.capro-loader-box {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  background: rgba(255,255,255,0.03);
+  padding: 14px 18px;
+  border-radius: 12px;
+  color: #e6eef8;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial;
+  box-shadow: 0 6px 30px rgba(2,6,23,0.6);
+}
+.capro-loader-spinner {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 4px solid rgba(255,255,255,0.12);
+  border-top-color: #60a5fa;
+  animation: capro-spin 1s linear infinite;
+}
+@keyframes capro-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.capro-loader-message { font-size: 14px; color: #dbeafe; }

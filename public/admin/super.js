@@ -15,16 +15,20 @@ function clearToken() {
 async function apiGetMe() {
   const token = getToken();
   if (!token) throw new Error("No token");
+  if (window.caproShowLoader) window.caproShowLoader('Loading profile...');
+  try {
+    const res = await fetch(`${API_BASE}/auth/me`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
 
-  const res = await fetch(`${API_BASE}/auth/me`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    }
-  });
-
-  if (!res.ok) throw new Error("Unauthorized");
-  return res.json();
+    if (!res.ok) throw new Error("Unauthorized");
+    return res.json();
+  } finally {
+    if (window.caproHideLoader) window.caproHideLoader();
+  }
 }
 
 // AUTH GUARD FUNCTION
@@ -73,28 +77,33 @@ async function api(path, opts = {}) {
 
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: opts.method || "GET",
-    headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-
-  let data = null;
+  if (window.caproShowLoader) window.caproShowLoader('Loading...');
   try {
-    data = await res.json();
-  } catch {
-    /* ignore */
-  }
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: opts.method || "GET",
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
 
-  if (!res.ok) {
-    const msg = data?.error || data?.message || `Request failed (${res.status})`;
-    const err = new Error(msg);
-    err.status = res.status;
-    err.data = data;
-    throw err;
-  }
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      /* ignore */
+    }
 
-  return data;
+    if (!res.ok) {
+      const msg = data?.error || data?.message || `Request failed (${res.status})`;
+      const err = new Error(msg);
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
+
+    return data;
+  } finally {
+    if (window.caproHideLoader) window.caproHideLoader();
+  }
 }
 
 function requireSuperAdmin(user) {

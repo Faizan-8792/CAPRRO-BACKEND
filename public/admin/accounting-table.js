@@ -17,13 +17,18 @@ async function loadRecords() {
   }
 
   try {
-    const res = await fetch(`${API_BASE_URL}/api/accounting`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    if (window.caproShowLoader) window.caproShowLoader('Loading accounting records...');
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/accounting`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
-    const data = await res.json();
+      var data = await res.json();
+    } finally {
+      if (window.caproHideLoader) window.caproHideLoader();
+    }
 
     if (!res.ok || !data.ok) {
       container.innerHTML = `<p class="muted">Failed to load accounting records.</p>`;
@@ -91,12 +96,17 @@ async function deleteRecord(id) {
   if (!token) return;
 
   try {
-    await fetch(`${API_BASE_URL}/api/accounting/${id}`, {
-      method: "DELETE",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+    if (window.caproShowLoader) window.caproShowLoader('Deleting record...');
+    try {
+      await fetch(`${API_BASE_URL}/api/accounting/${id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+    } finally {
+      if (window.caproHideLoader) window.caproHideLoader();
+    }
 
     loadRecords();
   } catch (err) {

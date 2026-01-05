@@ -18,11 +18,16 @@ function escapeHtml(s) {
 
 async function api(path) {
   const token = localStorage.getItem('caproadminjwt');
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  if (!res.ok) throw new Error('API failed');
-  return res.json();
+  if (window.caproShowLoader) window.caproShowLoader('Loading assistant...');
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error('API failed');
+    return res.json();
+  } finally {
+    if (window.caproHideLoader) window.caproHideLoader();
+  }
 }
 
 async function loadAdminComplianceAssistant() {

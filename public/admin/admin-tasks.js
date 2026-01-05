@@ -28,25 +28,30 @@ async function apiTasks(path, opts) {
   );
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(`${TASK_API_BASE}${path}`, {
-    method: opts?.method || 'GET',
-    headers,
-    body: opts?.body ? JSON.stringify(opts.body) : undefined,
-  });
-
-  let data = null;
+  if (window.caproShowLoader) window.caproShowLoader('Loading tasks...');
   try {
-    data = await res.json();
-  } catch {}
+    const res = await fetch(`${TASK_API_BASE}${path}`, {
+      method: opts?.method || 'GET',
+      headers,
+      body: opts?.body ? JSON.stringify(opts.body) : undefined,
+    });
 
-  if (!res.ok) {
-    const msg = data?.error || data?.message || 'Request failed';
-    const err = new Error(msg);
-    err.status = res.status;
-    err.data = data;
-    throw err;
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {}
+
+    if (!res.ok) {
+      const msg = data?.error || data?.message || 'Request failed';
+      const err = new Error(msg);
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
+  } finally {
+    if (window.caproHideLoader) window.caproHideLoader();
   }
-  return data;
 }
 
 // -------------------- CACHE (users for assign/filter) --------------------

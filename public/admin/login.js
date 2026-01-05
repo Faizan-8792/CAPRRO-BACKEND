@@ -86,20 +86,24 @@ async function initLoginPage() {
       }
 
       statusEl.textContent = 'Sending OTP...';
+      if (window.caproShowLoader) window.caproShowLoader('Sending OTP...');
+      try {
+        const res = await fetch(`${API_BASE}/auth/send-otp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        });
 
-      const res = await fetch(`${API_BASE}/auth/send-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data?.error || data?.message || 'Failed to send OTP');
+        }
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.error || data?.message || 'Failed to send OTP');
+        otpBlock.style.display = 'block';
+        statusEl.textContent = 'OTP sent. Check your email.';
+      } finally {
+        if (window.caproHideLoader) window.caproHideLoader();
       }
-
-      otpBlock.style.display = 'block';
-      statusEl.textContent = 'OTP sent. Check your email.';
     } catch (e) {
       console.error('Send OTP error:', e);
       statusEl.textContent = e.message || 'Failed to send OTP.';
@@ -117,24 +121,28 @@ async function initLoginPage() {
       }
 
       statusEl.textContent = 'Verifying OTP...';
+      if (window.caproShowLoader) window.caproShowLoader('Verifying OTP...');
+      try {
+        const res = await fetch(`${API_BASE}/auth/verify-otp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, otpCode }),
+        });
 
-      const res = await fetch(`${API_BASE}/auth/verify-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, otpCode }),
-      });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data?.error || data?.message || 'Failed to verify OTP');
+        }
 
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.error || data?.message || 'Failed to verify OTP');
+        // Save JWT
+        saveToken(data.token);
+
+        // Fetch user and redirect
+        const me = await api('/auth/me');
+        const user = me.user;
+      } finally {
+        if (window.caproHideLoader) window.caproHideLoader();
       }
-
-      // Save JWT
-      saveToken(data.token);
-
-      // Fetch user and redirect
-      const me = await api('/auth/me');
-      const user = me.user;
       console.log('Login successful user:', user);
 
       if (isSuperAdmin(user)) {

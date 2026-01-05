@@ -1,12 +1,16 @@
 async function viewDetail(id) {
   const token = getToken();
+  try {
+    if (window.caproShowLoader) window.caproShowLoader('Loading snapshot...');
+    const res = await fetch(`${API_BASE_URL}/api/accounting/${id}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
 
-  const res = await fetch(`${API_BASE_URL}/api/accounting/${id}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-
-  const data = await res.json();
-  if (!data.ok) return;
+    const data = await res.json();
+    if (!data.ok) return;
+  } finally {
+    if (window.caproHideLoader) window.caproHideLoader();
+  }
 
   const r = data.record;
 
