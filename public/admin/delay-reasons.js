@@ -18,8 +18,15 @@
       console.log('Populating taskId dropdown with', allTasks.length, 'tasks');
       // Keep placeholder option and populate with actual tasks
       sel.innerHTML = '<option value="">-- Select a task --</option>' +
-        allTasks.map(t => `<option value="${t._id}">${t.clientName || 'Unknown'} • ${t.title}</option>`).join('');
+        allTasks.map(t => {
+          const id = t.id || t._id; // board API returns `id`
+          return `<option value="${id}">${t.clientName || 'Unknown'} • ${t.title}</option>`;
+        }).join('');
     }catch(e){ console.error('loadTasks error', e); }
+  }
+
+  function isValidObjectIdString(s){
+    return typeof s === 'string' && /^[a-f\d]{24}$/i.test(s.trim());
   }
 
   async function loadAgg(){
@@ -39,8 +46,23 @@
       const addBtn = document.getElementById('addBtn');
       if (addBtn) {
         addBtn.addEventListener('click', async()=>{
-          const id=document.getElementById('taskId').value.trim(); const reason=document.getElementById('reason').value; const note=document.getElementById('note').value;
-          const st=document.getElementById('addStatus'); if(!id || !reason){ if (st) { st.textContent='Please select a task and reason'; st.className='small-label err'; } return; }
+          const taskEl = document.getElementById('taskId');
+          const reasonEl = document.getElementById('reason');
+          const noteEl = document.getElementById('note');
+          const id = (taskEl && taskEl.value ? String(taskEl.value) : '').trim();
+          const reason = reasonEl ? reasonEl.value : '';
+          const note = noteEl ? noteEl.value : '';
+
+          const st=document.getElementById('addStatus');
+          if(!id || !reason){
+            if (st) { st.textContent='Please select a task and reason'; st.className='small-label err'; }
+            return;
+          }
+
+          if (!isValidObjectIdString(id)) {
+            if (st) { st.textContent = `Invalid taskId selected: ${id}`; st.className='small-label err'; }
+            return;
+          }
           if (st) { st.textContent='Adding...'; }
           try{
             const res = await fetch(API + '/delay-logs', { method:'POST', headers:{ 'Content-Type':'application/json', Authorization: 'Bearer '+token }, body: JSON.stringify({ taskId:id, reason, note }) });
