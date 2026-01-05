@@ -130,14 +130,12 @@ function renderTaskColumn(title, key, items) {
     .join('');
 
   return `
-    <div class="col-12 col-md-6 col-lg-3">
-      <div class="task-column">
-        <div class="task-column-header">
-          <span>${esc(title)}</span>
-          <span class="badge bg-${badgeColor}">${count}</span>
-        </div>
-        ${cardsHtml || `<div class="text-muted small">No tasks</div>`}
+    <div class="task-column">
+      <div class="task-column-header">
+        <span>${esc(title)}</span>
+        <span class="badge bg-${badgeColor}">${count}</span>
       </div>
+      ${cardsHtml || `<div class="text-muted small">No tasks</div>`}
     </div>
   `;
 }

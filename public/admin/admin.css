@@ -973,6 +973,26 @@ input:focus, textarea:focus, select:focus, .form-control:focus, .form-select:foc
   backdrop-filter: blur(10px);
 }
 
+/* Task board grid: show 5 columns on large screens */
+#taskBoardColumns {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 768px) {
+  #taskBoardColumns {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 992px) {
+  /* Desktop: 5 equal columns */
+  #taskBoardColumns {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
 .task-column-header {
   color: #ffffff !important;
   font-weight: 700;
