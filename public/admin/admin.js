@@ -928,11 +928,11 @@ async function initAdminPage() {
         try {
             const badge = qs('planBadge');
             if (badge) {
-                const planRaw = String(firm?.planType || '').toUpperCase();
-                const isPremium = planRaw === 'PREMIUM' || planRaw === 'PRO';
+                const planRaw = String(firm?.planType || 'FREE').toUpperCase();
+                const isPremium = planRaw === 'PREMIUM';
                 badge.textContent = isPremium ? 'PREMIUM' : 'STANDARD';
                 badge.style.display = 'inline-flex';
-                badge.classList.remove('bg-light', 'text-dark', 'bg-warning', 'text-dark');
+                badge.classList.remove('bg-light', 'bg-warning');
                 if (isPremium) {
                     badge.classList.add('bg-warning', 'text-dark');
                 } else {
