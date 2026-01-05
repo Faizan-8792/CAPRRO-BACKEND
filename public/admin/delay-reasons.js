@@ -2,6 +2,16 @@
   'use strict';
   const API='/api';
   const token=localStorage.getItem('caproadminjwt');
+  const taskLabelById = new Map();
+
+  function reasonLabel(code){
+    return {
+      CLIENT_DELAY: 'Client delay',
+      DOCUMENTS_PENDING: 'Documents pending',
+      STAFF_WORKLOAD: 'Staff workload',
+      TECHNICAL: 'Technical',
+    }[code] || code || 'Unknown';
+  }
 
   async function loadTasks(){
     try{
@@ -16,6 +26,15 @@
         return; 
       }
       console.log('Populating taskId dropdown with', allTasks.length, 'tasks');
+
+      // Build lookup for pretty display in recent logs
+      taskLabelById.clear();
+      allTasks.forEach(t => {
+        const id = t.id || t._id;
+        if (!id) return;
+        taskLabelById.set(String(id), `${t.clientName || 'Unknown'} • ${t.title || 'Untitled'}`);
+      });
+
       // Keep placeholder option and populate with actual tasks
       sel.innerHTML = '<option value="">-- Select a task --</option>' +
         allTasks.map(t => {
@@ -36,7 +55,27 @@
       if(!d.ok) return; // leave agg element as-is
       const aggEl = document.getElementById('agg');
       if (!aggEl) return;
-      aggEl.innerHTML = (d.aggregate||[]).map(x=>`<div><strong>${x._id}</strong>: ${x.count}</div>`).join('') + '<hr/>' + (d.recent||[]).map(r=>`<div class="muted small">${r.taskId} • ${r.reason} • ${new Date(r.createdAt).toLocaleString()}</div>`).join('');
+
+      const aggHtml = (d.aggregate||[])
+        .map(x=>`<div><strong>${reasonLabel(x._id)}</strong>: ${x.count}</div>`)
+        .join('');
+
+      const seen = new Set();
+      const recentHtml = (d.recent||[])
+        .filter(r => {
+          const k = String(r._id || `${r.taskId}-${r.reason}-${r.createdAt}`);
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        })
+        .map(r => {
+          const label = taskLabelById.get(String(r.taskId)) || `Task: ${String(r.taskId).slice(0,8)}…`;
+          const when = new Date(r.createdAt).toLocaleString();
+          return `<div class="muted small"><strong>${label}</strong> • ${reasonLabel(r.reason)} • ${when}</div>`;
+        })
+        .join('');
+
+      aggEl.innerHTML = aggHtml + '<hr/>' + recentHtml;
     }catch(e){ console.error('loadAgg', e); const aggEl = document.getElementById('agg'); if (aggEl) aggEl.innerText='Failed'; }
   }
 
