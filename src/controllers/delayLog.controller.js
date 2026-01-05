@@ -6,8 +6,26 @@ export const createDelayLog = async (req, res) => {
     const { taskId, reason, note } = req.body || {};
     if (!taskId || !reason) return res.status(400).json({ ok: false, error: "taskId and reason required" });
 
+    if (!firmId) {
+      // More explicit error when user's firm context is missing
+      return res.status(400).json({ ok: false, error: "Firm context missing for this user" });
+    }
+
     const log = new TaskDelayLog({ firmId, taskId, reason, note, createdBy: req.user.id });
-    await log.save();
+    try {
+      await log.save();
+    } catch (saveErr) {
+      // If validation error, return 400 with details to help debugging
+      if (saveErr && saveErr.name === 'ValidationError') {
+        const details = Object.keys(saveErr.errors || {}).reduce((acc, k) => {
+          acc[k] = saveErr.errors[k].message;
+          return acc;
+        }, {});
+        return res.status(400).json({ ok: false, error: 'Validation failed', details });
+      }
+      throw saveErr;
+    }
+
     return res.json({ ok: true, id: log._id });
   } catch (err) {
     console.error("createDelayLog error", err);

@@ -29,7 +29,10 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+        // Allow Google Fonts stylesheet and CDN for styles
+  styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
+  // Explicitly allow style elements from Google Fonts (some browsers check style-src-elem)
+  styleSrcElem: ["'self'", "https://fonts.googleapis.com"],
         scriptSrc: ["'self'"],
         connectSrc: [
           "'self'",
@@ -37,7 +40,8 @@ app.use(
           "https://caprro-backend-1.onrender.com"
         ],
         imgSrc: ["'self'", "data:", "https:"],
-        fontSrc: ["'self'", "https://cdn.jsdelivr.net"],
+        // Allow Google Fonts font files
+        fontSrc: ["'self'", "https://cdn.jsdelivr.net", "https://fonts.gstatic.com"],
       },
     },
   })
