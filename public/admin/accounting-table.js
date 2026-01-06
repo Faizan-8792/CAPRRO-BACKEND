@@ -18,20 +18,30 @@ async function loadRecords() {
 
   try {
     if (window.caproShowLoader) window.caproShowLoader('Loading accounting records...');
+    let res;
+    let data;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/accounting`, {
+      res = await fetch(`${API_BASE_URL}/api/accounting`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
 
-      var data = await res.json();
+      // Avoid throwing if backend returns non-JSON error
+      try {
+        data = await res.json();
+      } catch (e) {
+        data = null;
+      }
     } finally {
       if (window.caproHideLoader) window.caproHideLoader();
     }
 
-    if (!res.ok || !data.ok) {
-      container.innerHTML = `<p class="muted">Failed to load accounting records.</p>`;
+    if (!res || !res.ok || !data || !data.ok) {
+      const msg = (data && (data.error || data.message))
+        ? (data.error || data.message)
+        : 'Failed to load accounting records.';
+      container.innerHTML = `<p class="muted">${msg}</p>`;
       return;
     }
 
