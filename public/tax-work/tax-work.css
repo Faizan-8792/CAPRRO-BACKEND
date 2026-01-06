@@ -163,3 +163,40 @@
   justify-content: flex-end;
   gap: 10px;
 }
+
+/* =============================
+   Performance: background layers
+   Tax Work page gets laggy on some machines because admin.css adds multiple
+   full-screen animated layers. This page already has a lot of DOM updates.
+   So we reduce background cost here.
+   ============================= */
+
+/* Default: keep the page clean + fast (disable heavy layers) */
+.neural-network,
+.data-streams,
+.holographic-grid,
+.circuit-board,
+.orbiting-particles {
+  display: none;
+}
+
+/* Respect reduced motion: also stop hover transforms that can cause jank */
+@media (prefers-reduced-motion: reduce) {
+  .checklist li,
+  .btn-primary {
+    transition: none !important;
+  }
+
+  .checklist li:hover,
+  .btn-primary:hover {
+    transform: none !important;
+    box-shadow: none !important;
+  }
+}
+
+/* Rendering hints for interactive rows */
+.checklist li,
+.client-row,
+.btn-primary {
+  will-change: transform;
+}
