@@ -452,7 +452,10 @@ async function exportServiceToWord() {
 
   // Ensure docx lib is available
   if (!window.docx) {
-    alert("Word export library failed to load. Please refresh and try again.");
+    const extra = window.__DOCX_LIBRARY_PLACEHOLDER__
+      ? "\n\nNOTE: docx.umd.js is currently a placeholder. Replace it with the real docx UMD bundle."
+      : "";
+    alert("Word export library failed to load." + extra);
     return;
   }
 
