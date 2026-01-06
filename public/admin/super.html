@@ -178,6 +178,98 @@
           </div>
         </div>
       </section>
+
+      <!-- USER ANALYTICS -->
+      <section class="mt-4">
+        <div class="row g-3 mb-3 align-items-center">
+          <div class="col">
+            <h2 class="h5 mb-1">User Analytics</h2>
+            <p class="text-muted mb-0 small">
+              Overview of all registered users — individual and firm-based.
+            </p>
+          </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="row g-3 mb-4">
+          <div class="col-md-4 col-sm-6">
+            <div class="card shadow-sm border-0 text-center py-3">
+              <div class="card-body">
+                <h3 class="h2 text-primary mb-1" id="statTotalUsers">—</h3>
+                <p class="text-muted mb-0 small">Total Users</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-4 col-sm-6">
+            <div class="card shadow-sm border-0 text-center py-3">
+              <div class="card-body">
+                <h3 class="h2 text-success mb-1" id="statIndividualUsers">—</h3>
+                <p class="text-muted mb-0 small">Individual Users</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-4 col-sm-6">
+            <div class="card shadow-sm border-0 text-center py-3">
+              <div class="card-body">
+                <h3 class="h2 text-info mb-1" id="statFirmUsers">—</h3>
+                <p class="text-muted mb-0 small">Users Under Firms</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-4 col-sm-6">
+            <div class="card shadow-sm border-0 text-center py-3">
+              <div class="card-body">
+                <h3 class="h2 text-warning mb-1" id="statFirmAdmins">—</h3>
+                <p class="text-muted mb-0 small">Firm Admins</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-4 col-sm-6">
+            <div class="card shadow-sm border-0 text-center py-3">
+              <div class="card-body">
+                <h3 class="h2 text-success mb-1" id="statActiveUsers">—</h3>
+                <p class="text-muted mb-0 small">Active Users</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-4 col-sm-6">
+            <div class="card shadow-sm border-0 text-center py-3">
+              <div class="card-body">
+                <h3 class="h2 text-danger mb-1" id="statInactiveUsers">—</h3>
+                <p class="text-muted mb-0 small">Inactive Users</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Users Table -->
+        <div class="card shadow-sm border-0 super-admin-card">
+          <div class="card-body">
+            <p id="usersAnalyticsStatus" class="text-muted mb-3 small">
+              Loading all users…
+            </p>
+
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col">Email</th>
+                    <th scope="col">Role</th>
+                    <th scope="col">Account Type</th>
+                    <th scope="col">Firm</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Joined</th>
+                  </tr>
+                </thead>
+                <tbody id="allUsersBody">
+                  <!-- rows via super.js -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
 
     <!-- Bootstrap JS for modal/close button -->

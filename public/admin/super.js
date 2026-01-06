@@ -235,6 +235,49 @@ async function deleteFirmApi(firmId) {
   });
 }
 
+// ---------- User Analytics ----------
+
+async function loadAllUsers() {
+  const data = await api("/super/all-users");
+  return data;
+}
+
+function renderUserAnalyticsRow(user) {
+  const created = user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "—";
+  
+  const roleBadge =
+    user.role === "SUPER_ADMIN"
+      ? `<span class="badge bg-danger">SUPER_ADMIN</span>`
+      : user.role === "FIRM_ADMIN"
+      ? `<span class="badge good">FIRM_ADMIN</span>`
+      : `<span class="badge">USER</span>`;
+
+  const accountTypeBadge =
+    user.accountType === "FIRM_USER"
+      ? `<span class="badge bg-info text-dark">FIRM_USER</span>`
+      : `<span class="badge bg-secondary">INDIVIDUAL</span>`;
+
+  const statusBadge = user.isActive
+    ? `<span class="badge good">Active</span>`
+    : `<span class="badge warn">Inactive</span>`;
+
+  const firmDisplay = user.firmName
+    ? `${escapeHtml(user.firmName)}<br><span class="text-muted small">@${escapeHtml(user.firmHandle)}</span>`
+    : `<span class="text-muted">—</span>`;
+
+  return `
+    <tr>
+      <td>${escapeHtml(user.name || "—")}</td>
+      <td>${escapeHtml(user.email || "—")}</td>
+      <td>${roleBadge}</td>
+      <td>${accountTypeBadge}</td>
+      <td>${firmDisplay}</td>
+      <td>${statusBadge}</td>
+      <td>${escapeHtml(created)}</td>
+    </tr>
+  `;
+}
+
 function renderFirmRow(firm) {
   const planBadge =
     firm.planType === "PREMIUM"
@@ -640,6 +683,45 @@ async function initSuperPage() {
     } catch (err) {
       if (firmsStatus) {
         firmsStatus.textContent = err.message || "Failed to load firms.";
+      }
+    }
+
+    // User Analytics
+    const usersAnalyticsStatus = qs("usersAnalyticsStatus");
+    const allUsersBody = qs("allUsersBody");
+
+    try {
+      const data = await loadAllUsers();
+      const { stats, users } = data;
+
+      // Update stat cards
+      if (qs("statTotalUsers")) qs("statTotalUsers").textContent = stats.totalUsers ?? "—";
+      if (qs("statIndividualUsers")) qs("statIndividualUsers").textContent = stats.individualUsers ?? "—";
+      if (qs("statFirmUsers")) qs("statFirmUsers").textContent = stats.firmUsers ?? "—";
+      if (qs("statFirmAdmins")) qs("statFirmAdmins").textContent = stats.firmAdmins ?? "—";
+      if (qs("statActiveUsers")) qs("statActiveUsers").textContent = stats.activeUsers ?? "—";
+      if (qs("statInactiveUsers")) qs("statInactiveUsers").textContent = stats.inactiveUsers ?? "—";
+
+      if (!users.length) {
+        if (allUsersBody) {
+          allUsersBody.innerHTML = `
+            <tr>
+              <td colspan="7" class="text-center text-muted">
+                No users found.
+              </td>
+            </tr>
+          `;
+        }
+        if (usersAnalyticsStatus) usersAnalyticsStatus.textContent = "";
+      } else {
+        if (allUsersBody) {
+          allUsersBody.innerHTML = users.map(renderUserAnalyticsRow).join("");
+        }
+        if (usersAnalyticsStatus) usersAnalyticsStatus.textContent = "";
+      }
+    } catch (err) {
+      if (usersAnalyticsStatus) {
+        usersAnalyticsStatus.textContent = err.message || "Failed to load user analytics.";
       }
     }
   } catch (err) {
