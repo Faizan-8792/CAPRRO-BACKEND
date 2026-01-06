@@ -1,18 +1,33 @@
 async function viewDetail(id) {
   const token = getToken();
+  let data = null;
   try {
     if (window.caproShowLoader) window.caproShowLoader('Loading snapshot...');
     const res = await fetch(`${API_BASE_URL}/api/accounting/${id}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
 
-    const data = await res.json();
-    if (!data.ok) return;
+    // Backend might return non-JSON on errors; never let that crash the UI.
+    try {
+      data = await res.json();
+    } catch (e) {
+      data = null;
+    }
+
+    if (!res.ok || !data || !data.ok) {
+      const msg = (data && (data.error || data.message))
+        ? (data.error || data.message)
+        : 'Failed to load snapshot.';
+      console.error('viewDetail failed:', msg, { status: res.status, id });
+      alert(msg);
+      return;
+    }
   } finally {
     if (window.caproHideLoader) window.caproHideLoader();
   }
 
-  const r = data.record;
+  const r = data && data.record;
+  if (!r) return;
 
   const modal = document.getElementById("viewModal");
   const content = document.getElementById("modalContent");
