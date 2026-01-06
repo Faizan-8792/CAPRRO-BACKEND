@@ -47,9 +47,15 @@ let isDirty = false;
 const selector = document.getElementById("serviceSelector");
 const checklistEl = document.getElementById("checklist");
 const progressBox = document.getElementById("progressBox");
+const exportWordBtn = document.getElementById("exportWordBtn");
 
 // B) Service select hone par checklist nahi, client UI dikhao
 selector.addEventListener("change", loadClientsForService);
+
+// Export button
+if (exportWordBtn) {
+  exportWordBtn.addEventListener("click", exportServiceToWord);
+}
 
 // ➕ ADD NEW FUNCTION (loadClientsForService)
 async function loadClientsForService() {
@@ -71,6 +77,12 @@ async function loadClientsForService() {
   const service = selector.value;
   checklistEl.innerHTML = "";
   progressBox.innerHTML = "";
+
+  // show/hide export button based on service selection
+  if (exportWordBtn) {
+    if (service) exportWordBtn.classList.remove("hidden");
+    else exportWordBtn.classList.add("hidden");
+  }
 
   if (!service) return;
 
@@ -431,4 +443,178 @@ async function updateStep(service, step, completed) {
   } finally {
     if (window.caproHideLoader) window.caproHideLoader();
   }
+}
+
+// ---------------- EXPORT TO WORD ----------------
+async function exportServiceToWord() {
+  const service = selector.value;
+  if (!service) return alert("Please choose a service first.");
+
+  // Ensure docx lib is available
+  if (!window.docx) {
+    alert("Word export library failed to load. Please refresh and try again.");
+    return;
+  }
+
+  const token = getToken();
+  if (!token) {
+    alert("Authentication missing. Please reopen from extension.");
+    return;
+  }
+
+  try {
+    if (window.caproShowLoader) window.caproShowLoader('Exporting to Word...');
+
+    // 1) fetch clients for service
+    const res = await fetch(
+      `https://caprro-backend-1.onrender.com/api/tax-work/clients/${service}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    if (!res.ok) {
+      alert("Failed to load clients for export.");
+      return;
+    }
+
+    const clients = await res.json();
+    const safeClients = Array.isArray(clients)
+      ? clients.filter((c) => c && (c.clientName || c._id))
+      : [];
+
+    if (!safeClients.length) {
+      alert(`No clients found under ${service}.`);
+      return;
+    }
+
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, AlignmentType, BorderStyle } = window.docx;
+
+    const now = new Date();
+    const title = `Tax Work Export — ${service}`;
+
+    const children = [];
+    children.push(
+      new Paragraph({
+        text: title,
+        heading: HeadingLevel.HEADING_1,
+      })
+    );
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: `Generated on: ${now.toLocaleString()}`, italics: true }),
+        ],
+      })
+    );
+    children.push(new Paragraph({ text: "" }));
+
+    const steps = checklistMap[service] || [];
+
+    // 2) For each client, fetch details so checklist comes too
+    for (let i = 0; i < safeClients.length; i++) {
+      const c = safeClients[i];
+
+      let detail = null;
+      try {
+        const dres = await fetch(
+          `https://caprro-backend-1.onrender.com/api/tax-work/client/${c._id}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (dres.ok) detail = await dres.json();
+      } catch (e) {
+        // ignore per-client fetch failures; export whatever we can
+      }
+
+      const clientName = (detail && detail.clientName) || c.clientName || `Client ${i + 1}`;
+      const dueDateISO = (detail && detail.dueDate) || c.dueDate;
+      const dueText = dueDateISO ? new Date(dueDateISO).toDateString() : "";
+      const checklist = (detail && detail.checklist) || {};
+
+      // Heading
+      children.push(
+        new Paragraph({
+          text: `${i + 1}. ${clientName}`,
+          heading: HeadingLevel.HEADING_2,
+          spacing: { before: 300, after: 120 },
+        })
+      );
+
+      if (dueText) {
+        children.push(
+          new Paragraph({
+            children: [
+              new TextRun({ text: "Due Date: ", bold: true }),
+              new TextRun({ text: dueText }),
+            ],
+          })
+        );
+      }
+
+      // Table rows
+      const rows = [];
+      rows.push(
+        new TableRow({
+          tableHeader: true,
+          children: [
+            new TableCell({
+              children: [new Paragraph({ text: "Checklist Step", bold: true })],
+            }),
+            new TableCell({
+              children: [new Paragraph({ text: "Status", bold: true })],
+            }),
+          ],
+        })
+      );
+
+      steps.forEach((step) => {
+        const done = !!checklist[step];
+        rows.push(
+          new TableRow({
+            children: [
+              new TableCell({
+                children: [new Paragraph({ text: step })],
+              }),
+              new TableCell({
+                children: [new Paragraph({ text: done ? "Completed" : "Pending" })],
+              }),
+            ],
+          })
+        );
+      });
+
+      const table = new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows,
+      });
+      children.push(table);
+    }
+
+    const doc = new Document({
+      sections: [
+        {
+          properties: {},
+          children,
+        },
+      ],
+    });
+
+    const blob = await Packer.toBlob(doc);
+    const fileName = `TaxWork_${service}_${now.toISOString().slice(0, 10)}.docx`;
+    downloadBlob(blob, fileName);
+  } catch (err) {
+    console.error("exportServiceToWord error:", err);
+    alert("Export failed. Check console for details.");
+  } finally {
+    if (window.caproHideLoader) window.caproHideLoader();
+  }
+}
+
+function downloadBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }

@@ -1,13 +1,22 @@
 // src/services/email.service.js
 
 import { Resend } from "resend";
+import { sendReminderEmail } from "../config/email.js";
 
 /**
- * Resend client
- * Make sure this exists in .env:
- * RESEND_API_KEY=re_xxxxxxxxx
+ * Resend client (optional)
+ *
+ * In local/dev environments we don't want the whole server to crash if
+ * RESEND_API_KEY isn't set. We'll lazily create the client when needed.
  */
-const resend = new Resend(process.env.RESEND_API_KEY);
+let resend = null;
+function getResendClient() {
+  if (resend) return resend;
+  const key = process.env.RESEND_API_KEY;
+  if (!key) return null;
+  resend = new Resend(key);
+  return resend;
+}
 
 /**
  * VERIFIED sender (must match verified domain in Resend)
@@ -25,7 +34,25 @@ export async function sendOtpEmail(toEmail, otp) {
       throw new Error("sendOtpEmail: toEmail and otp are required");
     }
 
-    const res = await resend.emails.send({
+    const resendClient = getResendClient();
+    if (!resendClient) {
+      // Fallback: nodemailer transporter (if configured)
+      try {
+        const subject = "Your CA PRO Toolkit OTP";
+        const text = `Your One-Time Password (OTP) is: ${otp}. This OTP is valid for 10 minutes.`;
+        await sendReminderEmail(toEmail, subject, text);
+        console.log(`📧 OTP email sent via SMTP to: ${toEmail}`);
+        return { id: "smtp_fallback" };
+      } catch (smtpErr) {
+        console.warn(
+          "⚠️ No RESEND_API_KEY and SMTP not configured. Skipping OTP email in dev.",
+          smtpErr?.message || smtpErr
+        );
+        return { id: "skipped_no_email_config" };
+      }
+    }
+
+    const res = await resendClient.emails.send({
       from: FROM_EMAIL,
       to: toEmail,
       subject: "Your CA PRO Toolkit OTP",
@@ -70,6 +97,8 @@ export async function sendComplianceReminderEmail({
       throw new Error("sendComplianceReminderEmail: toEmail is required");
     }
 
+    const resendClient = getResendClient();
+
     const due = new Date(dueDateISO);
     const dueText = Number.isNaN(due.getTime())
       ? String(dueDateISO)
@@ -103,12 +132,28 @@ export async function sendComplianceReminderEmail({
       </div>
     `;
 
-    const res = await resend.emails.send({
-      from: FROM_EMAIL,
-      to: toEmail,
-      subject,
-      html,
-    });
+    let res;
+    if (resendClient) {
+      res = await resendClient.emails.send({
+        from: FROM_EMAIL,
+        to: toEmail,
+        subject,
+        html,
+      });
+    } else {
+      // Fallback: nodemailer transporter
+      try {
+        const text = `Compliance Reminder\n\nTitle: ${title}\nClient: ${clientLabel || ""}\n${whenLine}\nDue: ${dueText}`;
+        await sendReminderEmail(toEmail, subject, text);
+        res = { id: "smtp_fallback" };
+      } catch (smtpErr) {
+        console.warn(
+          "⚠️ No RESEND_API_KEY and SMTP not configured. Skipping reminder email in dev.",
+          smtpErr?.message || smtpErr
+        );
+        res = { id: "skipped_no_email_config" };
+      }
+    }
 
     console.log(`📧 Compliance reminder sent to: ${toEmail}`, res?.id || "");
     return res;

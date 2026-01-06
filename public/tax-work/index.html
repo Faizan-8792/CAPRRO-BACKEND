@@ -41,6 +41,13 @@
         <option value="ROC">ROC</option>
       </select>
 
+      <!-- Export -->
+      <div class="export-row">
+        <button type="button" id="exportWordBtn" class="btn-primary hidden">
+          Export to Word (.docx)
+        </button>
+      </div>
+
       <!-- CLIENT SECTION -->
       <div id="clientSection">
         <!-- CLIENT ADD FORM -->
@@ -71,6 +78,8 @@
 </div>
 
 <script src="../loader.js"></script>
+<!-- Word export (docx generator) -->
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
 <script src="tax-work.js"></script>
 </body>
 </html>

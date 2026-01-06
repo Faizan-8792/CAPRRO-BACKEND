@@ -7,6 +7,11 @@
   z-index: 10;
 }
 
+/* Utility */
+.hidden {
+  display: none !important;
+}
+
 /* Title */
 .page-title {
   text-align: center;
@@ -149,4 +154,12 @@
 
 .client-row button:hover {
   background: rgba(59,130,246,0.35);
+}
+
+.export-row {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
