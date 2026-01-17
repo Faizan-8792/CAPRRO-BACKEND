@@ -30,11 +30,11 @@ app.use(
       directives: {
         defaultSrc: ["'self'"],
         // Allow Google Fonts stylesheet and CDN for styles
-  styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com"],
+  styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com", "https://replit-cdn.com"],
   // Explicitly allow style elements from Google Fonts (some browsers check style-src-elem)
   // Also allow inline styles for admin UI since scripts create style attributes dynamically
-  styleSrcElem: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-        scriptSrc: ["'self'"],
+    styleSrcElem: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com", "https://replit-cdn.com"],
+      scriptSrc: ["'self'", "https://replit-cdn.com"],
         connectSrc: [
           "'self'",
           "https://cdn.jsdelivr.net",
@@ -42,7 +42,7 @@ app.use(
         ],
         imgSrc: ["'self'", "data:", "https:"],
         // Allow Google Fonts font files
-        fontSrc: ["'self'", "https://cdn.jsdelivr.net", "https://fonts.gstatic.com"],
+        fontSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"],
       },
     },
   })
