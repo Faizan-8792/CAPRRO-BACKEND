@@ -1,6 +1,6 @@
 // public/admin/login.js
 // Used by public/index.html
-const API_BASE = "https://caprro-backend-1.onrender.com/api";
+const API_BASE = "https://capro--saifullahfaizan.replit.app/api";
 
 
 const TOKEN_KEY = 'caproadminjwt';

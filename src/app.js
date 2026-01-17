@@ -38,7 +38,7 @@ app.use(
         connectSrc: [
           "'self'",
           "https://cdn.jsdelivr.net",
-          "https://caprro-backend-1.onrender.com"
+          "https://capro--saifullahfaizan.replit.app"
         ],
         imgSrc: ["'self'", "data:", "https:"],
         // Allow Google Fonts font files
@@ -61,7 +61,7 @@ app.use(
       if (!origin) return callback(null, true);
 
       // ✅ Allow backend itself
-      if (origin === "https://caprro-backend-1.onrender.com") {
+      if (origin === "https://capro--saifullahfaizan.replit.app") {
         return callback(null, true);
       }
 

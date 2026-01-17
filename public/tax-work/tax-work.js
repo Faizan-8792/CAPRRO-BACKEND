@@ -93,7 +93,7 @@ async function loadClientsForService() {
   try {
     if (window.caproShowLoader) window.caproShowLoader('Loading clients...');
     const res = await fetch(
-      `https://caprro-backend-1.onrender.com/api/tax-work/clients/${service}`,
+      `https://capro--saifullahfaizan.replit.app/api/tax-work/clients/${service}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
@@ -141,7 +141,7 @@ window.deleteClient = async function (clientId) {
   try {
     if (window.caproShowLoader) window.caproShowLoader('Deleting client...');
     await fetch(
-      `https://caprro-backend-1.onrender.com/api/tax-work/client/${clientId}`,
+      `https://capro--saifullahfaizan.replit.app/api/tax-work/client/${clientId}`,
       {
         method: "DELETE",
         headers: {
@@ -166,7 +166,7 @@ document.getElementById("addClientBtn").addEventListener("click", async () => {
   if (!name || !dueDate) return alert("Fill all fields");
   try {
     if (window.caproShowLoader) window.caproShowLoader('Creating client...');
-    await fetch("https://caprro-backend-1.onrender.com/api/tax-work/client", {
+    await fetch("https://capro--saifullahfaizan.replit.app/api/tax-work/client", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -226,7 +226,7 @@ async function loadClientChecklist(clientId) {
   try {
     if (window.caproShowLoader) window.caproShowLoader('Loading checklist...');
     const res = await fetch(
-      `https://caprro-backend-1.onrender.com/api/tax-work/client/${clientId}`,
+      `https://capro--saifullahfaizan.replit.app/api/tax-work/client/${clientId}`,
       {
         headers: {
           Authorization: `Bearer ${token}`
@@ -303,7 +303,7 @@ async function loadChecklist() {
   try {
     if (window.caproShowLoader) window.caproShowLoader('Loading checklist...');
     res = await fetch(
-      `https://caprro-backend-1.onrender.com/api/tax-work/${service}`,
+      `https://capro--saifullahfaizan.replit.app/api/tax-work/${service}`,
       {
         headers: {
           Authorization: `Bearer ${token}`
@@ -378,7 +378,7 @@ document.getElementById("doneBtn").addEventListener("click", async () => {
   try {
     if (window.caproShowLoader) window.caproShowLoader('Saving checklist...');
     await fetch(
-      `https://caprro-backend-1.onrender.com/api/tax-work/client/${activeClientId}`,
+      `https://capro--saifullahfaizan.replit.app/api/tax-work/client/${activeClientId}`,
       {
         method: "POST",
         headers: {
@@ -419,7 +419,7 @@ async function updateStep(service, step, completed) {
   try {
     if (window.caproShowLoader) window.caproShowLoader('Updating step...');
     const res = await fetch(
-      "https://caprro-backend-1.onrender.com/api/tax-work",
+      "https://capro--saifullahfaizan.replit.app/api/tax-work",
       {
         method: "POST",
         headers: {
@@ -470,7 +470,7 @@ async function exportServiceToWord() {
 
     // 1) fetch clients for service
     const res = await fetch(
-      `https://caprro-backend-1.onrender.com/api/tax-work/clients/${service}`,
+      `https://capro--saifullahfaizan.replit.app/api/tax-work/clients/${service}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
@@ -519,7 +519,7 @@ async function exportServiceToWord() {
       let detail = null;
       try {
         const dres = await fetch(
-          `https://caprro-backend-1.onrender.com/api/tax-work/client/${c._id}`,
+          `https://capro--saifullahfaizan.replit.app/api/tax-work/client/${c._id}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         if (dres.ok) detail = await dres.json();

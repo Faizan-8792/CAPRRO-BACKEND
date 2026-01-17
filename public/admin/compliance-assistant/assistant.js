@@ -24,7 +24,7 @@ async function api(path, opts) {
   const token = localStorage.getItem('caproadminjwt');
   if (window.caproShowLoader) window.caproShowLoader('Loading assistant...');
   try {
-    const API_BASE = "https://caprro-backend-1.onrender.com/api";
+    const API_BASE = "https://capro--saifullahfaizan.replit.app/api";
     const res = await fetch(`${API_BASE}${path}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
