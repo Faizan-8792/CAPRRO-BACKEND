@@ -12,7 +12,6 @@ import {
   updateFirmUserForSuper,
   deleteFirmUserForSuper,
   deleteFirmForSuper,
-  listAllUsersForSuper,
 } from "../controllers/super.controller.js";
 
 const router = express.Router();
@@ -37,8 +36,5 @@ router.delete("/firms/:firmId/users/:userId", deleteFirmUserForSuper);
 
 // Delete firm completely
 router.delete("/firms/:firmId", deleteFirmForSuper);
-
-// All users analytics
-router.get("/all-users", listAllUsersForSuper);
 
 export default router;

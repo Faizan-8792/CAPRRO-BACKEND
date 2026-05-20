@@ -1,6 +1,6 @@
 // admin-tasks.js
 // Task board helpers for CA PRO Firm Admin (Add Task UI + Assign dropdown + Compact cards + Expand/Collapse + Delete)
-const TASK_API_BASE = "https://capro--saifullahfaizan.replit.app/api";
+const TASK_API_BASE ="https://caprro-backend-1.onrender.com/api";
 const TASK_TOKEN_KEY = 'caproadminjwt';
 
 function getAdminToken() {
@@ -21,12 +21,6 @@ function esc(s) {
 }
 
 async function apiTasks(path, opts) {
-  // Prefer the shared admin.js api() wrapper so demo mode can intercept.
-  // This keeps existing behaviour for approved admins, and fixes demo/pending admins.
-  if (typeof window.api === 'function') {
-    return window.api(path, opts);
-  }
-
   const token = getAdminToken();
   const headers = Object.assign(
     { 'Content-Type': 'application/json' },
@@ -34,30 +28,25 @@ async function apiTasks(path, opts) {
   );
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  if (window.caproShowLoader) window.caproShowLoader('Loading tasks...');
+  const res = await fetch(`${TASK_API_BASE}${path}`, {
+    method: opts?.method || 'GET',
+    headers,
+    body: opts?.body ? JSON.stringify(opts.body) : undefined,
+  });
+
+  let data = null;
   try {
-    const res = await fetch(`${TASK_API_BASE}${path}`, {
-      method: opts?.method || 'GET',
-      headers,
-      body: opts?.body ? JSON.stringify(opts.body) : undefined,
-    });
+    data = await res.json();
+  } catch {}
 
-    let data = null;
-    try {
-      data = await res.json();
-    } catch {}
-
-    if (!res.ok) {
-      const msg = data?.error || data?.message || 'Request failed';
-      const err = new Error(msg);
-      err.status = res.status;
-      err.data = data;
-      throw err;
-    }
-    return data;
-  } finally {
-    if (window.caproHideLoader) window.caproHideLoader();
+  if (!res.ok) {
+    const msg = data?.error || data?.message || 'Request failed';
+    const err = new Error(msg);
+    err.status = res.status;
+    err.data = data;
+    throw err;
   }
+  return data;
 }
 
 // -------------------- CACHE (users for assign/filter) --------------------
@@ -116,19 +105,6 @@ function renderTaskColumn(title, key, items) {
                 <option value="CLOSED" ${t.status === 'CLOSED' ? 'selected' : ''}>Closed</option>
               </select>
             </div>
-
-            ${t.status === 'WAITING_DOCS' ? `
-              <div class="mt-2">
-                <select class="form-select form-select-sm task-delay-reason"
-                        data-task-id="${esc(t.id)}">
-                  <option value="">Select delay reason</option>
-                  <option value="CLIENT" ${t.meta?.delayReason === 'CLIENT' ? 'selected' : ''}>Client not responding</option>
-                  <option value="DOCS" ${t.meta?.delayReason === 'DOCS' ? 'selected' : ''}>Documents incomplete</option>
-                  <option value="INTERNAL" ${t.meta?.delayReason === 'INTERNAL' ? 'selected' : ''}>Internal delay</option>
-                  <option value="PORTAL" ${t.meta?.delayReason === 'PORTAL' ? 'selected' : ''}>Govt portal issue</option>
-                </select>
-              </div>
-            ` : ''}
           </div>
         </div>
       `;
@@ -136,12 +112,14 @@ function renderTaskColumn(title, key, items) {
     .join('');
 
   return `
-    <div class="task-column">
-      <div class="task-column-header">
-        <span>${esc(title)}</span>
-        <span class="badge bg-${badgeColor}">${count}</span>
+    <div class="col-md-4 col-lg-2">
+      <div class="task-column">
+        <div class="task-column-header">
+          <span>${esc(title)}</span>
+          <span class="badge bg-${badgeColor}">${count}</span>
+        </div>
+        ${cardsHtml || `<div class="text-muted small">No tasks</div>`}
       </div>
-      ${cardsHtml || `<div class="text-muted small">No tasks</div>`}
     </div>
   `;
 }
@@ -190,7 +168,6 @@ async function refreshTaskBoard() {
     attachStatusChangeHandlers();
     attachCardToggleHandlers();
     attachDeleteHandlers();
-    attachDelayReasonHandlers();
   } catch (e) {
     console.error('refreshTaskBoard error:', e);
     if (statusEl) statusEl.textContent = e.message || 'Failed to load task board.';
@@ -206,7 +183,7 @@ function attachStatusChangeHandlers() {
       if (!taskId || !newStatus) return;
       try {
         await apiTasks(`/tasks/${taskId}`, {
-          method: 'PUT',
+          method: 'PATCH',
           body: { status: newStatus },
         });
         await refreshTaskBoard();
@@ -225,7 +202,6 @@ function attachCardToggleHandlers() {
     card.addEventListener('click', (e) => {
       if (e.target.closest('.task-delete-btn')) return;
       if (e.target.closest('.task-status-select')) return;
-      if (e.target.closest('.task-delay-reason')) return;
       card.classList.toggle('task-card-expanded');
     });
   });
@@ -250,22 +226,6 @@ function attachDeleteHandlers() {
         console.error('Delete error:', err);
         alert(err.message || 'Failed to delete task');
       }
-    });
-  });
-}
-
-// -------------------- DELAY REASON HANDLER --------------------
-function attachDelayReasonHandlers() {
-  document.querySelectorAll('.task-delay-reason').forEach((sel) => {
-    sel.addEventListener('change', async () => {
-      const taskId = sel.getAttribute('data-task-id');
-      const delayReason = sel.value;
-      if (!taskId) return;
-
-      await apiTasks(`/tasks/${taskId}`, {
-        method: 'PUT',
-        body: { meta: { delayReason } }
-      });
     });
   });
 }
@@ -397,169 +357,6 @@ function initAddTaskUI() {
   btn.addEventListener('click', createTaskFromAdminUI);
 }
 
-// -------------------- COMPLIANCE ASSISTANT UI --------------------
-
-async function loadAdminComplianceAssistant() {
-  try {
-    const tbody = qs('caTaskTbody');
-    const statusEl = qs('caStatus');
-    
-    if (!tbody) return;
-    
-    if (statusEl) statusEl.textContent = 'Loading compliance priorities...';
-    
-    // Fetch clients to chase data
-    const resp = await apiTasks('/stats/clients-to-chase-today');
-    const { pendingDocsClients = [] } = resp;
-    
-    if (pendingDocsClients.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No pending tasks requiring attention.</td></tr>';
-      if (statusEl) statusEl.textContent = 'All caught up!';
-      return;
-    }
-    
-    // Render table rows with new columns and action buttons
-    tbody.innerHTML = pendingDocsClients.map(task => {
-      const dueDate = task.dueDateISO
-        ? new Date(task.dueDateISO).toLocaleDateString('en-IN')
-        : '';
-
-      const priorityBadge =
-        task.suggestedAction === 'ESCALATE'
-          ? '<span class="badge bg-danger">ESCALATE</span>'
-          : '<span class="badge bg-warning">CHASE</span>';
-
-      return `
-        <tr>
-          <td>${esc(task.clientName)}</td>
-          <td>${esc(task.serviceType)}</td>
-          <td>${esc(dueDate)}</td>
-          <td>Unassigned</td>
-          <td>${priorityBadge}</td>
-          <td>${esc(task.delayReason || 'Not specified')}</td>
-          <td>${esc(task.waitingDays)} days</td>
-          <td>
-            <div class="btn-group btn-group-sm">
-              <button class="btn btn-outline-secondary btn-sm">Copy</button>
-              <button class="btn btn-outline-primary btn-sm">Done</button>
-              <button class="btn btn-outline-danger btn-sm">Escalate</button>
-            </div>
-          </td>
-        </tr>
-      `;
-    }).join('');
-    
-    if (statusEl) statusEl.textContent = `Found ${pendingDocsClients.length} tasks requiring attention`;
-    
-    // Attach action button handlers
-    attachComplianceAssistantActions();
-    
-  } catch (err) {
-    console.error('loadAdminComplianceAssistant error:', err);
-    const tbody = qs('caTaskTbody');
-    if (tbody) {
-      tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger">Error loading data: ${err.message}</td></tr>`;
-    }
-  }
-}
-
-function attachComplianceAssistantActions() {
-  // Copy button - reuse existing clipboard logic
-  document.querySelectorAll('[data-action="copy"]').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const taskId = btn.getAttribute('data-task-id');
-      const row = btn.closest('tr');
-      const clientName = row.cells[0].textContent;
-      const serviceType = row.cells[1].textContent;
-      const dueDate = row.cells[2].textContent;
-      
-      const text = `Client: ${clientName}\nService: ${serviceType}\nDue: ${dueDate}\nTask ID: ${taskId}`;
-      
-      try {
-        await navigator.clipboard.writeText(text);
-        btn.textContent = 'Copied!';
-        btn.classList.remove('btn-outline-secondary');
-        btn.classList.add('btn-success');
-        setTimeout(() => {
-          btn.textContent = 'Copy';
-          btn.classList.remove('btn-success');
-          btn.classList.add('btn-outline-secondary');
-        }, 1500);
-      } catch (err) {
-        console.error('Copy failed:', err);
-        alert('Failed to copy to clipboard');
-      }
-    });
-  });
-  
-  // Done button - call followup endpoint
-  document.querySelectorAll('[data-action="done"]').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const taskId = btn.getAttribute('data-task-id');
-      
-      try {
-        btn.disabled = true;
-        btn.textContent = 'Processing...';
-        
-        await apiTasks(`/tasks/${taskId}/followup`, {
-          method: 'POST',
-        });
-        
-        btn.textContent = 'Done ✓';
-        btn.classList.remove('btn-outline-primary');
-        btn.classList.add('btn-success');
-        
-        // Optionally refresh the list after a delay
-        setTimeout(() => {
-          loadAdminComplianceAssistant();
-        }, 1000);
-        
-      } catch (err) {
-        console.error('Followup action failed:', err);
-        alert(err.message || 'Failed to mark as done');
-        btn.disabled = false;
-        btn.textContent = 'Done';
-      }
-    });
-  });
-  
-  // Escalate button - call escalate endpoint
-  document.querySelectorAll('[data-action="escalate"]').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const taskId = btn.getAttribute('data-task-id');
-      
-      if (!confirm('Escalate this task to partner/manager?')) return;
-      
-      try {
-        btn.disabled = true;
-        btn.textContent = 'Escalating...';
-        
-        await apiTasks(`/tasks/${taskId}/escalate`, {
-          method: 'POST',
-        });
-        
-        btn.textContent = 'Escalated ✓';
-        btn.classList.remove('btn-outline-danger');
-        btn.classList.add('btn-dark');
-        
-        // Update the row to show it's escalated
-        const row = btn.closest('tr');
-        const delayReasonCell = row.cells[5];
-        delayReasonCell.innerHTML = '<span class="badge bg-danger">ESCALATED</span>';
-        
-      } catch (err) {
-        console.error('Escalate action failed:', err);
-        alert(err.message || 'Failed to escalate task');
-        btn.disabled = false;
-        btn.textContent = 'Escalate';
-      }
-    });
-  });
-}
-
 // -------------------- INIT --------------------
 
 async function initTaskBoard() {
@@ -573,4 +370,3 @@ async function initTaskBoard() {
 
 window.initTaskBoard = initTaskBoard;
 window.refreshTaskBoard = refreshTaskBoard;
-window.loadAdminComplianceAssistant = loadAdminComplianceAssistant;

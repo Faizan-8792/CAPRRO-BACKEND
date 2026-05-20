@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import crypto from "crypto";
 
 const FirmSchema = new mongoose.Schema({
   displayName: {
@@ -46,15 +47,14 @@ const FirmSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
-// FIXED: Correct static method - generates 6-char join code
+// Cryptographically secure 6-char join code
 FirmSchema.statics.generateJoinCode = function () {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = crypto.randomBytes(6);
   let code = "";
-
-  for (let i = 0; i < 6; i += 1) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  for (let i = 0; i < 6; i++) {
+    code += chars[bytes[i] % chars.length];
   }
-
   return code;
 };
 

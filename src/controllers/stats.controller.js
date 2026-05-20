@@ -32,41 +32,38 @@ export async function getClientsToChaseToday(req, res, next) {
 
     const today = startOfToday();
 
-    // Get all WAITING_DOCS tasks
-    const pendingTasks = await Task.find({
+    // Pending docs
+    const pendingFilter = {
       firmId,
       isActive: true,
-      status: "WAITING_DOCS"
-    })
+      $or: [
+        { status: { $in: ["WAITING_DOCS", "OPEN"] } },
+        { "meta.docsStatus": "PENDING" }
+      ]
+    };
+
+    const pendingTasks = await Task.find(pendingFilter)
       .sort({ createdAt: 1 })
       .limit(200)
       .lean();
 
-    // SIMPLIFIED LOGIC: Include all WAITING_DOCS tasks with waitingSince
     const pendingDocsClients = pendingTasks
-      .filter(task => task.status === 'WAITING_DOCS' && task.meta?.waitingSince)
-      .map(task => {
-        const waitingSince = task.meta?.waitingSince;
-        if (!waitingSince) return null;
-
-        const waitingDays = Math.floor(
-          (Date.now() - new Date(waitingSince).getTime()) / (1000 * 60 * 60 * 24)
-        );
+      .map((t) => {
+        const created = t.createdAt ? new Date(t.createdAt) : today;
+        const d = daysDiff(today, created);
+        const daysPending = d >= 0 ? d : 0;
 
         return {
-          taskId: task._id.toString(),
-          clientName: task.clientName || "Unknown",
-          serviceType: task.serviceType || "OTHER",
-          title: task.title || "No title",
-          dueDateISO: task.dueDateISO,
-          daysPending: waitingDays,
-          status: task.status,
-          delayReason: task.meta?.delayReason || null,
-          waitingDays: waitingDays,
-          suggestedAction: waitingDays >= 7 ? 'ESCALATE' : 'CHASE'
+          taskId: t._id.toString(),
+          clientName: t.clientName || "Unknown",
+          serviceType: t.serviceType || "OTHER",
+          title: t.title || "No title",
+          dueDateISO: t.dueDateISO,
+          daysPending,
+          status: t.status
         };
       })
-      .filter(Boolean) // Remove any null entries
+      .filter((x) => x.daysPending >= 3)
       .slice(0, 50);
 
     // Chronic late
@@ -185,11 +182,10 @@ export async function postChaseComplete(req, res, next) {
     });
 
   } catch (err) {
-    console.error("💥 Raw MongoDB ERROR:", err.message);
+    console.error("💥 postChaseComplete ERROR:", err.message);
     res.status(500).json({ 
       ok: false, 
-      error: "Database update failed",
-      debug: err.message 
+      error: "Database update failed"
     });
   }
 }
@@ -200,6 +196,14 @@ export async function postChaseComplete(req, res, next) {
 export const getFirmOverviewStats = async (req, res, next) => {
   try {
     const { firmId } = req.params;
+
+    // Ownership check: FIRM_ADMIN can only query their own firm
+    if (
+      req.user.role !== "SUPER_ADMIN" &&
+      String(req.user.firmId) !== String(firmId)
+    ) {
+      return res.status(403).json({ ok: false, error: "Forbidden: not your firm" });
+    }
 
     const userCount = await User.countDocuments({ firmId, isActive: true });
     const reminderCount = await Reminder.countDocuments({ firmId });
@@ -219,75 +223,3 @@ export const getFirmOverviewStats = async (req, res, next) => {
     next(err);
   }
 };
-
-/**
- * Employee productivity stats
- * Count of CLOSED tasks per employee
- * period = week | month | year
- */
-export async function getEmployeeProductivityStats(req, res) {
-  try {
-    const firmId = new mongoose.Types.ObjectId(req.user.firmId);
-    const { period = "month" } = req.query;
-
-    const now = new Date();
-    let startDate;
-
-    if (period === "week") {
-      startDate = new Date(now);
-      startDate.setDate(now.getDate() - 7);
-    } else if (period === "year") {
-      startDate = new Date(now.getFullYear(), 0, 1);
-    } else {
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    }
-
-    // 1️⃣ Get all active users of firm
-    const users = await User.find(
-      { firmId, isActive: true },
-      { email: 1 }
-    ).lean();
-
-    // 2️⃣ Get closed task counts
-    const taskCounts = await Task.aggregate([
-      {
-        $match: {
-          firmId,
-          status: "CLOSED",
-          assignedTo: { $ne: null },
-          updatedAt: { $gte: startDate }
-        }
-      },
-      {
-        $group: {
-          _id: "$assignedTo",
-          count: { $sum: 1 }
-        }
-      }
-    ]);
-
-    const taskMap = {};
-    taskCounts.forEach(t => {
-      taskMap[t._id.toString()] = t.count;
-    });
-
-    // 3️⃣ Merge → ensure 0-task users appear
-    const data = users.map(u => ({
-      userId: u._id,
-      email: u.email,
-      label: u.email.split("@")[0],
-      tasksCompleted: taskMap[u._id.toString()] || 0
-    }));
-
-    res.json({
-      period,
-      startDate,
-      totalEmployees: data.length,
-      data
-    });
-
-  } catch (err) {
-    console.error("Employee productivity error:", err);
-    res.status(500).json({ error: "Failed to load employee stats" });
-  }
-}

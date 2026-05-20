@@ -1,9 +1,6 @@
 // src/controllers/firm.controller.js
-import jwt from "jsonwebtoken";
 import Firm from "../models/Firm.js";
 import User from "../models/User.js";
-
-const JWT_SECRET = process.env.JWT_SECRET || "changeme";
 
 async function assertFirmAdmin(userId, firmId) {
   const firm = await Firm.findById(firmId);
@@ -213,19 +210,7 @@ export const joinFirmByCode = async (req, res, next) => {
     await user.save();
 
     // ✅ FIX: Return UPDATED USER with firmId for popup.js
-    const updatedUser = await User.findById(userId).select('firmId accountType role name email isActive');
-
-    // ✅ NEW: Create JWT token with updated user information
-    const payload = {
-      id: updatedUser._id,
-      email: updatedUser.email,
-      role: updatedUser.role,
-      accountType: updatedUser.accountType,
-      firmId: firm._id,
-      isActive: updatedUser.isActive,
-    };
-
-    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
+    const updatedUser = await User.findById(userId).select('firmId accountType role name email');
 
     return res.json({
       ok: true,
@@ -234,8 +219,7 @@ export const joinFirmByCode = async (req, res, next) => {
         displayName: firm.displayName,
         handle: firm.handle,
       },
-      user: payload,
-      token, // ✅ NEW TOKEN WITH firmId
+      user: updatedUser  // ✅ This fixes popup.js
     });
   } catch (err) {
     next(err);
@@ -361,5 +345,5 @@ export default {
   joinFirmByCode,
   listFirmUsers,
   requestFirmAdmin,
-  deleteFirmUser
+  deleteFirmUser  // ✅ ADD
 };

@@ -69,6 +69,11 @@ const ReminderSchema = new mongoose.Schema(
   }
 );
 
+// Indexes for performance
+ReminderSchema.index({ userId: 1, isActive: 1 });
+ReminderSchema.index({ firmId: 1, isActive: 1 });
+ReminderSchema.index({ dueDateISO: 1, isActive: 1 });
+
 const Reminder = mongoose.model("Reminder", ReminderSchema);
 
 export default Reminder;

@@ -136,11 +136,20 @@ export async function getTodayReminders(req, res) {
 export async function updateReminder(req, res) {
   try {
     const { id } = req.params;
-    const updates = req.body;
+
+    // Whitelist only safe fields — prevent mass-assignment of userId/firmId/firedOffsets
+    const { typeId, clientLabel, dueDateISO, offsets, isActive, meta } = req.body || {};
+    const safeUpdates = {};
+    if (typeId !== undefined) safeUpdates.typeId = typeId;
+    if (clientLabel !== undefined) safeUpdates.clientLabel = clientLabel;
+    if (dueDateISO !== undefined) safeUpdates.dueDateISO = dueDateISO;
+    if (Array.isArray(offsets)) safeUpdates.offsets = offsets;
+    if (typeof isActive === "boolean") safeUpdates.isActive = isActive;
+    if (meta && typeof meta === "object") safeUpdates.meta = meta;
 
     const reminder = await Reminder.findOneAndUpdate(
       { _id: id, $or: [{ userId: req.user.id }, { firmId: req.user.firmId }] },
-      updates,
+      safeUpdates,
       { new: true }
     );
 

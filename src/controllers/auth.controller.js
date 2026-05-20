@@ -3,7 +3,9 @@ import crypto from "crypto";
 import User from "../models/User.js";
 import { sendOtpEmail } from "../services/email.service.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "changeme";
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) throw new Error("JWT_SECRET env var is required");
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
 const OTP_EXPIRY_MINUTES = 10;
 
 // ---------------- Helpers ----------------
@@ -61,8 +63,10 @@ export const sendOtp = async (req, res, next) => {
 
     const otp = generateOtp();
 
-    // (Optional dev log – remove later if you want)
-    console.log("🔐 OTP GENERATED for", normalizedEmail, "=>", otp);
+    // Dev-only OTP log — never log OTPs in production
+    if (process.env.NODE_ENV !== "production") {
+      console.log("🔐 OTP GENERATED for", normalizedEmail, "=>", otp);
+    }
 
     user.otpCodeHash = hashOtp(otp);
     user.otpExpiresAt = new Date(
@@ -133,7 +137,7 @@ export const verifyOtpAndLogin = async (req, res, next) => {
     await user.save();
 
     const payload = buildTokenPayload(user);
-    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
     return res.json({ ok: true, token, user: payload });
   } catch (err) {

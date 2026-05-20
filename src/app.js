@@ -11,7 +11,6 @@ import firmRoutes from "./routes/firm.routes.js";
 import statsRoutes from "./routes/stats.routes.js";
 import superRoutes from "./routes/super.routes.js";
 import taskRoutes from "./routes/task.routes.js";
-import routes from "./routes/index.js";
 
 const app = express();
 
@@ -29,20 +28,15 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        // Allow Google Fonts stylesheet and CDN for styles
-  styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com", "https://replit-cdn.com"],
-  // Explicitly allow style elements from Google Fonts (some browsers check style-src-elem)
-  // Also allow inline styles for admin UI since scripts create style attributes dynamically
-    styleSrcElem: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://fonts.googleapis.com", "https://replit-cdn.com"],
-      scriptSrc: ["'self'", "https://replit-cdn.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+        scriptSrc: ["'self'"],
         connectSrc: [
           "'self'",
           "https://cdn.jsdelivr.net",
-          "https://capro--saifullahfaizan.replit.app"
+          "https://caprro-backend-1.onrender.com"
         ],
         imgSrc: ["'self'", "data:", "https:"],
-        // Allow Google Fonts font files
-        fontSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://fonts.gstatic.com"],
+        fontSrc: ["'self'", "https://cdn.jsdelivr.net"],
       },
     },
   })
@@ -61,7 +55,7 @@ app.use(
       if (!origin) return callback(null, true);
 
       // ✅ Allow backend itself
-      if (origin === "https://capro--saifullahfaizan.replit.app") {
+      if (origin === "https://caprro-backend-1.onrender.com") {
         return callback(null, true);
       }
 
@@ -127,5 +121,19 @@ app.use("/api/firms", firmRoutes);
 app.use("/api/stats", statsRoutes);
 app.use("/api/super", superRoutes);
 app.use("/api/tasks", taskRoutes);
-app.use(routes);
+
+/* ===============================
+   GLOBAL ERROR HANDLER
+================================ */
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  const status = err.status || err.statusCode || 500;
+  console.error(`[ERROR] ${req.method} ${req.path} →`, err.message, err.stack);
+  res.status(status).json({
+    ok: false,
+    error: err.message || "Internal server error",
+    ...(process.env.NODE_ENV !== "production" && { stack: err.stack }),
+  });
+});
+
 export default app;

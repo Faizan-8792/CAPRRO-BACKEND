@@ -1,5 +1,7 @@
-// assistant.js (Admin Compliance Assistant) — DATE BASED
+// assistant.js (Admin Compliance Assistant)
 import { computePriority } from './priority-engine.js';
+
+const API_BASE = "https://caprro-backend-1.onrender.com/api";
 
 function qs(id) {
   return document.getElementById(id);
@@ -14,25 +16,13 @@ function escapeHtml(s) {
     .replaceAll("'", '&#39;');
 }
 
-async function api(path, opts) {
-  // Prefer the shared admin.js api() wrapper so demo mode can intercept.
-  if (typeof window.api === 'function') {
-    return window.api(path, opts);
-  }
-
-  // Fallback (should be rare): local fetch.
+async function api(path) {
   const token = localStorage.getItem('caproadminjwt');
-  if (window.caproShowLoader) window.caproShowLoader('Loading assistant...');
-  try {
-    const API_BASE = "https://capro--saifullahfaizan.replit.app/api";
-    const res = await fetch(`${API_BASE}${path}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) throw new Error('API failed');
-    return res.json();
-  } finally {
-    if (window.caproHideLoader) window.caproHideLoader();
-  }
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!res.ok) throw new Error('API failed');
+  return res.json();
 }
 
 async function loadAdminComplianceAssistant() {
@@ -44,22 +34,20 @@ async function loadAdminComplianceAssistant() {
     statusEl.textContent = 'Analyzing today’s compliance workload...';
 
     const resp = await api('/tasks/board');
+    if (!resp || !resp.columns) {
+      throw new Error('Invalid task board response');
+    }
     const allTasks = Object.values(resp.columns || {}).flat();
 
-    // ✅ DATE BASED PRIORITY
     const enriched = allTasks.map(t => {
       const p = computePriority(t);
-      return { ...t, priority: p.level };
+      return { ...t, priority: p.level, score: p.score };
     });
 
-    // ✅ SHOW ONLY RELEVANT TASKS
-    const today = enriched.filter(t =>
-      ['CRITICAL', 'HIGH', 'MEDIUM'].includes(t.priority)
-    );
+    const today = enriched.filter(t => t.score >= 30);
 
-    // 🔢 Counters
     qs('caOverdueCount').textContent =
-      `Critical: ${today.filter(t => t.priority === 'CRITICAL').length}`;
+      `Overdue: ${today.filter(t => t.score >= 90).length}`;
     qs('caTodayCount').textContent =
       `High: ${today.filter(t => t.priority === 'HIGH').length}`;
     qs('caUpcomingCount').textContent =
@@ -67,15 +55,13 @@ async function loadAdminComplianceAssistant() {
 
     if (!today.length) {
       tbody.innerHTML =
-        `<tr><td colspan="8" class="text-center text-muted">No work to do today 🎉</td></tr>`;
+        `<tr><td colspan="5" class="text-center text-muted">No critical work today 🎉</td></tr>`;
       statusEl.textContent = '';
       return;
     }
 
-    const priorityOrder = { CRITICAL: 1, HIGH: 2, MEDIUM: 3 };
-
     tbody.innerHTML = today
-      .sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority])
+      .sort((a, b) => b.score - a.score)
       .slice(0, 10)
       .map(t => `
         <tr>
@@ -83,36 +69,18 @@ async function loadAdminComplianceAssistant() {
           <td>${escapeHtml(t.serviceType)}</td>
           <td>${new Date(t.dueDateISO).toLocaleDateString('en-IN')}</td>
           <td>${escapeHtml(t.assignedTo?.email || 'Unassigned')}</td>
-
           <td>
-            <span class="badge bg-${
-              t.priority === 'CRITICAL' ? 'danger' :
-              t.priority === 'HIGH' ? 'warning' : 'secondary'
-            }">
+            <span class="badge bg-${t.priority === 'CRITICAL' ? 'danger' :
+                                   t.priority === 'HIGH' ? 'warning' :
+                                   'secondary'}">
               ${t.priority}
-            </span>
-          </td>
-
-          <td>${escapeHtml(t.meta?.delayReason || '-')}</td>
-
-          <td>
-            ${t.meta?.waitingSince
-              ? Math.floor((Date.now() - new Date(t.meta.waitingSince)) / 86400000) + ' days'
-              : '-'}
-          </td>
-
-          <td>
-            <span class="badge bg-${
-              t.priority === 'CRITICAL' ? 'danger' : 'secondary'
-            }">
-              ${t.priority === 'CRITICAL' ? 'CHASE' : 'OK'}
             </span>
           </td>
         </tr>
       `)
       .join('');
 
-    statusEl.textContent = `Showing ${today.length} priority tasks`;
+    statusEl.textContent = `Showing top ${today.length} priority tasks`;
 
   } catch (e) {
     console.error(e);

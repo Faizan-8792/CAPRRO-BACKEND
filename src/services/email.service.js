@@ -1,21 +1,19 @@
 // src/services/email.service.js
 
 import { Resend } from "resend";
-import { sendReminderEmail } from "../config/email.js";
 
 /**
- * Resend client (optional)
- *
- * In local/dev environments we don't want the whole server to crash if
- * RESEND_API_KEY isn't set. We'll lazily create the client when needed.
+ * Lazy Resend client — initialized on first use so missing env var
+ * doesn't crash the module at import time.
  */
-let resend = null;
-function getResendClient() {
-  if (resend) return resend;
-  const key = process.env.RESEND_API_KEY;
-  if (!key) return null;
-  resend = new Resend(key);
-  return resend;
+let _resend = null;
+function getResend() {
+  if (!_resend) {
+    const key = process.env.RESEND_API_KEY;
+    if (!key) throw new Error("RESEND_API_KEY env var is required");
+    _resend = new Resend(key);
+  }
+  return _resend;
 }
 
 /**
@@ -34,25 +32,7 @@ export async function sendOtpEmail(toEmail, otp) {
       throw new Error("sendOtpEmail: toEmail and otp are required");
     }
 
-    const resendClient = getResendClient();
-    if (!resendClient) {
-      // Fallback: nodemailer transporter (if configured)
-      try {
-        const subject = "Your CA PRO Toolkit OTP";
-        const text = `Your One-Time Password (OTP) is: ${otp}. This OTP is valid for 10 minutes.`;
-        await sendReminderEmail(toEmail, subject, text);
-        console.log(`📧 OTP email sent via SMTP to: ${toEmail}`);
-        return { id: "smtp_fallback" };
-      } catch (smtpErr) {
-        console.warn(
-          "⚠️ No RESEND_API_KEY and SMTP not configured. Skipping OTP email in dev.",
-          smtpErr?.message || smtpErr
-        );
-        return { id: "skipped_no_email_config" };
-      }
-    }
-
-    const res = await resendClient.emails.send({
+    const res = await getResend().emails.send({
       from: FROM_EMAIL,
       to: toEmail,
       subject: "Your CA PRO Toolkit OTP",
@@ -75,7 +55,8 @@ export async function sendOtpEmail(toEmail, otp) {
     console.log(`📧 OTP email sent to: ${toEmail}`, res?.id || "");
     return res;
   } catch (err) {
-    console.error("❌ Resend OTP error:", err);
+    // Surface the full Resend error body so you can diagnose domain/key issues
+    console.error("❌ Resend OTP error:", err?.message, JSON.stringify(err?.response?.data ?? err?.cause ?? {}));
     throw err;
   }
 }
@@ -96,8 +77,6 @@ export async function sendComplianceReminderEmail({
     if (!toEmail) {
       throw new Error("sendComplianceReminderEmail: toEmail is required");
     }
-
-    const resendClient = getResendClient();
 
     const due = new Date(dueDateISO);
     const dueText = Number.isNaN(due.getTime())
@@ -132,28 +111,12 @@ export async function sendComplianceReminderEmail({
       </div>
     `;
 
-    let res;
-    if (resendClient) {
-      res = await resendClient.emails.send({
-        from: FROM_EMAIL,
-        to: toEmail,
-        subject,
-        html,
-      });
-    } else {
-      // Fallback: nodemailer transporter
-      try {
-        const text = `Compliance Reminder\n\nTitle: ${title}\nClient: ${clientLabel || ""}\n${whenLine}\nDue: ${dueText}`;
-        await sendReminderEmail(toEmail, subject, text);
-        res = { id: "smtp_fallback" };
-      } catch (smtpErr) {
-        console.warn(
-          "⚠️ No RESEND_API_KEY and SMTP not configured. Skipping reminder email in dev.",
-          smtpErr?.message || smtpErr
-        );
-        res = { id: "skipped_no_email_config" };
-      }
-    }
+    const res = await getResend().emails.send({
+      from: FROM_EMAIL,
+      to: toEmail,
+      subject,
+      html,
+    });
 
     console.log(`📧 Compliance reminder sent to: ${toEmail}`, res?.id || "");
     return res;

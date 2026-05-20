@@ -1,10 +1,7 @@
-const API_BASE = "https://capro--saifullahfaizan.replit.app/api";
+const API_BASE = "https://caprro-backend-1.onrender.com/api";
 const TOKEN_KEY = 'caproadminjwt';
 let __clientsChaseLoading = false;
 let __lastHash = null; // NEW: prevents repeated hash handling
-let currentFirm = null; // 🔥 MOVE THIS TO GLOBAL SCOPE (was inside initAdminPage)
-let __demoMode = false;
-let __demoData = null;
 
 // AUTH HELPER FUNCTIONS
 function getToken() {
@@ -15,55 +12,19 @@ function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-// If the Chrome extension logs out, it can notify this page to force logout.
-// This only works when this admin panel is opened from the extension and the
-// content script bridge is available.
-try {
-    // Path A: if this page is running inside an extension context (rare)
-    if (window.chrome?.runtime?.onMessage?.addListener) {
-        window.chrome.runtime.onMessage.addListener((msg) => {
-            if (msg && msg.type === 'CAPRO_FORCE_LOGOUT') {
-                try {
-                    clearToken();
-                    window.location.href = '/index.html?reason=extension-logout';
-                } catch (e) {}
-            }
-        });
-    }
-
-    // Path B: normal hosted page — listen to bridge messages via window.postMessage
-    window.addEventListener('message', (ev) => {
-        const data = ev?.data;
-        if (!data || data.source !== 'CAPRO_EXTENSION') return;
-        const msg = data.payload;
-        if (msg && msg.type === 'CAPRO_FORCE_LOGOUT') {
-            try {
-                clearToken();
-                window.location.href = '/index.html?reason=extension-logout';
-            } catch (e) {}
-        }
-    });
-} catch (e) {
-    // ignore if not running inside an extension-injected context
-}
-
 async function apiGetMe() {
   const token = getToken();
   if (!token) throw new Error("No token");
-    if (window.caproShowLoader) window.caproShowLoader('Loading profile...');
-    try {
-        const res = await fetch(`${API_BASE}/auth/me`, {
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            }
-        });
 
-        if (!res.ok) throw new Error("Unauthorized");
-        return res.json();
-    } finally {
-        if (window.caproHideLoader) window.caproHideLoader();
+  const res = await fetch(`${API_BASE}/auth/me`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
     }
+  });
+
+  if (!res.ok) throw new Error("Unauthorized");
+  return res.json();
 }
 
 // AUTH GUARD FUNCTION
@@ -124,70 +85,6 @@ function isSuperAdmin(user) {
 }
 
 async function api(path, opts) {
-    // DEMO MODE (Pending approval): return frontend-only sample data.
-    // Strict rules:
-    // - Do not call backend for data reads we want to protect
-    // - Never write anything (writes are already disabled in UI)
-    if (__demoMode) {
-        const method = (opts?.method || 'GET').toUpperCase();
-        if (method !== 'GET') {
-            const err = new Error('Demo Mode: write actions are disabled');
-            err.status = 403;
-            throw err;
-        }
-
-        const demo = __demoData || window.caproDemoData;
-        // Always allow auth/me in demo mode so base UI can render identity.
-        // NOTE: We don't override ensureAdminAuth()'s initial /auth/me call because
-        // demo mode is only enabled after that call determines the user is pending.
-        if (path === '/auth/me') {
-            return {
-                ok: true,
-                user: {
-                    name: 'Pending Admin',
-                    email: 'pending.admin@example.com',
-                    role: 'FIRM_ADMIN',
-                    isActive: false,
-                }
-            };
-        }
-        // Known reads used across admin UI
-        if (path === '/firms/me' || path.startsWith('/firms/')) {
-            return { ok: true, firm: demo?.firm };
-        }
-        if (path.startsWith('/tasks/board')) {
-            return demo?.taskBoard;
-        }
-        if (path === '/document-requests') {
-            return demo?.documentRequests;
-        }
-        if (path === '/document-requests/pending-summary') {
-            return demo?.pendingDocsSummary;
-        }
-        if (path === '/delay-logs/aggregate') {
-            return demo?.delayLogsAggregate;
-        }
-        if (path === '/stats/clients-to-chase-today') {
-            return demo?.clientsToChaseToday || { ok: true, pendingDocsClients: [], chronicLateClients: [] };
-        }
-        if (path.startsWith('/stats/clients-to-chase-today/')) {
-            // “complete” etc. are writes in real life; in demo mode we keep it no-op.
-            return { ok: true };
-        }
-        if (path === '/reminders/today') {
-            return demo?.remindersToday || { ok: true, reminders: [] };
-        }
-        if (/^\/firms\/[^/]+\/users(\/.*)?$/.test(path)) {
-            // Users page (list) and any future read endpoints.
-            return demo?.users || { ok: true, users: [] };
-        }
-        if (path.startsWith('/stats/employee-productivity')) {
-            return demo?.productivity || { ok: true, data: [] };
-        }
-        // Fallback: safe empty response
-        return { ok: true };
-    }
-
     const token = getToken();
     const headers = Object.assign({
         'Content-Type': 'application/json',
@@ -197,64 +94,41 @@ async function api(path, opts) {
         headers.Authorization = `Bearer ${token}`;
     }
 
-    // Show loader for API requests in admin UI
-    if (window.caproShowLoader) window.caproShowLoader('Loading...');
+    const res = await fetch(`${API_BASE}${path}`, {
+        method: opts?.method || 'GET',
+        headers,
+        body: opts?.body ? JSON.stringify(opts.body) : undefined,
+    });
+
+    let data = null;
     try {
-        const res = await fetch(`${API_BASE}${path}`, {
-            method: opts?.method || 'GET',
-            headers,
-            body: opts?.body ? JSON.stringify(opts.body) : undefined,
-        });
-
-        let data = null;
-        try {
-            data = await res.json();
-        } catch {
-            // ignore
-        }
-
-        if (!res.ok) {
-            const msg = data?.error || data?.message || 'Request failed';
-            const err = new Error(msg);
-            err.status = res.status;
-            err.data = data;
-            throw err;
-        }
-
-        return data;
-    } finally {
-        if (window.caproHideLoader) window.caproHideLoader();
+        data = await res.json();
+    } catch {
+        // ignore
     }
+
+    if (!res.ok) {
+        const msg = data?.error || data?.message || 'Request failed';
+        const err = new Error(msg);
+        err.status = res.status;
+        err.data = data;
+        throw err;
+    }
+
+    return data;
 }
 
-// Expose wrapper for other admin modules (e.g., compliance assistant).
-window.api = api;
-
 /**
- * UPDATED: includes 'analytics' and 'tasks' page + correct nav highlight
+ * UPDATED: includes 'tasks' page + correct nav highlight
  */
 function showPage(hash) {
-    const pages = [
-      'dashboard',
-      'analytics', // ✅ ADD THIS
-      'tasks',
-      'assistant',
-      'firm',
-      'users',
-      'join',
-      'settings'
-    ];
-    
+    const pages = ['dashboard', 'tasks', 'assistant', 'firm', 'users', 'join', 'settings'];
     for (const p of pages) {
         const el = qs(`page-${p}`);
         if (el) {
             el.style.display = (hash === `#${p}`) ? 'block' : 'none';
         }
     }
-
-    // If an external page container was loaded, hide it when navigating to SPA sections
-    const externalContainer = qs('externalPageContainer');
-    if (externalContainer) externalContainer.style.display = 'none';
 
     // FIXED: Target sidebar links (.sidebar a), not <nav>
     const sidebar = document.querySelector('.sidebar');
@@ -263,151 +137,6 @@ function showPage(hash) {
             const targetHash = a.getAttribute('href');
             a.classList.toggle('active', targetHash === hash);
         });
-    }
-}
-
-// Load an external admin HTML page into the main content area without navigating away
-async function loadAdminExternalPage(href, activatingLink) {
-    const containerId = 'externalPageContainer';
-    let container = qs(containerId);
-    if (!container) {
-        container = document.createElement('div');
-        container.id = containerId;
-        container.className = 'card p-3 mb-3';
-        const main = document.querySelector('main.content');
-        if (main) main.appendChild(container);
-    }
-
-    // Hide SPA sections
-    document.querySelectorAll('main.content > section').forEach(s => s.style.display = 'none');
-    container.style.display = 'block';
-    container.innerHTML = '<div class="small-label">Loading page...</div>';
-
-    try {
-        const path = href.startsWith('/') ? href : `/admin/${href}`;
-        const res = await fetch(path, { credentials: 'same-origin' });
-        if (!res.ok) {
-            container.innerHTML = `<div class="alert alert-danger">Failed to load page: ${res.status}</div>`;
-            return;
-        }
-        const text = await res.text();
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(text, 'text/html');
-
-        // Remove external stylesheet and style tags from fetched doc so we rely on admin shell CSS
-        doc.querySelectorAll('link[rel="stylesheet"]').forEach(n => n.remove());
-        doc.querySelectorAll('style').forEach(n => n.remove());
-
-        // Prefer a fragment root (#page-root) if the page provides it, otherwise fall back to body
-        const fragmentRoot = doc.getElementById('page-root') || doc.querySelector('.page-content');
-        if (fragmentRoot) {
-            container.innerHTML = fragmentRoot.innerHTML;
-        } else {
-            container.innerHTML = doc.body ? doc.body.innerHTML : text;
-        }
-
-        // Execute any scripts referenced in the loaded HTML
-        // First, execute scripts that were part of the injected fragment (inside the container)
-        const scripts = Array.from(container.querySelectorAll('script'));
-        const executedSrc = new Set();
-        const shouldReExecuteExternalScripts = /\b(doc-requests\.html|today-control\.html|delay-reasons\.html)\b/i.test(href);
-        const loadPromises = [];
-        for (const s of scripts) {
-            if (s.src) {
-                const src = s.getAttribute('src');
-                const abs = src.startsWith('http') || src.startsWith('/') ? src : `/admin/${src}`;
-                // Avoid adding the same src twice (but for external fragment pages we *do* want
-                // the script to re-run when you revisit the page).
-                if (!shouldReExecuteExternalScripts) {
-                    if (document.querySelector(`script[src="${abs}"]`) || executedSrc.has(abs)) { s.remove(); continue; }
-                }
-                const newScript = document.createElement('script');
-                newScript.src = abs;
-                newScript.async = false;
-                const p = new Promise((resolve) => {
-                    newScript.onload = () => resolve({ src: abs, ok: true });
-                    newScript.onerror = () => resolve({ src: abs, ok: false });
-                });
-                loadPromises.push(p);
-                document.body.appendChild(newScript);
-                executedSrc.add(abs);
-            } else {
-                // inline script: execute immediately
-                const newScript = document.createElement('script');
-                newScript.textContent = s.textContent;
-                document.body.appendChild(newScript);
-            }
-            s.remove();
-        }
-
-        // As a fallback, if the page's HTML had script tags outside the fragment root
-        // (some pages may put scripts after the fragment), also execute those.
-        const docScripts = Array.from(doc.querySelectorAll('script'));
-        for (const s of docScripts) {
-            const src = s.getAttribute && s.getAttribute('src');
-            if (src) {
-                const abs = src.startsWith('http') || src.startsWith('/') ? src : `/admin/${src}`;
-                if (document.querySelector(`script[src="${abs}"]`) || executedSrc.has(abs)) continue;
-                const newScript = document.createElement('script');
-                newScript.src = abs;
-                newScript.async = false;
-                const p = new Promise((resolve) => {
-                    newScript.onload = () => resolve({ src: abs, ok: true });
-                    newScript.onerror = () => resolve({ src: abs, ok: false });
-                });
-                loadPromises.push(p);
-                document.body.appendChild(newScript);
-                executedSrc.add(abs);
-            } else if (s.textContent && s.textContent.trim()) {
-                // inline scripts outside fragment
-                const newScript = document.createElement('script');
-                newScript.textContent = s.textContent;
-                document.body.appendChild(newScript);
-            }
-        }
-
-        // After all external scripts finish loading, try to call known init functions
-        try {
-            await Promise.all(loadPromises);
-        } catch (e) {
-            // ignore - we'll still attempt to call init functions
-            console.warn('Some scripts failed to load', e);
-        }
-
-        // Attempt to call init function for the active external page.
-        // IMPORTANT: on revisits, scripts may not re-run by themselves (because the browser
-        // caches loaded JS and we de-dupe <script src=...>), so we always call init explicitly.
-        const pageInitMap = {
-            'doc-requests.html': 'initDocRequestsPage',
-            'today-control.html': 'initTodayControl',
-            'delay-reasons.html': 'initDelayReasons',
-        };
-
-        const normalized = String(href || '').split('?')[0].split('#')[0];
-        const pageKey = normalized.split('/').pop();
-        const initName = pageInitMap[pageKey];
-        if (initName) {
-            const fn = window[initName];
-            if (typeof fn === 'function') {
-                try {
-                    fn();
-                } catch (e) {
-                    console.warn(`init ${initName} threw`, e);
-                }
-            } else {
-                console.warn(`External page loaded but init function not found: ${initName}`);
-            }
-        }
-
-        // Update active link styling
-        if (activatingLink) {
-            document.querySelectorAll('.sidebar a').forEach(a => a.classList.toggle('active', a === activatingLink));
-        }
-
-        window.scrollTo(0, 0);
-    } catch (err) {
-        console.error('loadAdminExternalPage error', err);
-        container.innerHTML = `<div class="alert alert-danger">Error loading page</div>`;
     }
 }
 
@@ -443,11 +172,6 @@ function onHashChange() {
     if (hash === '#dashboard') {
         if (window.loadTodayReminders) loadTodayReminders();
         if (!__clientsChaseLoading) loadClientsToChaseToday();
-    }
-
-    // ✅ Analytics page open hone par chart load
-    if (hash === '#analytics') {
-        loadEmployeeProductivity();
     }
 }
 
@@ -492,19 +216,19 @@ function buildReminderMessage(item, type) {
     if (type === "pending") {
         return (
             `Hi ${item.clientName},\n\n` +
-            `We are waiting for your ${item.serviceType || "compliance"} documents. ` +
-            `Your documents have been pending for 3+ days.\n` +
+            `Hum aapke ${item.serviceType || "compliance"} ke documents ka wait kar rahe hain. ` +
+            `Last 3+ din se documents pending hain.\n` +
             `Due: ${dueText}.\n\n` +
-            `Please share the documents at the earliest.\n\n- CA PRO Toolkit`
+            `Kripya documents jaldi share karein.\n\n- CA PRO Toolkit`
         );
     }
 
     // high risk
     return (
         `Hi ${item.clientName},\n\n` +
-        `In the last 2 periods, your ${item.serviceType || "compliance"} filings ` +
-        `were submitted after the due date. To complete this on time, ` +
-        `please share the documents a bit earlier.\n` +
+        `Pichle 2 periods me aapke ${item.serviceType || "compliance"} filings ` +
+        `due date ke baad submit hue the. Is baar time se complete karne ke liye ` +
+        `documents thoda pehle bhejne ka request hai.\n` +
         `Current due: ${dueText}.\n\n` +
         `Thanks.\n\n- CA PRO Toolkit`
     );
@@ -567,7 +291,7 @@ async function loadClientsToChaseToday() {
             pendingList.innerHTML = pending
                 .map((item, idx) => {
                     const label = escapeHtml(
-                       `${idx + 1}. ${item.clientName} – ${item.serviceType || ""} · pending for ${item.daysPending} days`
+                        `${idx + 1}. ${item.clientName} – ${item.serviceType || ""} · ${item.daysPending} din se pending`
                     );
                     return `
                         <li>
@@ -594,7 +318,7 @@ async function loadClientsToChaseToday() {
             riskList.innerHTML = risk
                 .map((item, idx) => {
                     const label = escapeHtml(
-                        `${idx + 1}. ${item.clientName} – ${item.serviceType || ""} · last delay ${item.lastPeriodDelayDays} days`
+                        `${idx + 1}. ${item.clientName} – ${item.serviceType || ""} · last delay ${item.lastPeriodDelayDays} din`
                     );
                     return `
                         <li>
@@ -692,50 +416,6 @@ async function loadClientsToChaseToday() {
     }
 }
 
-// Function to attach delete button handlers for users
-function attachUserDeleteHandlers() {
-  document.querySelectorAll('.delete-user-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.preventDefault();
-
-      const userId = btn.dataset.userid;
-      if (!userId) return;
-
-      if (!confirm('Delete this user permanently?')) return;
-
-      try {
-        btn.disabled = true;
-        btn.textContent = 'Deleting...';
-
-        // ✅ ADD DEBUG LOG
-        console.log('Deleting user', {
-          firmId: currentFirm?._id,
-          userId
-        });
-
-        // ✅ FIXED API URL - Check firm context first
-        if (!currentFirm?._id) {
-          throw new Error('Firm context missing');
-        }
-
-        // ✅ CORRECT DELETE ENDPOINT
-        await api(`/firms/${currentFirm._id}/users/${userId}`, {
-          method: 'DELETE'
-        });
-
-        // 🔁 Reload users table
-        btn.closest('tr')?.remove();
-
-      } catch (err) {
-        console.error('User delete failed:', err);
-        alert(err.message || 'Failed to delete user');
-        btn.disabled = false;
-        btn.textContent = 'Delete';
-      }
-    });
-  });
-}
-
 // ---------- Firm Admin page (admin.html) ----------
 async function initAdminPage() {
     if (!qs('logoutBtn')) return;
@@ -769,15 +449,6 @@ async function initAdminPage() {
         });
     });
 
-    // Intercept sidebar links that point to separate admin HTML pages and load them into the SPA
-    document.querySelectorAll('.sidebar a[href$=".html"]').forEach(link => {
-        link.addEventListener('click', (e) => {
-            e.preventDefault();
-            const href = link.getAttribute('href');
-            loadAdminExternalPage(href, link);
-        });
-    });
-
     // Initial page load
     onHashChange();
 
@@ -786,7 +457,7 @@ async function initAdminPage() {
         console.log('Task board detected, waiting for hashchange to init');
     }
 
-    // ❌ REMOVED: let currentFirm = null; (now declared at top)
+    let currentFirm = null; // Store firm globally for delete operations
 
     async function loadAndRenderUsers() {
         if (!currentFirm || !currentFirm._id) return;
@@ -823,10 +494,6 @@ async function initAdminPage() {
                     </tr>
                 `).join('');
             }
-            
-            // ✅ ADD THIS LINE: Attach event handlers to delete buttons
-            attachUserDeleteHandlers();
-            
         } catch (e) {
             console.error('Users load error:', e);
             if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Failed to load users</td></tr>';
@@ -865,24 +532,10 @@ async function initAdminPage() {
         // PENDING APPROVAL - View-only mode
         const pendingBanner = qs('pendingBanner');
         if (!me.isActive) {
-            __demoMode = true;
-            __demoData = window.caproDemoData || null;
             if (pendingBanner) {
                 pendingBanner.style.display = 'block';
                 pendingBanner.classList.remove('d-none');
             }
-
-            const demoHint = qs('demoModeHint');
-            if (demoHint) demoHint.style.display = 'block';
-
-            // Replace banner text to make it clear this is demo data
-            try {
-                const msg = pendingBanner?.querySelector('strong');
-                if (msg) msg.textContent = 'Demo Mode – Pending Approval';
-                const p = pendingBanner?.querySelector('br')?.nextSibling;
-                // (leave existing text if structure differs)
-            } catch {}
-
             document.querySelectorAll('button[id$="Btn"]').forEach(btn => {
                 btn.disabled = true;
                 btn.classList.add('opacity-50');
@@ -893,52 +546,24 @@ async function initAdminPage() {
         if (qs('emailBadge')) qs('emailBadge').textContent = me.email;
         if (qs('roleBadge')) qs('roleBadge').textContent = me.isActive ? 'FIRM_ADMIN' : 'FIRM_ADMIN (Pending)';
 
-    // Expose mode for external pages
-    window.caproDemoMode = __demoMode;
-    window.caproDemoData = window.caproDemoData || __demoData;
-
         // FIRM LOADING
-        // In demo mode, never fetch real firm data.
         let firm = null;
-        if (__demoMode) {
-            firm = __demoData?.firm || { displayName: 'Demo Firm', handle: 'demo-firm', planType: 'FREE' };
-            currentFirm = firm;
-        } else {
-            try {
-                const myFirmResp = await api('/firms/me');
-                if (myFirmResp?.ok && myFirmResp.firm && myFirmResp.firm._id) {
-                    const firmId = myFirmResp.firm._id;
-                    const firmResp = await api(`/firms/${firmId}`);
-                    if (firmResp?.ok && firmResp.firm) {
-                        firm = firmResp.firm;
-                        currentFirm = firm; // ✅ THIS IS REQUIRED - Using global currentFirm
-                    }
+        try {
+            const myFirmResp = await api('/firms/me');
+            if (myFirmResp?.ok && myFirmResp.firm && myFirmResp.firm._id) {
+                const firmId = myFirmResp.firm._id;
+                const firmResp = await api(`/firms/${firmId}`);
+                if (firmResp?.ok && firmResp.firm) {
+                    firm = firmResp.firm;
+                    currentFirm = firm; // Store for delete operations
                 }
-            } catch (e) {
-                console.error('Firm load error:', e);
             }
+        } catch (e) {
+            console.error('Firm load error:', e);
         }
 
         if (qs('topSub')) {
             qs('topSub').textContent = firm ? `Firm: ${firm.displayName} (@${firm.handle})` : 'No firm linked';
-        }
-
-        // Navbar plan badge (PREMIUM vs STANDARD)
-        // Note: legacy values in codebase include FREE/PREMIUM; user asked for STANDARD/PREMIUM.
-        try {
-            const badge = qs('planBadge');
-            if (badge) {
-                const planRaw = String(firm?.planType || 'FREE').toUpperCase();
-                const isPremium = planRaw === 'PREMIUM';
-                // badge text is wrapped in a nested span for shimmer layering
-                const label = badge.querySelector('span') || badge;
-                label.textContent = isPremium ? 'PREMIUM' : 'STANDARD';
-                badge.style.display = 'inline-flex';
-                badge.classList.toggle('plan-badge--premium', isPremium);
-                badge.classList.toggle('plan-badge--standard', !isPremium);
-            }
-        } catch (e) {
-            // ignore UI-only badge failures
         }
 
         // ✅ DASHBOARD KPIs
@@ -1080,6 +705,28 @@ async function initAdminPage() {
                 if (firmStatus) firmStatus.textContent = e.message;
             }
         });
+
+        // ✅ Delete user handler
+        document.getElementById('usersTbody')?.addEventListener('click', async (e) => {
+            if (e.target.classList.contains('delete-user-btn')) {
+                const userId = e.target.dataset.userid;
+                const confirmed = confirm(`Delete user ${userId}? This removes them from firm only.`);
+                if (!confirmed) return;
+                
+                try {
+                    e.target.textContent = 'Deleting...';
+                    e.target.disabled = true;
+                    await api(`/firms/${firm._id}/users/${userId}`, { method: 'DELETE' });
+                    await loadAndRenderUsers();  // Refresh list
+                } catch (err) {
+                    alert(err.message || 'Delete failed');
+                } finally {
+                    e.target.disabled = false;
+                    e.target.textContent = 'Delete';
+                }
+            }
+        });
+
     } catch (e) {
         console.error('Dashboard error:', e);
         if (e.status === 401 || e.status === 403) {
@@ -1092,89 +739,4 @@ async function initAdminPage() {
 
 document.addEventListener('DOMContentLoaded', () => {
     initAdminPage();
-});
-
-/* ===============================
-   EMPLOYEE PRODUCTIVITY CHART
-================================ */
-
-let __productivityChart = null;
-
-async function loadEmployeeProductivity() {
-  const period = document.getElementById('productivityPeriod')?.value || 'month';
-
-  const resp = await api(`/stats/employee-productivity?period=${period}`);
-  const data = resp.data || [];
-
-  const labels = data.map(d => d.label);
-  const values = data.map(d => d.tasksCompleted);
-
-  const canvas = document.getElementById('employeeProductivityChart');
-  const ctx = canvas.getContext('2d');
-
-  if (__productivityChart) __productivityChart.destroy();
-
-  // 🔥 FORCE ALL TEXT TO WHITE
-  Chart.defaults.color = '#ffffff';
-
-  __productivityChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [{
-        data: values,
-        backgroundColor: '#198754',   // green
-        borderRadius: 8,
-        barThickness: 26
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      indexAxis: 'y',
-
-      layout: {
-        padding: {
-          left: 140   // 🔥 MOST IMPORTANT FIX (label space)
-        }
-      },
-
-      plugins: {
-        legend: { display: false }
-      },
-
-      scales: {
-        x: {
-          beginAtZero: true,
-          ticks: {
-            precision: 0,
-            color: '#ffffff'
-          },
-          grid: {
-            color: 'rgba(255,255,255,0.08)'
-          }
-        },
-        y: {
-          ticks: {
-            autoSkip: false,
-            color: '#ffffff',
-            font: {
-              size: 14,
-              weight: '600'
-            }
-          },
-          grid: {
-            color: 'rgba(255,255,255,0.08)'
-          }
-        }
-            }
-        }
-    });
-}
-
-// Period dropdown handler
-document.addEventListener("change", (e) => {
-    if (e.target && e.target.id === "productivityPeriod") {
-        loadEmployeeProductivity(e.target.value);
-    }
 });

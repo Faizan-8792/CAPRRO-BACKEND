@@ -5,7 +5,6 @@ import {
   getFirmOverviewStats,
   getClientsToChaseToday,
   postChaseComplete,
-  getEmployeeProductivityStats,
 } from "../controllers/stats.controller.js";
 
 const router = Router();
@@ -23,22 +22,15 @@ router.get(
 
 router.get(
   "/clients-to-chase-today",
-  requireRoles("FIRM_ADMIN", "STAFF", "SUPER_ADMIN"),
+  requireRoles("FIRM_ADMIN", "USER", "SUPER_ADMIN"),
   getClientsToChaseToday
 );
 
 
 router.post(
   "/clients-to-chase-today/complete",
-  requireRoles("FIRM_ADMIN", "STAFF", "SUPER_ADMIN"),
+  requireRoles("FIRM_ADMIN", "USER", "SUPER_ADMIN"),
   postChaseComplete
-);
-
-
-router.get(
-  "/employee-productivity",
-  requireRoles("FIRM_ADMIN", "SUPER_ADMIN"),
-  getEmployeeProductivityStats
 );
 
 export default router;

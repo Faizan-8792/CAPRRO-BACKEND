@@ -1,6 +1,6 @@
 // public/admin/login.js
 // Used by public/index.html
-const API_BASE = "https://capro--saifullahfaizan.replit.app/api";
+const API_BASE = "https://caprro-backend-1.onrender.com/api";
 
 
 const TOKEN_KEY = 'caproadminjwt';
@@ -57,18 +57,6 @@ function isSuperAdmin(user) {
          user.email === 'saifullahfaizan786@gmail.com';
 }
 
-function getExtEmailFromQuery() {
-  try {
-    const params = new URLSearchParams(window.location.search || '');
-    const v = params.get('extEmail');
-    if (!v) return null;
-    const email = String(v).trim().toLowerCase();
-    return email || null;
-  } catch {
-    return null;
-  }
-}
-
 // ---------------- LOGIN PAGE (public/index.html) ----------------
 
 async function initLoginPage() {
@@ -81,19 +69,6 @@ async function initLoginPage() {
   const otpBlock = document.getElementById('otpBlock');
   const goVerify = document.getElementById('goVerify');
   const verifyBtn = document.getElementById('verifyOtp');
-
-  const extEmail = getExtEmailFromQuery();
-
-  // Default hint (so the status area is never confusing/empty)
-  if (statusEl && !statusEl.textContent) {
-    if (extEmail) {
-      statusEl.innerHTML =
-        `You are logged in the Chrome extension as <b>${extEmail}</b>.<br/>` +
-        'Please use the <b>same email</b> here to open the Admin Panel.';
-    } else {
-      statusEl.textContent = 'Enter your email, click “Send OTP”, then verify.';
-    }
-  }
 
   // ---------- UI handlers ----------
 
@@ -110,32 +85,21 @@ async function initLoginPage() {
         return;
       }
 
-      if (extEmail && String(email).trim().toLowerCase() !== extEmail) {
-        statusEl.innerHTML =
-          `You are currently logged into the Chrome extension as <b>${extEmail}</b>.<br/>` +
-          `Please login here using the <b>same email</b>.`;
-        return;
-      }
-
       statusEl.textContent = 'Sending OTP...';
-      if (window.caproShowLoader) window.caproShowLoader('Sending OTP...');
-      try {
-        const res = await fetch(`${API_BASE}/auth/send-otp`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email }),
-        });
 
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(data?.error || data?.message || 'Failed to send OTP');
-        }
+      const res = await fetch(`${API_BASE}/auth/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
 
-        otpBlock.style.display = 'block';
-        statusEl.textContent = 'OTP sent. Check your email.';
-      } finally {
-        if (window.caproHideLoader) window.caproHideLoader();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || data?.message || 'Failed to send OTP');
       }
+
+      otpBlock.style.display = 'block';
+      statusEl.textContent = 'OTP sent. Check your email.';
     } catch (e) {
       console.error('Send OTP error:', e);
       statusEl.textContent = e.message || 'Failed to send OTP.';
@@ -152,47 +116,26 @@ async function initLoginPage() {
         return;
       }
 
-      if (extEmail && String(email).trim().toLowerCase() !== extEmail) {
-        statusEl.innerHTML =
-          `You are currently logged into the Chrome extension as <b>${extEmail}</b>.<br/>` +
-          `Please verify OTP using the <b>same email</b>.`;
-        return;
-      }
-
       statusEl.textContent = 'Verifying OTP...';
-      if (window.caproShowLoader) window.caproShowLoader('Verifying OTP...');
-      
-      let user = null;
-      
-      try {
-        const res = await fetch(`${API_BASE}/auth/verify-otp`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, otpCode }),
-        });
 
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(data?.error || data?.message || 'Failed to verify OTP');
-        }
+      const res = await fetch(`${API_BASE}/auth/verify-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, otpCode }),
+      });
 
-        // Save JWT
-        saveToken(data.token);
-
-        // Fetch user and redirect
-        const me = await api('/auth/me');
-        user = me.user;
-      } finally {
-        if (window.caproHideLoader) window.caproHideLoader();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || data?.message || 'Failed to verify OTP');
       }
-      
+
+      // Save JWT
+      saveToken(data.token);
+
+      // Fetch user and redirect
+      const me = await api('/auth/me');
+      const user = me.user;
       console.log('Login successful user:', user);
-
-      if (!user) {
-        clearToken();
-        statusEl.textContent = 'Login failed: user profile not found. Please try again.';
-        return;
-      }
 
       if (isSuperAdmin(user)) {
         statusEl.textContent = 'Super Admin login successful. Redirecting...';
@@ -211,9 +154,10 @@ async function initLoginPage() {
       // 1) Agar already FIRM_ADMIN hai but pending
       if (user.role === 'FIRM_ADMIN' && user.isActive === false) {
         statusEl.innerHTML =
-          'Your Firm Admin account is created, but it is <b>pending Super Admin approval</b>.<br/>' +
-          'You can open the Admin Panel in <b>view-only demo mode</b> for now.<br/>' +
-          'Please wait until Super Admin approves your request.';
+          'Successfully signed up for Firm Admin! ' +
+          'Your request is now pending Super Admin approval. ' +
+          'Check back later or contact Super Admin at ' +
+          'saifullahfaizan786@gmail.com.';
         setTimeout(() => {
           window.location.href = '/admin/admin.html#dashboard';
         }, 2500);
@@ -223,10 +167,7 @@ async function initLoginPage() {
       // 2) USER with NO firm → truly new person
       if (user.role === 'USER' && !user.firmId) {
         statusEl.innerHTML =
-          'You are signed in as a normal user.<br/>' +
-          '<b>Step 1:</b> Create your Firm from the <b>Chrome extension</b> (Create Firm).<br/>' +
-          '<b>Step 2:</b> Come back here and sign in again using OTP.<br/>' +
-          'After that, you will be taken to the Admin Panel (view-only) until Super Admin approves.';
+          'First create a firm from the admin panel, then come back to this page to sign in as Firm Admin.';
         clearToken();
         return;
       }

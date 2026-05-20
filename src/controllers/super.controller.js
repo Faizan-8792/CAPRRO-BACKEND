@@ -2,6 +2,8 @@
 
 import User from "../models/User.js";
 import Firm from "../models/Firm.js";
+import Task from "../models/Task.js";
+import Reminder from "../models/Reminder.js";
 
 const SUPER_EMAIL = "saifullahfaizan786@gmail.com";
 
@@ -274,71 +276,13 @@ export const deleteFirmForSuper = async (req, res, next) => {
       }
     );
 
+    // Cascade delete: remove all tasks and reminders belonging to this firm
+    await Task.deleteMany({ firmId: firm._id });
+    await Reminder.deleteMany({ firmId: firm._id });
+
     await firm.deleteOne();
 
     return res.json({ ok: true });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// 10) List ALL users with firm info for super admin analytics
-export const listAllUsersForSuper = async (req, res, next) => {
-  try {
-    assertSuper(req.user);
-
-    // Get all users (excluding super admin from count but include in list)
-    const users = await User.find({})
-      .select("email name role accountType firmId isActive createdAt")
-      .sort({ createdAt: -1 })
-      .lean();
-
-    // Get all firms for lookup
-    const firms = await Firm.find({})
-      .select("displayName handle")
-      .lean();
-
-    const firmsById = new Map();
-    firms.forEach((f) => firmsById.set(String(f._id), f));
-
-    // Enrich users with firm info
-    const enrichedUsers = users.map((u) => {
-      const firm = u.firmId ? firmsById.get(String(u.firmId)) : null;
-      return {
-        ...u,
-        firmName: firm ? firm.displayName : null,
-        firmHandle: firm ? firm.handle : null,
-      };
-    });
-
-    // Calculate stats
-    const totalUsers = users.filter((u) => u.role !== "SUPER_ADMIN").length;
-    const individualUsers = users.filter(
-      (u) => u.role !== "SUPER_ADMIN" && u.accountType === "INDIVIDUAL" && !u.firmId
-    ).length;
-    const firmUsers = users.filter(
-      (u) => u.role !== "SUPER_ADMIN" && u.firmId
-    ).length;
-    const firmAdmins = users.filter((u) => u.role === "FIRM_ADMIN").length;
-    const activeUsers = users.filter(
-      (u) => u.role !== "SUPER_ADMIN" && u.isActive
-    ).length;
-    const inactiveUsers = users.filter(
-      (u) => u.role !== "SUPER_ADMIN" && !u.isActive
-    ).length;
-
-    return res.json({
-      ok: true,
-      stats: {
-        totalUsers,
-        individualUsers,
-        firmUsers,
-        firmAdmins,
-        activeUsers,
-        inactiveUsers,
-      },
-      users: enrichedUsers,
-    });
   } catch (err) {
     next(err);
   }
