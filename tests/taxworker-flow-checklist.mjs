@@ -185,11 +185,18 @@ check(
   "Auto-suggestion logic for all period formats"
 );
 
-// 16. Custom doc cannot remove built-in
+// 16. Documents can be removed (template + custom)
 check(
-  "removeCustomDocument refuses to delete non-custom (built-in) docs",
-  /isCustom\s*\)/.test(ctrl) && /Custom document not found.*built-ins cannot/.test(ctrl),
-  "Built-in template docs are immutable"
+  "removeCustomDocument removes any document from session checklist",
+  /session\.documents\s*=\s*session\.documents\.filter\(\(d\)\s*=>\s*d\.docKey\s*!==\s*docKey\)/.test(ctrl),
+  "User has full control over their checklist (template + custom)"
+);
+
+// 16b. Bulk add supported via items array
+check(
+  "addCustomDocument supports bulk add via items[] array",
+  /Array\.isArray\(items\)/.test(ctrl) && /addedCount/.test(ctrl),
+  "Add Documents modal can submit multiple suggestions in one call"
 );
 
 // 17. Period format validation in custom docs (slug from name)

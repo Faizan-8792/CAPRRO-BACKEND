@@ -344,16 +344,55 @@ export const addCustomDocument = async (req, res, next) => {
   try {
     const scope = getScope(req.user);
     const { id } = req.params;
-    const { name, required } = req.body || {};
+    const { name, required, items } = req.body || {};
     if (!isValidObjectId(id)) {
       return res.status(400).json({ ok: false, error: "Invalid session id" });
-    }
-    if (!name || !String(name).trim()) {
-      return res.status(400).json({ ok: false, error: "name required" });
     }
 
     const session = await TaxWorkSession.findOne({ _id: id, ...scope });
     if (!session) return res.status(404).json({ ok: false, error: "Session not found" });
+
+    // Bulk mode: items = [{name, docKey?, required, isCustom?}, ...]
+    if (Array.isArray(items) && items.length) {
+      const added = [];
+      for (const it of items) {
+        const itemName = String(it?.name || "").trim();
+        if (!itemName) continue;
+
+        const slug = String(it.docKey || itemName)
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_")
+          .replace(/^_+|_+$/g, "")
+          .slice(0, 60);
+
+        const isCustom = it.isCustom !== false; // default true unless explicitly false (i.e. from template)
+        const prefix = isCustom ? "custom_" : "tpl_";
+        let docKey = it.docKey ? String(it.docKey).slice(0, 80) : `${prefix}${slug}`;
+        let suffix = 1;
+        while (session.documents.find((d) => d.docKey === docKey)) {
+          docKey = `${prefix}${slug}_${suffix++}`;
+        }
+
+        session.documents.push({
+          docKey,
+          name: itemName,
+          required: it.required === true,
+          received: false,
+          receivedAt: null,
+          receivedByUserId: null,
+          notes: "",
+          isCustom,
+        });
+        added.push(docKey);
+      }
+      await session.save();
+      return res.json({ ok: true, session, addedCount: added.length });
+    }
+
+    // Single custom mode (legacy)
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ ok: false, error: "name required" });
+    }
 
     const slug = String(name)
       .toLowerCase()
@@ -397,13 +436,9 @@ export const removeCustomDocument = async (req, res, next) => {
     if (!session) return res.status(404).json({ ok: false, error: "Session not found" });
 
     const before = session.documents.length;
-    session.documents = session.documents.filter(
-      (d) => !(d.docKey === docKey && d.isCustom)
-    );
+    session.documents = session.documents.filter((d) => d.docKey !== docKey);
     if (session.documents.length === before) {
-      return res
-        .status(404)
-        .json({ ok: false, error: "Custom document not found (built-ins cannot be removed)" });
+      return res.status(404).json({ ok: false, error: "Document not found" });
     }
 
     await session.save();
