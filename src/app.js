@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
+import rateLimit from "express-rate-limit";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -11,6 +12,7 @@ import firmRoutes from "./routes/firm.routes.js";
 import statsRoutes from "./routes/stats.routes.js";
 import superRoutes from "./routes/super.routes.js";
 import taskRoutes from "./routes/task.routes.js";
+import { sanitizeInputs } from "./middleware/sanitize.middleware.js";
 
 const app = express();
 
@@ -28,19 +30,63 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
-        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com"],
+        scriptSrc: ["'self'", "https://cdn.jsdelivr.net"],
         connectSrc: [
           "'self'",
           "https://cdn.jsdelivr.net",
           "https://caprro-backend-1.onrender.com"
         ],
         imgSrc: ["'self'", "data:", "https:"],
-        fontSrc: ["'self'", "https://cdn.jsdelivr.net"],
+        fontSrc: ["'self'", "https://cdn.jsdelivr.net", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
       },
     },
+    crossOriginEmbedderPolicy: false,
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
   })
 );
+
+/* ===============================
+   RATE LIMITING
+================================ */
+// Global: 200 requests per 15 minutes per IP
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: "Too many requests, please try again later." },
+});
+app.use(globalLimiter);
+
+// Auth endpoints: stricter - 10 requests per 15 minutes per IP
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: "Too many auth attempts, please try again later." },
+});
+
+// Super admin endpoints: moderate - 50 requests per 15 minutes
+const superLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: "Rate limit exceeded for admin operations." },
+});
+
+/* ===============================
+   ADDITIONAL SECURITY HEADERS
+================================ */
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  next();
+});
 
 /* ===============================
    CORS — FINAL FIX (IMPORTANT)
@@ -77,7 +123,8 @@ app.use(
 );
 
 app.use(morgan(isProd ? "combined" : "dev"));
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
+app.use(sanitizeInputs);
 
 /* ===============================
    HEALTH
@@ -115,11 +162,11 @@ app.get("/admin", (req, res) =>
 /* ===============================
    API ROUTES
 ================================ */
-app.use("/api/auth", authRoutes);
+app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/reminders", reminderRoutes);
 app.use("/api/firms", firmRoutes);
 app.use("/api/stats", statsRoutes);
-app.use("/api/super", superRoutes);
+app.use("/api/super", superLimiter, superRoutes);
 app.use("/api/tasks", taskRoutes);
 
 /* ===============================

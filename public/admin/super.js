@@ -1,9 +1,9 @@
-// public/admin/super.js
+// public/admin/super.js — Super Admin Dashboard
 
 const API_BASE = "https://caprro-backend-1.onrender.com/api";
 const TOKEN_KEY = "caproadminjwt";
 
-// AUTH HELPER FUNCTIONS
+// ─── Auth helpers ───────────────────────────────────────────────────
 function getToken() {
   return localStorage.getItem(TOKEN_KEY);
 }
@@ -15,32 +15,21 @@ function clearToken() {
 async function apiGetMe() {
   const token = getToken();
   if (!token) throw new Error("No token");
-
   const res = await fetch(`${API_BASE}/auth/me`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    }
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
   });
-
   if (!res.ok) throw new Error("Unauthorized");
   return res.json();
 }
 
-// AUTH GUARD FUNCTION
 async function ensureSuperAdminAuth() {
   try {
     const data = await apiGetMe();
-
     if (!data.ok) throw new Error("Invalid user");
-
-    // ❌ ONLY SUPER_ADMIN allowed
     if (data.user.role !== "SUPER_ADMIN") {
       window.location.href = "/admin/admin.html";
       return false;
     }
-
-    console.log("Super admin authenticated:", data.user.email);
     return true;
   } catch (err) {
     console.error("Auth error:", err);
@@ -50,27 +39,18 @@ async function ensureSuperAdminAuth() {
   }
 }
 
-function qs(id) {
-  return document.getElementById(id);
-}
+// ─── Utilities ──────────────────────────────────────────────────────
+function qs(id) { return document.getElementById(id); }
 
 function escapeHtml(s) {
   return String(s ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+    .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
 async function api(path, opts = {}) {
   const token = getToken();
-
-  const headers = Object.assign(
-    { "Content-Type": "application/json" },
-    opts.headers || {}
-  );
-
+  const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}${path}`, {
@@ -80,11 +60,7 @@ async function api(path, opts = {}) {
   });
 
   let data = null;
-  try {
-    data = await res.json();
-  } catch {
-    /* ignore */
-  }
+  try { data = await res.json(); } catch { /* ignore */ }
 
   if (!res.ok) {
     const msg = data?.error || data?.message || `Request failed (${res.status})`;
@@ -93,45 +69,129 @@ async function api(path, opts = {}) {
     err.data = data;
     throw err;
   }
-
   return data;
 }
 
 function requireSuperAdmin(user) {
-  return user.role === 'SUPER_ADMIN' ||
-         user.email === 'saifullahfaizan786@gmail.com';
+  return user.role === "SUPER_ADMIN" || user.email === "saifullahfaizan786@gmail.com";
 }
+
 async function loadMe() {
   const me = await api("/auth/me");
   return me.user;
 }
 
-// ---------- Pending admins ----------
+// ─── Dashboard Stats ────────────────────────────────────────────────
+async function loadDashboardStats() {
+  const grid = qs("statsGrid");
+  const statusEl = qs("statsLoadingStatus");
+  const taskBreakdownEl = qs("taskStatusBreakdown");
+  const serviceBreakdownEl = qs("serviceBreakdown");
 
+  try {
+    const data = await api("/super/dashboard-stats");
+    if (!data.ok) throw new Error("Failed to load stats");
+
+    const s = data.stats;
+    if (statusEl) statusEl.textContent = "";
+
+    // Main stats cards
+    grid.innerHTML = `
+      <div class="stat-card stat-primary">
+        <div class="stat-label">Total Users</div>
+        <div class="stat-value">${s.users.total}</div>
+        <div class="stat-sub">Active: ${s.users.active} · Inactive: ${s.users.inactive}</div>
+      </div>
+      <div class="stat-card stat-gold">
+        <div class="stat-label">Total Firms</div>
+        <div class="stat-value">${s.firms.total}</div>
+        <div class="stat-sub">Active: ${s.firms.active}</div>
+      </div>
+      <div class="stat-card stat-success">
+        <div class="stat-label">Total Tasks</div>
+        <div class="stat-value">${s.tasks.active}</div>
+        <div class="stat-sub">All time: ${s.tasks.total}</div>
+      </div>
+      <div class="stat-card stat-danger">
+        <div class="stat-label">Pending Admins</div>
+        <div class="stat-value">${s.users.pendingAdmins}</div>
+        <div class="stat-sub">Awaiting approval</div>
+      </div>
+      <div class="stat-card stat-primary">
+        <div class="stat-label">Firm Admins</div>
+        <div class="stat-value">${s.users.firmAdmins}</div>
+        <div class="stat-sub">Active firm admins</div>
+      </div>
+      <div class="stat-card stat-gold">
+        <div class="stat-label">Premium Firms</div>
+        <div class="stat-value">${s.firms.premium}</div>
+        <div class="stat-sub">Free: ${s.firms.free}</div>
+      </div>
+      <div class="stat-card stat-success">
+        <div class="stat-label">Reminders</div>
+        <div class="stat-value">${s.reminders.total}</div>
+        <div class="stat-sub">Total scheduled</div>
+      </div>
+      <div class="stat-card stat-primary">
+        <div class="stat-label">Recent (7d)</div>
+        <div class="stat-value">${s.users.recentSignups}</div>
+        <div class="stat-sub">New signups · ${s.tasks.recentTasks} tasks</div>
+      </div>
+    `;
+
+    // Task status breakdown
+    const statusColors = {
+      NOT_STARTED: "bg-secondary", WAITING_DOCS: "bg-warning",
+      IN_PROGRESS: "bg-primary", FILED: "bg-success", CLOSED: "bg-dark",
+    };
+    if (taskBreakdownEl) {
+      const breakdown = s.tasks.statusBreakdown || [];
+      if (!breakdown.length) {
+        taskBreakdownEl.innerHTML = '<span class="text-muted small">No tasks yet</span>';
+      } else {
+        taskBreakdownEl.innerHTML = breakdown.map(item =>
+          `<span class="badge ${statusColors[item._id] || 'bg-secondary'}">${escapeHtml(item._id)}: ${item.count}</span>`
+        ).join("");
+      }
+    }
+
+    // Service breakdown
+    if (serviceBreakdownEl) {
+      const services = s.tasks.serviceBreakdown || [];
+      if (!services.length) {
+        serviceBreakdownEl.innerHTML = '<span class="text-muted small">No tasks yet</span>';
+      } else {
+        serviceBreakdownEl.innerHTML = services.map(item =>
+          `<span class="badge bg-primary">${escapeHtml(item._id)}: ${item.count}</span>`
+        ).join("");
+      }
+    }
+
+  } catch (err) {
+    console.error("Dashboard stats error:", err);
+    if (statusEl) statusEl.textContent = err.message || "Failed to load stats.";
+  }
+}
+
+// ─── Pending Admins ─────────────────────────────────────────────────
 async function loadPendingAdmins() {
   const data = await api("/super/pending-admins");
   return data.users || [];
 }
 
 async function approveAdmin(userId) {
-  return api(`/super/approve-admin/${encodeURIComponent(userId)}`, {
-    method: "POST",
-  });
+  return api(`/super/approve-admin/${encodeURIComponent(userId)}`, { method: "POST" });
 }
 
 async function revokeAdmin(userId) {
-  return api(`/super/revoke-admin/${encodeURIComponent(userId)}`, {
-    method: "POST",
-  });
+  return api(`/super/revoke-admin/${encodeURIComponent(userId)}`, { method: "POST" });
 }
 
 function renderPendingRow(user) {
   const created = user.createdAt ? new Date(user.createdAt).toLocaleString() : "—";
-
-  const firmId =
-    typeof user.firmId === "object" && user.firmId !== null
-      ? user.firmId.handle || user.firmId._id || "—"
-      : user.firmId || "—";
+  const firmId = typeof user.firmId === "object" && user.firmId !== null
+    ? user.firmId.handle || user.firmId._id || "—"
+    : user.firmId || "—";
 
   return `
     <tr data-id="${escapeHtml(user._id)}">
@@ -140,8 +200,8 @@ function renderPendingRow(user) {
       <td>${escapeHtml(firmId)}</td>
       <td>${escapeHtml(created)}</td>
       <td>
-        <button class="btn btn-sm btn-success approve-btn">Approve</button>
-        <button class="btn btn-sm btn-danger revoke-btn ms-1">Revoke</button>
+        <button class="btn btn-sm btn-success approve-btn" type="button">Approve</button>
+        <button class="btn btn-sm btn-danger revoke-btn ms-1" type="button">Revoke</button>
       </td>
     </tr>
   `;
@@ -149,118 +209,99 @@ function renderPendingRow(user) {
 
 function attachPendingHandlers(tbody) {
   tbody.addEventListener("click", async (e) => {
-    const btn = e.target;
+    const btn = e.target.closest("button");
+    if (!btn) return;
     const row = btn.closest("tr");
     if (!row) return;
-
     const userId = row.getAttribute("data-id");
     if (!userId) return;
 
     if (btn.classList.contains("approve-btn")) {
       btn.disabled = true;
+      btn.textContent = "Approving...";
       try {
         await approveAdmin(userId);
         row.classList.add("table-success");
-        row.querySelectorAll("button").forEach((b) => (b.disabled = true));
+        row.querySelectorAll("button").forEach(b => { b.disabled = true; });
+        btn.textContent = "Approved ✓";
       } catch (err) {
         alert(err.message || "Failed to approve");
         btn.disabled = false;
+        btn.textContent = "Approve";
       }
     }
 
     if (btn.classList.contains("revoke-btn")) {
       btn.disabled = true;
+      btn.textContent = "Revoking...";
       try {
         await revokeAdmin(userId);
         row.classList.add("table-warning");
-        row.querySelectorAll("button").forEach((b) => (b.disabled = true));
+        row.querySelectorAll("button").forEach(b => { b.disabled = true; });
+        btn.textContent = "Revoked";
       } catch (err) {
         alert(err.message || "Failed to revoke");
         btn.disabled = false;
+        btn.textContent = "Revoke";
       }
     }
   });
 }
 
-// ---------- Firms & plans ----------
-
+// ─── Firms & Plans ──────────────────────────────────────────────────
 async function loadFirms() {
   const data = await api("/super/firms");
   return data.firms || [];
 }
 
 async function loadFirmUsers(firmId) {
-  const data = await api(`/super/firms/${encodeURIComponent(firmId)}/users`);
-  return data;
+  return api(`/super/firms/${encodeURIComponent(firmId)}/users`);
 }
 
 async function updateFirmPlanApi(firmId, payload) {
-  const data = await api(`/super/firms/${encodeURIComponent(firmId)}/plan`, {
-    method: "PATCH",
-    body: payload,
-  });
+  const data = await api(`/super/firms/${encodeURIComponent(firmId)}/plan`, { method: "PATCH", body: payload });
   return data.firm;
 }
 
 async function updateFirmUserApi(firmId, userId, payload) {
-  const data = await api(
-    `/super/firms/${encodeURIComponent(firmId)}/users/${encodeURIComponent(userId)}`,
-    {
-      method: "PATCH",
-      body: payload,
-    }
-  );
+  const data = await api(`/super/firms/${encodeURIComponent(firmId)}/users/${encodeURIComponent(userId)}`, { method: "PATCH", body: payload });
   return data.user;
 }
 
 async function deleteFirmUserApi(firmId, userId) {
-  await api(
-    `/super/firms/${encodeURIComponent(firmId)}/users/${encodeURIComponent(userId)}`,
-    { method: "DELETE" }
-  );
+  await api(`/super/firms/${encodeURIComponent(firmId)}/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
 }
 
 async function deleteFirmApi(firmId) {
-  await api(`/super/firms/${encodeURIComponent(firmId)}`, {
-    method: "DELETE",
-  });
+  await api(`/super/firms/${encodeURIComponent(firmId)}`, { method: "DELETE" });
 }
 
 function renderFirmRow(firm) {
-  const planBadge =
-    firm.planType === "PREMIUM"
-      ? `<span class="badge good">PREMIUM</span>`
-      : `<span class="badge">FREE</span>`;
-
-  const expiryText = firm.planExpiry
-    ? new Date(firm.planExpiry).toLocaleDateString()
-    : "—";
-
+  const planBadge = firm.planType === "PREMIUM"
+    ? `<span class="badge good">PREMIUM</span>`
+    : `<span class="badge bg-secondary">FREE</span>`;
+  const expiryText = firm.planExpiry ? new Date(firm.planExpiry).toLocaleDateString() : "—";
   const activeBadge = firm.isActive
     ? `<span class="badge good">Active</span>`
     : `<span class="badge warn">Inactive</span>`;
-
   const ownerEmail = firm.owner?.email || "—";
   const ownerName = firm.owner?.name || "";
-
   const ownerDisplay = ownerName
-    ? `${escapeHtml(ownerName)}<br><span class="text-muted small">${escapeHtml(
-        ownerEmail
-      )}</span>`
+    ? `${escapeHtml(ownerName)}<br><span class="text-muted small">${escapeHtml(ownerEmail)}</span>`
     : escapeHtml(ownerEmail);
 
   return `
     <tr data-firm-id="${escapeHtml(firm._id)}">
-      <td>${escapeHtml(firm.displayName || "—")}</td>
-      <td>${escapeHtml(firm.handle || "—")}</td>
+      <td><strong>${escapeHtml(firm.displayName || "—")}</strong></td>
+      <td><code>@${escapeHtml(firm.handle || "—")}</code></td>
       <td>${ownerDisplay}</td>
       <td>${planBadge}</td>
       <td>${escapeHtml(expiryText)}</td>
       <td>${activeBadge}</td>
       <td>
-        <button class="btn btn-sm btn-outline-primary me-1 firm-users-btn">View users</button>
-        <button class="btn btn-sm btn-outline-secondary me-1 firm-plan-btn">Edit plan</button>
-        <button class="btn btn-sm btn-outline-danger firm-delete-btn">Delete firm</button>
+        <button class="btn btn-sm btn-outline-primary me-1 firm-users-btn" type="button">Users</button>
+        <button class="btn btn-sm btn-outline-secondary me-1 firm-plan-btn" type="button">Edit Plan</button>
+        <button class="btn btn-sm btn-outline-danger firm-delete-btn" type="button">Delete</button>
       </td>
     </tr>
   `;
@@ -268,48 +309,34 @@ function renderFirmRow(firm) {
 
 function renderFirmUsersRows(firmId, users) {
   if (!users.length) {
+    return `<tr><td colspan="7" class="text-center text-muted small">No users in this firm yet.</td></tr>`;
+  }
+  return users.map(u => {
+    const created = u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—";
+    const isFirmAdmin = u.role === "FIRM_ADMIN";
+    const activeBadge = u.isActive ? `<span class="badge good">Yes</span>` : `<span class="badge warn">No</span>`;
+    const roleBadge = isFirmAdmin ? `<span class="badge good">FIRM_ADMIN</span>` : `<span class="badge bg-secondary">USER</span>`;
+
     return `
-      <tr>
-        <td colspan="7" class="text-center text-muted small">
-          No users in this firm yet.
+      <tr data-user-id="${escapeHtml(u._id)}" data-firm-id="${escapeHtml(firmId)}">
+        <td>${escapeHtml(u.email || "—")}</td>
+        <td>${escapeHtml(u.name || "—")}</td>
+        <td>${roleBadge}</td>
+        <td>${escapeHtml(u.accountType || "—")}</td>
+        <td>${activeBadge}</td>
+        <td>${escapeHtml(created)}</td>
+        <td>
+          <button class="btn btn-sm btn-outline-primary me-1 firm-user-toggle-admin" type="button">
+            ${isFirmAdmin ? "Remove Admin" : "Make Admin"}
+          </button>
+          <button class="btn btn-sm btn-outline-secondary me-1 firm-user-toggle-active" type="button">
+            ${u.isActive ? "Deactivate" : "Activate"}
+          </button>
+          <button class="btn btn-sm btn-outline-danger firm-user-delete" type="button">Delete</button>
         </td>
       </tr>
     `;
-  }
-
-  return users
-    .map((u) => {
-      const created = u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—";
-      const isFirmAdmin = u.role === "FIRM_ADMIN";
-      const activeBadge = u.isActive
-        ? `<span class="badge good">Yes</span>`
-        : `<span class="badge warn">No</span>`;
-
-      const roleBadge = isFirmAdmin
-        ? `<span class="badge good">FIRM_ADMIN</span>`
-        : `<span class="badge">USER</span>`;
-
-      return `
-        <tr data-user-id="${escapeHtml(u._id)}" data-firm-id="${escapeHtml(firmId)}">
-          <td>${escapeHtml(u.email || "—")}</td>
-          <td>${escapeHtml(u.name || "—")}</td>
-          <td>${roleBadge}</td>
-          <td>${escapeHtml(u.accountType || "—")}</td>
-          <td>${activeBadge}</td>
-          <td>${escapeHtml(created)}</td>
-          <td>
-            <button class="btn btn-sm btn-outline-primary me-1 firm-user-toggle-admin">
-              ${isFirmAdmin ? "Remove admin" : "Make admin"}
-            </button>
-            <button class="btn btn-sm btn-outline-warning me-1 firm-user-toggle-active">
-              ${u.isActive ? "Deactivate" : "Activate"}
-            </button>
-            <button class="btn btn-sm btn-outline-danger firm-user-delete">Delete</button>
-          </td>
-        </tr>
-      `;
-    })
-    .join("");
+  }).join("");
 }
 
 function attachFirmHandlers() {
@@ -319,10 +346,8 @@ function attachFirmHandlers() {
   tbody.addEventListener("click", async (e) => {
     const btn = e.target.closest("button");
     if (!btn) return;
-
     const row = btn.closest("tr");
     if (!row) return;
-
     const firmId = row.getAttribute("data-firm-id");
     if (!firmId) return;
 
@@ -330,12 +355,10 @@ function attachFirmHandlers() {
       await handleViewFirmUsers(firmId);
       return;
     }
-
     if (btn.classList.contains("firm-plan-btn")) {
       await handleEditFirmPlan(firmId, row);
       return;
     }
-
     if (btn.classList.contains("firm-delete-btn")) {
       await handleDeleteFirm(firmId, row);
     }
@@ -352,9 +375,7 @@ async function handleViewFirmUsers(firmId) {
 
   try {
     const data = await loadFirmUsers(firmId);
-    if (titleEl) {
-      titleEl.textContent = `Users in ${data.firm.displayName} (@${data.firm.handle})`;
-    }
+    if (titleEl) titleEl.textContent = `Users in ${data.firm.displayName} (@${data.firm.handle})`;
     if (bodyEl) {
       bodyEl.innerHTML = renderFirmUsersRows(firmId, data.users || []);
       attachFirmUsersHandlers();
@@ -378,39 +399,24 @@ function attachFirmUsersHandlers() {
   tbody.onclick = async (e) => {
     const btn = e.target.closest("button");
     if (!btn) return;
-
     const row = btn.closest("tr");
     if (!row) return;
-
     const firmId = row.getAttribute("data-firm-id");
     const userId = row.getAttribute("data-user-id");
     if (!firmId || !userId) return;
 
-    // Toggle admin
     if (btn.classList.contains("firm-user-toggle-admin")) {
       const isCurrentlyAdmin = row.innerHTML.includes("FIRM_ADMIN");
       const newRole = isCurrentlyAdmin ? "USER" : "FIRM_ADMIN";
-
-      const confirmMsg = isCurrentlyAdmin
-        ? "Remove this user's FIRM_ADMIN role?"
-        : "Make this user FIRM_ADMIN for this firm?";
+      const confirmMsg = isCurrentlyAdmin ? "Remove this user's FIRM_ADMIN role?" : "Make this user FIRM_ADMIN?";
       if (!window.confirm(confirmMsg)) return;
 
       btn.disabled = true;
+      btn.textContent = "Updating...";
       try {
-        const updated = await updateFirmUserApi(firmId, userId, { role: newRole });
-
-        row.outerHTML = renderFirmUsersRows(firmId, [
-          {
-            _id: updated.id,
-            email: row.children[0].innerText,
-            name: row.children[1].innerText,
-            role: updated.role,
-            accountType: row.children[3].innerText,
-            isActive: updated.isActive,
-            createdAt: null,
-          },
-        ]);
+        await updateFirmUserApi(firmId, userId, { role: newRole });
+        // Refresh modal
+        await handleViewFirmUsers(firmId);
       } catch (err) {
         alert(err.message || "Failed to update role.");
         btn.disabled = false;
@@ -418,49 +424,35 @@ function attachFirmUsersHandlers() {
       return;
     }
 
-    // Toggle active
     if (btn.classList.contains("firm-user-toggle-active")) {
       const isCurrentlyActive = row.innerHTML.includes(">Yes<");
       const newActive = !isCurrentlyActive;
-
-      const confirmMsg = newActive
-        ? "Activate this user?"
-        : "Deactivate this user (temporary suspension)?";
+      const confirmMsg = newActive ? "Activate this user?" : "Deactivate this user?";
       if (!window.confirm(confirmMsg)) return;
 
       btn.disabled = true;
+      btn.textContent = "Updating...";
       try {
-        const updated = await updateFirmUserApi(firmId, userId, { isActive: newActive });
-
-        row.outerHTML = renderFirmUsersRows(firmId, [
-          {
-            _id: updated.id,
-            email: row.children[0].innerText,
-            name: row.children[1].innerText,
-            role: updated.role,
-            accountType: row.children[3].innerText,
-            isActive: updated.isActive,
-            createdAt: null,
-          },
-        ]);
+        await updateFirmUserApi(firmId, userId, { isActive: newActive });
+        await handleViewFirmUsers(firmId);
       } catch (err) {
-        alert(err.message || "Failed to update active state.");
+        alert(err.message || "Failed to update.");
         btn.disabled = false;
       }
       return;
     }
 
-    // Delete user
     if (btn.classList.contains("firm-user-delete")) {
-      if (!window.confirm("Delete this user from database? This cannot be undone.")) return;
-
+      if (!window.confirm("Delete this user permanently? This cannot be undone.")) return;
       btn.disabled = true;
+      btn.textContent = "Deleting...";
       try {
         await deleteFirmUserApi(firmId, userId);
         row.remove();
       } catch (err) {
         alert(err.message || "Failed to delete user.");
         btn.disabled = false;
+        btn.textContent = "Delete";
       }
     }
   };
@@ -475,37 +467,23 @@ async function handleEditFirmPlan(firmId, rowEl) {
   const currentExpiryText = currentExpiryCell?.innerText.trim() || "";
   const currentActive = currentActiveCell?.innerText.toLowerCase().includes("active");
 
-  const planInput = window.prompt(
-    "Plan for this firm:\n- Type FREE for free plan\n- Type PREMIUM for paid plan",
-    currentPlanText
-  );
+  const planInput = window.prompt("Plan type (FREE or PREMIUM):", currentPlanText);
   if (!planInput) return;
-
   const planType = planInput.toUpperCase().trim();
-  if (!["FREE", "PREMIUM"].includes(planType)) {
-    alert("Plan must be FREE or PREMIUM.");
-    return;
-  }
+  if (!["FREE", "PREMIUM"].includes(planType)) { alert("Must be FREE or PREMIUM."); return; }
 
   let planExpiry = null;
   if (planType === "PREMIUM") {
-    const expiryInput = window.prompt(
-      "Plan expiry (YYYY-MM-DD), or leave blank for no expiry:",
-      currentExpiryText
-    );
+    const expiryInput = window.prompt("Plan expiry (YYYY-MM-DD), blank for no expiry:", currentExpiryText);
     if (expiryInput) {
       const d = new Date(expiryInput);
-      if (Number.isNaN(d.getTime())) {
-        alert("Invalid date format. Use YYYY-MM-DD.");
-        return;
-      }
+      if (Number.isNaN(d.getTime())) { alert("Invalid date. Use YYYY-MM-DD."); return; }
       planExpiry = d.toISOString();
     }
   }
 
-  const activeInput = window.prompt("Is this firm active? (yes/no):", currentActive ? "yes" : "no");
-  const isActive =
-    typeof activeInput === "string" && activeInput.trim().toLowerCase().startsWith("y");
+  const activeInput = window.prompt("Is firm active? (yes/no):", currentActive ? "yes" : "no");
+  const isActive = typeof activeInput === "string" && activeInput.trim().toLowerCase().startsWith("y");
 
   try {
     const updated = await updateFirmPlanApi(firmId, { planType, planExpiry, isActive });
@@ -516,19 +494,9 @@ async function handleEditFirmPlan(firmId, rowEl) {
 }
 
 async function handleDeleteFirm(firmId, rowEl) {
-  const firstConfirm = window.confirm(
-    "Are you sure you want to delete this firm?\nAll linked users will be detached from this firm."
-  );
-  if (!firstConfirm) return;
-
-  const text = window.prompt(
-    "Type DELETE in capital letters to permanently delete this firm:",
-    ""
-  );
-  if (text !== "DELETE") {
-    alert("Firm deletion cancelled (you did not type DELETE).");
-    return;
-  }
+  if (!window.confirm("Delete this firm? All linked users will be detached.")) return;
+  const text = window.prompt("Type DELETE to confirm:", "");
+  if (text !== "DELETE") { alert("Cancelled (you did not type DELETE)."); return; }
 
   try {
     await deleteFirmApi(firmId);
@@ -538,110 +506,72 @@ async function handleDeleteFirm(firmId, rowEl) {
   }
 }
 
-// ---------- Init ----------
-
+// ─── Init ───────────────────────────────────────────────────────────
 async function initSuperPage() {
   if (!qs("superLogoutBtn")) return;
 
-  // AUTH CHECK FIRST
   const isAuthenticated = await ensureSuperAdminAuth();
   if (!isAuthenticated) return;
 
   const token = getToken();
-  if (!token) {
-    // FIXED: index.html is now in public root, not inside /admin/
-    window.location.href = "/index.html";
-    return;
-  }
+  if (!token) { window.location.href = "/index.html"; return; }
 
-  qs("superLogoutBtn")?.addEventListener("click", () => {
+  // Logout
+  qs("superLogoutBtn").addEventListener("click", () => {
     clearToken();
-    // FIXED: index.html is now in public root
     window.location.href = "/index.html";
   });
 
+  // Back to admin
   qs("backToAdminBtn")?.addEventListener("click", () => {
     window.location.href = "/admin/admin.html";
   });
 
   try {
     const me = await loadMe();
-
-    if (!requireSuperAdmin(me)) {
-      window.location.href = "/admin/admin.html";
-      return;
-    }
-
+    if (!requireSuperAdmin(me)) { window.location.href = "/admin/admin.html"; return; }
     if (qs("superEmail")) qs("superEmail").textContent = me.email || "—";
 
-    // Pending admins
+    // Load dashboard stats
+    await loadDashboardStats();
+
+    // Load pending admins
     const pendingTbody = qs("pendingAdminsBody");
     const pendingStatus = qs("pendingStatus");
-
     try {
       const pending = await loadPendingAdmins();
       if (!pending.length) {
-        if (pendingTbody) {
-          pendingTbody.innerHTML = `
-            <tr>
-              <td colspan="5" class="text-center text-muted">
-                No pending firm admin requests.
-              </td>
-            </tr>
-          `;
-        }
+        if (pendingTbody) pendingTbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted">No pending requests.</td></tr>`;
         if (pendingStatus) pendingStatus.textContent = "";
       } else {
-        if (pendingTbody) {
-          pendingTbody.innerHTML = pending.map(renderPendingRow).join("");
-          attachPendingHandlers(pendingTbody);
-        }
+        if (pendingTbody) { pendingTbody.innerHTML = pending.map(renderPendingRow).join(""); attachPendingHandlers(pendingTbody); }
         if (pendingStatus) pendingStatus.textContent = "";
       }
     } catch (err) {
-      if (pendingStatus) {
-        pendingStatus.textContent = err.message || "Failed to load pending admins.";
-      }
+      if (pendingStatus) pendingStatus.textContent = err.message || "Failed to load.";
     }
 
-    // Firms & plans
+    // Load firms
     const firmsBody = qs("firmsBody");
     const firmsStatus = qs("firmsStatus");
-
     try {
       const firms = await loadFirms();
       if (!firms.length) {
-        if (firmsBody) {
-          firmsBody.innerHTML = `
-            <tr>
-              <td colspan="7" class="text-center text-muted">
-                No firms found.
-              </td>
-            </tr>
-          `;
-        }
+        if (firmsBody) firmsBody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">No firms found.</td></tr>`;
         if (firmsStatus) firmsStatus.textContent = "";
       } else {
-        if (firmsBody) {
-          firmsBody.innerHTML = firms.map(renderFirmRow).join("");
-          attachFirmHandlers();
-        }
+        if (firmsBody) { firmsBody.innerHTML = firms.map(renderFirmRow).join(""); attachFirmHandlers(); }
         if (firmsStatus) firmsStatus.textContent = "";
       }
     } catch (err) {
-      if (firmsStatus) {
-        firmsStatus.textContent = err.message || "Failed to load firms.";
-      }
+      if (firmsStatus) firmsStatus.textContent = err.message || "Failed to load firms.";
     }
+
   } catch (err) {
     console.error(err);
-    const statusEl = qs("pendingStatus");
-    if (statusEl) {
-      statusEl.textContent = err.message || "Failed to load super admin dashboard.";
-    }
+    const statusEl = qs("statsLoadingStatus");
+    if (statusEl) statusEl.textContent = err.message || "Failed to load dashboard.";
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  initSuperPage();
-});
+document.addEventListener("DOMContentLoaded", () => { initSuperPage(); });

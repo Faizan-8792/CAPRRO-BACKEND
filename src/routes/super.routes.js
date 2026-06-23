@@ -3,6 +3,7 @@
 import express from "express";
 import { authRequired } from "../middleware/auth.middleware.js";
 import {
+  getSuperDashboardStats,
   listPendingAdmins,
   approveAdmin,
   revokeAdmin,
@@ -17,6 +18,9 @@ import {
 const router = express.Router();
 
 router.use(authRequired);
+
+// Super admin dashboard stats
+router.get("/dashboard-stats", getSuperDashboardStats);
 
 // Pending firm admins
 router.get("/pending-admins", listPendingAdmins);

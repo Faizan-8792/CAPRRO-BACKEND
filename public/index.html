@@ -7,246 +7,176 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <title>CA PRO Admin - Login</title>
-  
-  <!-- Bootstrap (official CDN via jsDelivr) -->
+
+  <!-- Bootstrap -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
-  
-  <!-- Google Fonts - Hi-Tech Theme -->
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&family=Exo+2:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  
-  <!-- Font Awesome 6.5 -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  
-  <!-- Animate.css -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
-  
-  <!-- Hi-Tech Dashboard CSS -->
-  <link rel="stylesheet" href="admin.css" />
-  
-  <!-- Custom Login Styles -->
+
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
   <style>
-    /* Override Bootstrap light theme with dark futuristic theme */
-    body.bg-light {
-      background: linear-gradient(135deg, #0a0e17, #1a1f38) !important;
-      color: #ffffff !important;
+    :root {
+      --pri: #2563eb;
+      --pri-light: #3b82f6;
+      --pri-lighter: #dbeafe;
+      --pri-dark: #1d4ed8;
+      --gold: #f59e0b;
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --muted: #64748b;
     }
-    
-    .text-muted {
-      color: #cbd5e1 !important;
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
     }
-    
-    .form-label {
-      color: #e2e8f0 !important;
-      font-family: 'Rajdhani', sans-serif;
-      font-weight: 500;
-      font-size: 14px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-    
-    h3 {
-      color: #ffffff !important;
-      font-family: 'Orbitron', sans-serif;
-      font-weight: 700;
-      letter-spacing: 0.05em;
-      background: linear-gradient(90deg, #3b82f6, #60a5fa);
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      text-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
-    }
-    
-    .card {
-      background: rgba(15, 23, 42, 0.9) !important;
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(96, 165, 250, 0.3) !important;
-      border-radius: 16px !important;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4),
-                  inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
-      animation: loginGlow 3s ease-in-out infinite alternate;
-    }
-    
-    @keyframes loginGlow {
-      0% {
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4),
-                    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-                    0 0 20px rgba(59, 130, 246, 0.2);
-      }
-      100% {
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4),
-                    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-                    0 0 30px rgba(59, 130, 246, 0.4);
-      }
-    }
-    
-    .form-control {
-      background: rgba(30, 41, 59, 0.9) !important;
-      border: 1px solid rgba(96, 165, 250, 0.3) !important;
-      border-radius: 10px !important;
-      color: #ffffff !important;
-      font-family: 'Exo 2', monospace;
-      transition: all 0.3s ease;
-    }
-    
-    .form-control:focus {
-      background: rgba(30, 41, 59, 0.95) !important;
-      border-color: #60a5fa !important;
-      box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.2) !important;
-      color: #ffffff !important;
-    }
-    
-    .form-control::placeholder {
-      color: #94a3b8 !important;
-    }
-    
-    .btn-outline-secondary {
-      background: rgba(30, 41, 59, 0.8) !important;
-      border: 1px solid rgba(148, 163, 184, 0.4) !important;
-      color: #e2e8f0 !important;
-      border-radius: 10px !important;
-      font-family: 'Rajdhani', sans-serif;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      transition: all 0.3s ease;
-    }
-    
-    .btn-outline-secondary:hover {
-      background: rgba(59, 130, 246, 0.2) !important;
-      border-color: #60a5fa !important;
-      color: #ffffff !important;
-      transform: translateY(-2px);
-      box-shadow: 0 10px 20px rgba(59, 130, 246, 0.3);
-    }
-    
-    .btn-primary {
-      background: linear-gradient(135deg, #3b82f6, #60a5fa) !important;
-      border: none !important;
-      color: #ffffff !important;
-      border-radius: 10px !important;
-      font-family: 'Rajdhani', sans-serif;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      position: relative;
-      overflow: hidden;
-      transition: all 0.3s ease;
-    }
-    
-    .btn-primary::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: -100%;
+
+    .login-container {
       width: 100%;
-      height: 100%;
-      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-      transition: left 0.7s ease;
+      max-width: 440px;
+      animation: fadeUp 0.5s ease-out;
     }
-    
-    .btn-primary:hover::before {
-      left: 100%;
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
     }
-    
-    .btn-primary:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 15px 30px rgba(59, 130, 246, 0.4);
+
+    .login-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 36px 32px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
     }
-    
-    .btn-success {
-      background: linear-gradient(135deg, #10b981, #34d399) !important;
-      border: none !important;
-      color: #ffffff !important;
-      border-radius: 10px !important;
-      font-family: 'Rajdhani', sans-serif;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      position: relative;
-      overflow: hidden;
+
+    .login-brand {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--pri);
+      margin-bottom: 4px;
+      letter-spacing: -0.01em;
     }
-    
-    .btn-success:hover {
-      background: linear-gradient(135deg, #34d399, #10b981) !important;
-      transform: translateY(-2px);
-      box-shadow: 0 15px 30px rgba(16, 185, 129, 0.4);
+
+    .login-brand span {
+      color: var(--gold);
     }
-    
-    #status {
-      color: #cbd5e1 !important;
-      font-family: 'Exo 2', monospace;
+
+    .login-subtitle {
       font-size: 13px;
-      padding: 10px;
+      color: var(--muted);
+      margin-bottom: 24px;
+    }
+
+    .form-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }
+
+    .form-control {
+      background: var(--surface);
+      border: 1px solid var(--border);
       border-radius: 8px;
-      background: rgba(30, 41, 59, 0.6);
-      border: 1px solid rgba(96, 165, 250, 0.2);
+      padding: 10px 14px;
+      font-size: 14px;
+      color: var(--text);
+      transition: border-color 0.2s, box-shadow 0.2s;
     }
-    
-    /* Custom scrollbar */
-    ::-webkit-scrollbar {
-      width: 8px;
+
+    .form-control:focus {
+      border-color: var(--pri-light);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+      outline: none;
     }
-    
-    ::-webkit-scrollbar-track {
-      background: rgba(15, 23, 42, 0.6);
-      border-radius: 4px;
+
+    .form-control::placeholder {
+      color: #94a3b8;
     }
-    
-    ::-webkit-scrollbar-thumb {
-      background: linear-gradient(135deg, #3b82f6, #60a5fa);
-      border-radius: 4px;
+
+    .btn {
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      padding: 10px 18px;
+      transition: all 0.2s;
+      cursor: pointer;
     }
-    
-    /* Animation for the login container */
-    .container {
-      animation: fadeInUp 0.8s ease-out;
+
+    .btn:hover {
+      transform: translateY(-1px);
     }
-    
-    @keyframes fadeInUp {
-      from {
-        opacity: 0;
-        transform: translateY(30px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+
+    .btn-primary {
+      background: var(--pri);
+      border: none;
+      color: #fff;
+      box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
     }
-    
-    /* Responsive adjustments */
-    @media (max-width: 768px) {
-      .container {
-        padding: 20px !important;
-      }
-      
-      .card {
-        padding: 24px !important;
-      }
-      
-      h3 {
-        font-size: 24px;
-      }
+
+    .btn-primary:hover {
+      background: var(--pri-dark);
+      box-shadow: 0 4px 8px rgba(37, 99, 235, 0.3);
+    }
+
+    .btn-outline-secondary {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .btn-outline-secondary:hover {
+      background: var(--pri-lighter);
+      border-color: var(--pri-light);
+      color: var(--pri-dark);
+    }
+
+    .btn-success {
+      background: #16a34a;
+      border: none;
+      color: #fff;
+      box-shadow: 0 2px 4px rgba(22, 163, 74, 0.2);
+    }
+
+    .btn-success:hover {
+      background: #15803d;
+      box-shadow: 0 4px 8px rgba(22, 163, 74, 0.3);
+    }
+
+    #status {
+      font-size: 13px;
+      color: var(--muted);
+      padding: 10px 14px;
+      border-radius: 8px;
+      background: var(--pri-lighter);
+      border: 1px solid #bfdbfe;
+      min-height: 20px;
+    }
+
+    #status:empty {
+      display: none;
     }
   </style>
 </head>
-<body class="bg-light">
+<body>
 
-  <!-- Background animations for hi-tech theme -->
-  <div class="matrix-rain"></div>
-  <div class="floating-nodes"></div>
-  <div class="circuit-grid"></div>
-  <div class="neural-lines"></div>
-  <div class="kpi-orbs">
-    <div class="kpi-orb"></div>
-    <div class="kpi-orb"></div>
-    <div class="kpi-orb"></div>
-    <div class="kpi-orb"></div>
-  </div>
-
-  <div class="container" style="max-width:520px; padding-top:40px;">
-    <div class="card shadow-sm p-4">
-      <h3 class="mb-1">CA PRO Admin</h3>
-      <p class="text-muted small mb-3">Login using OTP (JWT will be stored in browser for this admin panel).</p>
+  <div class="login-container">
+    <div class="login-card">
+      <div class="login-brand">CA PRO <span>Toolkit</span></div>
+      <p class="login-subtitle">Login using OTP. Your session token will be stored securely in the browser.</p>
 
       <label class="form-label">Email</label>
       <input id="email" type="email" class="form-control" placeholder="you@office.com" />
@@ -256,20 +186,20 @@
         <button id="goVerify" class="btn btn-primary w-100" type="button">I have OTP</button>
       </div>
 
-      <div id="otpBlock" style="display:none; margin-top:12px;">
+      <div id="otpBlock" style="display:none; margin-top:14px;">
         <label class="form-label mt-2">OTP Code</label>
-        <input id="otp" type="text" class="form-control" placeholder="6-digit OTP" />
+        <input id="otp" type="text" class="form-control" placeholder="6-digit OTP" maxlength="6" />
 
         <button id="verifyOtp" class="btn btn-success w-100 mt-3" type="button">
           Verify & Login
         </button>
       </div>
 
-      <div id="status" class="small text-muted mt-3"></div>
+      <div id="status" class="mt-3"></div>
     </div>
   </div>
 
-  <script src="./admin/login.js?v=2"></script>
+  <script src="./admin/login.js?v=3"></script>
 
 </body>
 </html>

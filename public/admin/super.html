@@ -9,35 +9,31 @@
   </head>
   <body class="super-admin-body">
     <!-- TOP NAVBAR -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
-      <div class="container super-nav-container">
+    <nav class="navbar navbar-expand-lg shadow-sm">
+      <div class="container-fluid px-4">
         <span class="navbar-brand fw-semibold d-flex align-items-center gap-2">
-          <span class="badge bg-light text-primary fw-bold">SUPER</span>
-          <span>CA PRO Toolkit – Admin</span>
+          <span class="badge bg-primary fw-bold">SUPER</span>
+          <span style="color: var(--text); font-weight: 700;">CA PRO Toolkit</span>
         </span>
 
         <div class="d-flex align-items-center gap-3 ms-auto">
-          <div class="text-white small text-end d-none d-md-block">
-            <div>Logged in as:</div>
-            <div class="fw-semibold" id="superEmail">—</div>
+          <div class="small text-end d-none d-md-block">
+            <div style="color: var(--muted); font-size: 11px;">Logged in as</div>
+            <div class="fw-semibold" id="superEmail" style="color: var(--text);">—</div>
           </div>
 
-           <!-- ✅ CORRECT: -->
-<button
-  id="backToAdminBtn"
-  class="btn btn-outline-light btn-sm"
-  type="button"
-  title="Logout and login as Firm Admin"
->
-  Logout → Firm Admin
-</button>
-
-
-
+          <button
+            id="backToAdminBtn"
+            class="btn btn-outline-secondary btn-sm"
+            type="button"
+            title="Go to Firm Admin panel"
+          >
+            Firm Admin Panel
+          </button>
 
           <button
             id="superLogoutBtn"
-            class="btn btn-light btn-sm text-primary fw-semibold"
+            class="btn btn-primary btn-sm"
             type="button"
           >
             Logout
@@ -46,12 +42,49 @@
       </div>
     </nav>
 
-    <main class="container my-4 super-admin-main">
+    <main class="container-fluid px-4 my-4 super-admin-main">
+
+      <!-- DASHBOARD STATS -->
+      <section class="mb-4">
+        <div class="mb-3">
+          <h1 class="h5 mb-1">📊 Platform Overview</h1>
+          <p class="text-muted mb-0 small">
+            Real-time statistics for the entire CA PRO platform.
+          </p>
+        </div>
+
+        <div id="statsLoadingStatus" class="text-muted small mb-3">Loading dashboard statistics...</div>
+
+        <div class="stats-grid" id="statsGrid">
+          <!-- Stats cards rendered by JS -->
+        </div>
+
+        <!-- Secondary stats row -->
+        <div class="row g-3 mb-4">
+          <div class="col-md-6">
+            <div class="card p-3">
+              <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Task Status Breakdown</h6>
+              <div id="taskStatusBreakdown" class="d-flex flex-wrap gap-2">
+                <span class="text-muted small">Loading...</span>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card p-3">
+              <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Service Type Distribution</h6>
+              <div id="serviceBreakdown" class="d-flex flex-wrap gap-2">
+                <span class="text-muted small">Loading...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- PENDING ADMINS -->
       <section class="mb-4">
         <div class="row g-3 mb-3 align-items-center">
           <div class="col">
-            <h1 class="h5 mb-1">Pending firm admin approvals</h1>
+            <h2 class="h5 mb-1">⏳ Pending Firm Admin Approvals</h2>
             <p class="text-muted mb-0 small">
               Approve or revoke access for pending firm admin accounts.
             </p>
@@ -76,7 +109,6 @@
                   </tr>
                 </thead>
                 <tbody id="pendingAdminsBody">
-                  <!-- rows via super.js -->
                 </tbody>
               </table>
             </div>
@@ -88,7 +120,7 @@
       <section>
         <div class="row g-3 mb-3 align-items-center">
           <div class="col">
-            <h2 class="h5 mb-1">Firms, admins & plans</h2>
+            <h2 class="h5 mb-1">🏢 Firms, Admins & Plans</h2>
             <p class="text-muted mb-0 small">
               View firm admins, members, manage plans, or delete a firm.
             </p>
@@ -107,15 +139,14 @@
                   <tr>
                     <th scope="col">Firm</th>
                     <th scope="col">Handle</th>
-                    <th scope="col">Owner admin</th>
+                    <th scope="col">Owner Admin</th>
                     <th scope="col">Plan</th>
                     <th scope="col">Expiry</th>
-                    <th scope="col">Active</th>
-                    <th scope="col" style="width: 260px;">Actions</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" style="width: 280px;">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="firmsBody">
-                  <!-- rows via super.js -->
                 </tbody>
               </table>
             </div>
@@ -130,7 +161,7 @@
               <div class="modal-dialog modal-lg modal-dialog-scrollable">
                 <div class="modal-content">
                   <div class="modal-header">
-                    <h5 class="modal-title" id="firmUsersTitle">Firm users</h5>
+                    <h5 class="modal-title" id="firmUsersTitle">Firm Users</h5>
                     <button
                       type="button"
                       class="btn-close"
@@ -156,7 +187,6 @@
                           </tr>
                         </thead>
                         <tbody id="firmUsersBody">
-                          <!-- rows -->
                         </tbody>
                       </table>
                     </div>
@@ -173,7 +203,6 @@
                 </div>
               </div>
             </div>
-            <!-- /modal -->
           </div>
         </div>
       </section>

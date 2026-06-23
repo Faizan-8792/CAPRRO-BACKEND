@@ -15,6 +15,97 @@ function assertSuper(user) {
   }
 }
 
+// 0) Super Admin Dashboard Stats
+export const getSuperDashboardStats = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+
+    const [
+      totalUsers,
+      activeUsers,
+      inactiveUsers,
+      firmAdmins,
+      totalFirms,
+      activeFirms,
+      premiumFirms,
+      freeFirms,
+      totalTasks,
+      activeTasks,
+      pendingAdmins,
+      totalReminders,
+    ] = await Promise.all([
+      User.countDocuments({}),
+      User.countDocuments({ isActive: true }),
+      User.countDocuments({ isActive: false }),
+      User.countDocuments({ role: "FIRM_ADMIN" }),
+      Firm.countDocuments({}),
+      Firm.countDocuments({ isActive: true }),
+      Firm.countDocuments({ planType: "PREMIUM" }),
+      Firm.countDocuments({ planType: "FREE" }),
+      Task.countDocuments({}),
+      Task.countDocuments({ isActive: true }),
+      User.countDocuments({ role: "FIRM_ADMIN", isActive: false }),
+      Reminder.countDocuments({}),
+    ]);
+
+    // Task status breakdown
+    const taskStatusBreakdown = await Task.aggregate([
+      { $match: { isActive: true } },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]);
+
+    // Recent signups (last 7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const recentSignups = await User.countDocuments({
+      createdAt: { $gte: sevenDaysAgo },
+    });
+
+    // Recent tasks (last 7 days)
+    const recentTasks = await Task.countDocuments({
+      createdAt: { $gte: sevenDaysAgo },
+    });
+
+    // Service type breakdown
+    const serviceBreakdown = await Task.aggregate([
+      { $match: { isActive: true } },
+      { $group: { _id: "$serviceType", count: { $sum: 1 } } },
+    ]);
+
+    return res.json({
+      ok: true,
+      stats: {
+        users: {
+          total: totalUsers,
+          active: activeUsers,
+          inactive: inactiveUsers,
+          firmAdmins,
+          pendingAdmins,
+          recentSignups,
+        },
+        firms: {
+          total: totalFirms,
+          active: activeFirms,
+          premium: premiumFirms,
+          free: freeFirms,
+        },
+        tasks: {
+          total: totalTasks,
+          active: activeTasks,
+          recentTasks,
+          statusBreakdown: taskStatusBreakdown,
+          serviceBreakdown,
+        },
+        reminders: {
+          total: totalReminders,
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // 1) Pending firm admins list
 export const listPendingAdmins = async (req, res, next) => {
   try {
