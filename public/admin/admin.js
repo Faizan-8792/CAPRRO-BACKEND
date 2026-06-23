@@ -236,7 +236,29 @@ function buildReminderMessage(item, type) {
 
 async function copyReminderToClipboard(item, type) {
     try {
-        const msg = buildReminderMessage(item, type);
+        // Try AI-generated personalized message first
+        let msg = null;
+        try {
+            const resp = await api('/audit/reminder-message', {
+                method: 'POST',
+                body: {
+                    clientName: item.clientName,
+                    serviceType: item.serviceType,
+                    type,
+                    daysPending: item.daysPending,
+                    lastDelayDays: item.lastPeriodDelayDays,
+                    dueDate: item.dueDateISO,
+                    tone: 'polite',
+                },
+            });
+            if (resp?.message) msg = resp.message;
+        } catch (e) {
+            console.warn('AI reminder fetch failed, using template:', e?.message);
+        }
+
+        // Fallback to local template if backend unreachable
+        if (!msg) msg = buildReminderMessage(item, type);
+
         await navigator.clipboard.writeText(msg);
         alert("Reminder text copied. Paste in WhatsApp / email.");
     } catch (e) {

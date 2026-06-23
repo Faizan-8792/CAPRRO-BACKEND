@@ -1,14 +1,66 @@
 // src/controllers/audit.controller.js
 // Hybrid NLP + DeepSeek LLM audit text classifier.
-// The extension runs local NLP first, sends top-N candidates here.
-// We ask DeepSeek to (a) confirm the text is actually audit/finance content,
-// and (b) pick the best matching candidate or reject all.
+// Plus: insights generation, reminder message generation.
 
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 const DEEPSEEK_MODEL = "deepseek-chat";
 
 function safeStr(v, max = 4000) {
   return String(v ?? "").slice(0, max);
+}
+
+// ─── Reusable DeepSeek call helper ─────────────────────────────────
+async function callDeepSeek({
+  system,
+  prompt,
+  jsonResponse = false,
+  maxTokens = 600,
+  timeoutMs = 25000,
+  temperature = 0.3,
+}) {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) {
+    return { ok: false, reason: "DEEPSEEK_API_KEY not configured" };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const body = {
+      model: DEEPSEEK_MODEL,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: prompt },
+      ],
+      temperature,
+      max_tokens: maxTokens,
+    };
+    if (jsonResponse) body.response_format = { type: "json_object" };
+
+    const r = await fetch(DEEPSEEK_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!r.ok) {
+      const errText = await r.text().catch(() => "");
+      return { ok: false, reason: `LLM HTTP ${r.status}`, detail: errText.slice(0, 300) };
+    }
+
+    const j = await r.json().catch(() => null);
+    const content = j?.choices?.[0]?.message?.content || "";
+    return { ok: true, content };
+  } catch (err) {
+    clearTimeout(timer);
+    return { ok: false, reason: err.name === "AbortError" ? "LLM timeout" : err.message };
+  }
 }
 
 function buildPrompt(rawText, candidates) {
@@ -54,9 +106,7 @@ export async function refineAuditClassification(req, res, next) {
       return res.status(400).json({ ok: false, error: "candidates array required" });
     }
 
-    const apiKey = process.env.DEEPSEEK_API_KEY;
-    if (!apiKey) {
-      // Graceful fallback: no key configured, return passthrough so extension can use its NLP result.
+    if (!process.env.DEEPSEEK_API_KEY) {
       return res.json({
         ok: true,
         refined: false,
@@ -64,7 +114,6 @@ export async function refineAuditClassification(req, res, next) {
       });
     }
 
-    // If no candidates, short-circuit
     if (!candidates.length) {
       return res.json({
         ok: true,
@@ -77,79 +126,33 @@ export async function refineAuditClassification(req, res, next) {
     }
 
     const prompt = buildPrompt(rawText, candidates);
+    const r = await callDeepSeek({
+      system: "You are a strict JSON-only classifier. Output only valid JSON, no extra text.",
+      prompt,
+      jsonResponse: true,
+      maxTokens: 400,
+      temperature: 0.1,
+    });
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20_000);
-
-    let dsResp;
-    try {
-      dsResp = await fetch(DEEPSEEK_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: DEEPSEEK_MODEL,
-          messages: [
-            {
-              role: "system",
-              content:
-                "You are a strict JSON-only classifier. Output only valid JSON, no extra text.",
-            },
-            { role: "user", content: prompt },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.1,
-          max_tokens: 400,
-        }),
-        signal: controller.signal,
-      });
-    } catch (fetchErr) {
-      clearTimeout(timeoutId);
-      console.error("DeepSeek fetch error:", fetchErr.message);
-      return res.json({
-        ok: true,
-        refined: false,
-        reason: "LLM unreachable, falling back to NLP",
-      });
+    if (!r.ok) {
+      console.error("DeepSeek refine error:", r.reason);
+      return res.json({ ok: true, refined: false, reason: r.reason });
     }
-    clearTimeout(timeoutId);
-
-    if (!dsResp.ok) {
-      const errText = await dsResp.text().catch(() => "");
-      console.error("DeepSeek error:", dsResp.status, errText.slice(0, 500));
-      return res.json({
-        ok: true,
-        refined: false,
-        reason: `LLM HTTP ${dsResp.status}`,
-      });
-    }
-
-    const dsJson = await dsResp.json().catch(() => null);
-    const content = dsJson?.choices?.[0]?.message?.content || "";
 
     let parsed = null;
     try {
-      parsed = JSON.parse(content);
+      parsed = JSON.parse(r.content);
     } catch {
-      // Try to extract a JSON block from the content
-      const m = content.match(/\{[\s\S]*\}/);
+      const m = r.content.match(/\{[\s\S]*\}/);
       if (m) {
         try {
           parsed = JSON.parse(m[0]);
-        } catch {
-          /* ignore */
-        }
+        } catch {}
       }
     }
 
     if (!parsed || typeof parsed !== "object") {
-      return res.json({
-        ok: true,
-        refined: false,
-        reason: "Could not parse LLM response",
-      });
+      return res.json({ ok: true, refined: false, reason: "Could not parse LLM response" });
     }
 
     const isAuditText = parsed.isAuditText === true;
@@ -161,7 +164,6 @@ export async function refineAuditClassification(req, res, next) {
         : null;
     const reason = safeStr(parsed.reason, 500);
 
-    // Validate chosenId is one of the candidate IDs
     const validIds = new Set(candidates.map((c) => String(c.id || "")));
     const chosenId =
       chosenIdRaw && validIds.has(chosenIdRaw) ? chosenIdRaw : null;
@@ -176,6 +178,179 @@ export async function refineAuditClassification(req, res, next) {
     });
   } catch (err) {
     console.error("refineAuditClassification error:", err);
+    next(err);
+  }
+}
+
+// ─── AI Insights ────────────────────────────────────────────────────
+// Given extracted text + chosen topic, generate 3-5 actionable, audit-specific
+// insights tailored to the text (not generic).
+export async function generateInsights(req, res, next) {
+  try {
+    const { rawText, topicId, topicName } = req.body || {};
+    if (!rawText || typeof rawText !== "string") {
+      return res.status(400).json({ ok: false, error: "rawText required" });
+    }
+
+    if (!process.env.DEEPSEEK_API_KEY) {
+      return res.json({ ok: true, generated: false, reason: "LLM not configured", insights: [] });
+    }
+
+    const system =
+      "You are a senior Chartered Accountant audit advisor. Return only valid JSON. No markdown.";
+
+    const prompt = `Given this audit text and the matched topic, generate 3-5 SPECIFIC, ACTIONABLE insights an auditor should pay attention to in THIS specific text. Avoid generic advice. Focus on concrete things mentioned in the text.
+
+Topic: ${safeStr(topicName || topicId || "General Audit", 100)}
+
+EXTRACTED TEXT:
+"""
+${safeStr(rawText, 3500)}
+"""
+
+Respond ONLY with JSON of this exact shape:
+{"insights": [{"title": "short title", "detail": "1-2 sentence specific recommendation", "risk": "high|medium|low"}]}
+
+Keep title under 60 characters. Detail under 200 characters. Be precise to the text content.`;
+
+    const r = await callDeepSeek({
+      system,
+      prompt,
+      jsonResponse: true,
+      maxTokens: 800,
+      temperature: 0.3,
+    });
+
+    if (!r.ok) {
+      return res.json({ ok: true, generated: false, reason: r.reason, insights: [] });
+    }
+
+    let parsed = null;
+    try {
+      parsed = JSON.parse(r.content);
+    } catch {
+      const m = r.content.match(/\{[\s\S]*\}/);
+      if (m) {
+        try {
+          parsed = JSON.parse(m[0]);
+        } catch {}
+      }
+    }
+
+    const arr = Array.isArray(parsed?.insights) ? parsed.insights : [];
+    const insights = arr
+      .filter((i) => i && typeof i === "object")
+      .slice(0, 6)
+      .map((i) => ({
+        title: safeStr(i.title, 100),
+        detail: safeStr(i.detail, 350),
+        risk: ["high", "medium", "low"].includes(String(i.risk).toLowerCase())
+          ? String(i.risk).toLowerCase()
+          : "medium",
+      }))
+      .filter((i) => i.title && i.detail);
+
+    return res.json({ ok: true, generated: true, insights });
+  } catch (err) {
+    console.error("generateInsights error:", err);
+    next(err);
+  }
+}
+
+// ─── Reminder message generation ────────────────────────────────────
+// Generate a personalized client follow-up message in Hinglish.
+export async function generateReminderMessage(req, res, next) {
+  try {
+    const {
+      clientName,
+      serviceType,
+      type, // "pending" | "risk"
+      daysPending,
+      lastDelayDays,
+      dueDate,
+      tone, // "polite" | "firm" | "casual"
+    } = req.body || {};
+
+    if (!clientName || typeof clientName !== "string") {
+      return res.status(400).json({ ok: false, error: "clientName required" });
+    }
+
+    const fallbackMessage = (() => {
+      const dueText = dueDate
+        ? new Date(dueDate).toLocaleDateString("en-IN")
+        : "upcoming due date";
+      if (type === "pending") {
+        return `Hi ${clientName},\n\nHum aapke ${serviceType || "compliance"} ke documents ka wait kar rahe hain. ${daysPending || 3}+ din se documents pending hain.\nDue: ${dueText}.\n\nKripya documents jaldi share karein.\n\n- CA PRO Toolkit`;
+      }
+      return `Hi ${clientName},\n\nPichle 2 periods me aapke ${serviceType || "compliance"} filings due date ke baad submit hue the. Is baar time se complete karne ke liye documents thoda pehle bhejne ka request hai.\nCurrent due: ${dueText}.\n\nThanks.\n\n- CA PRO Toolkit`;
+    })();
+
+    if (!process.env.DEEPSEEK_API_KEY) {
+      return res.json({
+        ok: true,
+        generated: false,
+        message: fallbackMessage,
+        reason: "LLM not configured, using template",
+      });
+    }
+
+    const dueText = dueDate
+      ? new Date(dueDate).toLocaleDateString("en-IN")
+      : "upcoming";
+
+    const system =
+      "You write professional client follow-up messages for Indian Chartered Accountants. Tone is warm but professional. Use a natural Hinglish (Hindi-English mix) style common in CA-client communication. Keep messages 60-100 words. Sign off as '- CA PRO Toolkit'. Return only the message text, no quotes, no commentary.";
+
+    const userPrompt =
+      type === "risk"
+        ? `Write a polite WhatsApp/email follow-up message to a chronically late client.
+
+Client name: ${safeStr(clientName, 80)}
+Service: ${safeStr(serviceType || "compliance", 30)}
+Last period delay: ${Number(lastDelayDays || 0)} days late
+Current due date: ${dueText}
+Tone: ${tone === "firm" ? "firm but respectful" : "polite and supportive"}
+
+Goal: gently remind them that last 2 filings were late and request they share documents earlier this time. Keep it short. Hinglish.`
+        : `Write a polite WhatsApp/email follow-up message asking client to share pending documents.
+
+Client name: ${safeStr(clientName, 80)}
+Service: ${safeStr(serviceType || "compliance", 30)}
+Days pending: ${Number(daysPending || 3)}
+Due date: ${dueText}
+Tone: ${tone === "firm" ? "firm but respectful" : "polite and warm"}
+
+Goal: remind them documents have been pending for ${Number(daysPending || 3)}+ days and request they send them today. Keep it short. Hinglish.`;
+
+    const r = await callDeepSeek({
+      system,
+      prompt: userPrompt,
+      jsonResponse: false,
+      maxTokens: 400,
+      temperature: 0.6,
+    });
+
+    if (!r.ok || !r.content?.trim()) {
+      return res.json({
+        ok: true,
+        generated: false,
+        message: fallbackMessage,
+        reason: r.reason || "LLM returned empty",
+      });
+    }
+
+    let message = r.content.trim();
+    // Strip markdown code fences if any
+    message = message.replace(/^```[a-z]*\n?/i, "").replace(/```$/i, "").trim();
+    // Remove surrounding quotes if any
+    if ((message.startsWith('"') && message.endsWith('"')) ||
+        (message.startsWith("'") && message.endsWith("'"))) {
+      message = message.slice(1, -1).trim();
+    }
+
+    return res.json({ ok: true, generated: true, message });
+  } catch (err) {
+    console.error("generateReminderMessage error:", err);
     next(err);
   }
 }
