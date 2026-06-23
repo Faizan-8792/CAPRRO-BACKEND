@@ -12,6 +12,7 @@ import firmRoutes from "./routes/firm.routes.js";
 import statsRoutes from "./routes/stats.routes.js";
 import superRoutes from "./routes/super.routes.js";
 import taskRoutes from "./routes/task.routes.js";
+import auditRoutes from "./routes/audit.routes.js";
 import { sanitizeInputs } from "./middleware/sanitize.middleware.js";
 
 const app = express();
@@ -168,6 +169,7 @@ app.use("/api/firms", firmRoutes);
 app.use("/api/stats", statsRoutes);
 app.use("/api/super", superLimiter, superRoutes);
 app.use("/api/tasks", taskRoutes);
+app.use("/api/audit", auditRoutes);
 
 /* ===============================
    GLOBAL ERROR HANDLER
