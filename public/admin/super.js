@@ -373,6 +373,9 @@ async function handleViewFirmUsers(firmId) {
   if (statusEl) statusEl.textContent = "Loading users…";
   if (bodyEl) bodyEl.innerHTML = "";
 
+  // Open modal first so user sees loading state
+  openModal();
+
   try {
     const data = await loadFirmUsers(firmId);
     if (titleEl) titleEl.textContent = `Users in ${data.firm.displayName} (@${data.firm.handle})`;
@@ -384,12 +387,41 @@ async function handleViewFirmUsers(firmId) {
   } catch (err) {
     if (statusEl) statusEl.textContent = err.message || "Failed to load users.";
   }
+}
 
-  const modalEl = document.getElementById("firmUsersModal");
-  if (modalEl && window.bootstrap) {
-    const modal = window.bootstrap.Modal.getOrCreateInstance(modalEl);
-    modal.show();
+// ─── Custom Modal ───────────────────────────────────────────────────
+function openModal() {
+  const modalEl = qs("firmUsersModal");
+  if (!modalEl) return;
+  modalEl.classList.add("show");
+  modalEl.setAttribute("aria-hidden", "false");
+  document.body.style.overflow = "hidden";
+}
+
+function closeModal() {
+  const modalEl = qs("firmUsersModal");
+  if (!modalEl) return;
+  modalEl.classList.remove("show");
+  modalEl.setAttribute("aria-hidden", "true");
+  document.body.style.overflow = "";
+}
+
+function bindModalCloseHandlers() {
+  qs("firmUsersCloseBtn")?.addEventListener("click", closeModal);
+  qs("firmUsersCloseBtn2")?.addEventListener("click", closeModal);
+
+  const modalEl = qs("firmUsersModal");
+  if (modalEl) {
+    modalEl.addEventListener("click", (e) => {
+      // Click on backdrop closes modal
+      if (e.target === modalEl) closeModal();
+    });
   }
+
+  // ESC key closes modal
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeModal();
+  });
 }
 
 function attachFirmUsersHandlers() {
@@ -526,6 +558,9 @@ async function initSuperPage() {
   qs("backToAdminBtn")?.addEventListener("click", () => {
     window.location.href = "/admin/admin.html";
   });
+
+  // Modal close handlers
+  bindModalCloseHandlers();
 
   try {
     const me = await loadMe();
