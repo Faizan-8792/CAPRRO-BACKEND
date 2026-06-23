@@ -431,6 +431,7 @@ input:hover, textarea:hover, select:hover {
   transform: translate(-50%, -50%);
   transition: width 0.4s ease, height 0.4s ease;
   opacity: 0;
+  pointer-events: none;
 }
 
 .btn:active::after {
@@ -440,8 +441,8 @@ input:hover, textarea:hover, select:hover {
   transition: 0s;
 }
 
-.btn:hover { transform: translateY(-2px); }
-.btn:active { transform: translateY(0) scale(0.97); }
+.btn:hover { transform: translateY(-2px); transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.btn:active { transform: translateY(0) scale(0.97); transition: 0s; }
 
 .btn-primary {
   background: linear-gradient(135deg, var(--teal), var(--teal-light)) !important;
