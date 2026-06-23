@@ -9,13 +9,25 @@ import {
   suggestPeriodAndDueDate,
 } from "../config/tax-templates.js";
 
-function requireFirm(user) {
-  if (!user?.firmId) {
-    const err = new Error("Firm not linked to this user");
-    err.statusCode = 400;
+function getScope(user) {
+  // Returns the filter that scopes queries to the user's data.
+  // - Firm-linked user: see firm-shared data
+  // - Solo user: see only their own data (firmId is null + ownerUserId match)
+  if (!user) {
+    const err = new Error("Unauthorized");
+    err.statusCode = 401;
     throw err;
   }
-  return user.firmId;
+  if (user.firmId) return { firmId: user.firmId };
+  return { firmId: null, ownerUserId: user.id };
+}
+
+function getOwnership(user) {
+  // Returns the fields to set when creating new docs.
+  return {
+    firmId: user.firmId || null,
+    ownerUserId: user.id,
+  };
 }
 
 function isValidObjectId(id) {
@@ -25,7 +37,7 @@ function isValidObjectId(id) {
 // ─── Templates ──────────────────────────────────────────────────────
 export const getTemplates = async (req, res, next) => {
   try {
-    requireFirm(req.user);
+    getScope(req.user);
     const list = listTaxTypes().map((t) => ({
       ...t,
       documents: getTemplateDocuments(t.code),
@@ -40,10 +52,10 @@ export const getTemplates = async (req, res, next) => {
 // ─── Clients ────────────────────────────────────────────────────────
 export const listClients = async (req, res, next) => {
   try {
-    const firmId = requireFirm(req.user);
+    const scope = getScope(req.user);
     const { search = "", limit = 200 } = req.query || {};
 
-    const filter = { firmId, isActive: true };
+    const filter = { ...scope, isActive: true };
     if (search) {
       const safe = String(search).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const re = new RegExp(safe, "i");
@@ -63,7 +75,7 @@ export const listClients = async (req, res, next) => {
 
 export const createClient = async (req, res, next) => {
   try {
-    const firmId = requireFirm(req.user);
+    const own = getOwnership(req.user);
     const { name, gstin, pan, contactPerson, phone, email, notes } = req.body || {};
 
     if (!name || typeof name !== "string" || !name.trim()) {
@@ -71,7 +83,7 @@ export const createClient = async (req, res, next) => {
     }
 
     const client = new Client({
-      firmId,
+      ...own,
       name: name.trim(),
       gstin: gstin?.trim().toUpperCase() || undefined,
       pan: pan?.trim().toUpperCase() || undefined,
@@ -91,13 +103,13 @@ export const createClient = async (req, res, next) => {
 
 export const updateClient = async (req, res, next) => {
   try {
-    const firmId = requireFirm(req.user);
+    const scope = getScope(req.user);
     const { id } = req.params;
     if (!isValidObjectId(id)) {
       return res.status(400).json({ ok: false, error: "Invalid client id" });
     }
 
-    const client = await Client.findOne({ _id: id, firmId });
+    const client = await Client.findOne({ _id: id, ...scope });
     if (!client) return res.status(404).json({ ok: false, error: "Client not found" });
 
     const editable = ["name", "gstin", "pan", "contactPerson", "phone", "email", "notes"];
@@ -120,12 +132,12 @@ export const updateClient = async (req, res, next) => {
 
 export const deleteClient = async (req, res, next) => {
   try {
-    const firmId = requireFirm(req.user);
+    const scope = getScope(req.user);
     const { id } = req.params;
     if (!isValidObjectId(id)) {
       return res.status(400).json({ ok: false, error: "Invalid client id" });
     }
-    const client = await Client.findOne({ _id: id, firmId });
+    const client = await Client.findOne({ _id: id, ...scope });
     if (!client) return res.status(404).json({ ok: false, error: "Client not found" });
     client.isActive = false;
     await client.save();
@@ -138,10 +150,10 @@ export const deleteClient = async (req, res, next) => {
 // ─── Sessions ───────────────────────────────────────────────────────
 export const listSessions = async (req, res, next) => {
   try {
-    const firmId = requireFirm(req.user);
+    const scope = getScope(req.user);
     const { clientId, taxType, status, assignedTo, mine } = req.query || {};
 
-    const filter = { firmId, status: { $ne: "ARCHIVED" } };
+    const filter = { ...scope, status: { $ne: "ARCHIVED" } };
     if (clientId && isValidObjectId(clientId)) filter.clientId = clientId;
     if (taxType && TAX_TYPES.includes(taxType)) filter.taxType = taxType;
     if (status && STATUSES.includes(status)) filter.status = status;
@@ -155,7 +167,6 @@ export const listSessions = async (req, res, next) => {
       .limit(500)
       .lean();
 
-    // Compute progress summary
     const enriched = sessions.map((s) => {
       const total = (s.documents || []).length;
       const required = (s.documents || []).filter((d) => d.required).length;
@@ -178,12 +189,12 @@ export const listSessions = async (req, res, next) => {
 
 export const getSession = async (req, res, next) => {
   try {
-    const firmId = requireFirm(req.user);
+    const scope = getScope(req.user);
     const { id } = req.params;
     if (!isValidObjectId(id)) {
       return res.status(400).json({ ok: false, error: "Invalid session id" });
     }
-    const session = await TaxWorkSession.findOne({ _id: id, firmId })
+    const session = await TaxWorkSession.findOne({ _id: id, ...scope })
       .populate("clientId", "name gstin pan email phone contactPerson")
       .populate("assignedTo", "name email")
       .populate("createdBy", "name email")
@@ -197,7 +208,8 @@ export const getSession = async (req, res, next) => {
 
 export const createSession = async (req, res, next) => {
   try {
-    const firmId = requireFirm(req.user);
+    const scope = getScope(req.user);
+    const own = getOwnership(req.user);
     const { clientId, taxType, period, dueDate, assignedTo, notes } = req.body || {};
 
     if (!isValidObjectId(clientId)) {
@@ -207,12 +219,11 @@ export const createSession = async (req, res, next) => {
       return res.status(400).json({ ok: false, error: "Invalid taxType" });
     }
 
-    const client = await Client.findOne({ _id: clientId, firmId, isActive: true });
+    const client = await Client.findOne({ _id: clientId, ...scope, isActive: true });
     if (!client) {
-      return res.status(404).json({ ok: false, error: "Client not found in firm" });
+      return res.status(404).json({ ok: false, error: "Client not found in your scope" });
     }
 
-    // Snapshot template documents
     const docs = getTemplateDocuments(taxType).map((d) => ({
       ...d,
       received: false,
@@ -234,7 +245,7 @@ export const createSession = async (req, res, next) => {
     if (assignedTo && isValidObjectId(assignedTo)) assignedToId = assignedTo;
 
     const session = new TaxWorkSession({
-      firmId,
+      ...own,
       clientId,
       taxType,
       period: finalPeriod || "",
@@ -255,12 +266,12 @@ export const createSession = async (req, res, next) => {
 
 export const updateSession = async (req, res, next) => {
   try {
-    const firmId = requireFirm(req.user);
+    const scope = getScope(req.user);
     const { id } = req.params;
     if (!isValidObjectId(id)) {
       return res.status(400).json({ ok: false, error: "Invalid session id" });
     }
-    const session = await TaxWorkSession.findOne({ _id: id, firmId });
+    const session = await TaxWorkSession.findOne({ _id: id, ...scope });
     if (!session) return res.status(404).json({ ok: false, error: "Session not found" });
 
     const { period, dueDate, status, assignedTo, notes } = req.body || {};
@@ -288,13 +299,13 @@ export const updateSession = async (req, res, next) => {
 
 export const updateDocument = async (req, res, next) => {
   try {
-    const firmId = requireFirm(req.user);
+    const scope = getScope(req.user);
     const { id, docKey } = req.params;
     if (!isValidObjectId(id)) {
       return res.status(400).json({ ok: false, error: "Invalid session id" });
     }
 
-    const session = await TaxWorkSession.findOne({ _id: id, firmId });
+    const session = await TaxWorkSession.findOne({ _id: id, ...scope });
     if (!session) return res.status(404).json({ ok: false, error: "Session not found" });
 
     const doc = session.documents.find((d) => d.docKey === docKey);
@@ -311,7 +322,6 @@ export const updateDocument = async (req, res, next) => {
     if (typeof required === "boolean") doc.required = required;
     if (typeof name === "string" && name.trim()) doc.name = name.trim();
 
-    // Auto-update session status if all required received
     const allRequiredReceived =
       session.documents.length > 0 &&
       session.documents.filter((d) => d.required).every((d) => d.received);
@@ -332,7 +342,7 @@ export const updateDocument = async (req, res, next) => {
 
 export const addCustomDocument = async (req, res, next) => {
   try {
-    const firmId = requireFirm(req.user);
+    const scope = getScope(req.user);
     const { id } = req.params;
     const { name, required } = req.body || {};
     if (!isValidObjectId(id)) {
@@ -342,7 +352,7 @@ export const addCustomDocument = async (req, res, next) => {
       return res.status(400).json({ ok: false, error: "name required" });
     }
 
-    const session = await TaxWorkSession.findOne({ _id: id, firmId });
+    const session = await TaxWorkSession.findOne({ _id: id, ...scope });
     if (!session) return res.status(404).json({ ok: false, error: "Session not found" });
 
     const slug = String(name)
@@ -377,13 +387,13 @@ export const addCustomDocument = async (req, res, next) => {
 
 export const removeCustomDocument = async (req, res, next) => {
   try {
-    const firmId = requireFirm(req.user);
+    const scope = getScope(req.user);
     const { id, docKey } = req.params;
     if (!isValidObjectId(id)) {
       return res.status(400).json({ ok: false, error: "Invalid session id" });
     }
 
-    const session = await TaxWorkSession.findOne({ _id: id, firmId });
+    const session = await TaxWorkSession.findOne({ _id: id, ...scope });
     if (!session) return res.status(404).json({ ok: false, error: "Session not found" });
 
     const before = session.documents.length;
@@ -405,12 +415,12 @@ export const removeCustomDocument = async (req, res, next) => {
 
 export const deleteSession = async (req, res, next) => {
   try {
-    const firmId = requireFirm(req.user);
+    const scope = getScope(req.user);
     const { id } = req.params;
     if (!isValidObjectId(id)) {
       return res.status(400).json({ ok: false, error: "Invalid session id" });
     }
-    const session = await TaxWorkSession.findOne({ _id: id, firmId });
+    const session = await TaxWorkSession.findOne({ _id: id, ...scope });
     if (!session) return res.status(404).json({ ok: false, error: "Session not found" });
     session.status = "ARCHIVED";
     await session.save();
@@ -423,38 +433,46 @@ export const deleteSession = async (req, res, next) => {
 // ─── Stats ──────────────────────────────────────────────────────────
 export const getStats = async (req, res, next) => {
   try {
-    const firmId = requireFirm(req.user);
+    const scope = getScope(req.user);
 
     const [totalSessions, draftSessions, inProgressSessions, completeSessions] =
       await Promise.all([
-        TaxWorkSession.countDocuments({ firmId, status: { $ne: "ARCHIVED" } }),
-        TaxWorkSession.countDocuments({ firmId, status: "DRAFT" }),
-        TaxWorkSession.countDocuments({ firmId, status: "IN_PROGRESS" }),
-        TaxWorkSession.countDocuments({ firmId, status: "COMPLETE" }),
+        TaxWorkSession.countDocuments({ ...scope, status: { $ne: "ARCHIVED" } }),
+        TaxWorkSession.countDocuments({ ...scope, status: "DRAFT" }),
+        TaxWorkSession.countDocuments({ ...scope, status: "IN_PROGRESS" }),
+        TaxWorkSession.countDocuments({ ...scope, status: "COMPLETE" }),
       ]);
 
-    const totalClients = await Client.countDocuments({ firmId, isActive: true });
+    const totalClients = await Client.countDocuments({ ...scope, isActive: true });
 
-    // Pending required docs across firm
+    // Build aggregation match - convert ObjectIds where present
+    const aggMatch = { status: { $in: ["DRAFT", "IN_PROGRESS"] } };
+    if (scope.firmId) {
+      aggMatch.firmId = new mongoose.Types.ObjectId(scope.firmId);
+    } else {
+      aggMatch.firmId = null;
+      aggMatch.ownerUserId = new mongoose.Types.ObjectId(scope.ownerUserId);
+    }
+
     const pendingAgg = await TaxWorkSession.aggregate([
-      { $match: { firmId: new mongoose.Types.ObjectId(firmId), status: { $in: ["DRAFT", "IN_PROGRESS"] } } },
+      { $match: aggMatch },
       { $unwind: "$documents" },
       { $match: { "documents.required": true, "documents.received": false } },
       { $count: "pending" },
     ]);
     const pendingRequired = pendingAgg[0]?.pending || 0;
 
-    // Overdue sessions
     const today = new Date();
     today.setUTCHours(0, 0, 0, 0);
     const overdueSessions = await TaxWorkSession.countDocuments({
-      firmId,
+      ...scope,
       status: { $in: ["DRAFT", "IN_PROGRESS"] },
       dueDate: { $lt: today },
     });
 
     return res.json({
       ok: true,
+      mode: scope.firmId ? "firm" : "solo",
       stats: {
         totalSessions,
         draftSessions,

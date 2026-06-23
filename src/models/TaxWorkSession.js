@@ -43,7 +43,14 @@ const TaxWorkSessionSchema = new mongoose.Schema(
     firmId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Firm",
+      default: null,
+      index: true,
+    },
+    ownerUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
       required: true,
+      index: true,
     },
     clientId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -76,6 +83,8 @@ TaxWorkSessionSchema.index({ firmId: 1, clientId: 1 });
 TaxWorkSessionSchema.index({ firmId: 1, taxType: 1 });
 TaxWorkSessionSchema.index({ firmId: 1, assignedTo: 1 });
 TaxWorkSessionSchema.index({ firmId: 1, dueDate: 1 });
+TaxWorkSessionSchema.index({ ownerUserId: 1, firmId: 1, status: 1 });
+TaxWorkSessionSchema.index({ ownerUserId: 1, firmId: 1, dueDate: 1 });
 
 const TaxWorkSession = mongoose.model("TaxWorkSession", TaxWorkSessionSchema);
 

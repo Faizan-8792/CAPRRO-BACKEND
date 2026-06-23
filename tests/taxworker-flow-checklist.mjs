@@ -48,7 +48,7 @@ check(
   "Routes accessible at /api/taxworker"
 );
 
-// 3. Every controller scopes by firmId
+// 3. Every controller scopes by firmId or ownerUserId (via getScope helper)
 const handlers = [
   "listClients",
   "createClient",
@@ -70,35 +70,36 @@ const missingScope = [];
 for (const h of handlers) {
   const re = new RegExp(`(export const|export async function|export function)\\s+${h}[\\s\\S]*?(?=export const|export function|export async function|$)`);
   const block = (ctrl.match(re) || [""])[0];
-  const ok = /requireFirm\(req\.user\)/.test(block);
+  // Either getScope or getOwnership establishes the scope
+  const ok = /getScope\(req\.user\)/.test(block) || /getOwnership\(req\.user\)/.test(block);
   if (!ok) {
     allScoped = false;
     missingScope.push(h);
   }
 }
 check(
-  "All controllers call requireFirm(req.user) for firmId scoping",
+  "All controllers establish scope via getScope/getOwnership (firm or solo)",
   allScoped,
-  allScoped ? "Cross-firm leakage prevented" : `Missing: ${missingScope.join(", ")}`
+  allScoped ? "Cross-user/cross-firm leakage prevented" : `Missing: ${missingScope.join(", ")}`
 );
 
-// 4. Cross-firm leakage prevented in queries
+// 4. Cross-firm/user leakage prevented in queries
 const queriesScoped =
-  /\bfirmId\b/.test(ctrl) &&
+  /\bgetScope\b/.test(ctrl) &&
   (ctrl.match(/Client\.find/g) || []).length >= 1 &&
   (ctrl.match(/TaxWorkSession\.find/g) || []).length >= 1 &&
-  /const\s+filter\s*=\s*\{\s*firmId/.test(ctrl);
+  /\.\.\.scope/.test(ctrl);
 check(
-  "Queries use a filter object with firmId scoping (via requireFirm + filter)",
+  "Queries spread scope filter (firm-mode firmId OR solo-mode ownerUserId+firmId:null)",
   queriesScoped,
-  "Sessions/clients only fetched within user's firm"
+  "Each user only sees their firm or solo data"
 );
 
-// 5. createSession validates client belongs to firm
+// 5. createSession validates client belongs to scope
 check(
-  "createSession validates clientId belongs to firm before creating",
-  /Client\.findOne\(\s*\{\s*_id:\s*clientId\s*,\s*firmId/.test(ctrl),
-  "Cannot create session for a client from another firm"
+  "createSession validates clientId belongs to scope before creating",
+  /Client\.findOne\(\s*\{\s*_id:\s*clientId\s*,\s*\.\.\.scope/.test(ctrl),
+  "Cannot create session for a client outside your scope"
 );
 
 // 6. createSession snapshots template documents
@@ -197,6 +198,24 @@ check(
   /docKey\s*=\s*`custom_\$\{slug\}`/.test(ctrl) ||
     /custom_\$\{slug\}/.test(ctrl),
   "Custom docs get unique slugified keys to avoid collisions"
+);
+
+// 18. Solo mode: getScope returns ownerUserId-based filter for unlinked users
+check(
+  "getScope() supports SOLO mode (firmId:null + ownerUserId) for unlinked users",
+  /if\s*\(\s*user\.firmId\s*\)\s*return\s*\{\s*firmId:\s*user\.firmId\s*\}/.test(ctrl) &&
+    /return\s*\{\s*firmId:\s*null,\s*ownerUserId:\s*user\.id\s*\}/.test(ctrl),
+  "Users not linked to any firm can use Tax Worker independently"
+);
+
+// 19. Models support solo mode (firmId optional, ownerUserId required)
+check(
+  "Client + TaxWorkSession models allow firmId=null with required ownerUserId",
+  /firmId[\s\S]{0,80}default:\s*null/.test(clientModel) &&
+    /ownerUserId[\s\S]{0,80}required:\s*true/.test(clientModel) &&
+    /firmId[\s\S]{0,80}default:\s*null/.test(sessionModel) &&
+    /ownerUserId[\s\S]{0,80}required:\s*true/.test(sessionModel),
+  "Solo mode supported at schema level"
 );
 
 // ─── Print report ────────────────────────────────────────────────

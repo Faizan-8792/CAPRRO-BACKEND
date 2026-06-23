@@ -5,7 +5,14 @@ const ClientSchema = new mongoose.Schema(
     firmId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Firm",
+      default: null,
+      index: true,
+    },
+    ownerUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
       required: true,
+      index: true,
     },
     name: { type: String, required: true, trim: true },
     gstin: { type: String, trim: true, uppercase: true },
@@ -28,6 +35,7 @@ ClientSchema.index({ firmId: 1, isActive: 1 });
 ClientSchema.index({ firmId: 1, name: 1 });
 ClientSchema.index({ firmId: 1, gstin: 1 });
 ClientSchema.index({ firmId: 1, pan: 1 });
+ClientSchema.index({ ownerUserId: 1, firmId: 1, isActive: 1 });
 
 const Client = mongoose.model("Client", ClientSchema);
 export default Client;
