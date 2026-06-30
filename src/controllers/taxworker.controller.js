@@ -35,15 +35,24 @@ function isValidObjectId(id) {
 }
 
 // ─── Templates ──────────────────────────────────────────────────────
+// Build once at module load — templates are static, no per-request work needed.
+let _templatesCache = null;
+function buildTemplatesPayload() {
+  if (_templatesCache) return _templatesCache;
+  const list = listTaxTypes().map((t) => ({
+    ...t,
+    documents: getTemplateDocuments(t.code),
+    defaultDueDay: TAX_TEMPLATES[t.code]?.defaultDueDay || 0,
+  }));
+  _templatesCache = { ok: true, templates: list, statuses: STATUSES };
+  return _templatesCache;
+}
+
 export const getTemplates = async (req, res, next) => {
   try {
     getScope(req.user);
-    const list = listTaxTypes().map((t) => ({
-      ...t,
-      documents: getTemplateDocuments(t.code),
-      defaultDueDay: TAX_TEMPLATES[t.code]?.defaultDueDay || 0,
-    }));
-    return res.json({ ok: true, templates: list, statuses: STATUSES });
+    res.set("Cache-Control", "private, max-age=3600"); // safe to cache 1h
+    return res.json(buildTemplatesPayload());
   } catch (err) {
     next(err);
   }
@@ -62,12 +71,29 @@ export const listClients = async (req, res, next) => {
       filter.$or = [{ name: re }, { gstin: re }, { pan: re }];
     }
 
-    const clients = await Client.find(filter)
-      .sort({ name: 1 })
+    const all = await Client.find(filter)
+      .sort({ name: 1, createdAt: 1 })
       .limit(Math.min(Number(limit) || 200, 500))
       .lean();
 
-    return res.json({ ok: true, clients });
+    // De-duplicate by case-insensitive name (keep the OLDEST = first created)
+    const seen = new Map();
+    const dedupedIds = [];
+    for (const c of all) {
+      const key = String(c.name || "").trim().toLowerCase();
+      if (!seen.has(key)) {
+        seen.set(key, c);
+      } else {
+        dedupedIds.push(c._id);
+      }
+    }
+
+    // Auto-archive duplicates so future lists are clean
+    if (dedupedIds.length) {
+      await Client.updateMany({ _id: { $in: dedupedIds } }, { $set: { isActive: false } });
+    }
+
+    return res.json({ ok: true, clients: Array.from(seen.values()), removedDupes: dedupedIds.length });
   } catch (err) {
     next(err);
   }
@@ -76,15 +102,42 @@ export const listClients = async (req, res, next) => {
 export const createClient = async (req, res, next) => {
   try {
     const own = getOwnership(req.user);
+    const scope = getScope(req.user);
     const { name, gstin, pan, contactPerson, phone, email, notes } = req.body || {};
 
     if (!name || typeof name !== "string" || !name.trim()) {
       return res.status(400).json({ ok: false, error: "name required" });
     }
 
+    const cleanName = name.trim();
+
+    // Dedup: case-insensitive name match within scope (active clients only)
+    const existing = await Client.findOne({
+      ...scope,
+      isActive: true,
+      name: { $regex: `^${cleanName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" },
+    });
+
+    if (existing) {
+      // Optionally update missing fields with new info, never overwrite existing values
+      const editable = { gstin, pan, contactPerson, phone, email, notes };
+      let touched = false;
+      for (const [key, raw] of Object.entries(editable)) {
+        if (raw && !existing[key]) {
+          let v = String(raw).trim();
+          if (key === "gstin" || key === "pan") v = v.toUpperCase();
+          if (key === "email") v = v.toLowerCase();
+          existing[key] = v;
+          touched = true;
+        }
+      }
+      if (touched) await existing.save();
+      return res.json({ ok: true, client: existing, deduped: true });
+    }
+
     const client = new Client({
       ...own,
-      name: name.trim(),
+      name: cleanName,
       gstin: gstin?.trim().toUpperCase() || undefined,
       pan: pan?.trim().toUpperCase() || undefined,
       contactPerson: contactPerson?.trim() || undefined,
@@ -95,7 +148,7 @@ export const createClient = async (req, res, next) => {
     });
 
     await client.save();
-    return res.json({ ok: true, client });
+    return res.json({ ok: true, client, deduped: false });
   } catch (err) {
     next(err);
   }

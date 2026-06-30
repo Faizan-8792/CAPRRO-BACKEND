@@ -3,6 +3,7 @@
 import express from "express";
 import { authRequired } from "../middleware/auth.middleware.js";
 import {
+  getUsageStats,
   getSuperDashboardStats,
   listPendingAdmins,
   approveAdmin,
@@ -21,6 +22,9 @@ router.use(authRequired);
 
 // Super admin dashboard stats
 router.get("/dashboard-stats", getSuperDashboardStats);
+
+// Extension usage analytics (DAU/WAU/MAU)
+router.get("/usage-stats", getUsageStats);
 
 // Pending firm admins
 router.get("/pending-admins", listPendingAdmins);

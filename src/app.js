@@ -3,6 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
+import compression from "compression";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -15,14 +16,34 @@ import taskRoutes from "./routes/task.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
 import taxworkerRoutes from "./routes/taxworker.routes.js";
 import { sanitizeInputs } from "./middleware/sanitize.middleware.js";
+import { trackUsage } from "./middleware/usage-tracker.middleware.js";
+import { requestId } from "./middleware/request-id.middleware.js";
 
 const app = express();
+
+// Trust Render's reverse proxy so req.ip + secure cookies work correctly
+app.set("trust proxy", 1);
 
 // Resolve __dirname in ES modules
 const filename = fileURLToPath(import.meta.url);
 const dirname = path.dirname(filename);
 
 const isProd = process.env.NODE_ENV === "production";
+
+// Validate required env vars at boot
+const REQUIRED_ENV = ["JWT_SECRET", "MONGODB_URI"];
+for (const key of REQUIRED_ENV) {
+  if (!process.env[key]) {
+    console.error(`[STARTUP] Missing required env var: ${key}`);
+    if (isProd) {
+      process.exit(1);
+    }
+  }
+}
+
+// Request ID + compression (very early in the chain)
+app.use(requestId);
+app.use(compression({ threshold: 1024 })); // gzip responses larger than 1KB
 
 /* ===============================
    HELMET (CSP – admin pages)
@@ -125,15 +146,63 @@ app.use(
 );
 
 app.use(morgan(isProd ? "combined" : "dev"));
+
+// Content-Type guard: reject non-JSON POST/PATCH/PUT bodies on /api/*
+app.use((req, res, next) => {
+  if (!req.path.startsWith("/api/")) return next();
+  const method = req.method.toUpperCase();
+  if (!["POST", "PATCH", "PUT"].includes(method)) return next();
+  // Empty bodies are fine for some routes
+  const len = Number(req.headers["content-length"] || 0);
+  if (len === 0) return next();
+  const ct = String(req.headers["content-type"] || "").toLowerCase();
+  if (!ct.includes("application/json")) {
+    return res.status(415).json({
+      ok: false,
+      error: "Unsupported Media Type — Content-Type must be application/json",
+    });
+  }
+  next();
+});
+
 app.use(express.json({ limit: "1mb" }));
 app.use(sanitizeInputs);
+// trackUsage is wired AFTER authRequired in each route; this comment marks the chain.
 
 /* ===============================
-   HEALTH
+   HEALTH (with DB ping)
 ================================ */
-app.get("/health", (req, res) =>
-  res.json({ status: "ok", uptime: process.uptime() })
-);
+import mongoose from "mongoose";
+
+app.get("/health", async (req, res) => {
+  const dbState = mongoose.connection?.readyState; // 0=disconnected,1=connected,2=connecting,3=disconnecting
+  const dbStateName =
+    { 0: "disconnected", 1: "connected", 2: "connecting", 3: "disconnecting" }[
+      dbState
+    ] || "unknown";
+
+  let dbOk = dbState === 1;
+  let dbPingMs = null;
+  if (dbOk) {
+    try {
+      const start = Date.now();
+      await mongoose.connection.db.admin().ping();
+      dbPingMs = Date.now() - start;
+    } catch {
+      dbOk = false;
+    }
+  }
+
+  res.status(dbOk ? 200 : 503).json({
+    status: dbOk ? "ok" : "degraded",
+    uptime: Math.round(process.uptime()),
+    db: { state: dbStateName, ping_ms: dbPingMs },
+    memory: {
+      rss_mb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+      heap_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+    },
+  });
+});
 
 /* ===============================
    ROOT

@@ -81,6 +81,112 @@ async function loadMe() {
   return me.user;
 }
 
+// ─── Usage Stats (DAU/WAU/MAU) ──────────────────────────────────────
+async function loadUsageStats() {
+  const grid = qs("usageGrid");
+  const statusEl = qs("usageLoadingStatus");
+  const chartEl = qs("dailyActivityChart");
+  const topUsersEl = qs("topUsersList");
+
+  try {
+    const data = await api("/super/usage-stats");
+    if (!data.ok) throw new Error("Failed to load usage stats");
+    const u = data.usage;
+    if (statusEl) statusEl.textContent = "";
+
+    if (grid) {
+      grid.innerHTML = `
+        <div class="stat-card stat-primary">
+          <div class="stat-label">DAU (Last 24h)</div>
+          <div class="stat-value">${u.dau}</div>
+          <div class="stat-sub">Active in last day</div>
+        </div>
+        <div class="stat-card stat-gold">
+          <div class="stat-label">WAU (Last 7d)</div>
+          <div class="stat-value">${u.wau}</div>
+          <div class="stat-sub">Active in last week</div>
+        </div>
+        <div class="stat-card stat-success">
+          <div class="stat-label">MAU (Last 30d)</div>
+          <div class="stat-value">${u.mau}</div>
+          <div class="stat-sub">Active in last month</div>
+        </div>
+        <div class="stat-card stat-primary">
+          <div class="stat-label">QAU (Last 90d)</div>
+          <div class="stat-value">${u.qau}</div>
+          <div class="stat-sub">Active in last quarter</div>
+        </div>
+        <div class="stat-card stat-gold">
+          <div class="stat-label">Activation Rate</div>
+          <div class="stat-value">${u.activationRate}%</div>
+          <div class="stat-sub">${u.totalEverActive} of ${u.totalUsers} users</div>
+        </div>
+        <div class="stat-card stat-success">
+          <div class="stat-label">7-day Retention</div>
+          <div class="stat-value">${u.retentionRate}%</div>
+          <div class="stat-sub">Of activated users</div>
+        </div>
+        <div class="stat-card stat-primary">
+          <div class="stat-label">Total API Calls</div>
+          <div class="stat-value">${(u.totalApiCalls || 0).toLocaleString("en-IN")}</div>
+          <div class="stat-sub">Lifetime tracked</div>
+        </div>
+        <div class="stat-card stat-gold">
+          <div class="stat-label">Total Users</div>
+          <div class="stat-value">${u.totalUsers}</div>
+          <div class="stat-sub">Ever signed up</div>
+        </div>
+      `;
+    }
+
+    if (chartEl) {
+      const days = u.dailyActivity || [];
+      if (!days.length) {
+        chartEl.innerHTML = `<div style="color:var(--muted);font-size:12px;font-style:italic;padding:14px 0;">No activity recorded yet</div>`;
+      } else {
+        const max = Math.max(...days.map((d) => d.count), 1);
+        chartEl.innerHTML = days
+          .map((d) => {
+            const h = Math.max(8, Math.round((d.count / max) * 80));
+            const dayLabel = d._id.slice(5); // MM-DD
+            return `
+              <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;" title="${d._id}: ${d.count} active">
+                <div style="width:100%;height:${h}px;background:linear-gradient(180deg,var(--teal),var(--teal-light));border-radius:4px 4px 0 0;"></div>
+                <div style="font-size:9.5px;color:var(--muted);font-weight:600">${dayLabel}</div>
+                <div style="font-size:10px;color:var(--text);font-weight:700">${d.count}</div>
+              </div>
+            `;
+          })
+          .join("");
+      }
+    }
+
+    if (topUsersEl) {
+      const top = u.topUsers || [];
+      if (!top.length) {
+        topUsersEl.innerHTML = `<div style="color:var(--muted);font-style:italic;">No active users yet</div>`;
+      } else {
+        topUsersEl.innerHTML = top
+          .map(
+            (user, i) => `
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:${i < top.length - 1 ? "1px solid var(--border)" : "none"};">
+                <div style="flex:1;min-width:0;">
+                  <div style="font-weight:600;color:var(--text);text-overflow:ellipsis;overflow:hidden;white-space:nowrap;">${escapeHtml(user.email || "—")}</div>
+                  <div style="font-size:11px;color:var(--muted);">${escapeHtml(user.role || "USER")}${user.firmId?.handle ? " · @" + escapeHtml(user.firmId.handle) : ""}</div>
+                </div>
+                <div style="font-weight:700;color:var(--teal-dark);font-size:13px;margin-left:8px;">${user.totalApiCalls}</div>
+              </div>
+            `
+          )
+          .join("");
+      }
+    }
+  } catch (err) {
+    console.error("Usage stats error:", err);
+    if (statusEl) statusEl.textContent = err.message || "Failed to load usage stats.";
+  }
+}
+
 // ─── Dashboard Stats ────────────────────────────────────────────────
 async function loadDashboardStats() {
   const grid = qs("statsGrid");
@@ -567,8 +673,8 @@ async function initSuperPage() {
     if (!requireSuperAdmin(me)) { window.location.href = "/admin/admin.html"; return; }
     if (qs("superEmail")) qs("superEmail").textContent = me.email || "—";
 
-    // Load dashboard stats
-    await loadDashboardStats();
+    // Load extension usage analytics + dashboard stats in parallel
+    await Promise.all([loadUsageStats(), loadDashboardStats()]);
 
     // Load pending admins
     const pendingTbody = qs("pendingAdminsBody");

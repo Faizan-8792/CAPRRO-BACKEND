@@ -1,6 +1,7 @@
 // src/middleware/auth.middleware.js
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import { trackUsage } from "./usage-tracker.middleware.js";
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error("JWT_SECRET env var is required");
@@ -58,6 +59,9 @@ export const authRequired = async (req, res, next) => {
       accountType: payload.accountType,
       firmId: payload.firmId || null,
     };
+
+    // Track usage (throttled, fire-and-forget) — does not block request
+    trackUsage(req, res, () => {});
 
     return next();
   } catch (err) {

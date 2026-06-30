@@ -15,6 +15,82 @@ function assertSuper(user) {
   }
 }
 
+// 0a) Extension Usage Analytics (DAU/WAU/MAU)
+export const getUsageStats = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+
+    const now = new Date();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const oneDay = new Date(now.getTime() - dayMs);
+    const sevenDay = new Date(now.getTime() - 7 * dayMs);
+    const thirtyDay = new Date(now.getTime() - 30 * dayMs);
+    const ninetyDay = new Date(now.getTime() - 90 * dayMs);
+
+    const [dau, wau, mau, qau, totalEverActive, totalUsers, totalApiCallsAgg] =
+      await Promise.all([
+        User.countDocuments({ lastActiveAt: { $gte: oneDay } }),
+        User.countDocuments({ lastActiveAt: { $gte: sevenDay } }),
+        User.countDocuments({ lastActiveAt: { $gte: thirtyDay } }),
+        User.countDocuments({ lastActiveAt: { $gte: ninetyDay } }),
+        User.countDocuments({ lastActiveAt: { $ne: null } }),
+        User.countDocuments({}),
+        User.aggregate([
+          { $group: { _id: null, total: { $sum: "$totalApiCalls" } } },
+        ]),
+      ]);
+
+    const totalApiCalls = totalApiCallsAgg[0]?.total || 0;
+
+    // Activity by day for last 14 days
+    const dailyActivity = await User.aggregate([
+      {
+        $match: { lastActiveAt: { $gte: new Date(now.getTime() - 14 * dayMs) } },
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: "%Y-%m-%d", date: "$lastActiveAt" },
+          },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    // Top 5 most active users (highest API calls)
+    const topUsers = await User.find({ totalApiCalls: { $gt: 0 } })
+      .select("email name role totalApiCalls lastActiveAt firmId")
+      .sort({ totalApiCalls: -1 })
+      .limit(5)
+      .populate("firmId", "displayName handle")
+      .lean();
+
+    return res.json({
+      ok: true,
+      usage: {
+        dau,
+        wau,
+        mau,
+        qau,
+        totalEverActive,
+        totalUsers,
+        totalApiCalls,
+        activationRate:
+          totalUsers > 0
+            ? Math.round((totalEverActive / totalUsers) * 100)
+            : 0,
+        retentionRate:
+          totalEverActive > 0 ? Math.round((wau / totalEverActive) * 100) : 0,
+        dailyActivity,
+        topUsers,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // 0) Super Admin Dashboard Stats
 export const getSuperDashboardStats = async (req, res, next) => {
   try {

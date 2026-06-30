@@ -5,7 +5,7 @@
     <title>CA PRO Toolkit – Super Admin</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="bootstrap.min.css" />
-    <link rel="stylesheet" href="admin.css?v=7" />
+    <link rel="stylesheet" href="admin.css?v=8" />
     <link rel="icon" type="image/png" href="logo.png" />
   </head>
   <body class="super-admin-body">
@@ -45,6 +45,34 @@
     </nav>
 
     <main class="container-fluid px-4 my-4 super-admin-main">
+
+      <!-- USAGE ANALYTICS -->
+      <section class="mb-4">
+        <div class="mb-3">
+          <h1 class="h5 mb-1">📈 Extension Usage Analytics</h1>
+          <p class="text-muted mb-0 small">
+            How many CAs are using the extension regularly.
+          </p>
+        </div>
+        <div id="usageLoadingStatus" class="text-muted small mb-3">Loading usage stats...</div>
+
+        <div class="stats-grid" id="usageGrid"></div>
+
+        <div class="row g-3 mb-4 mt-1">
+          <div class="col-md-7">
+            <div class="card p-3">
+              <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Daily Activity (last 14 days)</h6>
+              <div id="dailyActivityChart" style="display:flex; align-items:flex-end; gap:6px; min-height:90px; padding-top:10px;"></div>
+            </div>
+          </div>
+          <div class="col-md-5">
+            <div class="card p-3">
+              <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Top Active Users</h6>
+              <div id="topUsersList" style="font-size: 12.5px;">Loading...</div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <!-- DASHBOARD STATS -->
       <section class="mb-4">
@@ -190,6 +218,6 @@
     </main>
 
     <!-- Bootstrap JS no longer needed (custom modal). Kept removed. -->
-    <script src="super.js?v=7"></script>
+    <script src="super.js?v=8"></script>
   </body>
 </html>

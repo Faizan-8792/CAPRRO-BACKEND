@@ -35,6 +35,20 @@ const UserSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // ─── Usage tracking (super admin analytics) ─────────────────────
+    lastActiveAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    lastSeenIp: {
+      type: String,
+      default: null,
+    },
+    totalApiCalls: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true }
 );

@@ -19,12 +19,32 @@ export async function connectDB() {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       await mongoose.connect(uri, {
-        autoIndex: true,
-        serverSelectionTimeoutMS: 10000, // 10s to find a server
-        connectTimeoutMS: 15000,         // 15s to establish connection
+        autoIndex: process.env.NODE_ENV !== "production", // Index in dev, manage in prod
+        serverSelectionTimeoutMS: 10000,
+        connectTimeoutMS: 15000,
         socketTimeoutMS: 45000,
+        // Connection pool sized for production traffic
+        maxPoolSize: Number(process.env.MONGO_POOL_MAX) || 50,
+        minPoolSize: Number(process.env.MONGO_POOL_MIN) || 5,
+        // Query timeout — fail fast on slow queries
+        maxIdleTimeMS: 60_000,
+        retryWrites: true,
+        retryReads: true,
+        w: "majority",
       });
-      console.log("✅ MongoDB connected");
+
+      // Listen for connection events
+      mongoose.connection.on("error", (err) => {
+        console.error("MongoDB connection error:", err.message);
+      });
+      mongoose.connection.on("disconnected", () => {
+        console.warn("MongoDB disconnected — Mongoose will auto-reconnect");
+      });
+      mongoose.connection.on("reconnected", () => {
+        console.log("MongoDB reconnected");
+      });
+
+      console.log("✅ MongoDB connected (pool:", process.env.MONGO_POOL_MAX || 50, ")");
       return;
     } catch (err) {
       console.error(
