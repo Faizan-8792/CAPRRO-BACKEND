@@ -20,7 +20,7 @@ const AppConfigSchema = new mongoose.Schema(
       body: {
         type: String,
         default:
-          "We have just integrated AI (DeepSeek + our own NLP engine) for smarter audit analysis, instant insights, and personalised client reminders. Try the AI Audit Scan and Tax Work Tracker for the best results!",
+          "We have just integrated AI for smarter audit analysis, instant insights, and personalised client reminders. Try the AI Audit Scan and Tax Work Tracker for the best results!",
       },
       enabled: { type: Boolean, default: true },
       updatedAt: { type: Date, default: Date.now },
