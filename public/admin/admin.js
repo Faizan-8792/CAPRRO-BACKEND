@@ -27,34 +27,74 @@ async function apiGetMe() {
   return res.json();
 }
 
-// AUTH GUARD FUNCTION
+// AUTH GUARD — returns the verified user object (or null on failure).
 async function ensureAdminAuth() {
   try {
     const data = await apiGetMe();
-
     if (!data.ok) throw new Error("Invalid user");
 
-    // ❌ Super admin should not stay on admin page
     if (data.user.role === "SUPER_ADMIN") {
       window.location.href = "/admin/super.html";
-      return false;
+      return null;
     }
-
-    // ✅ Only FIRM_ADMIN allowed
     if (data.user.role !== "FIRM_ADMIN") {
       clearToken();
       window.location.href = "/index.html";
-      return false;
+      return null;
     }
-
-    console.log("Admin authenticated:", data.user.email);
-    return true;
+    return data.user;
   } catch (err) {
     console.error("Auth error:", err);
     clearToken();
     window.location.href = "/index.html";
-    return false;
+    return null;
   }
+}
+
+// ─── sessionStorage cache with TTL ──────────────────────────────────
+// Reduces perceived load time on tab switches / refreshes within a session.
+function cacheGet(key, ttlSec) {
+  try {
+    const raw = sessionStorage.getItem(`__cache:${key}`);
+    if (!raw) return null;
+    const { t, v } = JSON.parse(raw);
+    if (Date.now() - t > ttlSec * 1000) {
+      sessionStorage.removeItem(`__cache:${key}`);
+      return null;
+    }
+    return v;
+  } catch {
+    return null;
+  }
+}
+function cacheSet(key, value) {
+  try {
+    sessionStorage.setItem(`__cache:${key}`, JSON.stringify({ t: Date.now(), v: value }));
+  } catch {}
+}
+function cacheBust(prefix = "") {
+  try {
+    for (const k of Object.keys(sessionStorage)) {
+      if (k.startsWith(`__cache:${prefix}`)) sessionStorage.removeItem(k);
+    }
+  } catch {}
+}
+
+// Stale-while-revalidate: returns cached value INSTANTLY (if any),
+// then triggers fresh fetch in background and calls onFresh(value).
+async function swrApi(key, path, ttlSec, onFresh) {
+  const cached = cacheGet(key, ttlSec);
+  if (cached !== null) {
+    // Fire-and-forget revalidation
+    api(path).then((fresh) => {
+      cacheSet(key, fresh);
+      if (typeof onFresh === "function") onFresh(fresh);
+    }).catch(() => {});
+    return cached;
+  }
+  const fresh = await api(path);
+  cacheSet(key, fresh);
+  return fresh;
 }
 
 function qs(id) {
@@ -438,13 +478,33 @@ async function loadClientsToChaseToday() {
     }
 }
 
+// Skeleton shimmer placeholders — instant visual feedback while data loads
+function paintSkeleton() {
+    const kpiIds = ['kpiFirmName', 'kpiFirmHandle', 'kpiTotalUsers', 'kpiActiveUsers', 'kpiPlanType', 'kpiPlanExpiry'];
+    for (const id of kpiIds) {
+        const el = qs(id);
+        if (el && !el.textContent.trim()) {
+            el.innerHTML = '<span class="skel-shimmer"></span>';
+        }
+    }
+    const tbody = qs('usersTbody');
+    if (tbody) {
+        tbody.innerHTML = Array.from({ length: 3 }).map(() =>
+            `<tr>${Array.from({ length: 7 }).map(() => '<td><span class="skel-shimmer"></span></td>').join('')}</tr>`
+        ).join('');
+    }
+}
+
 // ---------- Firm Admin page (admin.html) ----------
 async function initAdminPage() {
     if (!qs('logoutBtn')) return;
 
-    // AUTH CHECK FIRST
-    const isAuthenticated = await ensureAdminAuth();
-    if (!isAuthenticated) return;
+    // Render skeleton placeholders IMMEDIATELY so the page feels instant
+    paintSkeleton();
+
+    // AUTH CHECK (returns the user object; no duplicate /auth/me later)
+    const me = await ensureAdminAuth();
+    if (!me) return;
 
     const token = getToken();
     if (!token) {
@@ -523,18 +583,12 @@ async function initAdminPage() {
     }
 
     try {
-        const meResp = await api('/auth/me');
-        const me = meResp.user;
-
         // Non-admin access denied
         if (!ensureFirmAdmin(me.role)) {
-            // If this is Super Admin, always go to Super dashboard (no block)
             if (isSuperAdmin(me)) {
                 window.location.href = '/admin/super.html';
                 return;
             }
-
-            // For other roles, show access denied
             document.body.innerHTML = `
               <div class="container" style="padding-top: 40px">
                 <div class="card p-4 mx-auto" style="max-width: 500px">
@@ -551,7 +605,7 @@ async function initAdminPage() {
             return;
         }
 
-        // PENDING APPROVAL - View-only mode
+        // PENDING APPROVAL — view-only mode
         const pendingBanner = qs('pendingBanner');
         if (!me.isActive) {
             if (pendingBanner) {
@@ -564,51 +618,107 @@ async function initAdminPage() {
             });
         }
 
-        // Populate user info
+        // Populate user info immediately
         if (qs('emailBadge')) qs('emailBadge').textContent = me.email;
         if (qs('roleBadge')) qs('roleBadge').textContent = me.isActive ? 'FIRM_ADMIN' : 'FIRM_ADMIN (Pending)';
 
-        // FIRM LOADING
+        // FIRM LOADING — stale-while-revalidate from cache + parallel users fetch
         let firm = null;
         try {
-            const myFirmResp = await api('/firms/me');
+            // Step 1: Get firmId (cached for 5 min)
+            const myFirmResp = await swrApi('firms/me', '/firms/me', 300, (fresh) => {
+                if (fresh?.firm?._id) reloadFirmAndUsers(fresh.firm._id);
+            });
             if (myFirmResp?.ok && myFirmResp.firm && myFirmResp.firm._id) {
                 const firmId = myFirmResp.firm._id;
-                const firmResp = await api(`/firms/${firmId}`);
+                // Step 2: Fire firm details + users in PARALLEL (Promise.all)
+                const [firmResp, usersResp] = await Promise.all([
+                    swrApi(`firms/${firmId}`, `/firms/${firmId}`, 300, (fresh) => {
+                        if (fresh?.firm) hydrateFirm(fresh.firm);
+                    }),
+                    swrApi(`firms/${firmId}/users`, `/firms/${firmId}/users`, 60, (fresh) => {
+                        if (fresh?.users) renderUsersTable(fresh.users);
+                    }),
+                ]);
                 if (firmResp?.ok && firmResp.firm) {
                     firm = firmResp.firm;
-                    currentFirm = firm; // Store for delete operations
+                    currentFirm = firm;
+                }
+                if (usersResp?.users) {
+                    renderUsersTable(usersResp.users);
                 }
             }
         } catch (e) {
             console.error('Firm load error:', e);
         }
 
-        if (qs('topSub')) {
-            qs('topSub').textContent = firm ? `Firm: ${firm.displayName} (@${firm.handle})` : 'No firm linked';
+        // Helper to refresh data when cache returns stale
+        async function reloadFirmAndUsers(firmId) {
+            try {
+                const [firmResp, usersResp] = await Promise.all([
+                    api(`/firms/${firmId}`),
+                    api(`/firms/${firmId}/users`),
+                ]);
+                if (firmResp?.firm) hydrateFirm(firmResp.firm);
+                if (usersResp?.users) renderUsersTable(usersResp.users);
+            } catch {}
         }
 
-        // ✅ DASHBOARD KPIs
-        if (qs('kpiFirmName')) qs('kpiFirmName').textContent = firm?.displayName || 'Individual';
-        if (qs('kpiFirmHandle')) qs('kpiFirmHandle').textContent = firm?.handle || '';
-        if (qs('kpiPlanType')) qs('kpiPlanType').textContent = firm?.planType || 'FREE';
-        const planExpiryText = firm?.planExpiry ? new Date(firm.planExpiry).toLocaleDateString() : 'NA';
-        if (qs('kpiPlanExpiry')) qs('kpiPlanExpiry').textContent = `Expires ${planExpiryText}`;
+        function hydrateFirm(f) {
+            currentFirm = f;
+            if (qs('topSub')) qs('topSub').textContent = `Firm: ${f.displayName} (@${f.handle})`;
+            if (qs('kpiFirmName')) qs('kpiFirmName').textContent = f.displayName || 'Individual';
+            if (qs('kpiFirmHandle')) qs('kpiFirmHandle').textContent = f.handle || '';
+            if (qs('kpiPlanType')) qs('kpiPlanType').textContent = f.planType || 'FREE';
+            const planExpiryText = f.planExpiry ? new Date(f.planExpiry).toLocaleDateString() : 'NA';
+            if (qs('kpiPlanExpiry')) qs('kpiPlanExpiry').textContent = `Expires ${planExpiryText}`;
+        }
 
-        // Form fields
+        function renderUsersTable(users) {
+            const tbody = qs('usersTbody');
+            if (qs('kpiTotalUsers')) qs('kpiTotalUsers').textContent = String(users.length);
+            const activeCount = users.filter(u => u.isActive !== false).length;
+            if (qs('kpiActiveUsers')) qs('kpiActiveUsers').textContent = String(activeCount);
+            if (!tbody) return;
+            if (!users.length) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No users</td></tr>';
+                return;
+            }
+            tbody.innerHTML = users.map(u => `
+                <tr>
+                    <td>${escapeHtml(u.name)}</td>
+                    <td>${escapeHtml(u.email)}</td>
+                    <td><span class="badge bg-${u.role === 'FIRM_ADMIN' ? 'warning' : 'secondary'}">${escapeHtml(u.role)}</span></td>
+                    <td>${escapeHtml(u.accountType)}</td>
+                    <td>${u.isActive !== false ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-warning">Inactive</span>'}</td>
+                    <td>${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : ''}</td>
+                    <td>
+                        <button class="btn btn-sm btn-danger delete-user-btn" data-userid="${u._id}">
+                            Delete
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // topSub + hydrate fall-through: if firm is null after fetch
+        if (!firm && qs('topSub')) {
+            qs('topSub').textContent = 'No firm linked';
+        }
+
+        const planExpiryText = firm?.planExpiry ? new Date(firm.planExpiry).toLocaleDateString() : 'NA';
+
+        // Form fields populated once firm data is in (KPIs already hydrated above)
         if (qs('settingsPlanType')) qs('settingsPlanType').value = firm?.planType || 'FREE';
         if (qs('settingsPlanExpiry')) qs('settingsPlanExpiry').value = planExpiryText;
         if (qs('firmDisplayName')) qs('firmDisplayName').value = firm?.displayName || '';
         if (qs('firmHandle')) qs('firmHandle').value = firm?.handle || '';
         if (qs('firmDescription')) qs('firmDescription').value = firm?.description || '';
         if (qs('firmPracticeAreas')) {
-            qs('firmPracticeAreas').value = Array.isArray(firm?.practiceAreas) 
-                ? firm.practiceAreas.join(', ') 
+            qs('firmPracticeAreas').value = Array.isArray(firm?.practiceAreas)
+                ? firm.practiceAreas.join(', ')
                 : firm?.practiceAreas || '';
         }
-
-        // ✅ USERS table - Load users
-        await loadAndRenderUsers();
 
         // ✅ COMPLETE JOIN CODE SECTION
         const joinField = qs('joinCodeField');
@@ -739,7 +849,9 @@ async function initAdminPage() {
                     e.target.textContent = 'Deleting...';
                     e.target.disabled = true;
                     await api(`/firms/${firm._id}/users/${userId}`, { method: 'DELETE' });
-                    await loadAndRenderUsers();  // Refresh list
+                    cacheBust(`firms/${firm._id}/users`);
+                    const usersResp = await api(`/firms/${firm._id}/users`);
+                    if (usersResp?.users) renderUsersTable(usersResp.users);
                 } catch (err) {
                     alert(err.message || 'Delete failed');
                 } finally {

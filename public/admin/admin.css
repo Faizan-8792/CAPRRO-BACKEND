@@ -862,3 +862,25 @@ input:hover, textarea:hover, select:hover {
   .content { padding: 0; }
   .card { box-shadow: none !important; border: 1px solid #ddd !important; }
 }
+
+/* =======================
+   SKELETON SHIMMER
+   ======================= */
+.skel-shimmer {
+  display: inline-block;
+  height: 1em;
+  min-height: 16px;
+  width: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--cream-light) 0%, var(--cream-dark) 50%, var(--cream-light) 100%);
+  background-size: 200% 100%;
+  animation: skelShimmer 1.4s ease-in-out infinite;
+  opacity: 0.7;
+}
+@keyframes skelShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Apply to KPI placeholders so they don't collapse to 0px */
+.kpi-value .skel-shimmer { min-height: 24px; }
