@@ -81,6 +81,129 @@ async function loadMe() {
   return me.user;
 }
 
+// ─── App Config (maintenance + welcome) ────────────────────────────
+async function loadAppConfigSection() {
+  try {
+    const r = await api("/app-config");
+    if (!r.ok) return;
+    const c = r.config;
+
+    const toggle = qs("maintenanceToggle");
+    const label = qs("maintenanceLabel");
+    const msg = qs("maintenanceMessageInput");
+    if (toggle) toggle.checked = !!c.maintenanceMode;
+    if (label) label.textContent = `Maintenance mode: ${c.maintenanceMode ? "ON" : "OFF"}`;
+    if (msg) msg.value = c.maintenanceMessage || "";
+
+    const wa = c.welcomeAnnouncement || {};
+    if (qs("welcomeVersion")) qs("welcomeVersion").value = wa.version || "";
+    if (qs("welcomeTitleInput")) qs("welcomeTitleInput").value = wa.title || "";
+    if (qs("welcomeBodyInput")) qs("welcomeBodyInput").value = wa.body || "";
+    if (qs("welcomeEnabled")) qs("welcomeEnabled").checked = wa.enabled !== false;
+  } catch (err) {
+    console.warn("App config load fail:", err.message);
+  }
+}
+
+function bindAppConfigHandlers() {
+  const toggle = qs("maintenanceToggle");
+  const label = qs("maintenanceLabel");
+  const msgInput = qs("maintenanceMessageInput");
+  const saveMsgBtn = qs("saveMaintenanceBtn");
+  const msgStatus = qs("maintenanceStatus");
+
+  if (toggle) {
+    toggle.addEventListener("change", async () => {
+      const want = toggle.checked;
+      const prev = !want;
+      toggle.disabled = true;
+      try {
+        const r = await api("/app-config/maintenance", {
+          method: "PATCH",
+          body: { maintenanceMode: want },
+        });
+        if (r.ok) {
+          if (label) label.textContent = `Maintenance mode: ${r.maintenanceMode ? "ON" : "OFF"}`;
+          if (msgStatus) {
+            msgStatus.textContent = r.maintenanceMode
+              ? "Maintenance mode is now ON. All users will see the maintenance screen."
+              : "Maintenance mode is OFF. Users have full access.";
+            msgStatus.style.color = r.maintenanceMode ? "#b8782e" : "#2d7a55";
+          }
+        } else {
+          toggle.checked = prev;
+        }
+      } catch (err) {
+        toggle.checked = prev;
+        if (msgStatus) {
+          msgStatus.textContent = err.message || "Failed to update.";
+          msgStatus.style.color = "#b44545";
+        }
+      } finally {
+        toggle.disabled = false;
+      }
+    });
+  }
+
+  if (saveMsgBtn) {
+    saveMsgBtn.addEventListener("click", async () => {
+      const message = msgInput?.value?.trim() || "";
+      saveMsgBtn.disabled = true;
+      saveMsgBtn.textContent = "Saving...";
+      try {
+        await api("/app-config/maintenance", {
+          method: "PATCH",
+          body: { maintenanceMessage: message },
+        });
+        if (msgStatus) {
+          msgStatus.textContent = "Saved.";
+          msgStatus.style.color = "#2d7a55";
+        }
+      } catch (err) {
+        if (msgStatus) {
+          msgStatus.textContent = err.message || "Save failed.";
+          msgStatus.style.color = "#b44545";
+        }
+      } finally {
+        saveMsgBtn.disabled = false;
+        saveMsgBtn.textContent = "Save Message";
+      }
+    });
+  }
+
+  const saveWelcomeBtn = qs("saveWelcomeBtn");
+  const welcomeStatus = qs("welcomeStatus");
+  if (saveWelcomeBtn) {
+    saveWelcomeBtn.addEventListener("click", async () => {
+      saveWelcomeBtn.disabled = true;
+      saveWelcomeBtn.textContent = "Saving...";
+      try {
+        await api("/app-config/welcome", {
+          method: "PATCH",
+          body: {
+            version: qs("welcomeVersion")?.value?.trim() || "",
+            title: qs("welcomeTitleInput")?.value || "",
+            body: qs("welcomeBodyInput")?.value || "",
+            enabled: !!qs("welcomeEnabled")?.checked,
+          },
+        });
+        if (welcomeStatus) {
+          welcomeStatus.textContent = "Saved. Users with a different seen-version will see this on next popup open.";
+          welcomeStatus.style.color = "#2d7a55";
+        }
+      } catch (err) {
+        if (welcomeStatus) {
+          welcomeStatus.textContent = err.message || "Save failed.";
+          welcomeStatus.style.color = "#b44545";
+        }
+      } finally {
+        saveWelcomeBtn.disabled = false;
+        saveWelcomeBtn.textContent = "Save Announcement";
+      }
+    });
+  }
+}
+
 // ─── Usage Stats (DAU/WAU/MAU) ──────────────────────────────────────
 async function loadUsageStats() {
   const grid = qs("usageGrid");
@@ -673,8 +796,9 @@ async function initSuperPage() {
     if (!requireSuperAdmin(me)) { window.location.href = "/admin/admin.html"; return; }
     if (qs("superEmail")) qs("superEmail").textContent = me.email || "—";
 
-    // Load extension usage analytics + dashboard stats in parallel
-    await Promise.all([loadUsageStats(), loadDashboardStats()]);
+    // Load app config, usage analytics, dashboard stats — all in parallel
+    bindAppConfigHandlers();
+    await Promise.all([loadAppConfigSection(), loadUsageStats(), loadDashboardStats()]);
 
     // Load pending admins
     const pendingTbody = qs("pendingAdminsBody");

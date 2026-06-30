@@ -49,6 +49,11 @@ const UserSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // One-time welcome announcement tracking (persists across logout/reinstall)
+    welcomeSeenVersion: {
+      type: String,
+      default: null,
+    },
   },
   { timestamps: true }
 );

@@ -152,7 +152,7 @@ export const getMe = async (req, res, next) => {
     const { id } = req.user;
 
     const user = await User.findById(id).select(
-      "email name role accountType firmId createdAt updatedAt isActive"
+      "email name role accountType firmId createdAt updatedAt isActive welcomeSeenVersion"
     );
 
     if (!user) {
@@ -171,6 +171,7 @@ export const getMe = async (req, res, next) => {
         isActive: user.isActive,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
+        welcomeSeenVersion: user.welcomeSeenVersion || null,
       },
     });
   } catch (err) {

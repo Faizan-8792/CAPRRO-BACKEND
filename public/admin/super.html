@@ -5,7 +5,7 @@
     <title>CA PRO Toolkit – Super Admin</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="bootstrap.min.css" />
-    <link rel="stylesheet" href="admin.css?v=8" />
+    <link rel="stylesheet" href="admin.css?v=10" />
     <link rel="icon" type="image/png" href="logo.png" />
   </head>
   <body class="super-admin-body">
@@ -45,6 +45,67 @@
     </nav>
 
     <main class="container-fluid px-4 my-4 super-admin-main">
+
+      <!-- APP CONFIG (Maintenance + Welcome) -->
+      <section class="mb-4">
+        <div class="mb-3">
+          <h1 class="h5 mb-1">🔧 App Controls</h1>
+          <p class="text-muted mb-0 small">
+            Toggle maintenance mode and manage the welcome announcement.
+          </p>
+        </div>
+
+        <div class="card p-3 super-admin-card">
+          <div class="row g-3 align-items-center">
+            <div class="col-md-7">
+              <div class="d-flex align-items-center gap-3">
+                <div class="form-check form-switch m-0" style="font-size: 18px;">
+                  <input class="form-check-input" type="checkbox" role="switch" id="maintenanceToggle" style="width: 44px; height: 24px;">
+                </div>
+                <div>
+                  <div style="font-weight:700; color: var(--text);" id="maintenanceLabel">Maintenance mode: OFF</div>
+                  <div class="text-muted" style="font-size:12px;">When ON, all users see an "Under Maintenance" screen.</div>
+                </div>
+              </div>
+            </div>
+            <div class="col-md-5">
+              <label class="form-label small-label">Maintenance message</label>
+              <input type="text" class="form-control" id="maintenanceMessageInput" maxlength="200" placeholder="We are doing some quick maintenance...">
+            </div>
+          </div>
+          <div class="mt-2 text-end">
+            <button class="btn btn-sm btn-primary" id="saveMaintenanceBtn">Save Message</button>
+          </div>
+          <div id="maintenanceStatus" class="small-label mt-2"></div>
+        </div>
+
+        <div class="card p-3 super-admin-card mt-3">
+          <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Welcome Announcement</h6>
+          <div class="row g-2">
+            <div class="col-md-3">
+              <label class="form-label small-label">Version</label>
+              <input type="text" class="form-control" id="welcomeVersion" placeholder="v1-ai-launch">
+              <div class="text-muted" style="font-size:11px;margin-top:4px;">Bump this to re-show to everyone.</div>
+            </div>
+            <div class="col-md-9">
+              <label class="form-label small-label">Title</label>
+              <input type="text" class="form-control" id="welcomeTitleInput" maxlength="200">
+            </div>
+          </div>
+          <div class="mt-2">
+            <label class="form-label small-label">Body</label>
+            <textarea class="form-control" id="welcomeBodyInput" rows="3" maxlength="1500"></textarea>
+          </div>
+          <div class="mt-2 d-flex align-items-center gap-2 flex-wrap">
+            <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+              <input type="checkbox" id="welcomeEnabled">
+              <span>Enabled</span>
+            </label>
+            <button class="btn btn-sm btn-primary ms-auto" id="saveWelcomeBtn">Save Announcement</button>
+          </div>
+          <div id="welcomeStatus" class="small-label mt-2"></div>
+        </div>
+      </section>
 
       <!-- USAGE ANALYTICS -->
       <section class="mb-4">
@@ -218,6 +279,6 @@
     </main>
 
     <!-- Bootstrap JS no longer needed (custom modal). Kept removed. -->
-    <script src="super.js?v=8"></script>
+    <script src="super.js?v=10"></script>
   </body>
 </html>
