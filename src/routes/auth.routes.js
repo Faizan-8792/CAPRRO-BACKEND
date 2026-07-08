@@ -1,6 +1,6 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
-import { sendOtp, verifyOtpAndLogin, getMe } from "../controllers/auth.controller.js";
+import { sendOtp, verifyOtpAndLogin, googleLogin, getMe } from "../controllers/auth.controller.js";
 import { authRequired } from "../middleware/auth.middleware.js";
 
 const router = Router();
@@ -23,8 +23,18 @@ const verifyOtpLimiter = rateLimit({
   message: { ok: false, error: "Too many verification attempts. Try again in 15 minutes." },
 });
 
+// Rate limit: max 20 Google sign-in attempts per IP per 15 minutes
+const googleLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: "Too many sign-in attempts. Try again in 15 minutes." },
+});
+
 router.post("/send-otp", sendOtpLimiter, sendOtp);
 router.post("/verify-otp", verifyOtpLimiter, verifyOtpAndLogin);
+router.post("/google", googleLoginLimiter, googleLogin);
 router.get("/me", authRequired, getMe);
 
 export default router;
