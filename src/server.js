@@ -13,30 +13,6 @@ import { runAutomationWorkerBatch } from "./services/automation-worker.service.j
 import { enqueueDueDigests } from "./services/digest.service.js";
 import app from "./app.js";
 
-await connectDB();
-
-if (process.env.NODE_ENV === "production") {
-  const [noticeRollout, engagementRollout, workingPaperRollout] = await Promise.all([
-    AppConfig.getFeatureFlagState("noticeCases", { fresh: true }),
-    AppConfig.getFeatureFlagState("assuranceEngagements", { fresh: true }),
-    AppConfig.getFeatureFlagState("auditWorkingPapers", { fresh: true }),
-  ]);
-  if (workingPaperRollout.enabled && !engagementRollout.enabled) {
-    const error = new Error(
-      "auditWorkingPapers cannot start enabled while assuranceEngagements is disabled"
-    );
-    error.code = "INVALID_AUDIT_WORKING_PAPER_ROLLOUT";
-    throw error;
-  }
-  const readinessChecks = [];
-  if (noticeRollout.enabled) readinessChecks.push(assertCaseIndexesReady());
-  if (engagementRollout.enabled) readinessChecks.push(assertEngagementIndexesReady());
-  if (workingPaperRollout.enabled) {
-    readinessChecks.push(assertAuditWorkingPaperIndexesReady());
-  }
-  await Promise.all(readinessChecks);
-}
-
 const PORT = Number(process.env.PORT || 4001);
 const REMINDER_SCHEDULER_INTERVAL_MS = 15 * 60 * 1000;
 const DIGEST_SCHEDULER_INTERVAL_MS = 15 * 60 * 1000;
@@ -47,7 +23,15 @@ const automationWorkerId = `${hostname()}:${process.pid}`;
 let shuttingDown = false;
 let automationWorkerPromise = null;
 let digestSchedulerPromise = null;
+let reminderSchedulerTimer = null;
+let digestSchedulerTimer = null;
+let automationWorkerTimer = null;
 
+// Start listening synchronously (no top-level await) so process managers such
+// as Phusion Passenger — which do not reliably support top-level await in the
+// entry module — detect the server immediately. Database connection, rollout
+// readiness checks, and background schedulers are initialized asynchronously in
+// bootstrap() after the server is already accepting connections.
 const server = app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
@@ -127,33 +111,72 @@ function runAutomationWorker() {
   return automationWorkerPromise;
 }
 
-const reminderSchedulerTimer = setInterval(
-  runReminderScheduler,
-  REMINDER_SCHEDULER_INTERVAL_MS
-);
-const digestSchedulerTimer = setInterval(
-  runDigestScheduler,
-  DIGEST_SCHEDULER_INTERVAL_MS
-);
-const automationWorkerTimer = setInterval(
-  runAutomationWorker,
-  AUTOMATION_WORKER_INTERVAL_MS
-);
-reminderSchedulerTimer.unref();
-digestSchedulerTimer.unref();
-automationWorkerTimer.unref();
-runReminderScheduler();
-runDigestScheduler();
-runAutomationWorker();
+function startSchedulers() {
+  reminderSchedulerTimer = setInterval(
+    runReminderScheduler,
+    REMINDER_SCHEDULER_INTERVAL_MS
+  );
+  digestSchedulerTimer = setInterval(
+    runDigestScheduler,
+    DIGEST_SCHEDULER_INTERVAL_MS
+  );
+  automationWorkerTimer = setInterval(
+    runAutomationWorker,
+    AUTOMATION_WORKER_INTERVAL_MS
+  );
+  reminderSchedulerTimer.unref();
+  digestSchedulerTimer.unref();
+  automationWorkerTimer.unref();
+  runReminderScheduler();
+  runDigestScheduler();
+  runAutomationWorker();
+}
+
+async function bootstrap() {
+  await connectDB();
+
+  if (process.env.NODE_ENV === "production") {
+    const [noticeRollout, engagementRollout, workingPaperRollout] =
+      await Promise.all([
+        AppConfig.getFeatureFlagState("noticeCases", { fresh: true }),
+        AppConfig.getFeatureFlagState("assuranceEngagements", { fresh: true }),
+        AppConfig.getFeatureFlagState("auditWorkingPapers", { fresh: true }),
+      ]);
+    if (workingPaperRollout.enabled && !engagementRollout.enabled) {
+      const error = new Error(
+        "auditWorkingPapers cannot start enabled while assuranceEngagements is disabled"
+      );
+      error.code = "INVALID_AUDIT_WORKING_PAPER_ROLLOUT";
+      throw error;
+    }
+    const readinessChecks = [];
+    if (noticeRollout.enabled) readinessChecks.push(assertCaseIndexesReady());
+    if (engagementRollout.enabled)
+      readinessChecks.push(assertEngagementIndexesReady());
+    if (workingPaperRollout.enabled) {
+      readinessChecks.push(assertAuditWorkingPaperIndexesReady());
+    }
+    await Promise.all(readinessChecks);
+  }
+
+  startSchedulers();
+}
+
+bootstrap().catch((error) => {
+  // Keep the HTTP server accepting connections so the platform does not
+  // crash-loop and /health can report a degraded state. Mongoose retries the
+  // connection in the background.
+  console.error("[BOOT] Startup initialization error:", error?.message || error);
+});
 
 async function gracefulShutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`\n[${signal}] Graceful shutdown starting...`);
 
-  clearInterval(reminderSchedulerTimer);
-  clearInterval(digestSchedulerTimer);
-  clearInterval(automationWorkerTimer);
+  if (reminderSchedulerTimer) clearInterval(reminderSchedulerTimer);
+  if (digestSchedulerTimer) clearInterval(digestSchedulerTimer);
+  if (automationWorkerTimer) clearInterval(automationWorkerTimer);
 
   server.close((error) => {
     if (error) console.error("HTTP server close error:", error);
