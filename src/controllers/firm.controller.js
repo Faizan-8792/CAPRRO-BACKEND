@@ -1,7 +1,6 @@
 // src/controllers/firm.controller.js
 import Firm from "../models/Firm.js";
 import User from "../models/User.js";
-import AppConfig from "../models/AppConfig.js";
 
 async function assertFirmAdmin(userId, firmId) {
   const firm = await Firm.findById(firmId);
@@ -38,8 +37,10 @@ export const createFirm = async (req, res, next) => {
       return res.status(409).json({ ok: false, error: "Firm handle already taken" });
     }
 
-    const featureFlags = await AppConfig.getFeatureFlags();
-    const ownerIsActive = featureFlags.zeroApprovalFirmCreation;
+    // Creating a firm never locks the owner out: the creator becomes an active
+    // firm admin immediately so they can use their workspace without waiting
+    // for approval.
+    const ownerIsActive = true;
 
     let joinCode;
     while (true) {

@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
 import User from "../models/User.js";
 import { sendOtpEmail } from "../services/email.service.js";
+import { ensurePersonalFirm } from "../services/firm-provisioning.service.js";
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error("JWT_SECRET env var is required");
@@ -145,6 +146,10 @@ export const verifyOtpAndLogin = async (req, res, next) => {
     user.otpExpiresAt = undefined;
     await user.save();
 
+    // Ensure the user has a personal workspace so the product is usable
+    // immediately, without being forced to create or join a firm.
+    await ensurePersonalFirm(user);
+
     const payload = buildTokenPayload(user);
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
@@ -253,6 +258,10 @@ export const googleLogin = async (req, res, next) => {
 
     await user.save();
 
+    // Ensure the user has a personal workspace so the product is usable
+    // immediately, without being forced to create or join a firm.
+    await ensurePersonalFirm(user);
+
     const tokenPayload = buildTokenPayload(user);
     const jwtToken = jwt.sign(tokenPayload, JWT_SECRET, {
       expiresIn: JWT_EXPIRES_IN,
@@ -277,6 +286,10 @@ export const getMe = async (req, res, next) => {
     if (!user) {
       return res.status(404).json({ ok: false, error: "User not found" });
     }
+
+    // Heal existing accounts that predate auto-provisioning: ensure a personal
+    // workspace so firm-scoped features are immediately usable on next load.
+    await ensurePersonalFirm(user);
 
     return res.json({
       ok: true,

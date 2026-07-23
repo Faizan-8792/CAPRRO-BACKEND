@@ -16,7 +16,11 @@ async function requireActiveFirm(req, res, next, { adminOnly = false } = {}) {
     if (!req.user.firmId) {
       return reject(req, res, 403, "Firm membership required");
     }
-    if (adminOnly && req.user.role !== "FIRM_ADMIN") {
+    if (
+      adminOnly &&
+      req.user.role !== "FIRM_ADMIN" &&
+      req.user.role !== "SUPER_ADMIN"
+    ) {
       return reject(req, res, 403, "Firm admin only");
     }
 
