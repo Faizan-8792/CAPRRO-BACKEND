@@ -1,7 +1,7 @@
 // assistant.js (Admin Compliance Assistant)
 import { computePriority } from './priority-engine.js';
 
-const API_BASE = "https://caprro-backend-1.onrender.com/api";
+const API_BASE = "https://api.caprotoolkit.in/api";
 
 function qs(id) {
   return document.getElementById(id);

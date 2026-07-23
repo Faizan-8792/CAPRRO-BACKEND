@@ -1,6 +1,6 @@
 // public/admin/super.js — Super Admin Dashboard
 
-const API_BASE = "https://caprro-backend-1.onrender.com/api";
+const API_BASE = "https://api.caprotoolkit.in/api";
 const TOKEN_KEY = "caproadminjwt";
 
 // ─── Auth helpers ───────────────────────────────────────────────────

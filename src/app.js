@@ -95,7 +95,7 @@ app.use(
         connectSrc: [
           "'self'",
           "https://cdn.jsdelivr.net",
-          "https://caprro-backend-1.onrender.com"
+          "https://api.caprotoolkit.in"
         ],
         imgSrc: ["'self'", "data:", "https:"],
         fontSrc: ["'self'", "https://cdn.jsdelivr.net", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
@@ -161,7 +161,7 @@ app.use(
       if (!origin) return callback(null, true);
 
       // ✅ Allow backend itself
-      if (origin === "https://caprro-backend-1.onrender.com") {
+      if (origin === "https://api.caprotoolkit.in") {
         return callback(null, true);
       }
 

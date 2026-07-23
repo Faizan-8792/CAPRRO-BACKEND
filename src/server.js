@@ -1,5 +1,5 @@
+import "./config/load-env.js";
 import { hostname } from "node:os";
-import dotenv from "dotenv";
 import mongoose from "mongoose";
 
 import connectDB from "./config/db.js";
@@ -12,8 +12,6 @@ import { assertAuditWorkingPaperIndexesReady } from "./services/audit-working-pa
 import { runAutomationWorkerBatch } from "./services/automation-worker.service.js";
 import { enqueueDueDigests } from "./services/digest.service.js";
 import app from "./app.js";
-
-dotenv.config();
 
 await connectDB();
 
