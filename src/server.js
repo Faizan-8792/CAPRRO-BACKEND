@@ -1,77 +1,192 @@
+import { hostname } from "node:os";
 import dotenv from "dotenv";
-import connectDB from "./config/db.js";
+import mongoose from "mongoose";
 
+import connectDB from "./config/db.js";
+import AppConfig from "./models/AppConfig.js";
 import Reminder from "./models/Reminder.js";
 import { processReminderForNow } from "./controllers/reminder.controller.js";
+import { assertCaseIndexesReady } from "./services/case-index-readiness.service.js";
+import { assertEngagementIndexesReady } from "./services/engagement-index-readiness.service.js";
+import { assertAuditWorkingPaperIndexesReady } from "./services/audit-working-paper-index-readiness.service.js";
+import { runAutomationWorkerBatch } from "./services/automation-worker.service.js";
+import { enqueueDueDigests } from "./services/digest.service.js";
 import app from "./app.js";
 
 dotenv.config();
 
 await connectDB();
 
+if (process.env.NODE_ENV === "production") {
+  const [noticeRollout, engagementRollout, workingPaperRollout] = await Promise.all([
+    AppConfig.getFeatureFlagState("noticeCases", { fresh: true }),
+    AppConfig.getFeatureFlagState("assuranceEngagements", { fresh: true }),
+    AppConfig.getFeatureFlagState("auditWorkingPapers", { fresh: true }),
+  ]);
+  if (workingPaperRollout.enabled && !engagementRollout.enabled) {
+    const error = new Error(
+      "auditWorkingPapers cannot start enabled while assuranceEngagements is disabled"
+    );
+    error.code = "INVALID_AUDIT_WORKING_PAPER_ROLLOUT";
+    throw error;
+  }
+  const readinessChecks = [];
+  if (noticeRollout.enabled) readinessChecks.push(assertCaseIndexesReady());
+  if (engagementRollout.enabled) readinessChecks.push(assertEngagementIndexesReady());
+  if (workingPaperRollout.enabled) {
+    readinessChecks.push(assertAuditWorkingPaperIndexesReady());
+  }
+  await Promise.all(readinessChecks);
+}
+
 const PORT = Number(process.env.PORT || 4001);
+const REMINDER_SCHEDULER_INTERVAL_MS = 15 * 60 * 1000;
+const DIGEST_SCHEDULER_INTERVAL_MS = 15 * 60 * 1000;
+const AUTOMATION_WORKER_INTERVAL_MS = 30 * 1000;
+const AUTOMATION_WORKER_BATCH_SIZE = 5;
+const automationWorkerId = `${hostname()}:${process.pid}`;
+
+let shuttingDown = false;
+let automationWorkerPromise = null;
+let digestSchedulerPromise = null;
 
 const server = app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
-
-// ----- SIMPLE SCHEDULER -----
-const SCHEDULER_INTERVAL_MS = 15 * 60 * 1000;
 
 async function runReminderScheduler() {
   const nowUtc = new Date();
   console.log("REMINDER Scheduler tick at", nowUtc.toISOString());
 
   try {
-    const activeReminders = await Reminder.find({ isActive: true });
+    const noticeCasesEnabled = await AppConfig.isFeatureEnabled("noticeCases", {
+      fresh: true,
+    });
+    const activeReminders = await Reminder.find({
+      isActive: true,
+      ...(noticeCasesEnabled ? {} : { source: { $ne: "CASE" } }),
+    });
 
-    for (const r of activeReminders) {
+    for (const reminder of activeReminders) {
       try {
-        await processReminderForNow(r, nowUtc);
-      } catch (e) {
-        console.error("REMINDER Error processing reminder", r?.id, e);
+        await processReminderForNow(reminder, nowUtc);
+      } catch (error) {
+        console.error(
+          "REMINDER Error processing reminder",
+          reminder?.id,
+          error
+        );
       }
     }
-  } catch (err) {
-    console.error("REMINDER Scheduler top-level error", err);
+  } catch (error) {
+    console.error("REMINDER Scheduler top-level error", error);
   }
 }
 
-const schedulerTimer = setInterval(runReminderScheduler, SCHEDULER_INTERVAL_MS);
-schedulerTimer.unref();
+function runDigestScheduler() {
+  if (shuttingDown || digestSchedulerPromise) return digestSchedulerPromise;
+
+  digestSchedulerPromise = enqueueDueDigests()
+    .then((summary) => {
+      if (!summary.disabled && (summary.daily || summary.weekly)) {
+        console.log("[DIGEST] Scheduler tick complete", summary);
+      }
+      return summary;
+    })
+    .catch((error) => {
+      console.error("[DIGEST] Scheduler tick failed", error);
+      return null;
+    })
+    .finally(() => {
+      digestSchedulerPromise = null;
+    });
+
+  return digestSchedulerPromise;
+}
+
+function runAutomationWorker() {
+  if (shuttingDown || automationWorkerPromise) return automationWorkerPromise;
+
+  automationWorkerPromise = runAutomationWorkerBatch({
+    workerId: automationWorkerId,
+    maxJobs: AUTOMATION_WORKER_BATCH_SIZE,
+    shouldContinue: () => !shuttingDown,
+  })
+    .then((summary) => {
+      if (summary.claimed) {
+        console.log("[AUTOMATION] Worker batch complete", summary);
+      }
+      return summary;
+    })
+    .catch((error) => {
+      console.error("[AUTOMATION] Worker batch failed", error);
+      return null;
+    })
+    .finally(() => {
+      automationWorkerPromise = null;
+    });
+
+  return automationWorkerPromise;
+}
+
+const reminderSchedulerTimer = setInterval(
+  runReminderScheduler,
+  REMINDER_SCHEDULER_INTERVAL_MS
+);
+const digestSchedulerTimer = setInterval(
+  runDigestScheduler,
+  DIGEST_SCHEDULER_INTERVAL_MS
+);
+const automationWorkerTimer = setInterval(
+  runAutomationWorker,
+  AUTOMATION_WORKER_INTERVAL_MS
+);
+reminderSchedulerTimer.unref();
+digestSchedulerTimer.unref();
+automationWorkerTimer.unref();
 runReminderScheduler();
+runDigestScheduler();
+runAutomationWorker();
 
-// ───────────── Graceful shutdown ─────────────
-import mongoose from "mongoose";
-
-let shuttingDown = false;
 async function gracefulShutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`\n[${signal}] Graceful shutdown starting...`);
 
-  // Stop accepting new HTTP connections; let in-flight finish
-  server.close((err) => {
-    if (err) console.error("HTTP server close error:", err);
+  clearInterval(reminderSchedulerTimer);
+  clearInterval(digestSchedulerTimer);
+  clearInterval(automationWorkerTimer);
+
+  server.close((error) => {
+    if (error) console.error("HTTP server close error:", error);
     else console.log("HTTP server closed");
   });
 
-  // Stop scheduler
-  clearInterval(schedulerTimer);
-
-  // Give in-flight requests up to 10s
   const forceTimer = setTimeout(() => {
     console.error("Forced shutdown after 10s timeout");
     process.exit(1);
   }, 10_000);
   forceTimer.unref();
 
-  // Close DB connection
+  try {
+    const activeWorker = automationWorkerPromise;
+    if (activeWorker) await activeWorker;
+  } catch (error) {
+    console.error("Automation worker shutdown error:", error.message);
+  }
+
+  try {
+    const activeDigestScheduler = digestSchedulerPromise;
+    if (activeDigestScheduler) await activeDigestScheduler;
+  } catch (error) {
+    console.error("Digest scheduler shutdown error:", error.message);
+  }
+
   try {
     await mongoose.connection.close(false);
     console.log("MongoDB connection closed");
-  } catch (e) {
-    console.error("Mongo close error:", e.message);
+  } catch (error) {
+    console.error("Mongo close error:", error.message);
   }
 
   clearTimeout(forceTimer);
@@ -81,8 +196,8 @@ async function gracefulShutdown(signal) {
 
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-process.on("uncaughtException", (err) => {
-  console.error("UNCAUGHT EXCEPTION:", err);
+process.on("uncaughtException", (error) => {
+  console.error("UNCAUGHT EXCEPTION:", error);
   gracefulShutdown("uncaughtException");
 });
 process.on("unhandledRejection", (reason) => {

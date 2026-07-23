@@ -31,7 +31,7 @@ router.get("/pending-admins", listPendingAdmins);
 router.post("/approve-admin/:userId", approveAdmin);
 router.post("/revoke-admin/:userId", revokeAdmin);
 
-// Firms + users + plan control
+// Firms + users + operational access (legacy /plan path retained for compatibility)
 router.get("/firms", listFirms);
 router.get("/firms/:firmId/users", listFirmUsersForSuper);
 router.patch("/firms/:firmId/plan", updateFirmPlan);

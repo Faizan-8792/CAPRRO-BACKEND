@@ -34,6 +34,32 @@ function isValidObjectId(id) {
   return mongoose.Types.ObjectId.isValid(String(id || ""));
 }
 
+const LEGACY_CLIENT_FIELDS = Object.freeze([
+  "_id",
+  "firmId",
+  "ownerUserId",
+  "name",
+  "gstin",
+  "pan",
+  "contactPerson",
+  "phone",
+  "email",
+  "notes",
+  "isActive",
+  "createdBy",
+  "createdAt",
+  "updatedAt",
+]);
+
+function legacyClientView(client) {
+  const source = client?.toObject ? client.toObject() : client || {};
+  return Object.fromEntries(
+    LEGACY_CLIENT_FIELDS.filter((field) =>
+      Object.prototype.hasOwnProperty.call(source, field)
+    ).map((field) => [field, source[field]])
+  );
+}
+
 // ─── Templates ──────────────────────────────────────────────────────
 // Build once at module load — templates are static, no per-request work needed.
 let _templatesCache = null;
@@ -72,6 +98,7 @@ export const listClients = async (req, res, next) => {
     }
 
     const all = await Client.find(filter)
+      .select(LEGACY_CLIENT_FIELDS.join(" "))
       .sort({ name: 1, createdAt: 1 })
       .limit(Math.min(Number(limit) || 200, 500))
       .lean();
@@ -132,7 +159,11 @@ export const createClient = async (req, res, next) => {
         }
       }
       if (touched) await existing.save();
-      return res.json({ ok: true, client: existing, deduped: true });
+      return res.json({
+        ok: true,
+        client: legacyClientView(existing),
+        deduped: true,
+      });
     }
 
     const client = new Client({
@@ -148,7 +179,11 @@ export const createClient = async (req, res, next) => {
     });
 
     await client.save();
-    return res.json({ ok: true, client, deduped: false });
+    return res.json({
+      ok: true,
+      client: legacyClientView(client),
+      deduped: false,
+    });
   } catch (err) {
     next(err);
   }
@@ -177,7 +212,7 @@ export const updateClient = async (req, res, next) => {
     }
 
     await client.save();
-    return res.json({ ok: true, client });
+    return res.json({ ok: true, client: legacyClientView(client) });
   } catch (err) {
     next(err);
   }

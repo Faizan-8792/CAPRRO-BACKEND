@@ -135,33 +135,45 @@ export async function postChaseComplete(req, res, next) {
     if (!taskId || !type) {
       return res.status(400).json({ ok: false, error: "Missing taskId or type" });
     }
+    if (!["pending", "risk"].includes(type)) {
+      return res.status(400).json({ ok: false, error: "Invalid chase type" });
+    }
 
     // ✅ RAW COLLECTION UPDATE - BYPASSES ALL Mongoose validation
     const db = mongoose.connection.db;
     const tasksCollection = db.collection('tasks');
 
-    let updateFields = {
-      $set: {
-        updatedAt: new Date()
-      }
-    };
+    const transitionAt = new Date();
+    const transitionBy = new mongoose.Types.ObjectId(req.user.id);
+    const setFields = { updatedAt: transitionAt };
 
     if (type === "pending") {
-      updateFields.$set['meta.docsStatus'] = "DONE";
-      updateFields.$set.status = "CLOSED";
+      setFields['meta.docsStatus'] = "DONE";
+      setFields.status = "CLOSED";
     } else if (type === "risk") {
-      updateFields.$set['meta.delayDays'] = 0;
-      updateFields.$set.status = "CLOSED";
+      setFields['meta.delayDays'] = 0;
+      setFields.status = "CLOSED";
     }
 
-    console.log("Raw MongoDB update:", updateFields);
+    if (setFields.status === "CLOSED") {
+      const wasComplete = { $in: ["$status", ["FILED", "CLOSED"]] };
+      setFields.completedAt = {
+        $cond: [wasComplete, "$completedAt", transitionAt],
+      };
+      setFields.completedBy = {
+        $cond: [wasComplete, "$completedBy", transitionBy],
+      };
+    }
+
+    const updatePipeline = [{ $set: setFields }];
+    console.log("Raw MongoDB update:", updatePipeline);
 
     const result = await tasksCollection.updateOne(
       { 
         _id: new mongoose.Types.ObjectId(taskId),
         firmId: new mongoose.Types.ObjectId(userFirmId)
       },
-      updateFields
+      updatePipeline
     );
 
     console.log("Raw MongoDB result:", {

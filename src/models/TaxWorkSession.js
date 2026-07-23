@@ -62,6 +62,57 @@ const TaxWorkSessionSchema = new mongoose.Schema(
     dueDate: { type: Date, default: null },
     status: { type: String, enum: STATUSES, default: "DRAFT" },
     documents: { type: [DocItemSchema], default: [] },
+    source: {
+      type: String,
+      enum: [
+        "MANUAL",
+        "COMPLIANCE_RULE",
+        "IMPORT",
+        "CASE",
+        "ENGAGEMENT",
+      ],
+      default: "MANUAL",
+    },
+    taskId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Task",
+      default: null,
+    },
+    reminderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Reminder",
+      default: null,
+    },
+    complianceRuleId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ComplianceRule",
+      default: null,
+    },
+    complianceRuleVersion: { type: Number, min: 1, default: null },
+    complianceCode: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      maxlength: 80,
+      default: null,
+    },
+    ruleSourceReference: {
+      type: String,
+      trim: true,
+      maxlength: 1000,
+      default: null,
+    },
+    generationKey: {
+      type: String,
+      trim: true,
+      maxlength: 200,
+      default: null,
+    },
+    automationJobId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "AutomationJob",
+      default: null,
+    },
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -83,8 +134,32 @@ TaxWorkSessionSchema.index({ firmId: 1, clientId: 1 });
 TaxWorkSessionSchema.index({ firmId: 1, taxType: 1 });
 TaxWorkSessionSchema.index({ firmId: 1, assignedTo: 1 });
 TaxWorkSessionSchema.index({ firmId: 1, dueDate: 1 });
+TaxWorkSessionSchema.index(
+  { firmId: 1, status: 1, dueDate: 1, _id: 1 },
+  { name: "workspace_session_firm_due" }
+);
+TaxWorkSessionSchema.index(
+  { firmId: 1, assignedTo: 1, status: 1, dueDate: 1, _id: 1 },
+  { name: "workspace_session_assignee_due" }
+);
+TaxWorkSessionSchema.index(
+  { firmId: 1, ownerUserId: 1, status: 1, dueDate: 1, _id: 1 },
+  { name: "workspace_session_owner_due" }
+);
+TaxWorkSessionSchema.index(
+  { firmId: 1, completedAt: -1, _id: 1 },
+  { name: "workspace_session_completion" }
+);
 TaxWorkSessionSchema.index({ ownerUserId: 1, firmId: 1, status: 1 });
 TaxWorkSessionSchema.index({ ownerUserId: 1, firmId: 1, dueDate: 1 });
+TaxWorkSessionSchema.index(
+  { firmId: 1, generationKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { generationKey: { $type: "string" } },
+    name: "unique_generated_tax_work_session_per_firm",
+  }
+);
 
 const TaxWorkSession = mongoose.model("TaxWorkSession", TaxWorkSessionSchema);
 

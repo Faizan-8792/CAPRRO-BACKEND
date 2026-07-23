@@ -139,3 +139,84 @@ function escapeHtml(s) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 }
+
+export async function sendDigestEmail({
+  toEmail,
+  subject,
+  heading,
+  periodLabel,
+  lines = [],
+  idempotencyKey,
+}) {
+  if (!toEmail || !subject || !heading) {
+    throw new Error(
+      "sendDigestEmail: toEmail, subject, and heading are required"
+    );
+  }
+  if (!Array.isArray(lines) || lines.length > 30) {
+    throw new Error("sendDigestEmail: lines must contain at most 30 entries");
+  }
+  const normalizedIdempotencyKey = String(idempotencyKey || "").trim();
+  if (
+    !normalizedIdempotencyKey ||
+    normalizedIdempotencyKey.length > 256 ||
+    /[^\x21-\x7E]/.test(normalizedIdempotencyKey)
+  ) {
+    throw new Error(
+      "sendDigestEmail: idempotencyKey must contain 1 to 256 visible ASCII characters"
+    );
+  }
+
+  const safeLines = lines.map((line) => ({
+    label: String(line?.label || "").slice(0, 120),
+    value: String(line?.value ?? "").slice(0, 240),
+  }));
+  const html = `
+    <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding:16px; color:#111827;">
+      <h2 style="margin-top:0;">${escapeHtml(heading)}</h2>
+      ${
+        periodLabel
+          ? `<p style="color:#4b5563;">${escapeHtml(periodLabel)}</p>`
+          : ""
+      }
+      <table style="border-collapse:collapse; width:100%; max-width:640px;">
+        <tbody>
+          ${safeLines
+            .map(
+              (line) => `
+                <tr>
+                  <th scope="row" style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">${escapeHtml(line.label)}</th>
+                  <td style="text-align:right; padding:8px; border-bottom:1px solid #e5e7eb;">${escapeHtml(line.value)}</td>
+                </tr>`
+            )
+            .join("")}
+        </tbody>
+      </table>
+      <p style="font-size:12px; color:#6b7280; margin-top:16px;">
+        Operational counts only. Review source records in CA PRO Toolkit before acting.
+      </p>
+    </div>
+  `;
+
+  try {
+    const response = await getResend().emails.send(
+      {
+        from: FROM_EMAIL,
+        to: toEmail,
+        subject: String(subject).slice(0, 240),
+        html,
+      },
+      { idempotencyKey: normalizedIdempotencyKey }
+    );
+    if (response?.error) {
+      throw new Error(
+        String(response.error.message || "Resend rejected digest email")
+      );
+    }
+    console.log(`Digest email sent to: ${toEmail}`, response?.data?.id || response?.id || "");
+    return response;
+  } catch (error) {
+    console.error("Resend digest error:", error?.message || error);
+    throw error;
+  }
+}

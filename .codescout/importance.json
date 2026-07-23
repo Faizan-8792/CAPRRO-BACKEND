@@ -1,0 +1,530 @@
+{
+  "schemaVersion": "1.0.0",
+  "scores": {
+    "src/app.js": {
+      "score": 55,
+      "dependents": 1,
+      "imports": 16,
+      "gitCommits": 6,
+      "routeUsage": 0
+    },
+    "src/server.js": {
+      "score": 16,
+      "dependents": 0,
+      "imports": 5,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "tests/app-config-checklist.mjs": {
+      "score": 3,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "tests/double-click-guard-checklist.mjs": {
+      "score": 3,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "tests/firm-join-sync-checklist.mjs": {
+      "score": 3,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "tests/production-readiness-checklist.mjs": {
+      "score": 3,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "tests/task-flow-checklist.mjs": {
+      "score": 3,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "tests/taxworker-flow-checklist.mjs": {
+      "score": 9,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 3,
+      "routeUsage": 0
+    },
+    "public/admin/admin-tasks.js": {
+      "score": 3,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "public/admin/admin.js": {
+      "score": 9,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 3,
+      "routeUsage": 0
+    },
+    "public/admin/login.js": {
+      "score": 3,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "public/admin/super.js": {
+      "score": 15,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 5,
+      "routeUsage": 0
+    },
+    "src/config/db.js": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/config/email.js": {
+      "score": 5,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/config/tax-templates.js": {
+      "score": 16,
+      "dependents": 2,
+      "imports": 0,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/controllers/appconfig.controller.js": {
+      "score": 12,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/controllers/audit.controller.js": {
+      "score": 11,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/controllers/auth.controller.js": {
+      "score": 18,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 3,
+      "routeUsage": 0
+    },
+    "src/controllers/compliance-generation.controller.js": {
+      "score": 7,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/controllers/compliance.controller.js": {
+      "score": 17,
+      "dependents": 1,
+      "imports": 6,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/controllers/firm.controller.js": {
+      "score": 14,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/controllers/import.controller.js": {
+      "score": 7,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/controllers/operations.controller.js": {
+      "score": 15,
+      "dependents": 1,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/controllers/reminder.controller.js": {
+      "score": 23,
+      "dependents": 2,
+      "imports": 5,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/controllers/stats.controller.js": {
+      "score": 14,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/controllers/super.controller.js": {
+      "score": 22,
+      "dependents": 1,
+      "imports": 4,
+      "gitCommits": 3,
+      "routeUsage": 0
+    },
+    "src/controllers/task.controller.js": {
+      "score": 16,
+      "dependents": 1,
+      "imports": 4,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/controllers/taxworker.controller.js": {
+      "score": 23,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 4,
+      "routeUsage": 0
+    },
+    "src/middleware/auth.middleware.js": {
+      "score": 70,
+      "dependents": 12,
+      "imports": 2,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/middleware/authorization.middleware.js": {
+      "score": 17,
+      "dependents": 3,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/middleware/maintenance.middleware.js": {
+      "score": 10,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/middleware/request-id.middleware.js": {
+      "score": 8,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/middleware/role.middleware.js": {
+      "score": 5,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/middleware/rollout.middleware.js": {
+      "score": 7,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/middleware/sanitize.middleware.js": {
+      "score": 8,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/middleware/usage-tracker.middleware.js": {
+      "score": 15,
+      "dependents": 2,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/models/ActivityEvent.js": {
+      "score": 10,
+      "dependents": 2,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/models/AppConfig.js": {
+      "score": 46,
+      "dependents": 8,
+      "imports": 0,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/models/AutomationJob.js": {
+      "score": 15,
+      "dependents": 3,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/models/Client.js": {
+      "score": 21,
+      "dependents": 3,
+      "imports": 0,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/models/ComplianceOverride.js": {
+      "score": 10,
+      "dependents": 2,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/models/ComplianceRule.js": {
+      "score": 17,
+      "dependents": 3,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/models/Firm.js": {
+      "score": 33,
+      "dependents": 6,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/models/ImportBatch.js": {
+      "score": 0,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/models/Otp.js": {
+      "score": 7,
+      "dependents": 1,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/models/Reminder.js": {
+      "score": 28,
+      "dependents": 5,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/models/Task.js": {
+      "score": 23,
+      "dependents": 4,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/models/TaxWorkSession.js": {
+      "score": 21,
+      "dependents": 3,
+      "imports": 0,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/models/User.js": {
+      "score": 56,
+      "dependents": 10,
+      "imports": 0,
+      "gitCommits": 2,
+      "routeUsage": 0
+    },
+    "src/routes/appconfig.routes.js": {
+      "score": 16,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 1,
+      "routeUsage": 1
+    },
+    "src/routes/audit.routes.js": {
+      "score": 19,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 2,
+      "routeUsage": 1
+    },
+    "src/routes/auth.routes.js": {
+      "score": 19,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 2,
+      "routeUsage": 1
+    },
+    "src/routes/compliance.routes.js": {
+      "score": 19,
+      "dependents": 1,
+      "imports": 5,
+      "gitCommits": 0,
+      "routeUsage": 1
+    },
+    "src/routes/firm.routes.js": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 1
+    },
+    "src/routes/import.routes.js": {
+      "score": 15,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 1
+    },
+    "src/routes/operations.routes.js": {
+      "score": 15,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 0,
+      "routeUsage": 1
+    },
+    "src/routes/reminder.routes.js": {
+      "score": 13,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 1
+    },
+    "src/routes/stats.routes.js": {
+      "score": 18,
+      "dependents": 1,
+      "imports": 3,
+      "gitCommits": 1,
+      "routeUsage": 1
+    },
+    "src/routes/super.routes.js": {
+      "score": 22,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 3,
+      "routeUsage": 1
+    },
+    "src/routes/task.routes.js": {
+      "score": 16,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 1,
+      "routeUsage": 1
+    },
+    "src/routes/taxworker.routes.js": {
+      "score": 16,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 1,
+      "routeUsage": 1
+    },
+    "src/services/activity.service.js": {
+      "score": 17,
+      "dependents": 3,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/services/automation-job.service.js": {
+      "score": 17,
+      "dependents": 3,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/services/automation-worker.service.js": {
+      "score": 9,
+      "dependents": 1,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/services/compliance-generation.service.js": {
+      "score": 38,
+      "dependents": 2,
+      "imports": 14,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/services/compliance-period.service.js": {
+      "score": 12,
+      "dependents": 2,
+      "imports": 1,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/services/email.service.js": {
+      "score": 8,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/services/import-preview.service.js": {
+      "score": 5,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/services/otp.service.js": {
+      "score": 4,
+      "dependents": 0,
+      "imports": 2,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/services/reminder.service.js": {
+      "score": 8,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/services/token.service.js": {
+      "score": 0,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "src/utils/constants.js": {
+      "score": 10,
+      "dependents": 2,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    },
+    "public/admin/compliance-assistant/assistant.js": {
+      "score": 5,
+      "dependents": 0,
+      "imports": 1,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "public/admin/compliance-assistant/priority-engine.js": {
+      "score": 8,
+      "dependents": 1,
+      "imports": 0,
+      "gitCommits": 1,
+      "routeUsage": 0
+    },
+    "src/docs/api-spec.md": {
+      "score": 0,
+      "dependents": 0,
+      "imports": 0,
+      "gitCommits": 0,
+      "routeUsage": 0
+    }
+  }
+}

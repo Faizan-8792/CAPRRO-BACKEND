@@ -1,0 +1,2206 @@
+{
+  "schemaVersion": "1.0.0",
+  "documents": [
+    {
+      "file": "public/admin/admin-tasks.js",
+      "exports": [],
+      "terms": [
+        "public",
+        "admin",
+        "tasks",
+        "js"
+      ]
+    },
+    {
+      "file": "public/admin/admin.js",
+      "exports": [],
+      "terms": [
+        "public",
+        "admin",
+        "js"
+      ]
+    },
+    {
+      "file": "public/admin/compliance-assistant/assistant.js",
+      "exports": [],
+      "terms": [
+        "public",
+        "admin",
+        "compliance",
+        "assistant",
+        "js"
+      ]
+    },
+    {
+      "file": "public/admin/compliance-assistant/priority-engine.js",
+      "exports": [
+        "computePriority"
+      ],
+      "terms": [
+        "public",
+        "admin",
+        "compliance",
+        "assistant",
+        "priority",
+        "engine",
+        "js",
+        "compute"
+      ]
+    },
+    {
+      "file": "public/admin/login.js",
+      "exports": [],
+      "terms": [
+        "public",
+        "admin",
+        "login",
+        "js"
+      ]
+    },
+    {
+      "file": "public/admin/super.js",
+      "exports": [],
+      "terms": [
+        "public",
+        "admin",
+        "super",
+        "js"
+      ]
+    },
+    {
+      "file": "src/config/db.js",
+      "exports": [
+        "connectDB",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "config",
+        "db",
+        "js",
+        "connect",
+        "default"
+      ]
+    },
+    {
+      "file": "src/config/email.js",
+      "exports": [
+        "getEmailTransporter",
+        "sendReminderEmail"
+      ],
+      "terms": [
+        "src",
+        "config",
+        "email",
+        "js",
+        "get",
+        "transporter",
+        "send",
+        "reminder"
+      ]
+    },
+    {
+      "file": "src/config/tax-templates.js",
+      "exports": [
+        "listTaxTypes",
+        "getTemplateDocuments",
+        "getRequiredTemplateDocuments",
+        "suggestPeriodAndDueDate",
+        "TAX_TEMPLATES",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "config",
+        "tax",
+        "templates",
+        "js",
+        "list",
+        "types",
+        "get",
+        "template",
+        "documents",
+        "required",
+        "suggest",
+        "period",
+        "and",
+        "due",
+        "date",
+        "default"
+      ]
+    },
+    {
+      "file": "src/controllers/audit.controller.js",
+      "exports": [
+        "refineAuditClassification",
+        "generateInsights",
+        "generateReminderMessage"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "audit",
+        "controller",
+        "js",
+        "refine",
+        "classification",
+        "generate",
+        "insights",
+        "reminder",
+        "message"
+      ]
+    },
+    {
+      "file": "src/controllers/auth.controller.js",
+      "exports": [
+        "sendOtp",
+        "verifyOtpAndLogin",
+        "googleLogin",
+        "getMe"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "auth",
+        "controller",
+        "js",
+        "send",
+        "otp",
+        "verify",
+        "and",
+        "login",
+        "google",
+        "get",
+        "me"
+      ]
+    },
+    {
+      "file": "src/controllers/compliance-generation.controller.js",
+      "exports": [
+        "previewComplianceGeneration",
+        "confirmComplianceGeneration"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "compliance",
+        "generation",
+        "controller",
+        "js",
+        "preview",
+        "confirm"
+      ]
+    },
+    {
+      "file": "src/controllers/compliance.controller.js",
+      "exports": [
+        "getClientComplianceProfile",
+        "updateClientComplianceProfile",
+        "listActiveComplianceRules",
+        "listManagedComplianceRules",
+        "createComplianceRule",
+        "updateComplianceRule",
+        "submitComplianceRuleForReview",
+        "reviewComplianceRule",
+        "activateComplianceRule",
+        "retireComplianceRule",
+        "listComplianceOverrides",
+        "upsertComplianceOverride",
+        "deleteComplianceOverride"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "compliance",
+        "controller",
+        "js",
+        "get",
+        "client",
+        "profile",
+        "update",
+        "list",
+        "active",
+        "rules",
+        "managed",
+        "create",
+        "rule",
+        "submit",
+        "for",
+        "review",
+        "activate",
+        "retire",
+        "overrides",
+        "upsert",
+        "override",
+        "delete"
+      ]
+    },
+    {
+      "file": "src/controllers/firm.controller.js",
+      "exports": [
+        "createFirm",
+        "getMyFirm",
+        "getFirmById",
+        "updateFirm",
+        "rotateJoinCode",
+        "joinFirmByCode",
+        "listFirmUsers",
+        "requestFirmAdmin",
+        "deleteFirmUser",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "firm",
+        "controller",
+        "js",
+        "create",
+        "get",
+        "my",
+        "by",
+        "id",
+        "update",
+        "rotate",
+        "join",
+        "code",
+        "list",
+        "users",
+        "request",
+        "admin",
+        "delete",
+        "user",
+        "default"
+      ]
+    },
+    {
+      "file": "src/controllers/gst-reconciliation.controller.js",
+      "exports": [
+        "createRun",
+        "listRuns",
+        "showRun",
+        "listItems",
+        "updateItemDisposition",
+        "updateItemsBulk",
+        "showGstr3bControl",
+        "showSupplierChase",
+        "recoverRunReview",
+        "lockRun",
+        "exportRun",
+        "listActivity"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "gst",
+        "reconciliation",
+        "controller",
+        "js",
+        "create",
+        "run",
+        "list",
+        "runs",
+        "show",
+        "items",
+        "update",
+        "item",
+        "disposition",
+        "bulk",
+        "gstr3b",
+        "control",
+        "supplier",
+        "chase",
+        "recover",
+        "review",
+        "lock",
+        "export",
+        "activity"
+      ]
+    },
+    {
+      "file": "src/controllers/operations.controller.js",
+      "exports": [
+        "listActivityEvents",
+        "listAutomationJobs",
+        "retryAutomationJob"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "operations",
+        "controller",
+        "js",
+        "list",
+        "activity",
+        "events",
+        "automation",
+        "jobs",
+        "retry",
+        "job"
+      ]
+    },
+    {
+      "file": "src/controllers/reminder.controller.js",
+      "exports": [
+        "createReminder",
+        "listReminders",
+        "getTodayReminders",
+        "updateReminder",
+        "processReminderForNow"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "reminder",
+        "controller",
+        "js",
+        "create",
+        "list",
+        "reminders",
+        "get",
+        "today",
+        "update",
+        "process",
+        "for",
+        "now"
+      ]
+    },
+    {
+      "file": "src/controllers/stats.controller.js",
+      "exports": [
+        "getClientsToChaseToday",
+        "postChaseComplete",
+        "getFirmOverviewStats"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "stats",
+        "controller",
+        "js",
+        "get",
+        "clients",
+        "to",
+        "chase",
+        "today",
+        "post",
+        "complete",
+        "firm",
+        "overview"
+      ]
+    },
+    {
+      "file": "src/controllers/super.controller.js",
+      "exports": [
+        "getUsageStats",
+        "getSuperDashboardStats",
+        "listPendingAdmins",
+        "approveAdmin",
+        "revokeAdmin",
+        "listFirms",
+        "listFirmUsersForSuper",
+        "updateFirmPlan",
+        "updateFirmUserForSuper",
+        "deleteFirmUserForSuper",
+        "deleteFirmForSuper"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "super",
+        "controller",
+        "js",
+        "get",
+        "usage",
+        "stats",
+        "dashboard",
+        "list",
+        "pending",
+        "admins",
+        "approve",
+        "admin",
+        "revoke",
+        "firms",
+        "firm",
+        "users",
+        "for",
+        "update",
+        "plan",
+        "user",
+        "delete"
+      ]
+    },
+    {
+      "file": "src/controllers/task.controller.js",
+      "exports": [
+        "createTask",
+        "getTaskBoard",
+        "updateTask",
+        "archiveTask",
+        "getTaskSource",
+        "getMyOpenTasks",
+        "completeTaskFromUser"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "task",
+        "controller",
+        "js",
+        "create",
+        "get",
+        "board",
+        "update",
+        "archive",
+        "source",
+        "my",
+        "open",
+        "tasks",
+        "complete",
+        "from",
+        "user"
+      ]
+    },
+    {
+      "file": "src/controllers/taxworker.controller.js",
+      "exports": [
+        "getTemplates",
+        "listClients",
+        "createClient",
+        "updateClient",
+        "deleteClient",
+        "listSessions",
+        "getSession",
+        "createSession",
+        "updateSession",
+        "updateDocument",
+        "addCustomDocument",
+        "removeCustomDocument",
+        "deleteSession",
+        "getStats"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "taxworker",
+        "controller",
+        "js",
+        "get",
+        "templates",
+        "list",
+        "clients",
+        "create",
+        "client",
+        "update",
+        "delete",
+        "sessions",
+        "session",
+        "document",
+        "add",
+        "custom",
+        "remove",
+        "stats"
+      ]
+    },
+    {
+      "file": "src/controllers/workspace.controller.js",
+      "exports": [
+        "getHomeSummary",
+        "getComplianceCalendar"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "workspace",
+        "controller",
+        "js",
+        "get",
+        "home",
+        "summary",
+        "compliance",
+        "calendar"
+      ]
+    },
+    {
+      "file": "src/docs/api-spec.md",
+      "exports": [],
+      "terms": [
+        "src",
+        "docs",
+        "api",
+        "spec",
+        "md"
+      ]
+    },
+    {
+      "file": "src/middleware/auth.middleware.js",
+      "exports": [
+        "authRequired",
+        "authRequiredWithoutUsageTracking"
+      ],
+      "terms": [
+        "src",
+        "middleware",
+        "auth",
+        "js",
+        "required",
+        "without",
+        "usage",
+        "tracking"
+      ]
+    },
+    {
+      "file": "src/middleware/authorization.middleware.js",
+      "exports": [
+        "requireFirmMember",
+        "requireFirmAdmin",
+        "requireSuperAdmin",
+        "SUPER_ADMIN_EMAIL"
+      ],
+      "terms": [
+        "src",
+        "middleware",
+        "authorization",
+        "js",
+        "require",
+        "firm",
+        "member",
+        "admin",
+        "super",
+        "email"
+      ]
+    },
+    {
+      "file": "src/middleware/maintenance.middleware.js",
+      "exports": [
+        "maintenanceGate"
+      ],
+      "terms": [
+        "src",
+        "middleware",
+        "maintenance",
+        "js",
+        "gate"
+      ]
+    },
+    {
+      "file": "src/middleware/request-id.middleware.js",
+      "exports": [
+        "requestId"
+      ],
+      "terms": [
+        "src",
+        "middleware",
+        "request",
+        "id",
+        "js"
+      ]
+    },
+    {
+      "file": "src/middleware/role.middleware.js",
+      "exports": [
+        "requireRoles"
+      ],
+      "terms": [
+        "src",
+        "middleware",
+        "role",
+        "js",
+        "require",
+        "roles"
+      ]
+    },
+    {
+      "file": "src/middleware/sanitize.middleware.js",
+      "exports": [
+        "sanitizeInputs",
+        "isValidObjectId",
+        "validateIdParam"
+      ],
+      "terms": [
+        "src",
+        "middleware",
+        "sanitize",
+        "js",
+        "inputs",
+        "is",
+        "valid",
+        "object",
+        "id",
+        "validate",
+        "param"
+      ]
+    },
+    {
+      "file": "src/middleware/usage-tracker.middleware.js",
+      "exports": [
+        "trackUsage"
+      ],
+      "terms": [
+        "src",
+        "middleware",
+        "usage",
+        "tracker",
+        "js",
+        "track"
+      ]
+    },
+    {
+      "file": "src/models/ActivityEvent.js",
+      "exports": [
+        "ACTIVITY_SOURCES",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "activity",
+        "event",
+        "js",
+        "sources",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/AutomationJob.js",
+      "exports": [
+        "JOB_STATUSES",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "automation",
+        "job",
+        "js",
+        "statuses",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/Client.js",
+      "exports": [
+        "ENTITY_TYPES",
+        "APPLICABILITY_STATUSES",
+        "ONBOARDING_SOURCES",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "client",
+        "js",
+        "entity",
+        "types",
+        "applicability",
+        "statuses",
+        "onboarding",
+        "sources",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/ComplianceOverride.js",
+      "exports": [
+        "OVERRIDE_ACTIONS",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "compliance",
+        "override",
+        "js",
+        "actions",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/ComplianceRule.js",
+      "exports": [
+        "RULE_STATUSES",
+        "RULE_FREQUENCIES",
+        "DUE_DATE_POLICIES",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "compliance",
+        "rule",
+        "js",
+        "statuses",
+        "frequencies",
+        "due",
+        "date",
+        "policies",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/Firm.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "firm",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/ImportRow.js",
+      "exports": [
+        "GST_IMPORT_KINDS",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "import",
+        "row",
+        "js",
+        "gst",
+        "kinds",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/Otp.js",
+      "exports": [
+        "Otp"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "otp",
+        "js"
+      ]
+    },
+    {
+      "file": "src/models/ReconciliationItem.js",
+      "exports": [
+        "DISPOSITION_ACTIONS",
+        "RECONCILIATION_ITEM_STATUSES",
+        "MoneyBreakdownSchema",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "reconciliation",
+        "item",
+        "js",
+        "disposition",
+        "actions",
+        "statuses",
+        "money",
+        "breakdown",
+        "schema",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/Reminder.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "reminder",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/Task.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "task",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/TaxWorkSession.js",
+      "exports": [
+        "TAX_TYPES",
+        "STATUSES",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "tax",
+        "work",
+        "session",
+        "js",
+        "types",
+        "statuses",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/User.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "user",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/routes/appconfig.routes.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "routes",
+        "appconfig",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/routes/audit.routes.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "routes",
+        "audit",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/routes/auth.routes.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "routes",
+        "auth",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/routes/compliance.routes.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "routes",
+        "compliance",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/routes/firm.routes.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "routes",
+        "firm",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/routes/gst-reconciliation.routes.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "routes",
+        "gst",
+        "reconciliation",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/routes/home.routes.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "routes",
+        "home",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/routes/operations.routes.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "routes",
+        "operations",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/routes/reminder.routes.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "routes",
+        "reminder",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/routes/stats.routes.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "routes",
+        "stats",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/routes/super.routes.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "routes",
+        "super",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/routes/task.routes.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "routes",
+        "task",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/routes/taxworker.routes.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "routes",
+        "taxworker",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/server.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "server",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/services/activity.service.js",
+      "exports": [
+        "recordActivity",
+        "safeRecordActivity",
+        "sanitizeSummary"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "activity",
+        "service",
+        "js",
+        "record",
+        "safe",
+        "sanitize",
+        "summary"
+      ]
+    },
+    {
+      "file": "src/services/automation-job.service.js",
+      "exports": [
+        "enqueueJob",
+        "claimNextJob",
+        "renewJobLease",
+        "completeJob",
+        "deferJob",
+        "failJob",
+        "retryFailedJob",
+        "DEFAULT_DEFER_MS",
+        "DEFAULT_LEASE_MS",
+        "RETRY_DELAYS_MS",
+        "safeJobError",
+        "terminalizeExhaustedJobs"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "automation",
+        "job",
+        "service",
+        "js",
+        "enqueue",
+        "claim",
+        "next",
+        "renew",
+        "lease",
+        "complete",
+        "defer",
+        "fail",
+        "retry",
+        "failed",
+        "default",
+        "ms",
+        "delays",
+        "safe",
+        "error",
+        "terminalize",
+        "exhausted",
+        "jobs"
+      ]
+    },
+    {
+      "file": "src/services/compliance-generation.service.js",
+      "exports": [
+        "assertComplianceGenerationIndexes",
+        "normalizeGenerationRequest",
+        "hashGenerationValue",
+        "calculateComplianceDueDate",
+        "renderComplianceTitle",
+        "buildGenerationKeys",
+        "createComplianceGenerationPreview",
+        "enqueueComplianceGeneration",
+        "assertComplianceGenerationCommitGuards",
+        "processComplianceGenerationJob",
+        "COMPLIANCE_GENERATION_JOB_KIND",
+        "COMPLIANCE_GENERATION_PREVIEW_VERSION"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "compliance",
+        "generation",
+        "service",
+        "js",
+        "assert",
+        "indexes",
+        "normalize",
+        "request",
+        "hash",
+        "value",
+        "calculate",
+        "due",
+        "date",
+        "render",
+        "title",
+        "build",
+        "keys",
+        "create",
+        "preview",
+        "enqueue",
+        "commit",
+        "guards",
+        "process",
+        "job",
+        "kind",
+        "version"
+      ]
+    },
+    {
+      "file": "src/services/compliance-period.service.js",
+      "exports": [
+        "parseCompliancePeriod",
+        "ruleAppliesToPeriod",
+        "selectApplicableComplianceRule",
+        "resolveApplicableComplianceRule"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "compliance",
+        "period",
+        "service",
+        "js",
+        "parse",
+        "rule",
+        "applies",
+        "to",
+        "select",
+        "applicable",
+        "resolve"
+      ]
+    },
+    {
+      "file": "src/services/email.service.js",
+      "exports": [
+        "sendOtpEmail",
+        "sendComplianceReminderEmail"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "email",
+        "service",
+        "js",
+        "send",
+        "otp",
+        "compliance",
+        "reminder"
+      ]
+    },
+    {
+      "file": "src/services/gst-import.service.js",
+      "exports": [
+        "commitGstImport",
+        "getGstImportBatch",
+        "getGstImportErrors",
+        "GST_IMPORT_NORMALIZATION_VERSION",
+        "GST_IMPORT_PROCESSING_LEASE_MS",
+        "buildImportFingerprint",
+        "createGstImportPreviewAuthorization",
+        "serializeImportBatch",
+        "serviceError"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "gst",
+        "import",
+        "service",
+        "js",
+        "commit",
+        "get",
+        "batch",
+        "errors",
+        "normalization",
+        "version",
+        "processing",
+        "lease",
+        "ms",
+        "build",
+        "fingerprint",
+        "create",
+        "preview",
+        "authorization",
+        "serialize",
+        "error"
+      ]
+    },
+    {
+      "file": "src/services/gst-matching.service.js",
+      "exports": [
+        "buildReconciliationItems",
+        "summarizeReconciliationItems",
+        "AMOUNT_FIELDS",
+        "MISMATCH_STATUSES",
+        "REVIEW_STATUSES",
+        "TAX_HEAD_FIELDS",
+        "amountDifferences",
+        "invoiceNumbersSimilar",
+        "taxWithinTolerance"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "gst",
+        "matching",
+        "service",
+        "js",
+        "build",
+        "reconciliation",
+        "items",
+        "summarize",
+        "amount",
+        "fields",
+        "mismatch",
+        "statuses",
+        "review",
+        "tax",
+        "head",
+        "differences",
+        "invoice",
+        "numbers",
+        "similar",
+        "within",
+        "tolerance"
+      ]
+    },
+    {
+      "file": "src/services/gst-normalization.service.js",
+      "exports": [
+        "GST_IMPORT_SPECS",
+        "GSTR3B_CATEGORIES",
+        "GSTIN_PATTERN",
+        "PERIOD_PATTERN",
+        "addSafeIntegers",
+        "calculateGstr3bClaimed",
+        "cleanText",
+        "dateDifferenceDays",
+        "formatMoneyMinor",
+        "isValidGstin",
+        "isValidPeriod",
+        "normalizeDocumentDate",
+        "normalizeDocumentType",
+        "normalizeGstImportRow",
+        "normalizeGstr3bCategory",
+        "normalizeGstin",
+        "normalizeInvoiceNumber",
+        "parseMoneyMinor"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "gst",
+        "normalization",
+        "service",
+        "js",
+        "import",
+        "specs",
+        "gstr3",
+        "categories",
+        "gstin",
+        "pattern",
+        "period",
+        "add",
+        "safe",
+        "integers",
+        "calculate",
+        "gstr3b",
+        "claimed",
+        "clean",
+        "text",
+        "date",
+        "difference",
+        "days",
+        "format",
+        "money",
+        "minor",
+        "is",
+        "valid",
+        "normalize",
+        "document",
+        "type",
+        "row",
+        "category",
+        "invoice",
+        "number",
+        "parse"
+      ]
+    },
+    {
+      "file": "src/services/gst-reconciliation.service.js",
+      "exports": [
+        "createReconciliationRun",
+        "processGstReconciliationJob",
+        "listReconciliationRuns",
+        "getReconciliationRun",
+        "listReconciliationItems",
+        "applyItemDisposition",
+        "bulkDisposition",
+        "recoverReviewOperation",
+        "getGstr3bControl",
+        "getSupplierChase",
+        "lockReconciliationRun",
+        "exportReconciliationRun",
+        "listReconciliationActivity",
+        "BULK_ACTIONS",
+        "DEFAULT_DATE_TOLERANCE_DAYS",
+        "DEFAULT_ROUNDING_TOLERANCE_MINOR",
+        "GST_RECONCILIATION_JOB_KIND",
+        "MATCHING_CONFIG_VERSION",
+        "MAX_BULK_ITEMS",
+        "MAX_PAGE_SIZE",
+        "fingerprintForRun",
+        "serializeItem",
+        "serializeRun",
+        "serviceError"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "gst",
+        "reconciliation",
+        "service",
+        "js",
+        "create",
+        "run",
+        "process",
+        "job",
+        "list",
+        "runs",
+        "get",
+        "items",
+        "apply",
+        "item",
+        "disposition",
+        "bulk",
+        "recover",
+        "review",
+        "operation",
+        "gstr3b",
+        "control",
+        "supplier",
+        "chase",
+        "lock",
+        "export",
+        "activity",
+        "actions",
+        "default",
+        "date",
+        "tolerance",
+        "days",
+        "rounding",
+        "minor",
+        "kind",
+        "matching",
+        "config",
+        "version",
+        "max",
+        "page",
+        "size",
+        "fingerprint",
+        "for",
+        "serialize",
+        "error"
+      ]
+    },
+    {
+      "file": "src/services/otp.service.js",
+      "exports": [
+        "generateOtpCode",
+        "createOtp",
+        "verifyOtp"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "otp",
+        "service",
+        "js",
+        "generate",
+        "code",
+        "create",
+        "verify"
+      ]
+    },
+    {
+      "file": "src/services/reminder.service.js",
+      "exports": [
+        "sendComplianceReminderEmail"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "reminder",
+        "service",
+        "js",
+        "send",
+        "compliance",
+        "email"
+      ]
+    },
+    {
+      "file": "src/services/token.service.js",
+      "exports": [
+        "signAccessToken",
+        "verifyAccessToken"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "token",
+        "service",
+        "js",
+        "sign",
+        "access",
+        "verify"
+      ]
+    },
+    {
+      "file": "src/services/workspace-summary.service.js",
+      "exports": [
+        "parseCalendarQuery",
+        "buildWorkspaceScopes",
+        "mergeWorkspaceSourceRecords",
+        "composeHomeSummary",
+        "loadHomeSummary",
+        "loadComplianceCalendar",
+        "HOME_SECTION_LIMIT",
+        "HOME_SOURCE_FETCH_LIMIT",
+        "CALENDAR_DEFAULT_LIMIT",
+        "CALENDAR_MAX_LIMIT",
+        "CALENDAR_MAX_RANGE_DAYS",
+        "WorkspaceQueryError"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "workspace",
+        "summary",
+        "service",
+        "js",
+        "parse",
+        "calendar",
+        "query",
+        "build",
+        "scopes",
+        "merge",
+        "source",
+        "records",
+        "compose",
+        "home",
+        "load",
+        "compliance",
+        "section",
+        "limit",
+        "fetch",
+        "default",
+        "max",
+        "range",
+        "days",
+        "error"
+      ]
+    },
+    {
+      "file": "src/utils/constants.js",
+      "exports": [
+        "ACCOUNT_TYPES",
+        "ROLES",
+        "OTP_PURPOSES",
+        "OTP_EXPIRY_MINUTES"
+      ],
+      "terms": [
+        "src",
+        "utils",
+        "constants",
+        "js",
+        "account",
+        "types",
+        "roles",
+        "otp",
+        "purposes",
+        "expiry",
+        "minutes"
+      ]
+    },
+    {
+      "file": "tests/app-config-checklist.mjs",
+      "exports": [],
+      "terms": [
+        "tests",
+        "app",
+        "config",
+        "checklist",
+        "mjs"
+      ]
+    },
+    {
+      "file": "tests/double-click-guard-checklist.mjs",
+      "exports": [],
+      "terms": [
+        "tests",
+        "double",
+        "click",
+        "guard",
+        "checklist",
+        "mjs"
+      ]
+    },
+    {
+      "file": "tests/firm-join-sync-checklist.mjs",
+      "exports": [],
+      "terms": [
+        "tests",
+        "firm",
+        "join",
+        "sync",
+        "checklist",
+        "mjs"
+      ]
+    },
+    {
+      "file": "tests/production-readiness-checklist.mjs",
+      "exports": [],
+      "terms": [
+        "tests",
+        "production",
+        "readiness",
+        "checklist",
+        "mjs"
+      ]
+    },
+    {
+      "file": "tests/task-flow-checklist.mjs",
+      "exports": [],
+      "terms": [
+        "tests",
+        "task",
+        "flow",
+        "checklist",
+        "mjs"
+      ]
+    },
+    {
+      "file": "tests/taxworker-flow-checklist.mjs",
+      "exports": [],
+      "terms": [
+        "tests",
+        "taxworker",
+        "flow",
+        "checklist",
+        "mjs"
+      ]
+    },
+    {
+      "file": "src/app.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "app",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/controllers/appconfig.controller.js",
+      "exports": [
+        "getAppConfig",
+        "dismissWelcome",
+        "updateFeatureFlags",
+        "updateMaintenance",
+        "updateWelcomeAnnouncement"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "appconfig",
+        "controller",
+        "js",
+        "get",
+        "app",
+        "config",
+        "dismiss",
+        "welcome",
+        "update",
+        "feature",
+        "flags",
+        "maintenance",
+        "announcement"
+      ]
+    },
+    {
+      "file": "src/controllers/import.controller.js",
+      "exports": [
+        "previewMappedImport",
+        "commitMappedGstImport",
+        "commitMappedTdsImport",
+        "showGstImportBatch",
+        "showGstImportErrors",
+        "showTdsImportBatch",
+        "showTdsImportErrors"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "import",
+        "controller",
+        "js",
+        "preview",
+        "mapped",
+        "commit",
+        "gst",
+        "tds",
+        "show",
+        "batch",
+        "errors"
+      ]
+    },
+    {
+      "file": "src/controllers/tds-health.controller.js",
+      "exports": [
+        "createRun",
+        "listRuns",
+        "showRun",
+        "listChecks",
+        "listEvidence",
+        "listRows",
+        "resolveCheck",
+        "verifyPan",
+        "verifyPanCompatibility",
+        "previewActionPlan",
+        "showActionPlan",
+        "commitActionPlan",
+        "createTasksCompatibility",
+        "lockRun",
+        "exportRun",
+        "listHistory"
+      ],
+      "terms": [
+        "src",
+        "controllers",
+        "tds",
+        "health",
+        "controller",
+        "js",
+        "create",
+        "run",
+        "list",
+        "runs",
+        "show",
+        "checks",
+        "evidence",
+        "rows",
+        "resolve",
+        "check",
+        "verify",
+        "pan",
+        "compatibility",
+        "preview",
+        "action",
+        "plan",
+        "commit",
+        "tasks",
+        "lock",
+        "export",
+        "history"
+      ]
+    },
+    {
+      "file": "src/middleware/rollout.middleware.js",
+      "exports": [
+        "requireFeatureFlag"
+      ],
+      "terms": [
+        "src",
+        "middleware",
+        "rollout",
+        "js",
+        "require",
+        "feature",
+        "flag"
+      ]
+    },
+    {
+      "file": "src/models/AppConfig.js",
+      "exports": [
+        "DEFAULT_FEATURE_FLAGS",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "app",
+        "config",
+        "js",
+        "default",
+        "feature",
+        "flags"
+      ]
+    },
+    {
+      "file": "src/models/ImportBatch.js",
+      "exports": [
+        "IMPORT_KINDS",
+        "IMPORT_STATUSES",
+        "TDS_QUARTERS",
+        "TDS_STATEMENT_TYPES",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "import",
+        "batch",
+        "js",
+        "kinds",
+        "statuses",
+        "tds",
+        "quarters",
+        "statement",
+        "types",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/ReconciliationRun.js",
+      "exports": [
+        "RECONCILIATION_RUN_STATUSES",
+        "TaxHeadsSchema",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "reconciliation",
+        "run",
+        "js",
+        "statuses",
+        "tax",
+        "heads",
+        "schema",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/TdsHealthCheck.js",
+      "exports": [
+        "TDS_CHECK_DIMENSIONS",
+        "TDS_CHECK_STATES",
+        "TDS_CHECK_STATUSES",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "tds",
+        "health",
+        "check",
+        "js",
+        "dimensions",
+        "states",
+        "statuses",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/TdsHealthEvidenceLink.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "tds",
+        "health",
+        "evidence",
+        "link",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/TdsHealthRun.js",
+      "exports": [
+        "TDS_QUARTERS",
+        "TDS_RUN_STATUSES",
+        "TDS_STATEMENT_TYPES",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "tds",
+        "health",
+        "run",
+        "js",
+        "quarters",
+        "statuses",
+        "statement",
+        "types",
+        "default"
+      ]
+    },
+    {
+      "file": "src/models/TdsImportRow.js",
+      "exports": [
+        "TDS_CERTIFICATE_STATUSES",
+        "TDS_CORRECTION_STATUSES",
+        "TDS_FILING_STATUSES",
+        "TDS_IMPORT_KINDS",
+        "TDS_QUARTERS",
+        "TDS_STATEMENT_TYPES",
+        "default"
+      ],
+      "terms": [
+        "src",
+        "models",
+        "tds",
+        "import",
+        "row",
+        "js",
+        "certificate",
+        "statuses",
+        "correction",
+        "filing",
+        "kinds",
+        "quarters",
+        "statement",
+        "types",
+        "default"
+      ]
+    },
+    {
+      "file": "src/routes/import.routes.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "routes",
+        "import",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/routes/tds-health.routes.js",
+      "exports": [
+        "default"
+      ],
+      "terms": [
+        "src",
+        "routes",
+        "tds",
+        "health",
+        "js",
+        "default"
+      ]
+    },
+    {
+      "file": "src/services/automation-worker.service.js",
+      "exports": [
+        "runAutomationWorkerBatch",
+        "DEFAULT_BATCH_SIZE",
+        "JOB_HANDLERS",
+        "MAX_BATCH_SIZE"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "automation",
+        "worker",
+        "service",
+        "js",
+        "run",
+        "batch",
+        "default",
+        "size",
+        "job",
+        "handlers",
+        "max"
+      ]
+    },
+    {
+      "file": "src/services/gst-storage-readiness.service.js",
+      "exports": [
+        "assertGstStorageIndexes",
+        "indexKeyMatches",
+        "indexSpecMatches"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "gst",
+        "storage",
+        "readiness",
+        "service",
+        "js",
+        "assert",
+        "indexes",
+        "index",
+        "key",
+        "matches",
+        "spec"
+      ]
+    },
+    {
+      "file": "src/services/import-preview.service.js",
+      "exports": [
+        "parseMappedImport",
+        "previewImport",
+        "IMPORT_SPECS",
+        "MAX_TEXT_BYTES",
+        "MAX_ROWS",
+        "MAX_COLUMNS",
+        "PREVIEW_ROWS"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "import",
+        "preview",
+        "service",
+        "js",
+        "parse",
+        "mapped",
+        "specs",
+        "max",
+        "text",
+        "bytes",
+        "rows",
+        "columns"
+      ]
+    },
+    {
+      "file": "src/services/tds-health-engine.service.js",
+      "exports": [
+        "CHECK_META",
+        "HEALTH_RULE_VERSION",
+        "HEALTH_SOURCE_REFERENCE",
+        "buildTdsHealthChecks",
+        "deductedTotal",
+        "sourceRows"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "tds",
+        "health",
+        "engine",
+        "service",
+        "js",
+        "check",
+        "meta",
+        "rule",
+        "version",
+        "source",
+        "reference",
+        "build",
+        "checks",
+        "deducted",
+        "total",
+        "rows"
+      ]
+    },
+    {
+      "file": "src/services/tds-health.service.js",
+      "exports": [
+        "ACTION_PLAN_MAX_CHECKS",
+        "ACTION_TOKEN_TTL_MS",
+        "MAX_PAGE_SIZE",
+        "TDS_HEALTH_JOB_KIND",
+        "commitTdsActionPlan",
+        "createTdsHealthRun",
+        "exportTdsHealthRun",
+        "getTdsActionPlan",
+        "getTdsHealthRun",
+        "listTdsHealthChecks",
+        "listTdsHealthEvidence",
+        "listTdsHealthHistory",
+        "listTdsHealthRuns",
+        "listTdsImportRows",
+        "lockTdsHealthRun",
+        "previewTdsActionPlan",
+        "processTdsHealthJob",
+        "recordPanVerification",
+        "resolveTdsHealthCheck",
+        "serializeCheck",
+        "serializeRun"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "tds",
+        "health",
+        "service",
+        "js",
+        "action",
+        "plan",
+        "max",
+        "checks",
+        "token",
+        "ttl",
+        "ms",
+        "page",
+        "size",
+        "job",
+        "kind",
+        "commit",
+        "create",
+        "run",
+        "export",
+        "get",
+        "list",
+        "evidence",
+        "history",
+        "runs",
+        "import",
+        "rows",
+        "lock",
+        "preview",
+        "process",
+        "record",
+        "pan",
+        "verification",
+        "resolve",
+        "check",
+        "serialize"
+      ]
+    },
+    {
+      "file": "src/services/tds-import.service.js",
+      "exports": [
+        "PREVIEW_TOKEN_TTL_MS",
+        "TDS_IMPORT_PROCESSING_LEASE_MS",
+        "buildTdsImportFingerprint",
+        "commitTdsImport",
+        "createTdsImportPreviewAuthorization",
+        "getTdsImportBatch",
+        "getTdsImportErrors",
+        "serializeTdsImportBatch"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "tds",
+        "import",
+        "service",
+        "js",
+        "preview",
+        "token",
+        "ttl",
+        "ms",
+        "processing",
+        "lease",
+        "build",
+        "fingerprint",
+        "commit",
+        "create",
+        "authorization",
+        "get",
+        "batch",
+        "errors",
+        "serialize"
+      ]
+    },
+    {
+      "file": "src/services/tds-normalization.service.js",
+      "exports": [
+        "PAN_PATTERN",
+        "SOURCE_LABELS",
+        "TAN_PATTERN",
+        "TDS_IMPORT_KINDS",
+        "TDS_IMPORT_SPECS",
+        "TDS_NORMALIZATION_VERSION",
+        "TDS_QUARTERS",
+        "TDS_STATEMENT_TYPES",
+        "addSafeMinorUnits",
+        "fingerprintTdsRow",
+        "localPanFormatStatus",
+        "normalizeTdsContext",
+        "normalizeTdsImportRow",
+        "parseMinorUnits",
+        "summarizeTdsRows",
+        "validateFinancialYear"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "tds",
+        "normalization",
+        "service",
+        "js",
+        "pan",
+        "pattern",
+        "source",
+        "labels",
+        "tan",
+        "import",
+        "kinds",
+        "specs",
+        "version",
+        "quarters",
+        "statement",
+        "types",
+        "add",
+        "safe",
+        "minor",
+        "units",
+        "fingerprint",
+        "row",
+        "local",
+        "format",
+        "status",
+        "normalize",
+        "context",
+        "parse",
+        "summarize",
+        "rows",
+        "validate",
+        "financial",
+        "year"
+      ]
+    },
+    {
+      "file": "src/services/tds-storage-readiness.service.js",
+      "exports": [
+        "REQUIRED_HEALTH_INDEXES",
+        "REQUIRED_IMPORT_INDEXES",
+        "assertNoUnsafeLegacyTdsData",
+        "assertTdsHealthStorageReady",
+        "assertTdsImportStorageReady",
+        "assertTdsReviewStorageReady",
+        "assertTransactionCapability"
+      ],
+      "terms": [
+        "src",
+        "services",
+        "tds",
+        "storage",
+        "readiness",
+        "service",
+        "js",
+        "required",
+        "health",
+        "indexes",
+        "import",
+        "assert",
+        "no",
+        "unsafe",
+        "legacy",
+        "data",
+        "ready",
+        "review",
+        "transaction",
+        "capability"
+      ]
+    }
+  ]
+}

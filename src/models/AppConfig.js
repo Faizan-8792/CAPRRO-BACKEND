@@ -1,10 +1,30 @@
 // src/models/AppConfig.js
-// Singleton document holding global app settings:
-// - Maintenance mode toggle + message
-// - Current welcome announcement (version + title + body)
-// Use AppConfig.getInstance() to fetch with built-in caching.
+// Singleton document holding global app settings.
 
 import mongoose from "mongoose";
+
+export const DEFAULT_FEATURE_FLAGS = Object.freeze({
+  zeroApprovalFirmCreation: false,
+  unrestrictedTasks: false,
+  fullReminderOffsets: false,
+  reliableReminderDelivery: false,
+  fullTabWorkspace: false,
+  sampleWorkspace: false,
+  homeWorkspace: false,
+  clientComplianceProfile: false,
+  complianceGenerationShadow: false,
+  complianceGenerationLive: false,
+  gstReconciliation: false,
+  tdsHealth: false,
+  noticeCases: false,
+  assuranceEngagements: false,
+  filingDashboard: false,
+  teamWorkload: false,
+  auditWorkingPapers: false,
+  dailyDigest: false,
+  weeklySummary: false,
+});
+
 
 const AppConfigSchema = new mongoose.Schema(
   {
@@ -25,12 +45,44 @@ const AppConfigSchema = new mongoose.Schema(
       enabled: { type: Boolean, default: true },
       updatedAt: { type: Date, default: Date.now },
     },
+    featureFlags: {
+      zeroApprovalFirmCreation: { type: Boolean, default: false },
+      unrestrictedTasks: { type: Boolean, default: false },
+      fullReminderOffsets: { type: Boolean, default: false },
+      reliableReminderDelivery: { type: Boolean, default: false },
+      fullTabWorkspace: { type: Boolean, default: false },
+      sampleWorkspace: { type: Boolean, default: false },
+      homeWorkspace: { type: Boolean, default: false },
+      clientComplianceProfile: { type: Boolean, default: false },
+      complianceGenerationShadow: { type: Boolean, default: false },
+      complianceGenerationLive: { type: Boolean, default: false },
+      gstReconciliation: { type: Boolean, default: false },
+      tdsHealth: { type: Boolean, default: false },
+      noticeCases: { type: Boolean, default: false },
+      assuranceEngagements: { type: Boolean, default: false },
+      filingDashboard: { type: Boolean, default: false },
+      teamWorkload: { type: Boolean, default: false },
+      auditWorkingPapers: { type: Boolean, default: false },
+      dailyDigest: { type: Boolean, default: false },
+      weeklySummary: { type: Boolean, default: false },
+    },
+    featureFlagVersions: {
+      tdsHealth: { type: Number, min: 0, default: 0 },
+      noticeCases: { type: Number, min: 0, default: 0 },
+      assuranceEngagements: { type: Number, min: 0, default: 0 },
+      auditWorkingPapers: { type: Number, min: 0, default: 0 },
+    },
+    featureFlagPublicationFences: {
+      tdsHealth: { type: String, trim: true, maxlength: 80, default: "" },
+      noticeCases: { type: String, trim: true, maxlength: 80, default: "" },
+      assuranceEngagements: { type: String, trim: true, maxlength: 80, default: "" },
+      auditWorkingPapers: { type: String, trim: true, maxlength: 80, default: "" },
+    },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   },
   { timestamps: true, _id: false }
 );
 
-// In-process cache (30s TTL) — avoids DB hit per request.
 let _cache = null;
 let _cacheAt = 0;
 const CACHE_MS = 30_000;
@@ -42,13 +94,72 @@ AppConfigSchema.statics.getInstance = async function () {
   }
   let doc = await this.findById("singleton").lean();
   if (!doc) {
-    // Create with defaults
-    doc = await this.create({ _id: "singleton" });
-    doc = doc.toObject();
+    doc = new this({ _id: "singleton" }).toObject();
   }
   _cache = doc;
   _cacheAt = now;
   return doc;
+};
+
+AppConfigSchema.statics.getFeatureFlags = async function () {
+  const config = await this.getInstance();
+  return {
+    ...DEFAULT_FEATURE_FLAGS,
+    ...(config.featureFlags || {}),
+  };
+};
+
+AppConfigSchema.statics.getFeatureFlagState = async function (
+  flagName,
+  { fresh = false } = {}
+) {
+  if (!Object.prototype.hasOwnProperty.call(DEFAULT_FEATURE_FLAGS, flagName)) {
+    throw new Error(`Unknown feature flag: ${flagName}`);
+  }
+  const config = fresh
+    ? await this.findById("singleton")
+        .select(
+          `featureFlags.${flagName} featureFlagVersions.${flagName} featureFlagPublicationFences.${flagName}`
+        )
+        .lean()
+    : await this.getInstance();
+  return {
+    enabled: config?.featureFlags?.[flagName] === true,
+    version: Number.isSafeInteger(config?.featureFlagVersions?.[flagName])
+      ? config.featureFlagVersions[flagName]
+      : 0,
+    publicationFence:
+      typeof config?.featureFlagPublicationFences?.[flagName] === "string"
+        ? config.featureFlagPublicationFences[flagName]
+        : "",
+  };
+};
+
+AppConfigSchema.statics.isFeatureEnabled = async function (
+  flagName,
+  { fresh = false } = {}
+) {
+  const state = await this.getFeatureFlagState(flagName, { fresh });
+  return state.enabled;
+};
+
+AppConfigSchema.statics.assertFeatureFlagVersion = async function (
+  flagName,
+  expectedVersion,
+  expectedPublicationFence = null
+) {
+  const state = await this.getFeatureFlagState(flagName, { fresh: true });
+  const fenceChanged =
+    expectedPublicationFence != null &&
+    state.publicationFence !== expectedPublicationFence;
+  if (!state.enabled || state.version !== expectedVersion || fenceChanged) {
+    const error = new Error(`${flagName} rollout changed while the request was running`);
+    error.statusCode = 409;
+    error.code = "FEATURE_ROLLOUT_CHANGED";
+    error.featureFlag = flagName;
+    throw error;
+  }
+  return state;
 };
 
 AppConfigSchema.statics.invalidateCache = function () {

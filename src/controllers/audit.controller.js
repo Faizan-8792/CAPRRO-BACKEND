@@ -2,65 +2,10 @@
 // Hybrid NLP + DeepSeek LLM audit text classifier.
 // Plus: insights generation, reminder message generation.
 
-const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
-const DEEPSEEK_MODEL = "deepseek-chat";
+import { callDeepSeek } from "../services/deepseek-provider.service.js";
 
 function safeStr(v, max = 4000) {
   return String(v ?? "").slice(0, max);
-}
-
-// ─── Reusable DeepSeek call helper ─────────────────────────────────
-async function callDeepSeek({
-  system,
-  prompt,
-  jsonResponse = false,
-  maxTokens = 600,
-  timeoutMs = 25000,
-  temperature = 0.3,
-}) {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) {
-    return { ok: false, reason: "DEEPSEEK_API_KEY not configured" };
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const body = {
-      model: DEEPSEEK_MODEL,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: prompt },
-      ],
-      temperature,
-      max_tokens: maxTokens,
-    };
-    if (jsonResponse) body.response_format = { type: "json_object" };
-
-    const r = await fetch(DEEPSEEK_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-
-    if (!r.ok) {
-      const errText = await r.text().catch(() => "");
-      return { ok: false, reason: `LLM HTTP ${r.status}`, detail: errText.slice(0, 300) };
-    }
-
-    const j = await r.json().catch(() => null);
-    const content = j?.choices?.[0]?.message?.content || "";
-    return { ok: true, content };
-  } catch (err) {
-    clearTimeout(timer);
-    return { ok: false, reason: err.name === "AbortError" ? "LLM timeout" : err.message };
-  }
 }
 
 function buildPrompt(rawText, candidates) {

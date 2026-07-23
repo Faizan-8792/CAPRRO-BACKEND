@@ -54,6 +54,11 @@ const UserSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    digestPreferences: {
+      dailyEnabled: { type: Boolean, default: true },
+      weeklyEnabled: { type: Boolean, default: true },
+      emailEnabled: { type: Boolean, default: true },
+    },
   },
   { timestamps: true }
 );

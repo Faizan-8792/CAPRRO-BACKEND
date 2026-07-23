@@ -143,7 +143,7 @@ async function refreshTaskBoard() {
 
     const query = params.toString() ? `?${params.toString()}` : '';
     const resp = await apiTasks(`/tasks/board${query}`);
-    const { columns = {}, plan } = resp;
+    const { columns = {} } = resp;
 
     const colHtml = [
       renderTaskColumn('Not started', 'NOT_STARTED', columns.NOT_STARTED),
@@ -156,13 +156,7 @@ async function refreshTaskBoard() {
     columnsEl.innerHTML = colHtml;
 
     if (statusEl) {
-      if (plan === 'FREE') {
-        statusEl.textContent =
-          'Free plan: Limited number of tasks. Upgrade to PREMIUM for filters and unlimited board.';
-      } else {
-        statusEl.textContent =
-          'Premium plan: Filters active. Use service/staff/month to slice tasks.';
-      }
+      statusEl.textContent = 'All task tools and filters are available free during the current rollout.';
     }
 
     attachStatusChangeHandlers();

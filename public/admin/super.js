@@ -352,9 +352,9 @@ async function loadDashboardStats() {
         <div class="stat-sub">Active firm admins</div>
       </div>
       <div class="stat-card stat-gold">
-        <div class="stat-label">Premium Firms</div>
-        <div class="stat-value">${s.firms.premium}</div>
-        <div class="stat-sub">Free: ${s.firms.free}</div>
+        <div class="stat-label">Product Access</div>
+        <div class="stat-value">Free</div>
+        <div class="stat-sub">All ${s.firms.total} firms</div>
       </div>
       <div class="stat-card stat-success">
         <div class="stat-label">Reminders</div>
@@ -506,10 +506,7 @@ async function deleteFirmApi(firmId) {
 }
 
 function renderFirmRow(firm) {
-  const planBadge = firm.planType === "PREMIUM"
-    ? `<span class="badge good">PREMIUM</span>`
-    : `<span class="badge bg-secondary">FREE</span>`;
-  const expiryText = firm.planExpiry ? new Date(firm.planExpiry).toLocaleDateString() : "—";
+  const accessBadge = `<span class="badge good">FREE · ALL TOOLS</span>`;
   const activeBadge = firm.isActive
     ? `<span class="badge good">Active</span>`
     : `<span class="badge warn">Inactive</span>`;
@@ -524,12 +521,11 @@ function renderFirmRow(firm) {
       <td><strong>${escapeHtml(firm.displayName || "—")}</strong></td>
       <td><code>@${escapeHtml(firm.handle || "—")}</code></td>
       <td>${ownerDisplay}</td>
-      <td>${planBadge}</td>
-      <td>${escapeHtml(expiryText)}</td>
+      <td>${accessBadge}</td>
       <td>${activeBadge}</td>
       <td>
         <button class="btn btn-sm btn-outline-primary me-1 firm-users-btn" type="button">Users</button>
-        <button class="btn btn-sm btn-outline-secondary me-1 firm-plan-btn" type="button">Edit Plan</button>
+        <button class="btn btn-sm btn-outline-secondary me-1 firm-plan-btn" type="button">Edit access</button>
         <button class="btn btn-sm btn-outline-danger firm-delete-btn" type="button">Delete</button>
       </td>
     </tr>
@@ -720,37 +716,25 @@ function attachFirmUsersHandlers() {
 }
 
 async function handleEditFirmPlan(firmId, rowEl) {
-  const currentPlanCell = rowEl.querySelector("td:nth-child(4)");
-  const currentExpiryCell = rowEl.querySelector("td:nth-child(5)");
-  const currentActiveCell = rowEl.querySelector("td:nth-child(6)");
-
-  const currentPlanText = currentPlanCell?.innerText.includes("PREMIUM") ? "PREMIUM" : "FREE";
-  const currentExpiryText = currentExpiryCell?.innerText.trim() || "";
-  const currentActive = currentActiveCell?.innerText.toLowerCase().includes("active");
-
-  const planInput = window.prompt("Plan type (FREE or PREMIUM):", currentPlanText);
-  if (!planInput) return;
-  const planType = planInput.toUpperCase().trim();
-  if (!["FREE", "PREMIUM"].includes(planType)) { alert("Must be FREE or PREMIUM."); return; }
-
-  let planExpiry = null;
-  if (planType === "PREMIUM") {
-    const expiryInput = window.prompt("Plan expiry (YYYY-MM-DD), blank for no expiry:", currentExpiryText);
-    if (expiryInput) {
-      const d = new Date(expiryInput);
-      if (Number.isNaN(d.getTime())) { alert("Invalid date. Use YYYY-MM-DD."); return; }
-      planExpiry = d.toISOString();
-    }
+  const currentActiveCell = rowEl.querySelector("td:nth-child(5)");
+  const currentActive = currentActiveCell?.innerText.trim().toLowerCase() === "active";
+  const activeInput = window.prompt(
+    "Keep this firm account active? (yes/no):",
+    currentActive ? "yes" : "no"
+  );
+  if (activeInput === null) return;
+  const normalized = activeInput.trim().toLowerCase();
+  if (!["yes", "y", "no", "n"].includes(normalized)) {
+    alert("Enter yes or no.");
+    return;
   }
-
-  const activeInput = window.prompt("Is firm active? (yes/no):", currentActive ? "yes" : "no");
-  const isActive = typeof activeInput === "string" && activeInput.trim().toLowerCase().startsWith("y");
+  const isActive = normalized.startsWith("y");
 
   try {
-    const updated = await updateFirmPlanApi(firmId, { planType, planExpiry, isActive });
+    const updated = await updateFirmPlanApi(firmId, { isActive });
     rowEl.outerHTML = renderFirmRow(updated);
   } catch (err) {
-    alert(err.message || "Failed to update plan.");
+    alert(err.message || "Failed to update firm access.");
   }
 }
 
@@ -822,7 +806,7 @@ async function initSuperPage() {
     try {
       const firms = await loadFirms();
       if (!firms.length) {
-        if (firmsBody) firmsBody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">No firms found.</td></tr>`;
+        if (firmsBody) firmsBody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No firms found.</td></tr>`;
         if (firmsStatus) firmsStatus.textContent = "";
       } else {
         if (firmsBody) { firmsBody.innerHTML = firms.map(renderFirmRow).join(""); attachFirmHandlers(); }

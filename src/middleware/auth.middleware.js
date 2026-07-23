@@ -6,65 +6,74 @@ import { trackUsage } from "./usage-tracker.middleware.js";
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error("JWT_SECRET env var is required");
 
-/**
- * authRequired
- * Checks Bearer token, verifies JWT, and attaches user info to req.user.
- */
-export const authRequired = async (req, res, next) => {
-  try {
-    // Remove noisy auth header log in production
-    if (process.env.NODE_ENV !== "production") {
-      console.log("Auth middleware headers.authorization:", req.headers.authorization);
-    }
+function reject(req, res, status, error) {
+  return res.status(status).json({
+    ok: false,
+    error,
+    requestId: req.id || "",
+  });
+}
 
-    // Accept typical lowercase header; Node/Express normalizes to lowercase
+/**
+ * Verifies token identity, then hydrates authorization fields from MongoDB.
+ * JWT role/firm claims are informational only and may become stale after
+ * membership, activation, or role changes.
+ */
+async function authenticate(req, res, next, { recordUsage }) {
+  try {
     const authHeader =
       req.headers.authorization || req.headers.Authorization || "";
-
     const parts = String(authHeader).trim().split(" ");
 
-    // Tolerant: only require 2 parts and 'bearer' (case-insensitive)
     if (parts.length !== 2 || parts[0].toLowerCase() !== "bearer") {
-      return res
-        .status(401)
-        .json({ ok: false, error: "Missing or invalid Authorization header" });
+      return reject(req, res, 401, "Missing or invalid Authorization header");
     }
-
-    const token = parts[1];
 
     let payload;
     try {
-      payload = jwt.verify(token, JWT_SECRET);
-    } catch (err) {
-      return res
-        .status(401)
-        .json({ ok: false, error: "Invalid or expired token" });
+      payload = jwt.verify(parts[1], JWT_SECRET);
+    } catch {
+      return reject(req, res, 401, "Invalid or expired token");
     }
 
-    // Optional: verify user still exists
-    if (payload.id) {
-      const user = await User.findById(payload.id).lean();
-      if (!user) {
-        return res
-          .status(401)
-          .json({ ok: false, error: "User no longer exists" });
-      }
+    if (!payload?.id) {
+      return reject(req, res, 401, "Invalid token subject");
     }
 
-    // Expecting payload built in auth.controller: { id, email, role, accountType, firmId }
+    const user = await User.findById(payload.id)
+      .select("email role accountType firmId isActive")
+      .lean();
+    if (!user) {
+      return reject(req, res, 401, "User no longer exists");
+    }
+    if (user.isActive === false) {
+      return reject(req, res, 403, "Account is inactive");
+    }
+
     req.user = {
-      id: payload.id,
-      email: payload.email,
-      role: payload.role,
-      accountType: payload.accountType,
-      firmId: payload.firmId || null,
+      id: String(user._id),
+      email: user.email,
+      role: user.role,
+      accountType: user.accountType,
+      firmId: user.firmId || null,
     };
 
-    // Track usage (throttled, fire-and-forget) — does not block request
-    trackUsage(req, res, () => {});
+    if (recordUsage) {
+      // Throttled, fire-and-forget usage tracking receives current firm/role state.
+      trackUsage(req, res, () => {});
+    }
 
     return next();
-  } catch (err) {
-    return next(err);
+  } catch (error) {
+    return next(error);
   }
-};
+}
+
+export function authRequired(req, res, next) {
+  return authenticate(req, res, next, { recordUsage: true });
+}
+
+// Read-only identity path for endpoints whose contract forbids database writes.
+export function authRequiredWithoutUsageTracking(req, res, next) {
+  return authenticate(req, res, next, { recordUsage: false });
+}

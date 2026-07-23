@@ -31,7 +31,7 @@ export function getEmailTransporter() {
 }
 
 
-export async function sendReminderEmail(to, subject, text) {
+export async function sendReminderEmail(to, subject, text, { messageId } = {}) {
   const tx = getEmailTransporter();
 
   const from =
@@ -39,10 +39,11 @@ export async function sendReminderEmail(to, subject, text) {
     process.env.EMAIL_USER ||
     'CA PRO Toolkit <no-reply@capro.local>';
 
-  await tx.sendMail({
+  return tx.sendMail({
     from,
     to,
     subject,
-    text
+    text,
+    ...(messageId ? { messageId } : {})
   });
 }

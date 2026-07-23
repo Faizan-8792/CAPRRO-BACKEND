@@ -40,7 +40,14 @@ function sanitizeObject(obj) {
  * Express middleware: sanitizes req.body, req.query, and req.params
  */
 export function sanitizeInputs(req, res, next) {
-  if (req.body && typeof req.body === "object") {
+  const isOpaqueImportPreview =
+    req.method === "POST" && /^\/api\/imports\/preview\/?$/.test(req.path);
+
+  if (
+    !isOpaqueImportPreview &&
+    req.body &&
+    typeof req.body === "object"
+  ) {
     req.body = sanitizeObject(req.body);
   }
   if (req.query && typeof req.query === "object") {

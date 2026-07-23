@@ -1,6 +1,7 @@
 // src/controllers/firm.controller.js
 import Firm from "../models/Firm.js";
 import User from "../models/User.js";
+import AppConfig from "../models/AppConfig.js";
 
 async function assertFirmAdmin(userId, firmId) {
   const firm = await Firm.findById(firmId);
@@ -37,6 +38,9 @@ export const createFirm = async (req, res, next) => {
       return res.status(409).json({ ok: false, error: "Firm handle already taken" });
     }
 
+    const featureFlags = await AppConfig.getFeatureFlags();
+    const ownerIsActive = featureFlags.zeroApprovalFirmCreation;
+
     let joinCode;
     while (true) {
       joinCode = Firm.generateJoinCode();
@@ -56,19 +60,23 @@ export const createFirm = async (req, res, next) => {
       isActive: true,
     });
 
-    // owner becomes FIRM_ADMIN but INACTIVE until Super Admin approves
+    // Rollout flag keeps the legacy approval path available for emergency rollback.
     await User.findByIdAndUpdate(
       userId,
       {
         role: "FIRM_ADMIN",
         accountType: "FIRM_USER",
         firmId: firm._id,
-        isActive: false,  // PENDING APPROVAL
+        isActive: ownerIsActive,
       },
       { new: true }
     );
 
-    return res.status(201).json({ ok: true, firm });
+    return res.status(201).json({
+      ok: true,
+      firm,
+      approvalRequired: !ownerIsActive,
+    });
   } catch (err) {
     next(err);
   }
@@ -205,21 +213,36 @@ export const joinFirmByCode = async (req, res, next) => {
       return res.status(404).json({ ok: false, error: "User not found" });
     }
 
-    user.firmId = firm._id;
-    user.accountType = "FIRM_USER";
-    await user.save();
+    const alreadyMember =
+      user.firmId && String(user.firmId) === String(firm._id);
+    if (user.firmId && !alreadyMember) {
+      return res.status(409).json({
+        ok: false,
+        error: "User is already linked to another firm",
+      });
+    }
 
-    // ✅ FIX: Return UPDATED USER with firmId for popup.js
-    const updatedUser = await User.findById(userId).select('firmId accountType role name email');
+    if (!alreadyMember) {
+      user.firmId = firm._id;
+      user.accountType = "FIRM_USER";
+      // Firm-admin authority never carries into a newly joined tenant.
+      if (user.role !== "SUPER_ADMIN") user.role = "USER";
+      await user.save();
+    }
+
+    const updatedUser = await User.findById(userId).select(
+      "firmId accountType role name email"
+    );
 
     return res.json({
       ok: true,
+      alreadyMember: !!alreadyMember,
       firm: {
         id: firm._id,
         displayName: firm.displayName,
         handle: firm.handle,
       },
-      user: updatedUser  // ✅ This fixes popup.js
+      user: updatedUser,
     });
   } catch (err) {
     next(err);
@@ -314,12 +337,21 @@ export const deleteFirmUser = async (req, res, next) => {
       return res.status(400).json({ ok: false, error: "Cannot delete yourself" });
     }
 
-    // Delete user from firm (set firmId null)
-    await User.findByIdAndUpdate(targetUserId, {
-      firmId: null,
-      accountType: "INDIVIDUAL",
-      role: "USER"
+    const targetUser = await User.findOne({
+      _id: targetUserId,
+      firmId: firm._id,
     });
+    if (!targetUser) {
+      return res.status(404).json({ ok: false, error: "User not found in firm" });
+    }
+    if (targetUser.role === "SUPER_ADMIN") {
+      return res.status(400).json({ ok: false, error: "Cannot remove super admin account" });
+    }
+
+    targetUser.firmId = null;
+    targetUser.accountType = "INDIVIDUAL";
+    targetUser.role = "USER";
+    await targetUser.save();
 
     // Return updated user list
     const users = await User.find({ firmId: firm._id }).select(

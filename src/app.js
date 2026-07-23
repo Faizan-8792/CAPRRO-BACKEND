@@ -16,10 +16,45 @@ import taskRoutes from "./routes/task.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
 import taxworkerRoutes from "./routes/taxworker.routes.js";
 import appConfigRoutes from "./routes/appconfig.routes.js";
+import complianceRoutes from "./routes/compliance.routes.js";
+import homeRoutes from "./routes/home.routes.js";
+import importRoutes from "./routes/import.routes.js";
+import gstReconciliationRoutes from "./routes/gst-reconciliation.routes.js";
+import tdsHealthRoutes from "./routes/tds-health.routes.js";
+import operationsRoutes from "./routes/operations.routes.js";
+import caseRoutes from "./routes/case.routes.js";
+import engagementRoutes from "./routes/engagement.routes.js";
+import firmOperationsRoutes from "./routes/firm-operations.routes.js";
+import digestRoutes from "./routes/digest.routes.js";
 import { sanitizeInputs } from "./middleware/sanitize.middleware.js";
 import { trackUsage } from "./middleware/usage-tracker.middleware.js";
 import { requestId } from "./middleware/request-id.middleware.js";
 import { maintenanceGate } from "./middleware/maintenance.middleware.js";
+import { DEFAULT_FEATURE_FLAGS } from "./models/AppConfig.js";
+
+const PUBLIC_ERROR_CODES = new Set([
+  "INVALID_MUTATION_KEY",
+  "MUTATION_KEY_REUSED",
+  "MUTATION_RECEIPT_LIMIT",
+  "ENGAGEMENT_REVISION_CONFLICT",
+  "ENGAGEMENT_SNAPSHOT_CHANGED",
+  "ENGAGEMENT_COMPLETE_READ_ONLY",
+  "ENGAGEMENT_REVIEWER_REQUIRED",
+  "ENGAGEMENT_REVIEWER_ROLE_REQUIRED",
+  "ENGAGEMENT_REVIEWER_REASSIGNMENT_CONFLICT",
+  "ENGAGEMENT_TEMPLATE_REVIEW_REQUIRED",
+  "ENGAGEMENT_TEMPLATE_REVIEW_DRAFT_ONLY",
+  "ENGAGEMENT_FINDING_REVIEW_CONFLICT",
+  "ENGAGEMENT_CLOSURE_INCOMPLETE",
+  "INVALID_ENGAGEMENT_TRANSITION",
+  "INVALID_FINDING_TRANSITION",
+  "AUDIT_WORKING_PAPER_REVISION_CONFLICT",
+  "AUDIT_ANALYSIS_REVISION_CONFLICT",
+  "AUDIT_WORKING_PAPER_ROW_KEY_EXISTS",
+  "AUDIT_PROPOSAL_ALREADY_DECIDED",
+  "AUDIT_SOURCE_ROW_CHANGED",
+  "AUDIT_AI_CONSENT_REQUIRED",
+]);
 
 const app = express();
 
@@ -158,7 +193,9 @@ app.use((req, res, next) => {
   const len = Number(req.headers["content-length"] || 0);
   if (len === 0) return next();
   const ct = String(req.headers["content-type"] || "").toLowerCase();
-  if (!ct.includes("application/json")) {
+  const isCaseOcrMultipart =
+    req.path === "/api/cases/ocr" && ct.includes("multipart/form-data");
+  if (!ct.includes("application/json") && !isCaseOcrMultipart) {
     return res.status(415).json({
       ok: false,
       error: "Unsupported Media Type — Content-Type must be application/json",
@@ -249,18 +286,75 @@ app.use("/api/super", superLimiter, superRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/audit", auditRoutes);
 app.use("/api/taxworker", taxworkerRoutes);
+app.use("/api/home", homeRoutes);
+app.use("/api/compliance", complianceRoutes);
+app.use("/api/imports", importRoutes);
+app.use("/api/gst-reconciliation", gstReconciliationRoutes);
+app.use("/api/tds-health", tdsHealthRoutes);
+app.use("/api/operations", operationsRoutes);
+app.use("/api/cases", caseRoutes);
+app.use("/api/engagements", engagementRoutes);
+app.use("/api/digests", digestRoutes);
+app.use("/api", firmOperationsRoutes);
 
 /* ===============================
    GLOBAL ERROR HANDLER
 ================================ */
+function errorCategory(status) {
+  if (status === 401) return "AUTHENTICATION_REQUIRED";
+  if (status === 403) return "ACCESS_DENIED";
+  if (status === 404) return "NOT_FOUND";
+  if (status === 409) return "CONFLICT";
+  if (status === 413) return "FILE_TOO_LARGE";
+  if (status === 429) return "RATE_LIMITED";
+  if (status >= 500) return "SERVICE_ERROR";
+  if (status === 400 || status === 422) return "INPUT_ERROR";
+  return "REQUEST_ERROR";
+}
+
+function publicErrorMessage({ err, status, multerStatus, publicCode }) {
+  if (!isProd) return err?.message || "Internal server error";
+  if (publicCode && err?.message) return err.message;
+  if (multerStatus === 413) return "The selected file exceeds the permitted size.";
+  if (multerStatus === 400) return "The selected file could not be processed. Review it and try again.";
+
+  if (status === 400 || status === 422) {
+    return "Some submitted information could not be accepted. Review the form and try again.";
+  }
+  if (status === 401) return "Your session has expired. Sign in again.";
+  if (status === 403) return "You do not have permission to complete this action.";
+  if (status === 404) return "The requested item could not be found.";
+  if (status === 409) return "This information changed while you were working. Refresh and try again.";
+  if (status === 413) return "The selected file exceeds the permitted size.";
+  if (status === 429) return "Too many requests were received. Wait briefly and try again.";
+  if (status >= 500) {
+    return "We could not complete your request. Try again, or contact support with the request ID if the issue continues.";
+  }
+  return "The request could not be completed. Review the information and try again.";
+}
+
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  const status = err.status || err.statusCode || 500;
-  console.error(`[ERROR] ${req.method} ${req.path} →`, err.message, err.stack);
+  const multerStatus = err?.name === "MulterError"
+    ? err.code === "LIMIT_FILE_SIZE" ? 413 : 400
+    : null;
+  const candidateStatus = Number(multerStatus || err?.status || err?.statusCode || 500);
+  const status = Number.isInteger(candidateStatus) && candidateStatus >= 400 && candidateStatus <= 599
+    ? candidateStatus
+    : 500;
+  console.error(`[ERROR] ${req.method} ${req.path} →`, err?.message, err?.stack);
+  const rolloutChanged =
+    err?.code === "FEATURE_ROLLOUT_CHANGED" &&
+    Object.prototype.hasOwnProperty.call(DEFAULT_FEATURE_FLAGS, err?.featureFlag);
+  const publicCode = rolloutChanged || PUBLIC_ERROR_CODES.has(err?.code);
   res.status(status).json({
     ok: false,
-    error: err.message || "Internal server error",
-    ...(process.env.NODE_ENV !== "production" && { stack: err.stack }),
+    error: publicErrorMessage({ err, status, multerStatus, publicCode }),
+    category: errorCategory(status),
+    requestId: req.id || "",
+    ...(publicCode ? { code: err.code } : {}),
+    ...(rolloutChanged ? { featureFlag: err.featureFlag } : {}),
+    ...(!isProd && { stack: err?.stack }),
   });
 });
 

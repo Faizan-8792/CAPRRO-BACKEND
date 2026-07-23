@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "1.0.0",
+  "task": "Locate exact monetization code only: subscription, billing, pricing, paid plan, free tier, entitlement, feature quota, upgrade paywall, trial, payment. Also separate rollout flags, auth, authorization, usage telemetry, consent, rate limits, and operational abuse controls.",
+  "detectedStack": [
+    "express"
+  ],
+  "selectedFiles": [
+    {
+      "path": "src/middleware/auth.middleware.js",
+      "tags": [
+        "auth",
+        "authmiddleware",
+        "js",
+        "middleware",
+        "required",
+        "src",
+        "tracking",
+        "usage",
+        "without"
+      ],
+      "importance": 70,
+      "role": "seed",
+      "hopDistance": 0,
+      "matchScore": 280
+    }
+  ],
+  "warnings": [
+    "src/middleware/auth.middleware.js has fan-in > 10 (18 dependents)"
+  ],
+  "tokenBudget": {
+    "pointEstimate": 560,
+    "range": {
+      "low": 448,
+      "high": 672
+    },
+    "reductionPercent": 100
+  }
+}

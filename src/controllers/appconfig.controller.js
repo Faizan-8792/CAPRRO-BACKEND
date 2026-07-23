@@ -1,5 +1,8 @@
 // src/controllers/appconfig.controller.js
-import AppConfig from "../models/AppConfig.js";
+import { randomUUID } from "node:crypto";
+import AppConfig, { DEFAULT_FEATURE_FLAGS } from "../models/AppConfig.js";
+import { assertCaseIndexesReady } from "../services/case-index-readiness.service.js";
+import { assertEngagementIndexesReady } from "../services/engagement-index-readiness.service.js";
 import User from "../models/User.js";
 
 const SUPER_EMAIL = "saifullahfaizan786@gmail.com";
@@ -16,12 +19,18 @@ function assertSuper(user) {
 export const getAppConfig = async (req, res, next) => {
   try {
     const cfg = await AppConfig.getInstance();
+    const featureFlags = {
+      ...DEFAULT_FEATURE_FLAGS,
+      ...(cfg.featureFlags || {}),
+    };
+
     return res.json({
       ok: true,
       config: {
         maintenanceMode: !!cfg.maintenanceMode,
         maintenanceMessage: cfg.maintenanceMessage || "",
         welcomeAnnouncement: cfg.welcomeAnnouncement || null,
+        featureFlags,
         updatedAt: cfg.updatedAt,
       },
     });
@@ -45,6 +54,94 @@ export const dismissWelcome = async (req, res, next) => {
     );
 
     return res.json({ ok: true, welcomeSeenVersion: version });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Super-only: update rollout flags without replacing unspecified values.
+export const updateFeatureFlags = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    const { featureFlags } = req.body || {};
+
+    if (!featureFlags || typeof featureFlags !== "object" || Array.isArray(featureFlags)) {
+      return res.status(400).json({ ok: false, error: "featureFlags object is required" });
+    }
+
+    const unknownKeys = Object.keys(featureFlags).filter(
+      (key) => !Object.prototype.hasOwnProperty.call(DEFAULT_FEATURE_FLAGS, key)
+    );
+    if (unknownKeys.length) {
+      return res.status(400).json({
+        ok: false,
+        error: `Unknown feature flags: ${unknownKeys.join(", ")}`,
+      });
+    }
+
+    const update = {};
+    for (const key of Object.keys(DEFAULT_FEATURE_FLAGS)) {
+      if (Object.prototype.hasOwnProperty.call(featureFlags, key)) {
+        if (typeof featureFlags[key] !== "boolean") {
+          return res.status(400).json({
+            ok: false,
+            error: `Feature flag ${key} must be boolean`,
+          });
+        }
+        update[`featureFlags.${key}`] = featureFlags[key];
+      }
+    }
+
+    if (!Object.keys(update).length) {
+      return res.status(400).json({ ok: false, error: "No feature flags to update" });
+    }
+
+    if (featureFlags.noticeCases === true) {
+      await assertCaseIndexesReady();
+    }
+    if (featureFlags.assuranceEngagements === true) {
+      await assertEngagementIndexesReady();
+    }
+    if (featureFlags.auditWorkingPapers === true) {
+      const { assertAuditWorkingPaperIndexesReady } = await import(
+        "../services/audit-working-paper-index-readiness.service.js"
+      );
+      await assertAuditWorkingPaperIndexesReady();
+    }
+
+    const versionIncrements = {};
+    if (Object.prototype.hasOwnProperty.call(featureFlags, "tdsHealth")) {
+      versionIncrements["featureFlagVersions.tdsHealth"] = 1;
+    }
+    if (Object.prototype.hasOwnProperty.call(featureFlags, "noticeCases")) {
+      versionIncrements["featureFlagVersions.noticeCases"] = 1;
+      update["featureFlagPublicationFences.noticeCases"] = randomUUID();
+    }
+    if (Object.prototype.hasOwnProperty.call(featureFlags, "assuranceEngagements")) {
+      versionIncrements["featureFlagVersions.assuranceEngagements"] = 1;
+      update["featureFlagPublicationFences.assuranceEngagements"] = randomUUID();
+    }
+    if (Object.prototype.hasOwnProperty.call(featureFlags, "auditWorkingPapers")) {
+      versionIncrements["featureFlagVersions.auditWorkingPapers"] = 1;
+      update["featureFlagPublicationFences.auditWorkingPapers"] = randomUUID();
+    }
+    update.updatedBy = req.user.id;
+    await AppConfig.findByIdAndUpdate(
+      "singleton",
+      {
+        $set: update,
+        ...(Object.keys(versionIncrements).length
+          ? { $inc: versionIncrements }
+          : {}),
+      },
+      { upsert: true, new: true }
+    );
+    AppConfig.invalidateCache();
+
+    return res.json({
+      ok: true,
+      featureFlags: await AppConfig.getFeatureFlags(),
+    });
   } catch (err) {
     next(err);
   }

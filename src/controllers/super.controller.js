@@ -103,8 +103,6 @@ export const getSuperDashboardStats = async (req, res, next) => {
       firmAdmins,
       totalFirms,
       activeFirms,
-      premiumFirms,
-      freeFirms,
       totalTasks,
       activeTasks,
       pendingAdmins,
@@ -116,8 +114,6 @@ export const getSuperDashboardStats = async (req, res, next) => {
       User.countDocuments({ role: "FIRM_ADMIN" }),
       Firm.countDocuments({}),
       Firm.countDocuments({ isActive: true }),
-      Firm.countDocuments({ planType: "PREMIUM" }),
-      Firm.countDocuments({ planType: "FREE" }),
       Task.countDocuments({}),
       Task.countDocuments({ isActive: true }),
       User.countDocuments({ role: "FIRM_ADMIN", isActive: false }),
@@ -162,8 +158,9 @@ export const getSuperDashboardStats = async (req, res, next) => {
         firms: {
           total: totalFirms,
           active: activeFirms,
-          premium: premiumFirms,
-          free: freeFirms,
+          accessModel: "FREE",
+          premium: 0,
+          free: totalFirms,
         },
         tasks: {
           total: totalTasks,
@@ -280,9 +277,14 @@ export const listFirms = async (req, res, next) => {
     const ownersById = new Map();
     owners.forEach((u) => ownersById.set(String(u._id), u));
 
-    const enriched = firms.map((f) => ({
-      ...f,
-      owner: ownersById.get(String(f.ownerUserId)) || null,
+    const enriched = firms.map((firm) => ({
+      ...firm,
+      // Legacy plan values remain in storage for backward compatibility only.
+      // Product access is free and does not expire for every firm.
+      planType: "FREE",
+      planExpiry: null,
+      accessModel: "FREE",
+      owner: ownersById.get(String(firm.ownerUserId)) || null,
     }));
 
     return res.json({ ok: true, firms: enriched });
@@ -318,39 +320,38 @@ export const listFirmUsersForSuper = async (req, res, next) => {
   }
 };
 
-// 6) Update firm plan (FREE / PREMIUM) + expiry + active flag
+// 6) Update firm operational access. Product features are free for every firm.
+// The legacy /plan route name remains temporarily for client compatibility.
 export const updateFirmPlan = async (req, res, next) => {
   try {
     assertSuper(req.user);
 
     const { firmId } = req.params;
-    const { planType, planExpiry, isActive } = req.body || {};
+    const { isActive } = req.body || {};
 
     const firm = await Firm.findById(firmId);
     if (!firm) {
       return res.status(404).json({ ok: false, error: "Firm not found" });
     }
 
-    if (planType && ["FREE", "PREMIUM"].includes(planType)) {
-      firm.planType = planType;
-    }
-
-    if (planExpiry === null) {
-      firm.planExpiry = null;
-    } else if (planExpiry) {
-      const d = new Date(planExpiry);
-      if (!Number.isNaN(d.getTime())) {
-        firm.planExpiry = d;
-      }
-    }
-
+    // Retain legacy fields without allowing them to restrict product access.
+    firm.planType = "FREE";
+    firm.planExpiry = null;
     if (typeof isActive === "boolean") {
       firm.isActive = isActive;
     }
 
     await firm.save();
 
-    return res.json({ ok: true, firm });
+    return res.json({
+      ok: true,
+      firm: {
+        ...firm.toObject(),
+        planType: "FREE",
+        planExpiry: null,
+        accessModel: "FREE",
+      },
+    });
   } catch (err) {
     next(err);
   }

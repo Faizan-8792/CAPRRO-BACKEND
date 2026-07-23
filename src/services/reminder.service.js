@@ -27,17 +27,22 @@ function escHtml(s) {
     .replaceAll("'", "&#39;");
 }
 
-// ---------- SAME FUNCTION, SAME SIGNATURE ----------
-// ONLY email sending engine is changed (nodemailer → Resend)
+// ---------- Provider-bound Resend delivery ----------
 export async function sendComplianceReminderEmail({
   toEmail,
   title,
   clientLabel,
   dueDateISO,
   daysLeft,
+  idempotencyKey,
 }) {
   if (!toEmail) {
     throw new Error("sendComplianceReminderEmail: toEmail is required");
+  }
+
+  const normalizedIdempotencyKey = String(idempotencyKey || "").trim();
+  if (!normalizedIdempotencyKey) {
+    throw new Error("sendComplianceReminderEmail: idempotencyKey is required");
   }
 
   const due = new Date(dueDateISO);
@@ -46,7 +51,9 @@ export async function sendComplianceReminderEmail({
     : due.toDateString();
 
   let whenLine;
-  if (daysLeft === 0) {
+  if (daysLeft < 0) {
+    whenLine = `Overdue by ${Math.abs(daysLeft)} day(s)`;
+  } else if (daysLeft === 0) {
     whenLine = "Due today";
   } else if (daysLeft === 1) {
     whenLine = "Due tomorrow";
@@ -88,13 +95,16 @@ export async function sendComplianceReminderEmail({
     </div>
   `;
 
-  const { error } = await getResend().emails.send({
-    from: FROM_EMAIL,
-    to: [toEmail],
-    subject,
-    text,
-    html,
-  });
+  const { data, error } = await getResend().emails.send(
+    {
+      from: FROM_EMAIL,
+      to: [toEmail],
+      subject,
+      text,
+      html,
+    },
+    { idempotencyKey: normalizedIdempotencyKey }
+  );
 
   if (error) {
     console.error("❌ Resend compliance reminder failed:", error);
@@ -102,4 +112,5 @@ export async function sendComplianceReminderEmail({
   }
 
   console.log("📧 Compliance reminder sent to", toEmail);
+  return { providerMessageId: data?.id || null };
 }

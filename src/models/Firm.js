@@ -45,6 +45,28 @@ const FirmSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  timezone: {
+    type: String,
+    trim: true,
+    maxlength: 80,
+    default: "Asia/Kolkata",
+    validate: {
+      validator(value) {
+        try {
+          new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      message: "timezone must be a valid IANA time zone",
+    },
+  },
+  digestSettings: {
+    dailyHour: { type: Number, min: 0, max: 23, default: 8 },
+    weeklyDay: { type: Number, min: 0, max: 6, default: 1 },
+    weeklyHour: { type: Number, min: 0, max: 23, default: 8 },
+  },
 }, { timestamps: true });
 
 // Cryptographically secure 6-char join code

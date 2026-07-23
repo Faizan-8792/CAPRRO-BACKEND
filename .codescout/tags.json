@@ -1,0 +1,712 @@
+{
+  "schemaVersion": "1.0.0",
+  "tags": {
+    "src/app.js": [
+      "app",
+      "js",
+      "src"
+    ],
+    "src/server.js": [
+      "js",
+      "server",
+      "src"
+    ],
+    "tests/app-config-checklist.mjs": [
+      "app",
+      "checklist",
+      "config",
+      "mjs",
+      "tests"
+    ],
+    "tests/double-click-guard-checklist.mjs": [
+      "checklist",
+      "click",
+      "double",
+      "guard",
+      "mjs",
+      "tests"
+    ],
+    "tests/firm-join-sync-checklist.mjs": [
+      "checklist",
+      "firm",
+      "join",
+      "mjs",
+      "sync",
+      "tests"
+    ],
+    "tests/production-readiness-checklist.mjs": [
+      "checklist",
+      "mjs",
+      "production",
+      "readiness",
+      "tests"
+    ],
+    "tests/task-flow-checklist.mjs": [
+      "checklist",
+      "flow",
+      "mjs",
+      "task",
+      "tests",
+      "update"
+    ],
+    "tests/taxworker-flow-checklist.mjs": [
+      "checklist",
+      "flow",
+      "mjs",
+      "taxworker",
+      "tests"
+    ],
+    "public/admin/admin-tasks.js": [
+      "admin",
+      "js",
+      "public",
+      "tasks"
+    ],
+    "public/admin/admin.js": [
+      "admin",
+      "js",
+      "public"
+    ],
+    "public/admin/login.js": [
+      "admin",
+      "js",
+      "login",
+      "public"
+    ],
+    "public/admin/super.js": [
+      "admin",
+      "js",
+      "public",
+      "super"
+    ],
+    "src/config/db.js": [
+      "config",
+      "db",
+      "js",
+      "src"
+    ],
+    "src/config/email.js": [
+      "config",
+      "email",
+      "get",
+      "js",
+      "src",
+      "transporter"
+    ],
+    "src/config/tax-templates.js": [
+      "and",
+      "config",
+      "date",
+      "documents",
+      "due",
+      "get",
+      "js",
+      "list",
+      "period",
+      "required",
+      "src",
+      "suggest",
+      "tax",
+      "template",
+      "templates",
+      "types"
+    ],
+    "src/controllers/appconfig.controller.js": [
+      "announcement",
+      "app",
+      "appconfig",
+      "appconfigcontroller",
+      "config",
+      "controller",
+      "controllers",
+      "dismiss",
+      "feature",
+      "flags",
+      "get",
+      "js",
+      "maintenance",
+      "src",
+      "update",
+      "welcome"
+    ],
+    "src/controllers/audit.controller.js": [
+      "audit",
+      "auditcontroller",
+      "controller",
+      "controllers",
+      "js",
+      "src"
+    ],
+    "src/controllers/auth.controller.js": [
+      "and",
+      "auth",
+      "authcontroller",
+      "controller",
+      "controllers",
+      "get",
+      "google",
+      "js",
+      "login",
+      "me",
+      "otp",
+      "send",
+      "src",
+      "verify"
+    ],
+    "src/controllers/compliance-generation.controller.js": [
+      "compliance",
+      "controller",
+      "controllers",
+      "generation",
+      "generationcontroller",
+      "js",
+      "src"
+    ],
+    "src/controllers/compliance.controller.js": [
+      "compliance",
+      "compliancecontroller",
+      "controller",
+      "controllers",
+      "js",
+      "src"
+    ],
+    "src/controllers/firm.controller.js": [
+      "admin",
+      "by",
+      "code",
+      "controller",
+      "controllers",
+      "create",
+      "delete",
+      "firm",
+      "firmcontroller",
+      "get",
+      "id",
+      "join",
+      "js",
+      "list",
+      "my",
+      "request",
+      "rotate",
+      "src",
+      "update",
+      "user",
+      "users"
+    ],
+    "src/controllers/import.controller.js": [
+      "controller",
+      "controllers",
+      "import",
+      "importcontroller",
+      "js",
+      "src"
+    ],
+    "src/controllers/operations.controller.js": [
+      "controller",
+      "controllers",
+      "js",
+      "operations",
+      "operationscontroller",
+      "src"
+    ],
+    "src/controllers/reminder.controller.js": [
+      "controller",
+      "controllers",
+      "js",
+      "reminder",
+      "remindercontroller",
+      "src"
+    ],
+    "src/controllers/stats.controller.js": [
+      "controller",
+      "controllers",
+      "firm",
+      "get",
+      "js",
+      "overview",
+      "src",
+      "stats",
+      "statscontroller"
+    ],
+    "src/controllers/super.controller.js": [
+      "admin",
+      "admins",
+      "approve",
+      "controller",
+      "controllers",
+      "dashboard",
+      "delete",
+      "firm",
+      "firms",
+      "for",
+      "get",
+      "js",
+      "list",
+      "pending",
+      "plan",
+      "revoke",
+      "src",
+      "stats",
+      "super",
+      "supercontroller",
+      "update",
+      "usage",
+      "user",
+      "users"
+    ],
+    "src/controllers/task.controller.js": [
+      "archive",
+      "board",
+      "complete",
+      "controller",
+      "controllers",
+      "create",
+      "from",
+      "get",
+      "js",
+      "my",
+      "open",
+      "src",
+      "task",
+      "taskcontroller",
+      "tasks",
+      "update",
+      "user"
+    ],
+    "src/controllers/taxworker.controller.js": [
+      "add",
+      "client",
+      "clients",
+      "controller",
+      "controllers",
+      "create",
+      "custom",
+      "delete",
+      "document",
+      "get",
+      "js",
+      "list",
+      "remove",
+      "session",
+      "sessions",
+      "src",
+      "stats",
+      "taxworker",
+      "taxworkercontroller",
+      "templates",
+      "update"
+    ],
+    "src/middleware/auth.middleware.js": [
+      "auth",
+      "authmiddleware",
+      "js",
+      "middleware",
+      "required",
+      "src",
+      "tracking",
+      "usage",
+      "without"
+    ],
+    "src/middleware/authorization.middleware.js": [
+      "admin",
+      "authorization",
+      "authorizationmiddleware",
+      "firm",
+      "js",
+      "member",
+      "middleware",
+      "require",
+      "src",
+      "super"
+    ],
+    "src/middleware/maintenance.middleware.js": [
+      "js",
+      "maintenance",
+      "maintenancemiddleware",
+      "middleware",
+      "routes",
+      "src"
+    ],
+    "src/middleware/request-id.middleware.js": [
+      "id",
+      "idmiddleware",
+      "js",
+      "middleware",
+      "request",
+      "src"
+    ],
+    "src/middleware/role.middleware.js": [
+      "js",
+      "middleware",
+      "require",
+      "role",
+      "rolemiddleware",
+      "roles",
+      "src"
+    ],
+    "src/middleware/rollout.middleware.js": [
+      "feature",
+      "flag",
+      "js",
+      "middleware",
+      "require",
+      "rollout",
+      "rolloutmiddleware",
+      "src"
+    ],
+    "src/middleware/sanitize.middleware.js": [
+      "id",
+      "inputs",
+      "is",
+      "js",
+      "middleware",
+      "object",
+      "param",
+      "sanitize",
+      "sanitizemiddleware",
+      "src",
+      "valid",
+      "validate"
+    ],
+    "src/middleware/usage-tracker.middleware.js": [
+      "js",
+      "middleware",
+      "src",
+      "track",
+      "tracker",
+      "trackermiddleware",
+      "usage"
+    ],
+    "src/models/ActivityEvent.js": [
+      "activity",
+      "activityevent",
+      "event",
+      "js",
+      "models",
+      "src"
+    ],
+    "src/models/AppConfig.js": [
+      "app",
+      "appconfig",
+      "config",
+      "default",
+      "feature",
+      "flags",
+      "js",
+      "models",
+      "src"
+    ],
+    "src/models/AutomationJob.js": [
+      "automation",
+      "automationjob",
+      "job",
+      "js",
+      "models",
+      "src"
+    ],
+    "src/models/Client.js": [
+      "client",
+      "js",
+      "models",
+      "src"
+    ],
+    "src/models/ComplianceOverride.js": [
+      "compliance",
+      "complianceoverride",
+      "js",
+      "models",
+      "override",
+      "src"
+    ],
+    "src/models/ComplianceRule.js": [
+      "compliance",
+      "compliancerule",
+      "js",
+      "models",
+      "rule",
+      "src"
+    ],
+    "src/models/Firm.js": [
+      "firm",
+      "js",
+      "models",
+      "src"
+    ],
+    "src/models/ImportBatch.js": [
+      "batch",
+      "import",
+      "importbatch",
+      "js",
+      "models",
+      "src"
+    ],
+    "src/models/Otp.js": [
+      "js",
+      "models",
+      "otp",
+      "src"
+    ],
+    "src/models/Reminder.js": [
+      "js",
+      "models",
+      "reminder",
+      "src"
+    ],
+    "src/models/Task.js": [
+      "js",
+      "models",
+      "src",
+      "task"
+    ],
+    "src/models/TaxWorkSession.js": [
+      "js",
+      "models",
+      "session",
+      "src",
+      "tax",
+      "taxworksession",
+      "work"
+    ],
+    "src/models/User.js": [
+      "js",
+      "models",
+      "src",
+      "user"
+    ],
+    "src/routes/appconfig.routes.js": [
+      "appconfig",
+      "appconfigroutes",
+      "js",
+      "routes",
+      "src"
+    ],
+    "src/routes/audit.routes.js": [
+      "audit",
+      "auditroutes",
+      "js",
+      "routes",
+      "src"
+    ],
+    "src/routes/auth.routes.js": [
+      "auth",
+      "authroutes",
+      "js",
+      "routes",
+      "src"
+    ],
+    "src/routes/compliance.routes.js": [
+      "compliance",
+      "complianceroutes",
+      "js",
+      "routes",
+      "src"
+    ],
+    "src/routes/firm.routes.js": [
+      "firm",
+      "firmroutes",
+      "js",
+      "routes",
+      "src"
+    ],
+    "src/routes/import.routes.js": [
+      "import",
+      "importroutes",
+      "js",
+      "routes",
+      "src"
+    ],
+    "src/routes/operations.routes.js": [
+      "js",
+      "operations",
+      "operationsroutes",
+      "routes",
+      "src"
+    ],
+    "src/routes/reminder.routes.js": [
+      "js",
+      "reminder",
+      "reminderroutes",
+      "routes",
+      "src"
+    ],
+    "src/routes/stats.routes.js": [
+      "js",
+      "routes",
+      "src",
+      "stats",
+      "statsroutes"
+    ],
+    "src/routes/super.routes.js": [
+      "js",
+      "routes",
+      "src",
+      "super",
+      "superroutes"
+    ],
+    "src/routes/task.routes.js": [
+      "js",
+      "routes",
+      "src",
+      "task",
+      "taskroutes"
+    ],
+    "src/routes/taxworker.routes.js": [
+      "js",
+      "routes",
+      "src",
+      "taxworker",
+      "taxworkerroutes"
+    ],
+    "src/services/activity.service.js": [
+      "activity",
+      "activityservice",
+      "js",
+      "service",
+      "services",
+      "src"
+    ],
+    "src/services/automation-job.service.js": [
+      "automation",
+      "job",
+      "jobservice",
+      "js",
+      "service",
+      "services",
+      "src"
+    ],
+    "src/services/automation-worker.service.js": [
+      "automation",
+      "js",
+      "service",
+      "services",
+      "src",
+      "worker",
+      "workerservice"
+    ],
+    "src/services/compliance-generation.service.js": [
+      "build",
+      "calculate",
+      "compliance",
+      "date",
+      "due",
+      "generation",
+      "generationservice",
+      "hash",
+      "job",
+      "js",
+      "keys",
+      "kind",
+      "normalize",
+      "preview",
+      "render",
+      "request",
+      "service",
+      "services",
+      "src",
+      "title",
+      "value",
+      "version"
+    ],
+    "src/services/compliance-period.service.js": [
+      "applicable",
+      "applies",
+      "compliance",
+      "js",
+      "parse",
+      "period",
+      "periodservice",
+      "rule",
+      "select",
+      "service",
+      "services",
+      "src",
+      "to"
+    ],
+    "src/services/email.service.js": [
+      "email",
+      "emailservice",
+      "js",
+      "service",
+      "services",
+      "src"
+    ],
+    "src/services/import-preview.service.js": [
+      "import",
+      "js",
+      "preview",
+      "previewservice",
+      "service",
+      "services",
+      "src"
+    ],
+    "src/services/otp.service.js": [
+      "code",
+      "generate",
+      "js",
+      "otp",
+      "otpservice",
+      "service",
+      "services",
+      "src"
+    ],
+    "src/services/reminder.service.js": [
+      "js",
+      "reminder",
+      "reminderservice",
+      "service",
+      "services",
+      "src"
+    ],
+    "src/services/token.service.js": [
+      "access",
+      "js",
+      "service",
+      "services",
+      "sign",
+      "src",
+      "token",
+      "tokenservice",
+      "verify"
+    ],
+    "src/utils/constants.js": [
+      "account",
+      "constants",
+      "expiry",
+      "js",
+      "minutes",
+      "otp",
+      "purposes",
+      "roles",
+      "src",
+      "types",
+      "utils"
+    ],
+    "public/admin/compliance-assistant/assistant.js": [
+      "admin",
+      "assistant",
+      "compliance",
+      "js",
+      "public"
+    ],
+    "public/admin/compliance-assistant/priority-engine.js": [
+      "admin",
+      "assistant",
+      "compliance",
+      "compute",
+      "engine",
+      "js",
+      "priority",
+      "public"
+    ],
+    "src/docs/api-spec.md": [
+      "api",
+      "api-docs",
+      "docs",
+      "docs-folder",
+      "documentation",
+      "md",
+      "spec",
+      "src"
+    ]
+  }
+}

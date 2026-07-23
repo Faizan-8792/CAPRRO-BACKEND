@@ -110,6 +110,56 @@ function escapeHtml(s) {
         .replaceAll("'", '&#39;');
 }
 
+function formatEnumLabel(value) {
+    const labels = {
+        FIRM_ADMIN: 'Firm administrator',
+        SUPER_ADMIN: 'Platform administrator',
+        USER: 'Team member',
+        FREE: 'Free',
+        PRO: 'Pro',
+        ENTERPRISE: 'Enterprise',
+    };
+    const normalized = String(value || '').trim().toUpperCase();
+    if (labels[normalized]) return labels[normalized];
+    return normalized
+        .toLowerCase()
+        .split('_')
+        .filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+}
+
+function cleanRequestId(value) {
+    const requestId = String(value || '').trim();
+    return /^[A-Za-z0-9._:-]{1,96}$/.test(requestId) ? requestId : '';
+}
+
+function safeUserMessage(error, fallback = 'The request could not be completed. Try again.') {
+    const status = Number(error?.status || 0);
+    let message = fallback;
+
+    if (status === 400 || status === 422) {
+        message = 'Some submitted information could not be accepted. Review it and try again.';
+    } else if (status === 401) {
+        message = 'Your session has expired. Sign in again.';
+    } else if (status === 403) {
+        message = 'Your account does not have permission to complete this action.';
+    } else if (status === 404) {
+        message = 'The requested information is no longer available. Refresh and try again.';
+    } else if (status === 409) {
+        message = 'This information changed while you were working. Refresh and try again.';
+    } else if (status === 429) {
+        message = 'Too many requests were received. Wait briefly and try again.';
+    } else if (status >= 500) {
+        message = 'The service could not complete this request. Try again, or contact support if the issue continues.';
+    } else if (error?.isRemoteRequest && !status) {
+        message = 'The service could not be reached. Check your connection and try again.';
+    }
+
+    const requestId = cleanRequestId(error?.requestId);
+    return `${message}${requestId ? ` Reference: ${requestId}.` : ''}`;
+}
+
 function saveToken(token) {
     localStorage.setItem(TOKEN_KEY, token);
 }
@@ -134,23 +184,34 @@ async function api(path, opts) {
         headers.Authorization = `Bearer ${token}`;
     }
 
-    const res = await fetch(`${API_BASE}${path}`, {
-        method: opts?.method || 'GET',
-        headers,
-        body: opts?.body ? JSON.stringify(opts.body) : undefined,
-    });
+    let res;
+    try {
+        res = await fetch(`${API_BASE}${path}`, {
+            method: opts?.method || 'GET',
+            headers,
+            body: opts?.body ? JSON.stringify(opts.body) : undefined,
+        });
+    } catch (error) {
+        error.isRemoteRequest = true;
+        error.status = 0;
+        throw error;
+    }
 
     let data = null;
     try {
         data = await res.json();
     } catch {
-        // ignore
+        // A safe fallback is created below for unsuccessful non-JSON responses.
     }
 
     if (!res.ok) {
-        const msg = data?.error || data?.message || 'Request failed';
+        const msg = data?.error || data?.message || `Request failed (${res.status})`;
         const err = new Error(msg);
+        err.isRemoteRequest = true;
         err.status = res.status;
+        err.code = data?.code || null;
+        err.category = data?.category || null;
+        err.requestId = data?.requestId || res.headers.get('x-request-id') || '';
         err.data = data;
         throw err;
     }
@@ -222,12 +283,12 @@ async function loadTodayReminders() {
     if (!listEl) return;
 
     try {
-        if (statusEl) statusEl.textContent = 'Loading last day notifications...';
+        if (statusEl) statusEl.textContent = 'Loading upcoming reminders...';
         const resp = await api('/reminders/today');
         const reminders = resp?.reminders || [];
 
         if (!reminders.length) {
-            listEl.innerHTML = "<li class='text-muted'>No reminders due tomorrow.</li>";
+            listEl.innerHTML = "<li class='text-muted'>No reminders are due tomorrow.</li>";
             if (statusEl) statusEl.textContent = '';
             return;
         }
@@ -236,48 +297,63 @@ async function loadTodayReminders() {
             .map(r => {
                 const dt = new Date(r.dueDateISO);
                 const when = dt.toLocaleDateString('en-IN');
-                return `<li>${r.status} ${escapeHtml(r.clientLabel || r.typeId)} – due ${escapeHtml(when)}</li>`;
+                const status = formatEnumLabel(r.status);
+                return `<li>${escapeHtml(status)} · ${escapeHtml(r.clientLabel || r.typeId)} · due ${escapeHtml(when)}</li>`;
             })
             .join('');
 
-        if (statusEl) statusEl.textContent = `${reminders.length} reminder(s) due tomorrow.`;
-    } catch (e) {
-        console.error('Today reminders load error:', e);
-        if (statusEl) statusEl.textContent = e.message || 'Failed to load reminders.';
+        if (statusEl) {
+            statusEl.textContent = `${reminders.length} reminder${reminders.length === 1 ? '' : 's'} due tomorrow.`;
+        }
+    } catch (error) {
+        console.error('Upcoming reminders load error:', error);
+        if (statusEl) statusEl.textContent = safeUserMessage(error, 'Upcoming reminders could not be loaded. Try again.');
     }
 }
 
 // --- Clients to Chase Today ---
 function buildReminderMessage(item, type) {
     const dueText = item.dueDateISO
-        ? new Date(item.dueDateISO).toLocaleDateString("en-IN")
-        : "upcoming due date";
+        ? new Date(item.dueDateISO).toLocaleDateString('en-IN')
+        : 'the upcoming due date';
+    const clientName = item.clientName || 'Client';
+    const serviceName = formatEnumLabel(item.serviceType) || 'compliance work';
 
-    if (type === "pending") {
+    if (type === 'pending') {
         return (
-            `Hi ${item.clientName},\n\n` +
-            `Hum aapke ${item.serviceType || "compliance"} ke documents ka wait kar rahe hain. ` +
-            `Last 3+ din se documents pending hain.\n` +
-            `Due: ${dueText}.\n\n` +
-            `Kripya documents jaldi share karein.\n\n- CA PRO Toolkit`
+            `Dear ${clientName},\n\n` +
+            `This is a reminder that we are awaiting documents required for your ${serviceName}. ` +
+            `Please share the outstanding items at your earliest convenience so the work can be completed before ${dueText}.\n\n` +
+            `If you have already shared them, please disregard this message.\n\n` +
+            `Regards,\nCA PRO Toolkit`
         );
     }
 
-    // high risk
     return (
-        `Hi ${item.clientName},\n\n` +
-        `Pichle 2 periods me aapke ${item.serviceType || "compliance"} filings ` +
-        `due date ke baad submit hue the. Is baar time se complete karne ke liye ` +
-        `documents thoda pehle bhejne ka request hai.\n` +
-        `Current due: ${dueText}.\n\n` +
-        `Thanks.\n\n- CA PRO Toolkit`
+        `Dear ${clientName},\n\n` +
+        `To support timely completion of your ${serviceName}, please share the required documents in advance of ${dueText}. ` +
+        `Early receipt will allow sufficient time for review and any necessary follow-up.\n\n` +
+        `If you have already shared them, please disregard this message.\n\n` +
+        `Regards,\nCA PRO Toolkit`
     );
+}
+
+function setFollowUpStatus(type, message, kind = '') {
+    const statusEl = qs(type === 'risk' ? 'chaseRiskStatus' : 'chasePendingStatus');
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    statusEl.classList.toggle('text-danger', kind === 'error');
+    statusEl.classList.toggle('text-success', kind === 'success');
+    if (kind === 'success') {
+        setTimeout(() => {
+            if (statusEl.textContent === message) statusEl.textContent = '';
+        }, 4000);
+    }
 }
 
 async function copyReminderToClipboard(item, type) {
     try {
-        // Try AI-generated personalized message first
-        let msg = null;
+        let message = null;
         try {
             const resp = await api('/audit/reminder-message', {
                 method: 'POST',
@@ -291,19 +367,18 @@ async function copyReminderToClipboard(item, type) {
                     tone: 'polite',
                 },
             });
-            if (resp?.message) msg = resp.message;
-        } catch (e) {
-            console.warn('AI reminder fetch failed, using template:', e?.message);
+            if (resp?.message) message = resp.message;
+        } catch (error) {
+            console.warn('Personalized reminder unavailable; using reviewed template:', error);
         }
 
-        // Fallback to local template if backend unreachable
-        if (!msg) msg = buildReminderMessage(item, type);
+        if (!message) message = buildReminderMessage(item, type);
 
-        await navigator.clipboard.writeText(msg);
-        alert("Reminder text copied. Paste in WhatsApp / email.");
-    } catch (e) {
-        console.error("Clipboard copy failed", e);
-        alert("Failed to copy text. Browser clipboard blocked?");
+        await navigator.clipboard.writeText(message);
+        setFollowUpStatus(type, 'Reminder copied. Paste it into your approved communication channel.', 'success');
+    } catch (error) {
+        console.error('Clipboard copy failed:', error);
+        setFollowUpStatus(type, 'Clipboard access is unavailable. Allow clipboard access, then try again.', 'error');
     }
 }
 
@@ -346,58 +421,60 @@ async function loadClientsToChaseToday() {
         const pending = data?.pendingDocsClients || [];
         const risk = data?.chronicLateClients || [];
 
-        // Pending docs clients - FULL AUTO-REFRESH
+        // Document follow-ups
         if (!pending.length) {
-            pendingList.innerHTML = '<li class="text-muted">No pending clients docs.</li>';
+            pendingList.innerHTML = '<li class="text-muted">No document follow-ups are due.</li>';
         } else {
             pendingList.innerHTML = pending
                 .map((item, idx) => {
+                    const service = formatEnumLabel(item.serviceType) || 'Compliance work';
                     const label = escapeHtml(
-                        `${idx + 1}. ${item.clientName} – ${item.serviceType || ""} · ${item.daysPending} din se pending`
+                        `${idx + 1}. ${item.clientName} · ${service} · awaiting documents for ${item.daysPending} days`
                     );
                     return `
                         <li>
                             <span>${label}</span>
                             <div class="d-flex gap-1">
-                                <button class="btn btn-sm btn-outline-primary ms-2 copy-btn"
+                                <button type="button" class="btn btn-sm btn-outline-primary ms-2 copy-btn"
                                         data-type="pending" data-index="${idx}">
-                                    Copy
+                                    Copy message
                                 </button>
-                                <button class="btn btn-sm btn-outline-success ms-1 done-btn"
+                                <button type="button" class="btn btn-sm btn-outline-success ms-1 done-btn"
                                         data-type="pending" data-taskid="${item.taskId}">
-                                    Done
+                                    Complete
                                 </button>
                             </div>
                         </li>`;
                 })
-                .join("");
+                .join('');
         }
 
-        // High-risk clients - ADD same auto-refresh
+        // Priority follow-ups
         if (!risk.length) {
-            riskList.innerHTML = '<li class="text-muted">No habitual client pending.</li>';
+            riskList.innerHTML = '<li class="text-muted">No priority follow-ups are due.</li>';
         } else {
             riskList.innerHTML = risk
                 .map((item, idx) => {
+                    const service = formatEnumLabel(item.serviceType) || 'Compliance work';
                     const label = escapeHtml(
-                        `${idx + 1}. ${item.clientName} – ${item.serviceType || ""} · last delay ${item.lastPeriodDelayDays} din`
+                        `${idx + 1}. ${item.clientName} · ${service} · early follow-up recommended`
                     );
                     return `
                         <li>
                             <span>${label}</span>
                             <div class="d-flex gap-1">
-                                <button class="btn btn-sm btn-outline-primary ms-2 copy-btn"
+                                <button type="button" class="btn btn-sm btn-outline-primary ms-2 copy-btn"
                                         data-type="risk" data-index="${idx}">
-                                    Copy
+                                    Copy message
                                 </button>
-                                <button class="btn btn-sm btn-outline-success ms-1 done-btn"
+                                <button type="button" class="btn btn-sm btn-outline-success ms-1 done-btn"
                                         data-type="risk" data-taskid="${item.taskId}">
-                                    Done
+                                    Complete
                                 </button>
                             </div>
                         </li>`;
                 })
-                .join("");
+                .join('');
         }
 
         if (pendingStatus) pendingStatus.textContent = "";
@@ -412,16 +489,16 @@ async function loadClientsToChaseToday() {
 
                 try {
                     doneBtn.disabled = true;
-                    const oldText = doneBtn.textContent;
-                    doneBtn.textContent = "Done...";
+                    doneBtn.textContent = "Saving...";
 
                     await markChaseComplete('pending', taskId);
-                    await loadClientsToChaseToday();  // ✅ Guard prevents infinite loop
-                } catch (err) {
-                    alert(err.message || "Failed to mark as done.");
+                    await loadClientsToChaseToday();
+                } catch (error) {
+                    console.error('Document follow-up completion failed:', error);
+                    setFollowUpStatus('pending', safeUserMessage(error, 'The follow-up could not be completed. Try again.'), 'error');
                 } finally {
                     doneBtn.disabled = false;
-                    doneBtn.textContent = "Done";
+                    doneBtn.textContent = "Complete";
                 }
                 return;
             }
@@ -443,15 +520,16 @@ async function loadClientsToChaseToday() {
 
                 try {
                     doneBtn.disabled = true;
-                    doneBtn.textContent = "Done...";
+                    doneBtn.textContent = "Saving...";
 
                     await markChaseComplete('risk', taskId);
-                    await loadClientsToChaseToday();  // ✅ Guard prevents infinite loop
-                } catch (err) {
-                    alert(err.message || "Failed to mark as done.");
+                    await loadClientsToChaseToday();
+                } catch (error) {
+                    console.error('Priority follow-up completion failed:', error);
+                    setFollowUpStatus('risk', safeUserMessage(error, 'The follow-up could not be completed. Try again.'), 'error');
                 } finally {
                     doneBtn.disabled = false;
-                    doneBtn.textContent = "Done";
+                    doneBtn.textContent = "Complete";
                 }
                 return;
             }
@@ -467,12 +545,12 @@ async function loadClientsToChaseToday() {
 
         console.log('loadClientsToChaseToday: Load complete');
         
-    } catch (err) {
-        console.error("loadClientsToChaseToday error:", err);
-        if (pendingStatus) pendingStatus.textContent = "Failed to load.";
-        if (riskStatus) riskStatus.textContent = "Failed to load.";
+    } catch (error) {
+        console.error('Client follow-up load error:', error);
+        const message = safeUserMessage(error, 'Client follow-ups could not be loaded. Try again.');
+        if (pendingStatus) pendingStatus.textContent = message;
+        if (riskStatus) riskStatus.textContent = message;
     } finally {
-        // ✅ ALWAYS RESET GUARD
         __clientsChaseLoading = false;
         console.log('loadClientsToChaseToday: Guard reset');
     }
@@ -556,29 +634,32 @@ async function initAdminPage() {
             const activeCount = users.filter(u => u.isActive !== false).length;
             if (qs('kpiActiveUsers')) qs('kpiActiveUsers').textContent = String(activeCount);
 
-            // Render table with delete buttons
+            // Render team members
             if (!users.length) {
-                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No users</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No team members found.</td></tr>';
             } else {
                 tbody.innerHTML = users.map(u => `
                     <tr>
                         <td>${escapeHtml(u.name)}</td>
                         <td>${escapeHtml(u.email)}</td>
-                        <td><span class="badge bg-${u.role === 'FIRM_ADMIN' ? 'warning' : 'secondary'}">${escapeHtml(u.role)}</span></td>
-                        <td>${escapeHtml(u.accountType)}</td>
+                        <td><span class="badge bg-${u.role === 'FIRM_ADMIN' ? 'warning' : 'secondary'}">${escapeHtml(formatEnumLabel(u.role))}</span></td>
+                        <td>${escapeHtml(formatEnumLabel(u.accountType))}</td>
                         <td>${u.isActive !== false ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-warning">Inactive</span>'}</td>
                         <td>${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : ''}</td>
                         <td>
-                            <button class="btn btn-sm btn-danger delete-user-btn" data-userid="${u._id}">
-                                Delete
+                            <button type="button" class="btn btn-sm btn-outline-danger delete-user-btn" data-userid="${u._id}">
+                                Remove
                             </button>
                         </td>
                     </tr>
                 `).join('');
             }
-        } catch (e) {
-            console.error('Users load error:', e);
-            if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Failed to load users</td></tr>';
+        } catch (error) {
+            console.error('Team member load error:', error);
+            if (tbody) {
+                const message = escapeHtml(safeUserMessage(error, 'Team members could not be loaded. Refresh and try again.'));
+                tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">${message}</td></tr>`;
+            }
         }
     }
 
@@ -620,7 +701,7 @@ async function initAdminPage() {
 
         // Populate user info immediately
         if (qs('emailBadge')) qs('emailBadge').textContent = me.email;
-        if (qs('roleBadge')) qs('roleBadge').textContent = me.isActive ? 'FIRM_ADMIN' : 'FIRM_ADMIN (Pending)';
+        if (qs('roleBadge')) qs('roleBadge').textContent = me.isActive ? 'Firm administrator' : 'Firm administrator · approval pending';
 
         // FIRM LOADING — stale-while-revalidate from cache + parallel users fetch
         let firm = null;
@@ -669,9 +750,8 @@ async function initAdminPage() {
             if (qs('topSub')) qs('topSub').textContent = `Firm: ${f.displayName} (@${f.handle})`;
             if (qs('kpiFirmName')) qs('kpiFirmName').textContent = f.displayName || 'Individual';
             if (qs('kpiFirmHandle')) qs('kpiFirmHandle').textContent = f.handle || '';
-            if (qs('kpiPlanType')) qs('kpiPlanType').textContent = f.planType || 'FREE';
-            const planExpiryText = f.planExpiry ? new Date(f.planExpiry).toLocaleDateString() : 'NA';
-            if (qs('kpiPlanExpiry')) qs('kpiPlanExpiry').textContent = `Expires ${planExpiryText}`;
+            if (qs('kpiPlanType')) qs('kpiPlanType').textContent = 'FREE';
+            if (qs('kpiPlanExpiry')) qs('kpiPlanExpiry').textContent = 'All tools included';
         }
 
         function renderUsersTable(users) {
@@ -681,20 +761,20 @@ async function initAdminPage() {
             if (qs('kpiActiveUsers')) qs('kpiActiveUsers').textContent = String(activeCount);
             if (!tbody) return;
             if (!users.length) {
-                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No users</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No team members found.</td></tr>';
                 return;
             }
             tbody.innerHTML = users.map(u => `
                 <tr>
                     <td>${escapeHtml(u.name)}</td>
                     <td>${escapeHtml(u.email)}</td>
-                    <td><span class="badge bg-${u.role === 'FIRM_ADMIN' ? 'warning' : 'secondary'}">${escapeHtml(u.role)}</span></td>
-                    <td>${escapeHtml(u.accountType)}</td>
+                    <td><span class="badge bg-${u.role === 'FIRM_ADMIN' ? 'warning' : 'secondary'}">${escapeHtml(formatEnumLabel(u.role))}</span></td>
+                    <td>${escapeHtml(formatEnumLabel(u.accountType))}</td>
                     <td>${u.isActive !== false ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-warning">Inactive</span>'}</td>
                     <td>${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : ''}</td>
                     <td>
-                        <button class="btn btn-sm btn-danger delete-user-btn" data-userid="${u._id}">
-                            Delete
+                        <button type="button" class="btn btn-sm btn-outline-danger delete-user-btn" data-userid="${u._id}">
+                            Remove
                         </button>
                     </td>
                 </tr>
@@ -706,11 +786,7 @@ async function initAdminPage() {
             qs('topSub').textContent = 'No firm linked';
         }
 
-        const planExpiryText = firm?.planExpiry ? new Date(firm.planExpiry).toLocaleDateString() : 'NA';
-
         // Form fields populated once firm data is in (KPIs already hydrated above)
-        if (qs('settingsPlanType')) qs('settingsPlanType').value = firm?.planType || 'FREE';
-        if (qs('settingsPlanExpiry')) qs('settingsPlanExpiry').value = planExpiryText;
         if (qs('firmDisplayName')) qs('firmDisplayName').value = firm?.displayName || '';
         if (qs('firmHandle')) qs('firmHandle').value = firm?.handle || '';
         if (qs('firmDescription')) qs('firmDescription').value = firm?.description || '';
@@ -776,7 +852,7 @@ async function initAdminPage() {
                     }
                 } catch (e) {
                     console.error('Rotate error:', e);
-                    if (statusEl) statusEl.textContent = e.message || 'Failed to rotate join code.';
+                    if (statusEl) statusEl.textContent = safeUserMessage(e, 'The join code could not be rotated. Try again.');
                 }
             });
         }
@@ -807,9 +883,9 @@ async function initAdminPage() {
                         statusEl.textContent = 'Custom join code saved!';
                         setTimeout(() => statusEl.textContent = '', 2000);
                     }
-                } catch (e) {
-                    console.error('Custom code error:', e);
-                    if (statusEl) statusEl.textContent = e.message || 'Failed to save custom code.';
+                } catch (error) {
+                    console.error('Custom join code save error:', error);
+                    if (statusEl) statusEl.textContent = safeUserMessage(error, 'The custom join code could not be saved. Try again.');
                 }
             });
         }
@@ -833,31 +909,39 @@ async function initAdminPage() {
                     firmStatus.textContent = 'Saved!';
                     setTimeout(() => firmStatus.textContent = '', 2000);
                 }
-            } catch (e) {
-                if (firmStatus) firmStatus.textContent = e.message;
+            } catch (error) {
+                console.error('Firm profile save error:', error);
+                if (firmStatus) firmStatus.textContent = safeUserMessage(error, 'Firm details could not be saved. Try again.');
             }
         });
 
-        // ✅ Delete user handler
-        document.getElementById('usersTbody')?.addEventListener('click', async (e) => {
-            if (e.target.classList.contains('delete-user-btn')) {
-                const userId = e.target.dataset.userid;
-                const confirmed = confirm(`Delete user ${userId}? This removes them from firm only.`);
-                if (!confirmed) return;
-                
-                try {
-                    e.target.textContent = 'Deleting...';
-                    e.target.disabled = true;
-                    await api(`/firms/${firm._id}/users/${userId}`, { method: 'DELETE' });
-                    cacheBust(`firms/${firm._id}/users`);
-                    const usersResp = await api(`/firms/${firm._id}/users`);
-                    if (usersResp?.users) renderUsersTable(usersResp.users);
-                } catch (err) {
-                    alert(err.message || 'Delete failed');
-                } finally {
-                    e.target.disabled = false;
-                    e.target.textContent = 'Delete';
+        // Remove a team member after explicit confirmation.
+        document.getElementById('usersTbody')?.addEventListener('click', async (event) => {
+            const removeButton = event.target.closest('.delete-user-btn');
+            if (!removeButton) return;
+
+            const userId = removeButton.dataset.userid;
+            const memberName = removeButton.closest('tr')?.querySelector('td')?.textContent?.trim() || 'this team member';
+            const confirmed = confirm(`Remove ${memberName} from this firm? They will lose access to the firm's workspace.`);
+            if (!confirmed) return;
+
+            const firmStatus = qs('firmStatus');
+            try {
+                removeButton.textContent = 'Removing...';
+                removeButton.disabled = true;
+                await api(`/firms/${firm._id}/users/${userId}`, { method: 'DELETE' });
+                cacheBust(`firms/${firm._id}/users`);
+                const usersResp = await api(`/firms/${firm._id}/users`);
+                if (usersResp?.users) renderUsersTable(usersResp.users);
+                if (firmStatus) firmStatus.textContent = `${memberName} was removed from the firm.`;
+            } catch (error) {
+                console.error('Team member removal error:', error);
+                if (firmStatus) {
+                    firmStatus.textContent = safeUserMessage(error, 'The team member could not be removed. Try again.');
                 }
+            } finally {
+                removeButton.disabled = false;
+                removeButton.textContent = 'Remove';
             }
         });
 

@@ -2,31 +2,67 @@
 import express from "express";
 import { authRequired } from "../middleware/auth.middleware.js";
 import {
+  requireFirmAdmin,
+  requireFirmMember,
+} from "../middleware/authorization.middleware.js";
+import { captureOptionalFeatureFlag } from "../middleware/rollout.middleware.js";
+import {
   createTask,
   getTaskBoard,
   updateTask,
   archiveTask,
+  getTaskSource,
   getMyOpenTasks,
   completeTaskFromUser,
 } from "../controllers/task.controller.js";
+import {
+  commitBulkTaskUpdate,
+  previewBulkTaskUpdate,
+  readBulkTaskOperation,
+} from "../controllers/task-bulk.controller.js";
 
 const router = express.Router();
+const captureNoticeCases = captureOptionalFeatureFlag("noticeCases");
 
-// All task routes require auth (board, CRUD, My Tasks, complete-from-user)
 router.use(authRequired);
 
-// Firm-admin board + CRUD
 router.post("/", createTask);
-router.get("/board", getTaskBoard);
+router.get(
+  "/board",
+  requireFirmMember,
+  captureNoticeCases,
+  getTaskBoard
+);
+router.post(
+  "/bulk/preview",
+  requireFirmAdmin,
+  previewBulkTaskUpdate
+);
+router.post(
+  "/bulk/:operationId/commit",
+  requireFirmAdmin,
+  commitBulkTaskUpdate
+);
+router.get(
+  "/bulk/:operationId",
+  requireFirmAdmin,
+  readBulkTaskOperation
+);
 router.patch("/:id", updateTask);
 router.delete("/:id", archiveTask);
 
-// -------- User-side tasks (for Chrome extension) --------
-
-// Logged-in staff ke liye unke open tasks
-router.get("/my-open", getMyOpenTasks);
-
-// Chrome extension se "Done" mark karne ke liye
+router.get(
+  "/my-open",
+  requireFirmMember,
+  captureNoticeCases,
+  getMyOpenTasks
+);
+router.get(
+  "/:id",
+  requireFirmMember,
+  captureNoticeCases,
+  getTaskSource
+);
 router.patch("/:id/complete-from-user", completeTaskFromUser);
 
 export default router;
