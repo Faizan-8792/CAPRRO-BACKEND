@@ -13,8 +13,14 @@ const currentDir = path.dirname(fileURLToPath(import.meta.url));
 // src/config/load-env.js -> package root is two levels up.
 const packageRootEnv = path.resolve(currentDir, "..", "..", ".env");
 
+// Non-dotfile fallback: some host build pipelines strip dotfiles (.env) when
+// packaging/extracting the app, so we also ship a plain "env.runtime" file.
+const packageRootRuntimeEnv = path.resolve(currentDir, "..", "..", "env.runtime");
+
 // cwd-based load first (no-op if absent). dotenv does not override existing
 // process.env values, so real host-provided env vars always win.
 dotenv.config();
 // Absolute-path fallback for hosts that run with a different cwd.
 dotenv.config({ path: packageRootEnv });
+// Non-dotfile fallback for hosts that drop dotfiles during deployment.
+dotenv.config({ path: packageRootRuntimeEnv });
