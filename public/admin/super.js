@@ -12,6 +12,27 @@ function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+// Token handoff: the extension can open this page as /admin/super.html?t=<jwt>.
+// Absorb the token into localStorage and strip it from the URL so a reload or
+// shared link never leaks it. Runs before any authenticated request.
+function absorbTokenFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    const handoff = url.searchParams.get("t");
+    if (handoff) {
+      localStorage.setItem(TOKEN_KEY, handoff);
+      url.searchParams.delete("t");
+      window.history.replaceState(
+        {},
+        document.title,
+        url.pathname + (url.search ? url.search : "") + url.hash
+      );
+    }
+  } catch {
+    /* ignore malformed URLs */
+  }
+}
+
 async function apiGetMe() {
   const token = getToken();
   if (!token) throw new Error("No token");
@@ -751,9 +772,146 @@ async function handleDeleteFirm(firmId, rowEl) {
   }
 }
 
+// ─── User directory ─────────────────────────────────────────────────
+const userDir = {
+  page: 1,
+  limit: 25,
+  search: "",
+  activity: "",
+  role: "",
+  sort: "recent",
+  totalPages: 1,
+};
+let userDirDebounce = null;
+
+function userRoleBadge(role) {
+  if (role === "SUPER_ADMIN") return `<span class="badge bg-dark">Super admin</span>`;
+  if (role === "FIRM_ADMIN") return `<span class="badge good">Firm admin</span>`;
+  return `<span class="badge bg-secondary">User</span>`;
+}
+
+function renderUserDirectoryRow(u) {
+  const joined = u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—";
+  let lastActive = "Never";
+  let sinceLabel = "";
+  if (u.lastActiveAt) {
+    lastActive = new Date(u.lastActiveAt).toLocaleDateString();
+    if (u.daysSinceActive === 0) sinceLabel = "today";
+    else if (u.daysSinceActive === 1) sinceLabel = "1 day ago";
+    else if (Number.isFinite(u.daysSinceActive)) sinceLabel = `${u.daysSinceActive} days ago`;
+  }
+  const dormant = u.lastActiveAt && Number(u.daysSinceActive) > 30;
+  const never = !u.lastActiveAt;
+  const lastActiveCell = never
+    ? `<span class="badge warn">Never active</span>`
+    : `${escapeHtml(lastActive)}${sinceLabel ? ` <span class="${dormant ? "text-danger" : "text-muted"} small">${escapeHtml(sinceLabel)}</span>` : ""}`;
+  const statusBadge = u.isActive
+    ? `<span class="badge good">Active</span>`
+    : `<span class="badge warn">Disabled</span>`;
+  const apiCalls = Number(u.totalApiCalls || 0).toLocaleString("en-IN");
+  const firmCell = u.activeFirm
+    ? `${escapeHtml(u.activeFirm.displayName || "—")} <span class="text-muted small">@${escapeHtml(u.activeFirm.handle || "")}</span>${u.activeFirm.kind === "PERSONAL" ? ` <span class="badge bg-secondary">personal</span>` : ""}`
+    : `<span class="text-muted small">—</span>`;
+
+  return `
+    <tr>
+      <td><strong>${escapeHtml(u.email || "—")}</strong>${u.name ? `<br><span class="text-muted small">${escapeHtml(u.name)}</span>` : ""}</td>
+      <td>${userRoleBadge(u.role)}</td>
+      <td>${statusBadge}</td>
+      <td>${escapeHtml(joined)}</td>
+      <td>${lastActiveCell}</td>
+      <td>${apiCalls}</td>
+      <td>${Number(u.workspaceCount || 0)}</td>
+      <td class="small">${firmCell}</td>
+    </tr>
+  `;
+}
+
+async function loadUserDirectory() {
+  const body = qs("userDirectoryBody");
+  const statusEl = qs("userDirectoryStatus");
+  const metaEl = qs("userDirectoryMeta");
+  if (statusEl) statusEl.textContent = "Loading users…";
+  try {
+    const params = new URLSearchParams({
+      page: String(userDir.page),
+      limit: String(userDir.limit),
+      sort: userDir.sort,
+    });
+    if (userDir.search) params.set("search", userDir.search);
+    if (userDir.activity) params.set("activity", userDir.activity);
+    if (userDir.role) params.set("role", userDir.role);
+
+    const data = await api(`/super/users?${params.toString()}`);
+    const users = data.users || [];
+    const p = data.pagination || {};
+    userDir.totalPages = p.totalPages || 1;
+
+    if (body) {
+      body.innerHTML = users.length
+        ? users.map(renderUserDirectoryRow).join("")
+        : `<tr><td colspan="8" class="text-center text-muted small">No users match these filters.</td></tr>`;
+    }
+    if (metaEl) {
+      metaEl.textContent = `Page ${p.page || 1} of ${p.totalPages || 1} · ${p.total || 0} users`;
+    }
+    if (statusEl) statusEl.textContent = "";
+    const prevBtn = qs("userPrevBtn");
+    const nextBtn = qs("userNextBtn");
+    if (prevBtn) prevBtn.disabled = (p.page || 1) <= 1;
+    if (nextBtn) nextBtn.disabled = !p.hasMore;
+  } catch (err) {
+    if (statusEl) statusEl.textContent = err.message || "Failed to load users.";
+  }
+}
+
+function bindUserDirectoryControls() {
+  const search = qs("userSearchInput");
+  if (search) {
+    search.addEventListener("input", () => {
+      clearTimeout(userDirDebounce);
+      userDirDebounce = setTimeout(() => {
+        userDir.search = search.value.trim();
+        userDir.page = 1;
+        loadUserDirectory();
+      }, 300);
+    });
+  }
+  qs("userActivityFilter")?.addEventListener("change", (e) => {
+    userDir.activity = e.target.value;
+    userDir.page = 1;
+    loadUserDirectory();
+  });
+  qs("userRoleFilter")?.addEventListener("change", (e) => {
+    userDir.role = e.target.value;
+    userDir.page = 1;
+    loadUserDirectory();
+  });
+  qs("userSortSelect")?.addEventListener("change", (e) => {
+    userDir.sort = e.target.value;
+    userDir.page = 1;
+    loadUserDirectory();
+  });
+  qs("userPrevBtn")?.addEventListener("click", () => {
+    if (userDir.page > 1) {
+      userDir.page -= 1;
+      loadUserDirectory();
+    }
+  });
+  qs("userNextBtn")?.addEventListener("click", () => {
+    if (userDir.page < userDir.totalPages) {
+      userDir.page += 1;
+      loadUserDirectory();
+    }
+  });
+}
+
 // ─── Init ───────────────────────────────────────────────────────────
 async function initSuperPage() {
   if (!qs("superLogoutBtn")) return;
+
+  // Accept a token passed via ?t= (extension handoff) before any auth check.
+  absorbTokenFromUrl();
 
   const isAuthenticated = await ensureSuperAdminAuth();
   if (!isAuthenticated) return;
@@ -780,9 +938,15 @@ async function initSuperPage() {
     if (!requireSuperAdmin(me)) { window.location.href = "/admin/admin.html"; return; }
     if (qs("superEmail")) qs("superEmail").textContent = me.email || "—";
 
-    // Load app config, usage analytics, dashboard stats — all in parallel
+    // Load app config, usage analytics, dashboard stats, user directory — parallel
     bindAppConfigHandlers();
-    await Promise.all([loadAppConfigSection(), loadUsageStats(), loadDashboardStats()]);
+    bindUserDirectoryControls();
+    await Promise.all([
+      loadAppConfigSection(),
+      loadUsageStats(),
+      loadDashboardStats(),
+      loadUserDirectory(),
+    ]);
 
     // Load pending admins
     const pendingTbody = qs("pendingAdminsBody");

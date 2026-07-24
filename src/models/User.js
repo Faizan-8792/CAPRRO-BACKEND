@@ -24,7 +24,16 @@ const UserSchema = new mongoose.Schema(
       enum: ["INDIVIDUAL", "FIRM_USER"],
       default: "INDIVIDUAL",
     },
+    // Active workspace. Firm-scoped features read this, so switching workspaces
+    // means updating this pointer. Retained for backward compatibility.
     firmId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Firm",
+      default: null,
+    },
+    // The user's own personal workspace. Never overwritten when creating or
+    // joining a shared firm, so a usable home workspace always exists.
+    personalFirmId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Firm",
       default: null,

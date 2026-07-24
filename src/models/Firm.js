@@ -19,6 +19,13 @@ const FirmSchema = new mongoose.Schema({
     ref: "User",
     required: true,
   },
+  // PERSONAL — an auto-provisioned single-user home workspace.
+  // SHARED   — a collaborative firm created for a team (joinable by code).
+  kind: {
+    type: String,
+    enum: ["PERSONAL", "SHARED"],
+    default: "SHARED",
+  },
   description: {
     type: String,
     trim: true,

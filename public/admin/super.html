@@ -171,6 +171,81 @@
         </div>
       </section>
 
+      <!-- USER DIRECTORY -->
+      <section class="mb-4">
+        <div class="row g-3 mb-3 align-items-center">
+          <div class="col">
+            <h2 class="h5 mb-1">👥 User directory</h2>
+            <p class="text-muted mb-0 small">
+              Every account: who signed up, when they joined, when they were last active, and who has gone quiet.
+            </p>
+          </div>
+        </div>
+
+        <div class="card shadow-sm border-0 super-admin-card">
+          <div class="card-body">
+            <div class="row g-2 mb-3">
+              <div class="col-md-4">
+                <label class="form-label small-label" for="userSearchInput">Search</label>
+                <input id="userSearchInput" class="form-control form-control-sm" type="search" placeholder="Email or name" />
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small-label" for="userActivityFilter">Activity</label>
+                <select id="userActivityFilter" class="form-select form-select-sm">
+                  <option value="">All activity</option>
+                  <option value="active">Active (last 30 days)</option>
+                  <option value="dormant">Dormant (30+ days)</option>
+                  <option value="never">Never active</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small-label" for="userRoleFilter">Role</label>
+                <select id="userRoleFilter" class="form-select form-select-sm">
+                  <option value="">All roles</option>
+                  <option value="USER">User</option>
+                  <option value="FIRM_ADMIN">Firm admin</option>
+                  <option value="SUPER_ADMIN">Super admin</option>
+                </select>
+              </div>
+              <div class="col-md-2">
+                <label class="form-label small-label" for="userSortSelect">Sort by</label>
+                <select id="userSortSelect" class="form-select form-select-sm">
+                  <option value="recent">Recently active</option>
+                  <option value="signup">Newest signup</option>
+                  <option value="usage">Most API calls</option>
+                </select>
+              </div>
+            </div>
+
+            <p id="userDirectoryStatus" class="text-muted mb-3 small">Loading users…</p>
+
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th scope="col">User</th>
+                    <th scope="col">Role</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Joined</th>
+                    <th scope="col">Last active</th>
+                    <th scope="col">API calls</th>
+                    <th scope="col">Workspaces</th>
+                    <th scope="col">Active firm</th>
+                  </tr>
+                </thead>
+                <tbody id="userDirectoryBody"></tbody>
+              </table>
+            </div>
+
+            <div class="d-flex align-items-center justify-content-between mt-3">
+              <button id="userPrevBtn" class="btn btn-sm btn-outline-secondary" type="button" disabled>Previous</button>
+              <span id="userDirectoryMeta" class="text-muted small">—</span>
+              <button id="userNextBtn" class="btn btn-sm btn-outline-secondary" type="button" disabled>Next</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- PENDING ADMINS -->
       <section class="mb-4">
         <div class="row g-3 mb-3 align-items-center">

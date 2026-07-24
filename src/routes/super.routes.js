@@ -5,6 +5,7 @@ import { authRequired } from "../middleware/auth.middleware.js";
 import {
   getUsageStats,
   getSuperDashboardStats,
+  listAllUsers,
   listPendingAdmins,
   approveAdmin,
   revokeAdmin,
@@ -25,6 +26,9 @@ router.get("/dashboard-stats", getSuperDashboardStats);
 
 // Extension usage analytics (DAU/WAU/MAU)
 router.get("/usage-stats", getUsageStats);
+
+// Full user directory (search, activity/role filters, pagination)
+router.get("/users", listAllUsers);
 
 // Pending firm admins
 router.get("/pending-admins", listPendingAdmins);

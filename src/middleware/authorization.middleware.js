@@ -16,13 +16,6 @@ async function requireActiveFirm(req, res, next, { adminOnly = false } = {}) {
     if (!req.user.firmId) {
       return reject(req, res, 403, "Firm membership required");
     }
-    if (
-      adminOnly &&
-      req.user.role !== "FIRM_ADMIN" &&
-      req.user.role !== "SUPER_ADMIN"
-    ) {
-      return reject(req, res, 403, "Firm admin only");
-    }
 
     const firm = await Firm.findOne({
       _id: req.user.firmId,
@@ -32,6 +25,18 @@ async function requireActiveFirm(req, res, next, { adminOnly = false } = {}) {
       .lean();
     if (!firm) {
       return reject(req, res, 403, "Firm is inactive or unavailable");
+    }
+
+    if (adminOnly) {
+      // Firm-admin authority is granted by global role (FIRM_ADMIN/SUPER_ADMIN)
+      // or by owning the active firm. Owning the firm is authoritative even if
+      // the global role pointer has drifted after a workspace switch.
+      const isOwner = String(firm.ownerUserId || "") === String(req.user.id);
+      const elevatedRole =
+        req.user.role === "FIRM_ADMIN" || req.user.role === "SUPER_ADMIN";
+      if (!isOwner && !elevatedRole) {
+        return reject(req, res, 403, "Firm admin only");
+      }
     }
 
     req.firm = firm;

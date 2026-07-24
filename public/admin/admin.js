@@ -12,6 +12,26 @@ function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+// Token handoff: allow opening this panel as /admin/admin.html?t=<jwt> (e.g.
+// from the extension). Store the token, then strip it from the URL.
+function absorbTokenFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    const handoff = url.searchParams.get("t");
+    if (handoff) {
+      localStorage.setItem(TOKEN_KEY, handoff);
+      url.searchParams.delete("t");
+      window.history.replaceState(
+        {},
+        document.title,
+        url.pathname + (url.search ? url.search : "") + url.hash
+      );
+    }
+  } catch {
+    /* ignore malformed URLs */
+  }
+}
+
 async function apiGetMe() {
   const token = getToken();
   if (!token) throw new Error("No token");
@@ -30,6 +50,7 @@ async function apiGetMe() {
 // AUTH GUARD — returns the verified user object (or null on failure).
 async function ensureAdminAuth() {
   try {
+    absorbTokenFromUrl();
     const data = await apiGetMe();
     if (!data.ok) throw new Error("Invalid user");
 

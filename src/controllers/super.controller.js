@@ -4,6 +4,7 @@ import User from "../models/User.js";
 import Firm from "../models/Firm.js";
 import Task from "../models/Task.js";
 import Reminder from "../models/Reminder.js";
+import FirmMembership from "../models/FirmMembership.js";
 
 const SUPER_EMAIL = "saifullahfaizan786@gmail.com";
 
@@ -120,6 +121,21 @@ export const getSuperDashboardStats = async (req, res, next) => {
       Reminder.countDocuments({}),
     ]);
 
+    // Collaboration signals: shared firms vs personal workspaces, and total
+    // active memberships (a firm with more than one member is collaborating).
+    const [sharedFirms, personalFirms, totalMemberships, collaboratingFirms] =
+      await Promise.all([
+        Firm.countDocuments({ kind: "SHARED" }),
+        Firm.countDocuments({ kind: "PERSONAL" }),
+        FirmMembership.countDocuments({ status: "ACTIVE" }),
+        FirmMembership.aggregate([
+          { $match: { status: "ACTIVE" } },
+          { $group: { _id: "$firmId", members: { $sum: 1 } } },
+          { $match: { members: { $gt: 1 } } },
+          { $count: "count" },
+        ]),
+      ]);
+
     // Task status breakdown
     const taskStatusBreakdown = await Task.aggregate([
       { $match: { isActive: true } },
@@ -161,6 +177,12 @@ export const getSuperDashboardStats = async (req, res, next) => {
           accessModel: "FREE",
           premium: 0,
           free: totalFirms,
+          shared: sharedFirms,
+          personal: personalFirms,
+        },
+        collaboration: {
+          memberships: totalMemberships,
+          collaboratingFirms: collaboratingFirms[0]?.count || 0,
         },
         tasks: {
           total: totalTasks,
@@ -172,6 +194,121 @@ export const getSuperDashboardStats = async (req, res, next) => {
         reminders: {
           total: totalReminders,
         },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// 0b) Full user directory (who signed up, when, last seen, activity, firm)
+// GET /api/super/users?page=&limit=&search=&activity=&role=&sort=
+export const listAllUsers = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+    const skip = (page - 1) * limit;
+
+    const search = String(req.query.search || "").trim();
+    const activity = String(req.query.activity || "").trim().toLowerCase();
+    const role = String(req.query.role || "").trim().toUpperCase();
+    const sort = String(req.query.sort || "recent").trim().toLowerCase();
+
+    const filter = {};
+    if (search) {
+      const safe = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const rx = new RegExp(safe, "i");
+      filter.$or = [{ email: rx }, { name: rx }];
+    }
+    if (["USER", "FIRM_ADMIN", "SUPER_ADMIN"].includes(role)) {
+      filter.role = role;
+    }
+
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    if (activity === "active") {
+      // Active in the last 30 days.
+      filter.lastActiveAt = { $gte: new Date(now - 30 * dayMs) };
+    } else if (activity === "dormant") {
+      // Signed in at least once, but not in the last 30 days.
+      filter.lastActiveAt = { $ne: null, $lt: new Date(now - 30 * dayMs) };
+    } else if (activity === "never") {
+      filter.lastActiveAt = null;
+    }
+
+    const sortSpec =
+      sort === "signup"
+        ? { createdAt: -1 }
+        : sort === "usage"
+        ? { totalApiCalls: -1 }
+        : { lastActiveAt: -1, createdAt: -1 };
+
+    const [total, users] = await Promise.all([
+      User.countDocuments(filter),
+      User.find(filter)
+        .select(
+          "email name role accountType isActive firmId personalFirmId lastActiveAt lastSeenIp totalApiCalls createdAt"
+        )
+        .sort(sortSpec)
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+    ]);
+
+    // Enrich with active firm summary and how many workspaces each user belongs to.
+    const firmIds = [
+      ...new Set(users.map((u) => u.firmId).filter(Boolean).map(String)),
+    ];
+    const firms = await Firm.find({ _id: { $in: firmIds } })
+      .select("displayName handle kind")
+      .lean();
+    const firmById = new Map(firms.map((f) => [String(f._id), f]));
+
+    const userIds = users.map((u) => u._id);
+    const membershipCounts = await FirmMembership.aggregate([
+      { $match: { userId: { $in: userIds }, status: "ACTIVE" } },
+      { $group: { _id: "$userId", count: { $sum: 1 } } },
+    ]);
+    const workspaceCountByUser = new Map(
+      membershipCounts.map((m) => [String(m._id), m.count])
+    );
+
+    const rows = users.map((u) => {
+      const firm = u.firmId ? firmById.get(String(u.firmId)) : null;
+      const lastActiveAt = u.lastActiveAt || null;
+      const daysSinceActive = lastActiveAt
+        ? Math.floor((now - new Date(lastActiveAt).getTime()) / dayMs)
+        : null;
+      return {
+        id: u._id,
+        email: u.email,
+        name: u.name || null,
+        role: u.role,
+        accountType: u.accountType,
+        isActive: u.isActive !== false,
+        createdAt: u.createdAt,
+        lastActiveAt,
+        daysSinceActive,
+        lastSeenIp: u.lastSeenIp || null,
+        totalApiCalls: u.totalApiCalls || 0,
+        workspaceCount: workspaceCountByUser.get(String(u._id)) || 0,
+        activeFirm: firm
+          ? { id: u.firmId, displayName: firm.displayName, handle: firm.handle, kind: firm.kind || "SHARED" }
+          : null,
+      };
+    });
+
+    return res.json({
+      ok: true,
+      users: rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+        hasMore: skip + users.length < total,
       },
     });
   } catch (err) {
@@ -412,6 +549,8 @@ export const deleteFirmUserForSuper = async (req, res, next) => {
         .json({ ok: false, error: "Cannot delete super admin account" });
     }
 
+    // Remove the account and all of its workspace memberships.
+    await FirmMembership.deleteMany({ userId: user._id });
     await user.deleteOne();
 
     return res.json({ ok: true });
@@ -432,7 +571,8 @@ export const deleteFirmForSuper = async (req, res, next) => {
       return res.status(404).json({ ok: false, error: "Firm not found" });
     }
 
-    // Detach all users from this firm: back to normal USER
+    // Detach all users whose ACTIVE workspace is this firm: they fall back to
+    // their personal workspace on next login (getMe heals firmId).
     await User.updateMany(
       { firmId: firm._id },
       {
@@ -443,6 +583,9 @@ export const deleteFirmForSuper = async (req, res, next) => {
         },
       }
     );
+
+    // Remove all memberships for this firm so no orphan rows remain.
+    await FirmMembership.deleteMany({ firmId: firm._id });
 
     // Cascade delete: remove all tasks and reminders belonging to this firm
     await Task.deleteMany({ firmId: firm._id });
