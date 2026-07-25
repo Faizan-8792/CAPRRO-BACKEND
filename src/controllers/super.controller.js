@@ -5,6 +5,7 @@ import Firm from "../models/Firm.js";
 import Task from "../models/Task.js";
 import Reminder from "../models/Reminder.js";
 import FirmMembership from "../models/FirmMembership.js";
+import { runSelfTest } from "../services/self-test.service.js";
 
 const SUPER_EMAIL = "saifullahfaizan786@gmail.com";
 
@@ -596,5 +597,19 @@ export const deleteFirmForSuper = async (req, res, next) => {
     return res.json({ ok: true });
   } catch (err) {
     next(err);
+  }
+};
+
+
+// One-button full system self-test. Super-admin only. Runs infrastructure,
+// engine/API-logic, data-model, and notification checks in-process (read-only,
+// no email sent) and returns a structured per-check report.
+export const runSystemSelfTest = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    const report = await runSelfTest();
+    return res.json({ ok: true, report });
+  } catch (err) {
+    return next(err);
   }
 };

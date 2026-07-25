@@ -1054,3 +1054,99 @@ async function initSuperPage() {
 }
 
 document.addEventListener("DOMContentLoaded", () => { initSuperPage(); });
+
+
+// ─── System Self-Test ───────────────────────────────────────────────
+async function runSelfTest() {
+  const btn = qs("runSelfTestBtn");
+  const idle = qs("selfTestIdle");
+  const wrap = qs("selfTestProgressWrap");
+  const results = qs("selfTestResults");
+  const bar = qs("selfTestBar");
+  const counts = qs("selfTestCounts");
+  const headline = qs("selfTestHeadline");
+  if (!btn) return;
+
+  btn.disabled = true;
+  btn.textContent = "Running…";
+  if (idle) idle.classList.add("d-none");
+  if (wrap) wrap.classList.remove("d-none");
+  results.innerHTML = "";
+  bar.style.width = "0%";
+  bar.className = "progress-bar";
+  headline.textContent = "Running system checks…";
+
+  let report;
+  try {
+    const data = await api("/super/self-test", { method: "POST" });
+    report = data.report;
+  } catch (err) {
+    results.innerHTML = `<div class="st-banner bad">Could not run the self-test: ${escapeHtml(err.message || "request failed")}</div>`;
+    btn.disabled = false;
+    btn.textContent = "▶ Run Full System Test";
+    return;
+  }
+
+  // Build rows (all pending) grouped, then reveal one-by-one for a live feel.
+  const rowEls = [];
+  let lastGroup = null;
+  for (const group of report.groups) {
+    for (const check of group.checks) {
+      if (group.name !== lastGroup) {
+        const title = document.createElement("div");
+        title.className = "st-group-title";
+        title.textContent = group.name;
+        results.appendChild(title);
+        lastGroup = group.name;
+      }
+      const row = document.createElement("div");
+      row.className = "st-row";
+      row.innerHTML = `<span class="st-ic pending"></span><span class="st-name">${escapeHtml(check.name)}</span><span class="st-ms"></span>`;
+      results.appendChild(row);
+      rowEls.push({ row, check });
+    }
+  }
+
+  const total = rowEls.length;
+  counts.textContent = `0 / ${total}`;
+  let done = 0;
+  let anyFail = false;
+
+  for (const { row, check } of rowEls) {
+    // small stagger so each check visibly resolves from spinner -> result
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const ic = row.querySelector(".st-ic");
+    ic.className = `st-ic ${check.status}`;
+    ic.textContent = check.status === "pass" ? "✓" : check.status === "warn" ? "!" : "✗";
+    row.querySelector(".st-ms").textContent = `${check.ms}ms`;
+    row.classList.add(check.status === "fail" ? "done-fail" : check.status === "warn" ? "done-warn" : "done-pass");
+    if (check.status !== "pass") {
+      const detail = document.createElement("div");
+      detail.className = `st-detail${check.status === "fail" ? " fail" : ""}`;
+      detail.textContent = check.detail;
+      row.after(detail);
+    }
+    if (check.status === "fail") anyFail = true;
+    done += 1;
+    counts.textContent = `${done} / ${total}`;
+    bar.style.width = `${Math.round((done / total) * 100)}%`;
+    bar.className = "progress-bar" + (anyFail ? " bg-danger" : "");
+  }
+
+  const s = report.summary;
+  const banner = document.createElement("div");
+  banner.className = "st-banner " + (report.ok ? "ok" : "bad");
+  banner.textContent = report.ok
+    ? `✓ All systems operational — ${s.passed}/${s.total} passed${s.warned ? `, ${s.warned} warning(s)` : ""} (${report.durationMs} ms)`
+    : `✗ ${s.failed} check(s) failed — ${s.passed}/${s.total} passed${s.warned ? `, ${s.warned} warning(s)` : ""}. See details above.`;
+  results.prepend(banner);
+  headline.textContent = report.ok ? "System healthy" : "Issues found";
+  btn.disabled = false;
+  btn.textContent = "▶ Run Full System Test";
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = qs("runSelfTestBtn");
+  if (btn) btn.addEventListener("click", runSelfTest);
+});

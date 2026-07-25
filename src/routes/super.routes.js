@@ -15,11 +15,16 @@ import {
   updateFirmUserForSuper,
   deleteFirmUserForSuper,
   deleteFirmForSuper,
+  runSystemSelfTest,
 } from "../controllers/super.controller.js";
+import { requireSuperAdmin } from "../middleware/authorization.middleware.js";
 
 const router = express.Router();
 
 router.use(authRequired);
+
+// One-button full system self-test (super admin only)
+router.post("/self-test", requireSuperAdmin, runSystemSelfTest);
 
 // Super admin dashboard stats
 router.get("/dashboard-stats", getSuperDashboardStats);

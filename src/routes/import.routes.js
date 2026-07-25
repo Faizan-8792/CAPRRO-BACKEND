@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   commitMappedGstImport,
   commitMappedTdsImport,
+  convertGstr2bImport,
   previewMappedImport,
   showGstImportBatch,
   showGstImportErrors,
@@ -33,6 +34,7 @@ function requireImportPreviewFeature(req, res, next) {
 
 router.use(authRequiredWithoutUsageTracking, requireFirmMember);
 router.post("/preview", requireImportPreviewFeature, previewMappedImport);
+router.post("/gstr2b/convert", requireGstReconciliation, convertGstr2bImport);
 router.post("/:sourceHash/tds-commit", requireTdsHealth, commitMappedTdsImport);
 router.get("/tds/:id/errors", requireTdsHealth, showTdsImportErrors);
 router.get("/tds/:id", requireTdsHealth, showTdsImportBatch);

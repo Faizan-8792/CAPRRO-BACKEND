@@ -1,4 +1,5 @@
 import { previewImport } from "../services/import-preview.service.js";
+import { convertGstr2bJson } from "../services/gstr2b-json.service.js";
 import {
   commitGstImport,
   createGstImportPreviewAuthorization,
@@ -225,3 +226,29 @@ export async function showTdsImportErrors(req, res, next) {
     return next(error);
   }
 }
+
+
+// Convert a GST portal GSTR-2B JSON export into preview-ready delimited text +
+// column mapping. The client then feeds this into the normal /preview + /commit
+// flow (kind GSTR2B) — no change to the proven ingestion path.
+export const convertGstr2bImport = async (req, res, next) => {
+  try {
+    const input =
+      req.body && typeof req.body.json === "object" ? req.body.json : req.body;
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw badRequest("A GSTR-2B JSON object is required");
+    }
+    const result = convertGstr2bJson(input);
+    return res.json({
+      ok: true,
+      kind: "GSTR2B",
+      text: result.csv,
+      mapping: result.mapping,
+      headers: result.headers,
+      meta: result.meta,
+      warnings: result.warnings,
+    });
+  } catch (err) {
+    return next(err);
+  }
+};

@@ -5,7 +5,7 @@
     <title>CA PRO Toolkit – Super Admin</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="bootstrap.min.css" />
-    <link rel="stylesheet" href="admin.css?v=10" />
+    <link rel="stylesheet" href="admin.css?v=11" />
     <link rel="icon" type="image/png" href="logo.png" />
   </head>
   <body class="super-admin-body">
@@ -45,6 +45,34 @@
     </nav>
 
     <main class="container-fluid px-4 my-4 super-admin-main">
+
+      <!-- SYSTEM SELF-TEST -->
+      <section class="mb-4">
+        <div class="mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+          <div>
+            <h1 class="h5 mb-1">🧪 System Self-Test</h1>
+            <p class="text-muted mb-0 small">
+              One click checks everything — backend, database, every engine and API, and email configuration. Read-only; nothing is written and no email is sent.
+            </p>
+          </div>
+          <button id="runSelfTestBtn" class="btn btn-primary" type="button">▶ Run Full System Test</button>
+        </div>
+        <div class="card p-3 super-admin-card">
+          <div id="selfTestIdle" class="text-muted small">
+            Click “Run Full System Test” to verify the whole system is working. Each check appears live with a spinner, then a green tick (passed) or red mark (failed) with full detail.
+          </div>
+          <div id="selfTestProgressWrap" class="d-none">
+            <div class="d-flex align-items-center justify-content-between mb-1">
+              <div class="fw-semibold" id="selfTestHeadline">Running system checks…</div>
+              <div class="small text-muted" id="selfTestCounts">0 / 0</div>
+            </div>
+            <div class="progress" style="height: 8px;">
+              <div id="selfTestBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+            </div>
+          </div>
+          <div id="selfTestResults" class="mt-3"></div>
+        </div>
+      </section>
 
       <!-- APP CONFIG (Maintenance + Welcome) -->
       <section class="mb-4">
@@ -360,6 +388,6 @@
 
     <!-- Bootstrap JS no longer needed (custom modal). Kept removed. -->
     <script src="file-tools.js"></script>
-    <script src="super.js?v=11"></script>
+    <script src="super.js?v=12"></script>
   </body>
 </html>
