@@ -1164,8 +1164,13 @@ async function sendTestEmailNow() {
   try {
     const data = await api("/super/send-test-email", { method: "POST" });
     if (status) {
-      status.textContent = `✓ Test email sent to ${data.to}. Check that inbox (also spam) to confirm delivery.`;
-      status.style.color = "#166534";
+      if (data.ok) {
+        status.textContent = `✓ Test email sent to ${data.to}. Check that inbox (also spam) to confirm delivery.`;
+        status.style.color = "#166534";
+      } else {
+        status.textContent = `✗ Email provider rejected the send: ${escapeHtml(data.error || "unknown error")}`;
+        status.style.color = "#b91c1c";
+      }
     }
   } catch (err) {
     if (status) {

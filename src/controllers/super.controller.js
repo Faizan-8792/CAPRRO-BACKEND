@@ -622,8 +622,14 @@ export const sendSuperTestEmail = async (req, res, next) => {
   try {
     assertSuper(req.user);
     const to = req.user.email;
-    const result = await sendTestEmail(to);
-    return res.json({ ok: true, to, id: result?.data?.id || result?.id || "" });
+    try {
+      const result = await sendTestEmail(to);
+      return res.json({ ok: true, to, id: result?.data?.id || result?.id || "" });
+    } catch (mailErr) {
+      // Surface the real provider error to the admin diagnostic instead of a 500,
+      // so "is email working?" gets a precise answer (rate limit, domain, key, etc.).
+      return res.json({ ok: false, to, error: String(mailErr?.message || mailErr).slice(0, 500) });
+    }
   } catch (err) {
     return next(err);
   }
