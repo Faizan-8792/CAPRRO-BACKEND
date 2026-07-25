@@ -1,7 +1,10 @@
+import {
+  parseFlexibleDateIso,
+  parseFlexibleMoneyMinor,
+} from "./robust-normalize.service.js";
+
 const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const PERIOD_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
-const ISO_DAY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
-const DMY_DAY_PATTERN = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/;
 
 const GSTR3B_CATEGORY_ALIASES = Object.freeze({
   ITCCLAIMED: "ITC_CLAIMED",
@@ -116,79 +119,45 @@ function normalizeDocumentType(value) {
   const normalized = cleanText(value, 40)
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "");
+  if (!normalized) return "INVOICE";
   const aliases = {
     INV: "INVOICE",
+    INVOICE: "INVOICE",
     TAXINVOICE: "INVOICE",
+    TAXINV: "INVOICE",
     I: "INVOICE",
+    BILL: "INVOICE",
+    BILLOFSUPPLY: "INVOICE",
+    BOS: "INVOICE",
+    B2B: "INVOICE",
+    B2C: "INVOICE",
+    RETAILINVOICE: "INVOICE",
     CN: "CREDIT_NOTE",
     C: "CREDIT_NOTE",
+    CRN: "CREDIT_NOTE",
+    CREDIT: "CREDIT_NOTE",
     CREDITNOTE: "CREDIT_NOTE",
+    CRNOTE: "CREDIT_NOTE",
     DN: "DEBIT_NOTE",
     D: "DEBIT_NOTE",
+    DBN: "DEBIT_NOTE",
+    DEBIT: "DEBIT_NOTE",
     DEBITNOTE: "DEBIT_NOTE",
+    DRNOTE: "DEBIT_NOTE",
   };
   return aliases[normalized] || normalized;
 }
 
-function validUtcDay(year, month, day) {
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return (
-    date.getUTCFullYear() === year &&
-    date.getUTCMonth() === month - 1 &&
-    date.getUTCDate() === day
-  );
-}
-
 function normalizeDocumentDate(value) {
-  const input = cleanText(value, 40);
-  let match = input.match(ISO_DAY_PATTERN);
-  let year;
-  let month;
-  let day;
-  if (match) {
-    [, year, month, day] = match;
-  } else {
-    match = input.match(DMY_DAY_PATTERN);
-    if (!match) return null;
-    [, day, month, year] = match;
-  }
-  const numericYear = Number(year);
-  const numericMonth = Number(month);
-  const numericDay = Number(day);
-  if (!validUtcDay(numericYear, numericMonth, numericDay)) return null;
-  return `${String(numericYear).padStart(4, "0")}-${String(numericMonth).padStart(2, "0")}-${String(numericDay).padStart(2, "0")}`;
+  // Accepts ISO, DD/MM/YYYY, DD-Mon-YYYY, Excel serial, YYYYMMDD, 2-digit years,
+  // etc. Returns canonical ISO YYYY-MM-DD, or null when not a real date.
+  return parseFlexibleDateIso(cleanText(value, 40));
 }
 
 function parseMoneyMinor(value, { allowBlank = true } = {}) {
-  const raw = cleanText(value, 80);
-  if (!raw) {
-    if (allowBlank) return 0;
-    throw new Error("Amount is required");
-  }
-
-  let normalized = raw.replace(/[₹,\s]/g, "");
-  let negative = false;
-  if (/^\(.*\)$/.test(normalized)) {
-    negative = true;
-    normalized = normalized.slice(1, -1);
-  }
-  if (normalized.startsWith("-")) {
-    negative = !negative;
-    normalized = normalized.slice(1);
-  } else if (normalized.startsWith("+")) {
-    normalized = normalized.slice(1);
-  }
-  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) {
-    throw new Error("Amount must be a decimal with at most two fraction digits");
-  }
-
-  const [whole, fraction = ""] = normalized.split(".");
-  const minor = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
-  const signed = negative ? -minor : minor;
-  if (signed > BigInt(Number.MAX_SAFE_INTEGER) || signed < BigInt(Number.MIN_SAFE_INTEGER)) {
-    throw new Error("Amount exceeds safe integer range");
-  }
-  return Number(signed);
+  // Delegates to the robust parser: accepts ₹/Rs/INR, Indian & intl grouping,
+  // parentheses/CR negatives, "/-" suffix, unicode minus. Exact integer paise.
+  return parseFlexibleMoneyMinor(value, { allowBlank, nonNegative: false, field: "Amount" });
 }
 
 function formatMoneyMinor(value) {

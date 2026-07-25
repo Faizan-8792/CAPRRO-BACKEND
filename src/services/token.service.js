@@ -2,6 +2,10 @@ import jwt from 'jsonwebtoken';
 
 export function signAccessToken(user) {
   const payload = {
+    // `id` is what auth.middleware reads to load the user; `sub` is kept for
+    // standards-compliance. Emitting both prevents a silent auth break if this
+    // helper is ever wired into the login flow.
+    id: user._id.toString(),
     sub: user._id.toString(),
     email: user.email,
     accountType: user.accountType,

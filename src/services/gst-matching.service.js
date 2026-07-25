@@ -223,6 +223,18 @@ export function buildReconciliationItems({
   const referencedCandidatePortal = new Set();
   const items = [];
 
+  // Index portal rows by supplier GSTIN. The fuzzy candidate search below can
+  // only ever match a portal row with the SAME supplier (candidateScore returns
+  // null otherwise), so scanning just this bucket is behaviour-identical to
+  // scanning all portal rows — but turns an O(unmatched x portal) hotspot into
+  // O(unmatched x same-supplier), which is what makes large imports viable.
+  const portalBySupplier = new Map();
+  for (const row of portal) {
+    const supplier = row.supplierGstin || "";
+    if (!portalBySupplier.has(supplier)) portalBySupplier.set(supplier, []);
+    portalBySupplier.get(supplier).push(row);
+  }
+
   for (const booksRow of books) {
     const key = exactKey(booksRow);
     const exactPortal = (portalGroups.get(key) || []).filter(
@@ -269,7 +281,7 @@ export function buildReconciliationItems({
       continue;
     }
 
-    const candidates = portal
+    const candidates = (portalBySupplier.get(booksRow.supplierGstin) || [])
       .filter(
         (row) =>
           !consumedPortal.has(idOf(row)) &&

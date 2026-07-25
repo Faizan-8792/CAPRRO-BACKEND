@@ -1,6 +1,33 @@
 import { createHash } from "node:crypto";
+import {
+  aliasLookup,
+  parseFlexibleDateIso,
+  parseFlexibleMoneyMinor,
+} from "./robust-normalize.service.js";
 
 const TDS_NORMALIZATION_VERSION = "tds-import-v1";
+
+// Label alias tables (keys are UPPERCASE alphanumeric-only; see aliasLookup).
+const FILING_STATUS_ALIASES = Object.freeze({
+  FILED: "FILED", EFILED: "FILED", ORIGINAL: "FILED", ORIGINALFILED: "FILED",
+  NOTFILED: "NOT_FILED", NOTYETFILED: "NOT_FILED", UNFILED: "NOT_FILED",
+  CORRECTIONPENDING: "CORRECTION_PENDING", REVISIONPENDING: "CORRECTION_PENDING",
+  CORRECTED: "CORRECTED", REVISED: "CORRECTED",
+});
+const CORRECTION_STATUS_ALIASES = Object.freeze({
+  NONE: "NONE", NA: "NONE", NIL: "NONE", ORIGINAL: "NONE", ORIGINALRETURN: "NONE", NOCORRECTION: "NONE",
+  PENDING: "PENDING", REQUIRED: "PENDING", INPROGRESS: "PENDING",
+  COMPLETED: "COMPLETED", DONE: "COMPLETED", CORRECTED: "COMPLETED", FILED: "COMPLETED",
+});
+const CERT_STATUS_ALIASES = Object.freeze({
+  NOTTRACKED: "NOT_TRACKED", NONE: "NOT_TRACKED", NA: "NOT_TRACKED", NIL: "NOT_TRACKED",
+  PENDING: "PENDING", NOTISSUED: "PENDING", INPROGRESS: "PENDING",
+  ISSUED: "ISSUED", GENERATED: "ISSUED", DONE: "ISSUED", DELIVERED: "ISSUED",
+});
+const CERT_TYPE_ALIASES = Object.freeze({
+  FORM16: "FORM_16", FORM16A: "FORM_16A", "16": "FORM_16", "16A": "FORM_16A",
+  FORM_16: "FORM_16", FORM_16A: "FORM_16A",
+});
 const TDS_IMPORT_KINDS = Object.freeze([
   "TDS_DEDUCTIONS",
   "TDS_CHALLANS",
@@ -11,7 +38,6 @@ const TDS_STATEMENT_TYPES = Object.freeze(["24Q", "26Q", "27Q"]);
 const TDS_QUARTERS = Object.freeze(["Q1", "Q2", "Q3", "Q4"]);
 const PAN_PATTERN = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const TAN_PATTERN = /^[A-Z]{4}[0-9]{5}[A-Z]$/;
-const ISO_DAY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
 const TDS_IMPORT_SPECS = Object.freeze({
   TDS_DEDUCTIONS: {
@@ -51,24 +77,8 @@ function normalizeCode(value) {
 }
 
 function parseMinorUnits(value, { field, required = false, nonNegative = true } = {}) {
-  const raw = String(value ?? "").trim();
-  if (!raw) {
-    if (required) throw new Error(`${field} is required`);
-    return 0;
-  }
-  const decimalPattern = /^-?(?:\d+|\d{1,3}(?:,\d{3})+|\d{1,3}(?:,\d{2})*,\d{3})(?:\.\d{1,2})?$/;
-  if (!decimalPattern.test(raw)) throw new Error(`${field} must be a decimal amount with at most 2 places`);
-  const normalized = raw.replaceAll(",", "");
-  const negative = normalized.startsWith("-");
-  const unsigned = negative ? normalized.slice(1) : normalized;
-  const [whole, fraction = ""] = unsigned.split(".");
-  const minor = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
-  const signed = negative ? -minor : minor;
-  if (nonNegative && signed < 0n) throw new Error(`${field} cannot be negative`);
-  if (signed > BigInt(Number.MAX_SAFE_INTEGER) || signed < BigInt(Number.MIN_SAFE_INTEGER)) {
-    throw new Error(`${field} exceeds safe currency range`);
-  }
-  return Number(signed);
+  // Robust superset: ₹/Rs/INR, Indian & intl grouping, "/-", CR/DR, unicode minus.
+  return parseFlexibleMoneyMinor(value, { allowBlank: !required, nonNegative, field });
 }
 
 function addSafeMinorUnits(values) {
@@ -83,17 +93,12 @@ function addSafeMinorUnits(values) {
   return Number(total);
 }
 
-function validIsoDay(value) {
-  if (!ISO_DAY_PATTERN.test(value)) return false;
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
-
 function normalizeIsoDay(value, { field, required = false } = {}) {
   const normalized = String(value || "").trim();
   if (!normalized && !required) return "";
-  if (!validIsoDay(normalized)) throw new Error(`${field} must be a real ISO date (YYYY-MM-DD)`);
-  return normalized;
+  const iso = parseFlexibleDateIso(normalized);
+  if (!iso) throw new Error(`${field} must be a real date (YYYY-MM-DD or common formats)`);
+  return iso;
 }
 
 function validateFinancialYear(value) {
@@ -172,14 +177,14 @@ function normalizeTdsImportRow(kind, mapped) {
     capture("challanDate", () => normalizeIsoDay(mapped.challanDate, { field: "challanDate", required: true }));
     capture("depositedMinor", () => parseMinorUnits(mapped.depositedAmount, { field: "depositedAmount", required: true, nonNegative: true }));
   } else if (normalizedKind === "TDS_STATEMENTS") {
-    values.filingStatus = normalizeCode(mapped.filingStatus);
+    values.filingStatus = aliasLookup(mapped.filingStatus, FILING_STATUS_ALIASES, normalizeCode(mapped.filingStatus));
     values.statementReference = String(mapped.statementReference || "").trim();
     values.deducteePan = normalizeCode(mapped.deducteePan);
     values.sectionCode = normalizeCode(mapped.sectionCode);
-    values.correctionStatus = normalizeCode(mapped.correctionStatus || "NONE");
+    values.correctionStatus = aliasLookup(mapped.correctionStatus, CORRECTION_STATUS_ALIASES, mapped.correctionStatus ? normalizeCode(mapped.correctionStatus) : "NONE");
     values.correctionReference = String(mapped.correctionReference || "").trim();
-    values.certificateStatus = normalizeCode(mapped.certificateStatus || "NOT_TRACKED");
-    values.certificateType = normalizeCode(mapped.certificateType);
+    values.certificateStatus = aliasLookup(mapped.certificateStatus, CERT_STATUS_ALIASES, mapped.certificateStatus ? normalizeCode(mapped.certificateStatus) : "NOT_TRACKED");
+    values.certificateType = aliasLookup(mapped.certificateType, CERT_TYPE_ALIASES, normalizeCode(mapped.certificateType));
     if (!["NOT_FILED", "FILED", "CORRECTION_PENDING", "CORRECTED"].includes(values.filingStatus)) {
       errors.push({ field: "filingStatus", code: "INVALID_FILING_STATUS", message: "Filing status must be NOT_FILED, FILED, CORRECTION_PENDING, or CORRECTED" });
     }
