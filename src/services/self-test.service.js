@@ -21,7 +21,6 @@ import { convertGstr2bJson } from "./gstr2b-json.service.js";
 import { parseMappedImport } from "./import-preview.service.js";
 import { validTimezone, zonedParts } from "./digest.service.js";
 import { sendTestEmail } from "./email.service.js";
-import { getEmailTransporter } from "../config/email.js";
 
 import AppConfig from "../models/AppConfig.js";
 import User from "../models/User.js";
@@ -200,20 +199,15 @@ function modelChecks() {
 function notificationChecks({ mailProbeTo } = {}) {
   return [
     ["mail-config", "Email provider configuration", async () => {
-      const providers = [];
-      if (process.env.RESEND_API_KEY) providers.push("Resend");
-      if (process.env.EMAIL_HOST && process.env.EMAIL_USER) providers.push("SMTP");
-      if (!providers.length) {
-        return {
-          status: "warn",
-          detail: "No email provider env detected (RESEND_API_KEY, or EMAIL_HOST + EMAIL_USER).",
-        };
+      if (!process.env.RESEND_API_KEY) {
+        return { status: "warn", detail: "RESEND_API_KEY not set — email delivery unavailable." };
       }
-      return `Configured: ${providers.join(" + ")}`;
+      return "Resend configured (all email: OTP, reminders, digests)";
     }],
     // REAL deliverability probe: actually send a test email through Resend.
     // sendTestEmail throws on any Resend soft-error (unverified domain, invalid
     // key, rate limit), so this check turns RED whenever email is truly broken.
+    // Resend is now the single provider for every email the app sends.
     ["mail-resend-send", "Resend live delivery (sends a real email)", async () => {
       if (!process.env.RESEND_API_KEY) {
         return { status: "warn", detail: "RESEND_API_KEY not set — Resend live send skipped." };
@@ -224,25 +218,6 @@ function notificationChecks({ mailProbeTo } = {}) {
       const res = await sendTestEmail(mailProbeTo);
       const id = res?.data?.id || res?.id || "";
       return `Real email accepted by Resend for ${mailProbeTo}${id ? ` (id ${id})` : ""}`;
-    }],
-    // Reminder emails use SMTP (nodemailer). verify() opens a real connection and
-    // authenticates against the SMTP server WITHOUT sending a message.
-    ["mail-smtp-verify", "SMTP transport reachable (reminders)", async () => {
-      const hasSmtp = Boolean(
-        process.env.EMAIL_HOST &&
-          process.env.EMAIL_PORT &&
-          process.env.EMAIL_USER &&
-          process.env.EMAIL_PASS
-      );
-      if (!hasSmtp) {
-        return {
-          status: "warn",
-          detail: "SMTP env (EMAIL_HOST/PORT/USER/PASS) not fully set — reminder SMTP path not configured.",
-        };
-      }
-      const tx = getEmailTransporter();
-      await tx.verify();
-      return "SMTP server reachable + credentials accepted (no email sent)";
     }],
   ];
 }

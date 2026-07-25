@@ -5,7 +5,6 @@ import Reminder from "../models/Reminder.js";
 import User from "../models/User.js";
 import AppConfig from "../models/AppConfig.js";
 import { sendComplianceReminderEmail } from "../services/reminder.service.js";
-import { sendReminderEmail } from "../config/email.js";
 import { safeRecordActivity } from "../services/activity.service.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -327,32 +326,23 @@ async function sendDeliveryEmail(reminder, spec, providerKey) {
     throw new Error("Reminder owner has no deliverable email address");
   }
 
-  if (spec.kind === "IMMEDIATE") {
-    const currentOffset = getRelativeOffset(
-      new Date(reminder.dueDateISO),
-      new Date()
-    );
-    return sendComplianceReminderEmail({
-      toEmail: user.email,
-      title: reminder.typeId,
-      clientLabel: reminder.clientLabel,
-      dueDateISO: reminder.dueDateISO,
-      daysLeft: -currentOffset,
-      idempotencyKey: providerKey,
-    });
-  }
+  // Both immediate and scheduled-offset reminders deliver through Resend (the
+  // verified caprotoolkit.in domain). daysLeft is derived from the attempt's
+  // offset: for IMMEDIATE we recompute it against "now"; for OFFSET the offset
+  // itself is the schedule point (daysLeft = -offset).
+  const offset =
+    spec.kind === "IMMEDIATE"
+      ? getRelativeOffset(new Date(reminder.dueDateISO), new Date())
+      : spec.offset;
 
-  const dueDate = new Date(reminder.dueDateISO);
-  const subject = `Reminder: ${reminder.typeId} for ${reminder.clientLabel || "Client"}`;
-  const text = `Dear ${user.name || "User"},\n\nReminder: ${
-    reminder.clientLabel || "Client"
-  }\nTask: ${reminder.typeId}\nDue: ${dueDate.toLocaleDateString(
-    "en-IN"
-  )}\n\nPlease complete this compliance task.\n\nCA PRO Toolkit`;
-
-  const messageId = `<${providerKey}@caprotoolkit.in>`;
-  const result = await sendReminderEmail(user.email, subject, text, { messageId });
-  return { providerMessageId: result?.messageId || messageId };
+  return sendComplianceReminderEmail({
+    toEmail: user.email,
+    title: reminder.typeId,
+    clientLabel: reminder.clientLabel,
+    dueDateISO: reminder.dueDateISO,
+    daysLeft: -offset,
+    idempotencyKey: providerKey,
+  });
 }
 
 async function completeDelivery(claim, spec, sentAt, providerResult = {}) {
@@ -1079,7 +1069,7 @@ export async function processReminderForNow(reminderDoc, nowUtc) {
         {
           kind,
           offset,
-          provider: attempt.provider || (kind === "IMMEDIATE" ? "RESEND" : "SMTP"),
+          provider: "RESEND",
           scheduleVersion: activeScheduleVersion,
           noticeCasesVersion,
           noticeCasesPublicationFence,
@@ -1117,7 +1107,7 @@ export async function processReminderForNow(reminderDoc, nowUtc) {
     {
       kind: "OFFSET",
       offset: relativeOffset,
-      provider: "SMTP",
+      provider: "RESEND",
       scheduleVersion: activeScheduleVersion,
       noticeCasesVersion,
       noticeCasesPublicationFence,
