@@ -220,3 +220,31 @@ export async function sendDigestEmail({
     throw error;
   }
 }
+
+
+/**
+ * ================================
+ * TEST EMAIL (admin diagnostics)
+ * ================================
+ * Sends a small "it works" email so an admin can confirm the email pipeline
+ * (Resend key + verified domain) is delivering. Returns the provider response.
+ */
+export async function sendTestEmail(toEmail) {
+  if (!toEmail) throw new Error("sendTestEmail: toEmail is required");
+  const sentAt = new Date().toISOString();
+  const res = await getResend().emails.send({
+    from: FROM_EMAIL,
+    to: toEmail,
+    subject: "CA PRO Toolkit — test email",
+    html: `
+      <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding:16px; color:#111827;">
+        <h2 style="margin-top:0;">Email delivery is working ✅</h2>
+        <p>This is a test email from CA PRO Toolkit, triggered from the Super Admin panel.</p>
+        <p style="font-size:12px; color:#6b7280;">Sent at ${escapeHtml(sentAt)}</p>
+      </div>
+    `,
+  });
+  if (res?.error) throw new Error(String(res.error.message || "Resend rejected test email"));
+  console.log(`📧 Test email sent to: ${toEmail}`, res?.data?.id || res?.id || "");
+  return res;
+}

@@ -3,6 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
+import hpp from "hpp";
 import compression from "compression";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -103,6 +104,8 @@ app.use(
     },
     crossOriginEmbedderPolicy: false,
     referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    // Force HTTPS for a year (with subdomains + preload eligibility).
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
   })
 );
 
@@ -145,6 +148,7 @@ app.use((req, res, next) => {
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("X-XSS-Protection", "1; mode=block");
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
   next();
 });
 
@@ -206,6 +210,9 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: "1mb" }));
 app.use(sanitizeInputs);
+// HTTP Parameter Pollution protection: collapse duplicated query/body params
+// to a single value so `?role=user&role=admin` cannot smuggle unexpected arrays.
+app.use(hpp());
 // trackUsage is wired AFTER authRequired in each route; this comment marks the chain.
 
 /* ===============================

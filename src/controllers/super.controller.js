@@ -6,6 +6,7 @@ import Task from "../models/Task.js";
 import Reminder from "../models/Reminder.js";
 import FirmMembership from "../models/FirmMembership.js";
 import { runSelfTest } from "../services/self-test.service.js";
+import { sendTestEmail } from "../services/email.service.js";
 
 const SUPER_EMAIL = "saifullahfaizan786@gmail.com";
 
@@ -609,6 +610,20 @@ export const runSystemSelfTest = async (req, res, next) => {
     assertSuper(req.user);
     const report = await runSelfTest();
     return res.json({ ok: true, report });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+
+// Super-admin only: send a real test email to the admin's own address to
+// confirm the email pipeline (Resend) is delivering.
+export const sendSuperTestEmail = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    const to = req.user.email;
+    const result = await sendTestEmail(to);
+    return res.json({ ok: true, to, id: result?.data?.id || result?.id || "" });
   } catch (err) {
     return next(err);
   }

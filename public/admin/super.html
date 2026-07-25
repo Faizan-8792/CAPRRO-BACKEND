@@ -55,8 +55,12 @@
               One click checks everything — backend, database, every engine and API, and email configuration. Read-only; nothing is written and no email is sent.
             </p>
           </div>
-          <button id="runSelfTestBtn" class="btn btn-primary" type="button">▶ Run Full System Test</button>
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <button id="sendTestEmailBtn" class="btn btn-outline-primary" type="button">✉ Send test email</button>
+            <button id="runSelfTestBtn" class="btn btn-primary" type="button">▶ Run Full System Test</button>
+          </div>
         </div>
+        <div id="sendTestEmailStatus" class="small mb-2" aria-live="polite"></div>
         <div class="card p-3 super-admin-card">
           <div id="selfTestIdle" class="text-muted small">
             Click “Run Full System Test” to verify the whole system is working. Each check appears live with a spinner, then a green tick (passed) or red mark (failed) with full detail.
@@ -388,6 +392,6 @@
 
     <!-- Bootstrap JS no longer needed (custom modal). Kept removed. -->
     <script src="file-tools.js"></script>
-    <script src="super.js?v=12"></script>
+    <script src="super.js?v=13"></script>
   </body>
 </html>

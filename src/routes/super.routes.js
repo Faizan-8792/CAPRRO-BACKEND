@@ -16,15 +16,28 @@ import {
   deleteFirmUserForSuper,
   deleteFirmForSuper,
   runSystemSelfTest,
+  sendSuperTestEmail,
 } from "../controllers/super.controller.js";
 import { requireSuperAdmin } from "../middleware/authorization.middleware.js";
+import rateLimit from "express-rate-limit";
 
 const router = express.Router();
+
+// Extra-strict limiter for expensive / side-effecting admin diagnostics.
+const diagnosticsLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: "Too many diagnostic requests, please wait a few minutes." },
+});
 
 router.use(authRequired);
 
 // One-button full system self-test (super admin only)
-router.post("/self-test", requireSuperAdmin, runSystemSelfTest);
+router.post("/self-test", diagnosticsLimiter, requireSuperAdmin, runSystemSelfTest);
+// Send a real test email to the admin's own address (super admin only)
+router.post("/send-test-email", diagnosticsLimiter, requireSuperAdmin, sendSuperTestEmail);
 
 // Super admin dashboard stats
 router.get("/dashboard-stats", getSuperDashboardStats);

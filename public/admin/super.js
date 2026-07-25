@@ -1150,3 +1150,35 @@ document.addEventListener("DOMContentLoaded", () => {
   const btn = qs("runSelfTestBtn");
   if (btn) btn.addEventListener("click", runSelfTest);
 });
+
+
+// ─── Send test email (admin diagnostics) ────────────────────────────
+async function sendTestEmailNow() {
+  const btn = qs("sendTestEmailBtn");
+  const status = qs("sendTestEmailStatus");
+  if (!btn) return;
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = "Sending…";
+  if (status) { status.textContent = "Sending a test email…"; status.style.color = "var(--muted)"; }
+  try {
+    const data = await api("/super/send-test-email", { method: "POST" });
+    if (status) {
+      status.textContent = `✓ Test email sent to ${data.to}. Check that inbox (also spam) to confirm delivery.`;
+      status.style.color = "#166534";
+    }
+  } catch (err) {
+    if (status) {
+      status.textContent = `✗ Test email failed: ${escapeHtml(err.message || "request failed")}`;
+      status.style.color = "#b91c1c";
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = qs("sendTestEmailBtn");
+  if (btn) btn.addEventListener("click", sendTestEmailNow);
+});
