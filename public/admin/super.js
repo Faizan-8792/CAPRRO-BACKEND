@@ -781,6 +781,7 @@ const userDir = {
   role: "",
   sort: "recent",
   totalPages: 1,
+  lastUsers: [],
 };
 let userDirDebounce = null;
 
@@ -790,7 +791,7 @@ function userRoleBadge(role) {
   return `<span class="badge bg-secondary">User</span>`;
 }
 
-function renderUserDirectoryRow(u) {
+function renderUserDirectoryRow(u, index) {
   const joined = u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—";
   let lastActive = "Never";
   let sinceLabel = "";
@@ -813,8 +814,20 @@ function renderUserDirectoryRow(u) {
     ? `${escapeHtml(u.activeFirm.displayName || "—")} <span class="text-muted small">@${escapeHtml(u.activeFirm.handle || "")}</span>${u.activeFirm.kind === "PERSONAL" ? ` <span class="badge bg-secondary">personal</span>` : ""}`
     : `<span class="text-muted small">—</span>`;
 
+  const cell = (label, value) => `<div class="col-md-3 col-6"><span class="text-muted d-block">${label}</span>${value}</div>`;
+  const detail = `
+    <div class="row g-3 small">
+      ${cell("Name", escapeHtml(u.name || "—"))}
+      ${cell("Email", escapeHtml(u.email || "—"))}
+      ${cell("Joined", escapeHtml(joined))}
+      ${cell("Last active", lastActiveCell)}
+      ${cell("Total API calls", apiCalls)}
+      ${cell("Workspaces", String(Number(u.workspaceCount || 0)))}
+      ${cell("Active firm", firmCell)}
+    </div>`;
+
   return `
-    <tr>
+    <tr class="user-dir-row" data-user-toggle="${index}" role="button" tabindex="0" aria-expanded="false" title="Show details">
       <td><strong>${escapeHtml(u.email || "—")}</strong>${u.name ? `<br><span class="text-muted small">${escapeHtml(u.name)}</span>` : ""}</td>
       <td>${userRoleBadge(u.role)}</td>
       <td>${statusBadge}</td>
@@ -824,7 +837,36 @@ function renderUserDirectoryRow(u) {
       <td>${Number(u.workspaceCount || 0)}</td>
       <td class="small">${firmCell}</td>
     </tr>
+    <tr class="user-dir-detail d-none" data-user-detail="${index}"><td colspan="8" class="bg-light">${detail}</td></tr>
   `;
+}
+
+// Export the users in the current directory view (respects filters) as CSV/Excel.
+function exportUserDirectory(format) {
+  if (typeof globalThis.CaProFiles?.downloadCsv !== "function") return;
+  const users = userDir.lastUsers || [];
+  if (!users.length) return;
+  const headers = ["Email", "Name", "Role", "Status", "Joined", "Last active", "Days since active", "API calls", "Workspaces", "Active firm", "Firm handle", "Firm type"];
+  const rows = users.map((u) => [
+    u.email || "",
+    u.name || "",
+    u.role || "",
+    u.isActive ? "Active" : "Disabled",
+    u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "",
+    u.lastActiveAt ? new Date(u.lastActiveAt).toLocaleDateString() : "Never",
+    u.lastActiveAt && Number.isFinite(u.daysSinceActive) ? String(u.daysSinceActive) : "",
+    String(Number(u.totalApiCalls || 0)),
+    String(Number(u.workspaceCount || 0)),
+    u.activeFirm?.displayName || "",
+    u.activeFirm?.handle || "",
+    u.activeFirm?.kind || "",
+  ]);
+  const stamp = new Date().toISOString().slice(0, 10);
+  if (format === "xlsx") {
+    globalThis.CaProFiles.downloadXlsx(`users-${stamp}.xlsx`, headers, rows, "Users");
+  } else {
+    globalThis.CaProFiles.downloadCsv(`users-${stamp}.csv`, headers, rows);
+  }
 }
 
 async function loadUserDirectory() {
@@ -846,10 +888,11 @@ async function loadUserDirectory() {
     const users = data.users || [];
     const p = data.pagination || {};
     userDir.totalPages = p.totalPages || 1;
+    userDir.lastUsers = users;
 
     if (body) {
       body.innerHTML = users.length
-        ? users.map(renderUserDirectoryRow).join("")
+        ? users.map((u, i) => renderUserDirectoryRow(u, i)).join("")
         : `<tr><td colspan="8" class="text-center text-muted small">No users match these filters.</td></tr>`;
     }
     if (metaEl) {
@@ -904,6 +947,29 @@ function bindUserDirectoryControls() {
       loadUserDirectory();
     }
   });
+  qs("userExportCsvBtn")?.addEventListener("click", () => exportUserDirectory("csv"));
+  qs("userExportXlsxBtn")?.addEventListener("click", () => exportUserDirectory("xlsx"));
+
+  // Expandable rows: click or Enter/Space toggles a detail panel for the user.
+  const body = qs("userDirectoryBody");
+  if (body) {
+    const toggleRow = (row) => {
+      const idx = row.dataset.userToggle;
+      const detail = body.querySelector(`[data-user-detail="${idx}"]`);
+      if (!detail) return;
+      const nowHidden = detail.classList.toggle("d-none");
+      row.setAttribute("aria-expanded", String(!nowHidden));
+    };
+    body.addEventListener("click", (e) => {
+      const row = e.target.closest(".user-dir-row");
+      if (row) toggleRow(row);
+    });
+    body.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const row = e.target.closest(".user-dir-row");
+      if (row) { e.preventDefault(); toggleRow(row); }
+    });
+  }
 }
 
 // ─── Init ───────────────────────────────────────────────────────────

@@ -217,6 +217,12 @@
               </div>
             </div>
 
+            <div class="d-flex align-items-center gap-2 mb-3">
+              <span class="text-muted small">Export current view:</span>
+              <button id="userExportCsvBtn" class="btn btn-sm btn-outline-secondary" type="button">CSV</button>
+              <button id="userExportXlsxBtn" class="btn btn-sm btn-outline-secondary" type="button">Excel</button>
+            </div>
+
             <p id="userDirectoryStatus" class="text-muted mb-3 small">Loading users…</p>
 
             <div class="table-responsive">
@@ -353,6 +359,7 @@
     </main>
 
     <!-- Bootstrap JS no longer needed (custom modal). Kept removed. -->
-    <script src="super.js?v=10"></script>
+    <script src="file-tools.js"></script>
+    <script src="super.js?v=11"></script>
   </body>
 </html>
