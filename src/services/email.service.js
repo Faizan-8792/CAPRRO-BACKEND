@@ -52,7 +52,12 @@ export async function sendOtpEmail(toEmail, otp) {
       `,
     });
 
-    console.log(`📧 OTP email sent to: ${toEmail}`, res?.id || "");
+    if (res?.error) {
+      // Resend returns a soft error object (unverified domain, invalid key, etc.)
+      // without throwing. Surface it so we never report a false "OTP sent".
+      throw new Error(String(res.error.message || "Resend rejected the OTP email"));
+    }
+    console.log(`📧 OTP email sent to: ${toEmail}`, res?.data?.id || res?.id || "");
     return res;
   } catch (err) {
     // Surface the full Resend error body so you can diagnose domain/key issues
@@ -118,7 +123,10 @@ export async function sendComplianceReminderEmail({
       html,
     });
 
-    console.log(`📧 Compliance reminder sent to: ${toEmail}`, res?.id || "");
+    if (res?.error) {
+      throw new Error(String(res.error.message || "Resend rejected the reminder email"));
+    }
+    console.log(`📧 Compliance reminder sent to: ${toEmail}`, res?.data?.id || res?.id || "");
     return res;
   } catch (err) {
     console.error("❌ Resend reminder error:", err);
