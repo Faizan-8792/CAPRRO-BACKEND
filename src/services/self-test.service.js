@@ -3,8 +3,11 @@
 // per-check report (pass/fail/warn + timing + detail). Each check is isolated:
 // one failure never aborts the others, and failures carry full detail.
 //
-// This is read-only and safe to run in production: no data is written, no email
-// is sent (mail is only checked for configuration).
+// Engine/model/infra checks are read-only. The notification group performs a
+// REAL email deliverability probe: it actually sends a test email via Resend
+// (to the caller-supplied recipient) and verifies the SMTP reminder transport.
+// This is deliberate — a green mail check must mean email genuinely works, not
+// merely that an API key env var is present.
 import mongoose from "mongoose";
 
 import { buildReconciliationItems, summarizeReconciliationItems } from "./gst-matching.service.js";
@@ -17,6 +20,8 @@ import { signAccessToken, verifyAccessToken } from "./token.service.js";
 import { convertGstr2bJson } from "./gstr2b-json.service.js";
 import { parseMappedImport } from "./import-preview.service.js";
 import { validTimezone, zonedParts } from "./digest.service.js";
+import { sendTestEmail } from "./email.service.js";
+import { getEmailTransporter } from "../config/email.js";
 
 import AppConfig from "../models/AppConfig.js";
 import User from "../models/User.js";
@@ -192,33 +197,71 @@ function modelChecks() {
   ]);
 }
 
-function notificationChecks() {
+function notificationChecks({ mailProbeTo } = {}) {
   return [
     ["mail-config", "Email provider configuration", async () => {
-      const configured = Boolean(
-        process.env.RESEND_API_KEY || process.env.SMTP_HOST || process.env.EMAIL_USER || process.env.EMAIL_HOST
+      const providers = [];
+      if (process.env.RESEND_API_KEY) providers.push("Resend");
+      if (process.env.EMAIL_HOST && process.env.EMAIL_USER) providers.push("SMTP");
+      if (!providers.length) {
+        return {
+          status: "warn",
+          detail: "No email provider env detected (RESEND_API_KEY, or EMAIL_HOST + EMAIL_USER).",
+        };
+      }
+      return `Configured: ${providers.join(" + ")}`;
+    }],
+    // REAL deliverability probe: actually send a test email through Resend.
+    // sendTestEmail throws on any Resend soft-error (unverified domain, invalid
+    // key, rate limit), so this check turns RED whenever email is truly broken.
+    ["mail-resend-send", "Resend live delivery (sends a real email)", async () => {
+      if (!process.env.RESEND_API_KEY) {
+        return { status: "warn", detail: "RESEND_API_KEY not set — Resend live send skipped." };
+      }
+      if (!mailProbeTo) {
+        return { status: "warn", detail: "No probe recipient available — Resend live send skipped." };
+      }
+      const res = await sendTestEmail(mailProbeTo);
+      const id = res?.data?.id || res?.id || "";
+      return `Real email accepted by Resend for ${mailProbeTo}${id ? ` (id ${id})` : ""}`;
+    }],
+    // Reminder emails use SMTP (nodemailer). verify() opens a real connection and
+    // authenticates against the SMTP server WITHOUT sending a message.
+    ["mail-smtp-verify", "SMTP transport reachable (reminders)", async () => {
+      const hasSmtp = Boolean(
+        process.env.EMAIL_HOST &&
+          process.env.EMAIL_PORT &&
+          process.env.EMAIL_USER &&
+          process.env.EMAIL_PASS
       );
-      if (!configured) return { status: "warn", detail: "No email provider env detected (RESEND_API_KEY/SMTP_HOST/EMAIL_USER). Email delivery will be skipped." };
-      return "Email provider configured";
+      if (!hasSmtp) {
+        return {
+          status: "warn",
+          detail: "SMTP env (EMAIL_HOST/PORT/USER/PASS) not fully set — reminder SMTP path not configured.",
+        };
+      }
+      const tx = getEmailTransporter();
+      await tx.verify();
+      return "SMTP server reachable + credentials accepted (no email sent)";
     }],
   ];
 }
 
-const GROUPS = [
-  ["Infrastructure & configuration", infrastructureChecks],
-  ["Core engines & API logic", engineChecks],
-  ["Data models (database)", modelChecks],
-  ["Notifications", notificationChecks],
-];
+export async function runSelfTest(options = {}) {
+  const groupsDef = [
+    ["Infrastructure & configuration", infrastructureChecks],
+    ["Core engines & API logic", engineChecks],
+    ["Data models (database)", modelChecks],
+    ["Notifications", () => notificationChecks(options)],
+  ];
 
-export async function runSelfTest() {
   const startedAt = new Date();
   const groups = [];
   let passed = 0;
   let failed = 0;
   let warned = 0;
 
-  for (const [groupName, builder] of GROUPS) {
+  for (const [groupName, builder] of groupsDef) {
     const defs = builder();
     // Run a group's checks in parallel; each is isolated.
     const checks = await Promise.all(defs.map(([id, name, fn]) => runCheck(id, name, fn)));

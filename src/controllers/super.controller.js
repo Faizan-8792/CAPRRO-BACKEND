@@ -603,12 +603,14 @@ export const deleteFirmForSuper = async (req, res, next) => {
 
 
 // One-button full system self-test. Super-admin only. Runs infrastructure,
-// engine/API-logic, data-model, and notification checks in-process (read-only,
-// no email sent) and returns a structured per-check report.
+// engine/API-logic, data-model, and notification checks in-process and returns
+// a structured per-check report. The notification group performs a REAL email
+// deliverability probe: it sends an actual test email (via Resend) to the
+// super admin's own address, so a green mail check proves email truly works.
 export const runSystemSelfTest = async (req, res, next) => {
   try {
     assertSuper(req.user);
-    const report = await runSelfTest();
+    const report = await runSelfTest({ mailProbeTo: req.user.email });
     return res.json({ ok: true, report });
   } catch (err) {
     return next(err);
