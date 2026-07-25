@@ -19,3 +19,7 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+
+# One-off recovery artifacts (never commit)
+super-token.txt
+__recover.mjs
