@@ -151,21 +151,123 @@ async function callDeepSeek({
   return { ok: false, reason: last.reason, provider: "DEEPSEEK" };
 }
 
+const asJsonObject = (p) =>
+  p && typeof p === "object" && !Array.isArray(p) ? p : null;
+
+// Light repair of common LLM JSON quirks: smart quotes and trailing commas.
+function sanitizeJsonish(s) {
+  return s
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/,\s*([}\]])/g, "$1");
+}
+
+// Extract the first balanced { ... } object, ignoring braces inside strings, so
+// prose/markdown around the object does not defeat parsing. Returns null if the
+// object never closes (truncated output).
+function extractFirstJsonObject(text) {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+// Recover a JSON object truncated mid-value (model hit the token cap): drop any
+// dangling partial key/value, close an open string, and append the missing
+// closing brackets so the fields already emitted (e.g. the classification)
+// still parse.
+function repairTruncatedJson(text) {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+  let s = text.slice(start);
+  let inStr = false;
+  let esc = false;
+  const stack = [];
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{" || ch === "[") stack.push(ch === "{" ? "}" : "]");
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+  if (inStr) s += '"'; // close an unterminated string literal
+  // Strip a dangling partial trailer so the completed fields still parse:
+  //   , "key": "val   (half value)   |   , "partialKey   (no colon yet)   |   ,
+  s = s
+    .replace(/,\s*"[^"]*"\s*:\s*("[^"]*")?\s*$/, "")
+    .replace(/,\s*"[^"]*"?\s*$/, "")
+    .replace(/,\s*$/, "");
+  while (stack.length) s += stack.pop();
+  return s;
+}
+
+// Robustly extract a JSON object from LLM output. Handles pure JSON, markdown
+// code fences, surrounding prose, minor formatting quirks, and truncation.
 function parseJsonObject(content) {
   if (typeof content !== "string") return null;
-  try {
-    const parsed = JSON.parse(content);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    const candidate = content.match(/\{[\s\S]*\}/)?.[0];
-    if (!candidate) return null;
+  const tryParse = (s) => {
     try {
-      const parsed = JSON.parse(candidate);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+      return asJsonObject(JSON.parse(s));
     } catch {
       return null;
     }
+  };
+
+  const trimmed = content.trim();
+  let out = tryParse(trimmed);
+  if (out) return out;
+
+  // Strip markdown code fences the model may add despite JSON mode.
+  const cleaned = trimmed
+    .replace(/```(?:json)?/gi, "")
+    .replace(/```/g, "")
+    .trim();
+  out = tryParse(cleaned) || tryParse(sanitizeJsonish(cleaned));
+  if (out) return out;
+
+  // First balanced object (tolerates surrounding prose).
+  const balanced = extractFirstJsonObject(cleaned);
+  if (balanced) {
+    out = tryParse(balanced) || tryParse(sanitizeJsonish(balanced));
+    if (out) return out;
   }
+
+  // Truncated object: repair and retry so emitted fields are recovered.
+  const repaired = repairTruncatedJson(cleaned);
+  if (repaired) {
+    out = tryParse(repaired) || tryParse(sanitizeJsonish(repaired));
+    if (out) return out;
+  }
+
+  // Last resort: greedy first-{ to last-} with light sanitising.
+  const greedy = cleaned.match(/\{[\s\S]*\}/)?.[0];
+  if (greedy) {
+    out = tryParse(greedy) || tryParse(sanitizeJsonish(greedy));
+    if (out) return out;
+  }
+  return null;
 }
 
 export {

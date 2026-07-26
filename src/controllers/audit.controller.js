@@ -81,8 +81,9 @@ ${catalogBlock}
 LOCAL ENGINE HINTS (a keyword tool's guesses; may be wrong, weak, or empty — use only as a faint hint, do not over-trust): ${hintsBlock || "(none)"}
 
 confidence: 0.0 to 1.0, your honest certainty. Be strict; do not inflate.
+reason: ONE short phrase, at most 15 words. Do not write paragraphs.
 
-Respond with ONLY this JSON (no markdown, no commentary):
+Respond with ONLY this compact JSON on a single line (no markdown, no commentary):
 {"isAuditText": boolean, "chosenId": string|null, "confidence": number, "reason": string}
 
 TEXT:
@@ -122,7 +123,7 @@ export async function refineAuditClassification(req, res, next) {
         "You are a strict JSON-only audit-text classifier for Indian Chartered Accountants. Output only valid JSON, no extra text.",
       prompt,
       jsonResponse: true,
-      maxTokens: 400,
+      maxTokens: 900,
       temperature: 0,
       model: classifierModel,
     });
