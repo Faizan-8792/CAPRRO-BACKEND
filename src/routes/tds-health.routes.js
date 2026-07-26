@@ -21,6 +21,7 @@ import { authRequiredWithoutUsageTracking } from "../middleware/auth.middleware.
 import {
   requireFirmAdmin,
   requireFirmMember,
+  requireFirmWriteAccess,
 } from "../middleware/authorization.middleware.js";
 import { requireFeatureFlag } from "../middleware/rollout.middleware.js";
 
@@ -29,6 +30,7 @@ const router = Router();
 router.use(
   authRequiredWithoutUsageTracking,
   requireFirmMember,
+  requireFirmWriteAccess,
   requireFeatureFlag("tdsHealth")
 );
 

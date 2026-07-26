@@ -20,7 +20,10 @@ import {
   showEngagement,
 } from "../controllers/engagement.controller.js";
 import { authRequired } from "../middleware/auth.middleware.js";
-import { requireFirmMember } from "../middleware/authorization.middleware.js";
+import {
+  requireFirmMember,
+  requireFirmWriteAccess,
+} from "../middleware/authorization.middleware.js";
 import { requireFeatureFlag } from "../middleware/rollout.middleware.js";
 
 const router = Router();
@@ -29,6 +32,7 @@ const requireAuditWorkingPapers = requireFeatureFlag("auditWorkingPapers");
 router.use(
   authRequired,
   requireFirmMember,
+  requireFirmWriteAccess,
   requireFeatureFlag("assuranceEngagements")
 );
 

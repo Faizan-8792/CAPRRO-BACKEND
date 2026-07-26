@@ -22,7 +22,10 @@ import {
   authRequired,
   authRequiredWithoutUsageTracking,
 } from "../middleware/auth.middleware.js";
-import { requireFirmMember } from "../middleware/authorization.middleware.js";
+import {
+  requireFirmMember,
+  requireFirmWriteAccess,
+} from "../middleware/authorization.middleware.js";
 import { requireFeatureFlag } from "../middleware/rollout.middleware.js";
 import { OCR_MAX_BYTES, OCR_MIME_TYPES } from "../services/ocr-space.service.js";
 
@@ -52,6 +55,7 @@ router.post(
 router.use(
   authRequired,
   requireFirmMember,
+  requireFirmWriteAccess,
   requireFeatureFlag("noticeCases")
 );
 router.post("/", createCase);

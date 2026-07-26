@@ -16,7 +16,10 @@ import {
 import {
   authRequiredWithoutUsageTracking,
 } from "../middleware/auth.middleware.js";
-import { requireFirmMember } from "../middleware/authorization.middleware.js";
+import {
+  requireFirmMember,
+  requireFirmWriteAccess,
+} from "../middleware/authorization.middleware.js";
 import { requireFeatureFlag } from "../middleware/rollout.middleware.js";
 
 const router = Router();
@@ -24,6 +27,7 @@ const router = Router();
 router.use(
   authRequiredWithoutUsageTracking,
   requireFirmMember,
+  requireFirmWriteAccess,
   requireFeatureFlag("gstReconciliation")
 );
 

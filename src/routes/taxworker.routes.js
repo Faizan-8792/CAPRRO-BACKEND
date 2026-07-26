@@ -1,6 +1,7 @@
 // src/routes/taxworker.routes.js
 import { Router } from "express";
 import { authRequired } from "../middleware/auth.middleware.js";
+import { requireFirmWriteAccess } from "../middleware/authorization.middleware.js";
 import {
   getTemplates,
   listClients,
@@ -20,7 +21,7 @@ import {
 
 const router = Router();
 
-router.use(authRequired);
+router.use(authRequired, requireFirmWriteAccess);
 
 // Templates catalog
 router.get("/templates", getTemplates);

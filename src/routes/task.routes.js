@@ -4,6 +4,7 @@ import { authRequired } from "../middleware/auth.middleware.js";
 import {
   requireFirmAdmin,
   requireFirmMember,
+  requireFirmWriteAccess,
 } from "../middleware/authorization.middleware.js";
 import { captureOptionalFeatureFlag } from "../middleware/rollout.middleware.js";
 import {
@@ -24,7 +25,7 @@ import {
 const router = express.Router();
 const captureNoticeCases = captureOptionalFeatureFlag("noticeCases");
 
-router.use(authRequired);
+router.use(authRequired, requireFirmWriteAccess);
 
 router.post("/", createTask);
 router.get(

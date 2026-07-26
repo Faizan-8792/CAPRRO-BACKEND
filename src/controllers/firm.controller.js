@@ -75,6 +75,7 @@ async function workspaceSummary(firm, membership, activeFirmId) {
         ? firm.joinCode
         : undefined,
     sharingEnabled: firm.sharingEnabled !== false,
+    memberAccess: firm.memberAccess === "READ_ONLY" ? "READ_ONLY" : "EDIT",
     isActive: String(firm._id) === String(activeFirmId),
   };
 }
@@ -217,6 +218,7 @@ export const listWorkspaces = async (req, res, next) => {
           memberCount: countById.get(String(firm._id)) || 1,
           joinCode: elevated ? firm.joinCode : undefined,
           sharingEnabled: firm.sharingEnabled !== false,
+          memberAccess: firm.memberAccess === "READ_ONLY" ? "READ_ONLY" : "EDIT",
           isActive: String(firm._id) === String(user.firmId),
         };
       })
@@ -422,7 +424,7 @@ export const updateFirm = async (req, res, next) => {
     const { firmId } = req.params;
     const firm = await assertFirmAdmin(userId, firmId);
 
-    const { displayName, description, practiceAreas, joinCode, sharingEnabled } = req.body || {};
+    const { displayName, description, practiceAreas, joinCode, sharingEnabled, memberAccess } = req.body || {};
     
     // Update basic fields
     if (displayName !== undefined) firm.displayName = displayName.trim();
@@ -430,6 +432,16 @@ export const updateFirm = async (req, res, next) => {
     if (Array.isArray(practiceAreas)) firm.practiceAreas = practiceAreas;
     // Owner-only privacy switch (assertFirmAdmin above already enforced ownership).
     if (typeof sharingEnabled === "boolean") firm.sharingEnabled = sharingEnabled;
+    // Owner-only member write access: EDIT (collaborative) or READ_ONLY (view only).
+    if (memberAccess !== undefined) {
+      if (memberAccess !== "EDIT" && memberAccess !== "READ_ONLY") {
+        return res.status(400).json({
+          ok: false,
+          error: "memberAccess must be either EDIT or READ_ONLY",
+        });
+      }
+      firm.memberAccess = memberAccess;
+    }
 
     // Handle custom join code update
     if (joinCode) {

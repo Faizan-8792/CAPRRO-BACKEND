@@ -59,6 +59,14 @@ const FirmSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  // EDIT       — members can change this firm's data (default; collaborative).
+  // READ_ONLY  — only the owner and firm admins can write; members view only.
+  // Absent on legacy documents, which are treated as EDIT (backward compatible).
+  memberAccess: {
+    type: String,
+    enum: ["EDIT", "READ_ONLY"],
+    default: "EDIT",
+  },
   timezone: {
     type: String,
     trim: true,

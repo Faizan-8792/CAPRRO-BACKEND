@@ -1,7 +1,10 @@
 // src/routes/reminder.routes.js
 import express from "express";
 import { authRequired } from "../middleware/auth.middleware.js";
-import { requireFirmAdmin } from "../middleware/authorization.middleware.js";
+import {
+  requireFirmAdmin,
+  requireFirmWriteAccess,
+} from "../middleware/authorization.middleware.js";
 import { captureOptionalFeatureFlag } from "../middleware/rollout.middleware.js";
 import {
   createReminder,
@@ -14,7 +17,7 @@ import {
 const router = express.Router();
 const captureNoticeCases = captureOptionalFeatureFlag("noticeCases");
 
-router.use(authRequired);
+router.use(authRequired, requireFirmWriteAccess);
 
 // Create reminder (extension / admin)
 router.post("/", createReminder);

@@ -12,7 +12,10 @@ import {
 import {
   authRequiredWithoutUsageTracking,
 } from "../middleware/auth.middleware.js";
-import { requireFirmMember } from "../middleware/authorization.middleware.js";
+import {
+  requireFirmMember,
+  requireFirmWriteAccess,
+} from "../middleware/authorization.middleware.js";
 import { requireFeatureFlag } from "../middleware/rollout.middleware.js";
 import { GST_IMPORT_KINDS } from "../models/ImportRow.js";
 import { TDS_IMPORT_KINDS } from "../models/TdsImportRow.js";
@@ -32,7 +35,7 @@ function requireImportPreviewFeature(req, res, next) {
   return next();
 }
 
-router.use(authRequiredWithoutUsageTracking, requireFirmMember);
+router.use(authRequiredWithoutUsageTracking, requireFirmMember, requireFirmWriteAccess);
 router.post("/preview", requireImportPreviewFeature, previewMappedImport);
 router.post("/gstr2b/convert", requireGstReconciliation, convertGstr2bImport);
 router.post("/:sourceHash/tds-commit", requireTdsHealth, commitMappedTdsImport);
