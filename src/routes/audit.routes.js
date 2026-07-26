@@ -5,6 +5,7 @@ import {
   refineAuditClassification,
   generateInsights,
   generateReminderMessage,
+  generateStandardGuidance,
 } from "../controllers/audit.controller.js";
 
 const router = Router();
@@ -19,5 +20,8 @@ router.post("/insights", generateInsights);
 
 // Personalized reminder/chase message generation
 router.post("/reminder-message", generateReminderMessage);
+
+// On-demand LLM-generated guidance for any standard/section code
+router.post("/standard-guidance", generateStandardGuidance);
 
 export default router;

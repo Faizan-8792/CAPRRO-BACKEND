@@ -351,3 +351,75 @@ Goal: remind them documents have been pending for ${Number(daysPending || 3)}+ d
     next(err);
   }
 }
+
+// In-memory cache for generated standard guidance (per server instance). Keeps
+// repeat lookups instant and avoids re-calling the LLM for the same code.
+const STANDARD_GUIDANCE_CACHE = new Map();
+
+// Generate a concise reference summary for ANY audit/accounting standard or
+// statutory provision code, so the extension's guidance page never dead-ends on
+// codes that are not in the packaged standardDetails dictionary.
+export async function generateStandardGuidance(req, res, next) {
+  try {
+    const code = safeStr(req.body?.code, 60).trim();
+    if (!code || code.length < 2) {
+      return res.status(400).json({ ok: false, error: "code required" });
+    }
+
+    const cacheKey = code.toLowerCase();
+    if (STANDARD_GUIDANCE_CACHE.has(cacheKey)) {
+      return res.json({
+        ok: true,
+        generated: true,
+        code,
+        guidance: STANDARD_GUIDANCE_CACHE.get(cacheKey),
+        cached: true,
+      });
+    }
+
+    if (!process.env.DEEPSEEK_API_KEY) {
+      return res.json({ ok: true, generated: false, code, guidance: "", reason: "LLM not configured" });
+    }
+
+    const system =
+      "You are an Indian Chartered Accountant. Provide a concise, practical reference summary of an Indian auditing/accounting standard or statutory provision as used in Indian statutory audit. Return plain text only, no markdown.";
+    const prompt = `Provide a concise reference summary for "${code}" as used in Indian statutory audit / accounting.
+Use short labelled lines:
+Overview: what it is and its scope.
+Key requirements: the core requirements.
+Audit focus / procedures: what the auditor does.
+Common risks / pitfalls.
+Documentation / disclosures.
+Keep it 120-200 words, professional and specific to Indian practice. If "${code}" is not a recognised standard or statutory provision, say so briefly and advise verifying against official ICAI / MCA / statutory sources.`;
+
+    const r = await callDeepSeek({
+      system,
+      prompt,
+      jsonResponse: false,
+      maxTokens: 500,
+      temperature: 0.2,
+      timeoutMs: 30000,
+      model: INSIGHTS_MODEL,
+    });
+
+    if (!r.ok || !r.content?.trim()) {
+      return res.json({ ok: true, generated: false, code, guidance: "", reason: r.reason || "LLM returned empty" });
+    }
+
+    const guidance = r.content
+      .trim()
+      .replace(/^```[a-z]*\n?/i, "")
+      .replace(/```$/i, "")
+      .trim();
+
+    STANDARD_GUIDANCE_CACHE.set(cacheKey, guidance);
+    if (STANDARD_GUIDANCE_CACHE.size > 500) {
+      STANDARD_GUIDANCE_CACHE.delete(STANDARD_GUIDANCE_CACHE.keys().next().value);
+    }
+
+    return res.json({ ok: true, generated: true, code, guidance });
+  } catch (err) {
+    console.error("generateStandardGuidance error:", err);
+    next(err);
+  }
+}
