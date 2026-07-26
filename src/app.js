@@ -239,14 +239,11 @@ app.get("/health", async (req, res) => {
     }
   }
 
+  // Keep the public health payload minimal (no process memory internals).
   res.status(dbOk ? 200 : 503).json({
     status: dbOk ? "ok" : "degraded",
     uptime: Math.round(process.uptime()),
     db: { state: dbStateName, ping_ms: dbPingMs },
-    memory: {
-      rss_mb: Math.round(process.memoryUsage().rss / 1024 / 1024),
-      heap_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
-    },
   });
 });
 

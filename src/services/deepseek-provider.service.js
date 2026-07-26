@@ -5,6 +5,29 @@ function boundedString(value, max = 4000) {
   return String(value ?? "").slice(0, max);
 }
 
+// Best-effort redaction of Indian PII / financial identifiers before any text
+// leaves our servers for the third-party LLM. Applied at the single egress
+// point (callDeepSeek) so every caller — classifier, insights, reminder,
+// working papers — is covered. Order matters: composite identifiers (a GSTIN
+// embeds a PAN) are redacted before their sub-patterns. Audit-topic semantics
+// are preserved because only identifiers, not domain terms, are removed.
+function redactPII(text) {
+  if (typeof text !== "string" || !text) return text;
+  return text
+    // GSTIN (15 chars): 2-digit state + PAN(5A4D1A) + entity/Z/checksum
+    .replace(/\b\d{2}[A-Z]{5}\d{4}[A-Z][0-9A-Z]{3}\b/gi, "[GSTIN]")
+    // PAN: 5 letters + 4 digits + 1 letter
+    .replace(/\b[A-Z]{5}\d{4}[A-Z]\b/gi, "[PAN]")
+    // Email address
+    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "[EMAIL]")
+    // Aadhaar: 12 digits, optionally grouped 4-4-4
+    .replace(/\b\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g, "[AADHAAR]")
+    // Indian mobile: optional +91/0 prefix + 10 digits starting 6-9
+    .replace(/\b(?:\+91[\s-]?|0)?[6-9]\d{9}\b/g, "[PHONE]")
+    // Long bare digit runs (bank account / long IDs)
+    .replace(/\b\d{11,18}\b/g, "[NUM]");
+}
+
 async function callDeepSeek({
   system,
   prompt,
@@ -25,7 +48,8 @@ async function callDeepSeek({
       model: DEEPSEEK_MODEL,
       messages: [
         { role: "system", content: boundedString(system, 12000) },
-        { role: "user", content: boundedString(prompt, 120000) },
+        // User content carries the caller's data — redact identifiers first.
+        { role: "user", content: boundedString(redactPII(prompt), 120000) },
       ],
       temperature: Math.max(0, Math.min(1, Number(temperature) || 0)),
       max_tokens: Math.max(1, Math.min(8000, Number(maxTokens) || 600)),
@@ -82,6 +106,7 @@ function parseJsonObject(content) {
 export {
   DEEPSEEK_MODEL,
   boundedString,
+  redactPII,
   callDeepSeek,
   parseJsonObject,
 };

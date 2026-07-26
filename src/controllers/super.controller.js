@@ -602,6 +602,35 @@ export const deleteFirmForSuper = async (req, res, next) => {
 };
 
 
+// Force-logout a user on every device by bumping their tokenVersion. Every JWT
+// issued before this instant immediately fails authentication — the response
+// for a compromised/leaked token or a "sign out everywhere" request.
+export const forceLogoutUser = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+
+    const { userId } = req.params;
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ ok: false, error: "User not found" });
+    }
+
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
+    await user.save();
+
+    return res.json({
+      ok: true,
+      user: {
+        id: user._id,
+        email: user.email,
+        tokenVersion: user.tokenVersion,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // One-button full system self-test. Super-admin only. Runs infrastructure,
 // engine/API-logic, data-model, and notification checks in-process and returns
 // a structured per-check report. The notification group performs a REAL email

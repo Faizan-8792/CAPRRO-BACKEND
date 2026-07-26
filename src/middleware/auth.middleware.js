@@ -41,13 +41,19 @@ async function authenticate(req, res, next, { recordUsage }) {
     }
 
     const user = await User.findById(payload.id)
-      .select("email role accountType firmId isActive")
+      .select("email role accountType firmId isActive tokenVersion")
       .lean();
     if (!user) {
       return reject(req, res, 401, "User no longer exists");
     }
     if (user.isActive === false) {
       return reject(req, res, 403, "Account is inactive");
+    }
+    // Session revocation: a token is valid only while its tv claim matches the
+    // account's current tokenVersion. Old tokens (no tv) default to 0, so this
+    // stays backward-compatible until a force-logout bumps the version.
+    if ((user.tokenVersion || 0) !== (payload.tv || 0)) {
+      return reject(req, res, 401, "Session revoked. Please sign in again.");
     }
 
     req.user = {

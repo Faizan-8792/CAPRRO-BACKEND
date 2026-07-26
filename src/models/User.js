@@ -40,6 +40,26 @@ const UserSchema = new mongoose.Schema(
     },
     otpCodeHash: String,
     otpExpiresAt: Date,
+    // Brute-force protection: failed OTP attempts + lockout window + resend throttle.
+    otpAttempts: {
+      type: Number,
+      default: 0,
+    },
+    otpLockedUntil: {
+      type: Date,
+      default: null,
+    },
+    otpLastSentAt: {
+      type: Date,
+      default: null,
+    },
+    // Session revocation: incrementing this invalidates every previously issued
+    // JWT for this user (compromised token, force-logout). Tokens carry the tv
+    // claim; auth middleware rejects any token whose tv is stale.
+    tokenVersion: {
+      type: Number,
+      default: 0,
+    },
     isActive: {
       type: Boolean,
       default: true,

@@ -9,6 +9,10 @@ const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error("JWT_SECRET env var is required");
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
 const OTP_EXPIRY_MINUTES = 10;
+// Brute-force + abuse protection for OTP login.
+const MAX_OTP_ATTEMPTS = 5; // wrong tries before lockout
+const OTP_LOCK_MS = 15 * 60 * 1000; // lockout duration after too many tries
+const OTP_RESEND_COOLDOWN_MS = 30 * 1000; // min gap between OTP sends
 
 // Google Sign-In: verifier for the Google-issued ID token.
 // GOOGLE_CLIENT_ID must match the client ID used by the extension/web to
@@ -25,7 +29,9 @@ function hashOtp(otp) {
 }
 
 function generateOtp() {
-  return Math.floor(100000 + Math.random() * 900000);
+  // Cryptographically secure 6-digit OTP (100000–999999). Math.random is not
+  // suitable for security tokens.
+  return crypto.randomInt(100000, 1000000);
 }
 
 function buildTokenPayload(user) {
@@ -71,6 +77,17 @@ export const sendOtp = async (req, res, next) => {
       user.isActive = true;
     }
 
+    // Resend throttle: block OTP flooding / email bombing of an address.
+    if (
+      user.otpLastSentAt &&
+      Date.now() - user.otpLastSentAt.getTime() < OTP_RESEND_COOLDOWN_MS
+    ) {
+      return res.status(429).json({
+        ok: false,
+        error: "Please wait a moment before requesting another OTP.",
+      });
+    }
+
     const otp = generateOtp();
 
     // Dev-only OTP log — never log OTPs in production
@@ -82,6 +99,10 @@ export const sendOtp = async (req, res, next) => {
     user.otpExpiresAt = new Date(
       Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000
     );
+    // A fresh OTP clears the brute-force counter/lock and records the send time.
+    user.otpAttempts = 0;
+    user.otpLockedUntil = null;
+    user.otpLastSentAt = new Date();
     await user.save();
 
     // ✅ ONLY CHANGE: OTP email now goes via Resend
@@ -116,6 +137,14 @@ export const verifyOtpAndLogin = async (req, res, next) => {
       return res.status(404).json({ ok: false, error: "User not found" });
     }
 
+    // Brute-force lockout: too many wrong OTPs → temporary hard stop.
+    if (user.otpLockedUntil && user.otpLockedUntil.getTime() > Date.now()) {
+      return res.status(429).json({
+        ok: false,
+        error: "Too many incorrect attempts. Please request a new OTP shortly.",
+      });
+    }
+
     // Re-apply SUPER_ADMIN
     if (
       normalizedEmail === "saifullahfaizan786@gmail.com" &&
@@ -138,12 +167,28 @@ export const verifyOtpAndLogin = async (req, res, next) => {
 
     const incomingHash = hashOtp(otpValue);
     if (incomingHash !== user.otpCodeHash) {
-      return res.status(400).json({ ok: false, error: "Invalid OTP" });
+      user.otpAttempts = (user.otpAttempts || 0) + 1;
+      const locked = user.otpAttempts >= MAX_OTP_ATTEMPTS;
+      if (locked) {
+        // Burn the OTP and start the lockout window.
+        user.otpLockedUntil = new Date(Date.now() + OTP_LOCK_MS);
+        user.otpCodeHash = undefined;
+        user.otpExpiresAt = undefined;
+      }
+      await user.save();
+      return res.status(locked ? 429 : 400).json({
+        ok: false,
+        error: locked
+          ? "Too many incorrect attempts. Please request a new OTP shortly."
+          : "Invalid OTP",
+      });
     }
 
-    // Clear OTP
+    // Success — clear OTP + reset brute-force state.
     user.otpCodeHash = undefined;
     user.otpExpiresAt = undefined;
+    user.otpAttempts = 0;
+    user.otpLockedUntil = null;
     await user.save();
 
     // Ensure the user has a personal workspace so the product is usable
@@ -151,7 +196,11 @@ export const verifyOtpAndLogin = async (req, res, next) => {
     await ensurePersonalFirm(user);
 
     const payload = buildTokenPayload(user);
-    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    const token = jwt.sign(
+      { ...payload, tv: user.tokenVersion || 0 },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
 
     return res.json({ ok: true, token, user: payload });
   } catch (err) {
@@ -263,9 +312,11 @@ export const googleLogin = async (req, res, next) => {
     await ensurePersonalFirm(user);
 
     const tokenPayload = buildTokenPayload(user);
-    const jwtToken = jwt.sign(tokenPayload, JWT_SECRET, {
-      expiresIn: JWT_EXPIRES_IN,
-    });
+    const jwtToken = jwt.sign(
+      { ...tokenPayload, tv: user.tokenVersion || 0 },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
 
     return res.json({ ok: true, token: jwtToken, user: tokenPayload });
   } catch (err) {

@@ -17,6 +17,7 @@ import {
   deleteFirmForSuper,
   runSystemSelfTest,
   sendSuperTestEmail,
+  forceLogoutUser,
 } from "../controllers/super.controller.js";
 import { requireSuperAdmin } from "../middleware/authorization.middleware.js";
 import rateLimit from "express-rate-limit";
@@ -52,6 +53,9 @@ router.get("/users", listAllUsers);
 router.get("/pending-admins", listPendingAdmins);
 router.post("/approve-admin/:userId", approveAdmin);
 router.post("/revoke-admin/:userId", revokeAdmin);
+
+// Force-logout a user everywhere (revoke all their JWTs) — super admin only
+router.post("/users/:userId/force-logout", requireSuperAdmin, forceLogoutUser);
 
 // Firms + users + operational access (legacy /plan path retained for compatibility)
 router.get("/firms", listFirms);
