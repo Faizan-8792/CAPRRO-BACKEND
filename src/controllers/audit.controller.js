@@ -16,6 +16,9 @@ function safeStr(v, max = 4000) {
 const ALLOWED_LLM_MODELS = new Set(["deepseek-v4-pro", "deepseek-v4-flash"]);
 const CLASSIFIER_MODEL =
   process.env.DEEPSEEK_CLASSIFIER_MODEL || "deepseek-v4-pro";
+// Insights are audit-grade documentation and quality-critical, so they default
+// to the accuracy model. Override to flash for cost via DEEPSEEK_INSIGHTS_MODEL.
+const INSIGHTS_MODEL = process.env.DEEPSEEK_INSIGHTS_MODEL || CLASSIFIER_MODEL;
 
 // Canonical audit-area taxonomy (mirrors the extension's data/topics.json ids).
 // Used so the LLM can classify against ALL areas even when the local keyword
@@ -188,16 +191,23 @@ export async function generateInsights(req, res, next) {
     }
 
     const system =
-      "You are a senior Indian Chartered Accountant and audit manager. Return ONLY valid JSON. No markdown, no commentary.";
+      "You are an Indian Chartered Accountant acting as the engagement partner on a statutory audit. You produce AUDIT PROCEDURES to be performed (imperative, executable steps), not management advice or business commentary. Return ONLY valid JSON. No markdown, no commentary.";
 
     const prompt = `Read the audit text below. It may contain OCR noise, broken grammar, misspellings, abbreviations, ALL CAPS, or a Hindi-English (Hinglish) mix — infer the real meaning and do not be thrown off by formatting.
 
-For the audit area "${safeStr(topicName || topicId || "General audit", 100)}", list 3 to 6 SPECIFIC, ACTIONABLE checks a Chartered Accountant must perform for THIS text. Tie each point to something the text actually mentions (amounts, parties, dates, transactions). Reference the relevant Indian authority where apt (e.g. SA 501, SA 505, SA 240, Ind AS 2, Ind AS 36, Ind AS 37, Schedule II, Companies Act 2013, CGST Act, Income-tax Act). Avoid generic filler and do not repeat points.
+For the audit area "${safeStr(topicName || topicId || "General audit", 100)}", produce 5 to 8 AUDIT PROCEDURES the engagement team must perform for THIS text. This is audit documentation, not management commentary.
+
+Hard rules:
+- Each "detail" MUST be an audit procedure phrased as an imperative action, starting with a verb such as Obtain, Inspect, Confirm, Recompute, Trace, Vouch, Perform, Reconcile, Assess, Evaluate or Test. Never write business or management advice.
+- Tie each procedure to something the text actually mentions (amounts, parties, dates, transactions).
+- Where relevant to this area, you MUST cover: (a) determining materiality and the basis for sample size / selection [SA 320, SA 530]; (b) external third-party confirmations [SA 505]; (c) obtaining written representations from management [SA 580]; (d) a roll-forward / roll-back reconciliation if any physical count or verification date differs from the reporting date; (e) the effect on the going concern assessment where the matter is significant [SA 570]; (f) a subsequent events review [SA 560 / Ind AS 10] where relevant; (g) tax-audit implications and the relevant Form 3CD clause / GST where the area is tax-relevant.
+- Reference the precise standard or section (e.g. SA 501, SA 505, SA 580, SA 570, SA 560, SA 240, SA 315, SA 320, SA 530, Ind AS 2/16/36/37/109/115, Schedule II/III, Companies Act 2013, CARO 2020, Income-tax Act / Form 3CD, CGST Act). Put a specific section/clause number ONLY when you are certain; if unsure of the exact number, name the standard without inventing a number.
+- No generic filler, no repeated points.
 
 Respond ONLY with JSON of this exact shape:
-{"insights": [{"title": "short imperative title", "detail": "1-2 sentence concrete step tied to the text", "risk": "high|medium|low", "standard": "relevant standard/section or empty string"}]}
+{"insights": [{"title": "short imperative procedure title", "detail": "1-3 sentence executable audit procedure tied to the text, citing the standard", "risk": "high|medium|low", "standard": "precise standard/section or empty string"}]}
 
-Keep title under 70 characters and detail under 220 characters. Be precise to the text content.
+Keep title under 80 characters and detail under 300 characters.
 
 EXTRACTED TEXT:
 """
@@ -208,8 +218,9 @@ ${safeStr(rawText, 3500)}
       system,
       prompt,
       jsonResponse: true,
-      maxTokens: 900,
-      temperature: 0.25,
+      maxTokens: 1600,
+      temperature: 0.2,
+      model: INSIGHTS_MODEL,
     });
 
     if (!r.ok) {
@@ -220,10 +231,10 @@ ${safeStr(rawText, 3500)}
     const arr = Array.isArray(parsed?.insights) ? parsed.insights : [];
     const insights = arr
       .filter((i) => i && typeof i === "object")
-      .slice(0, 6)
+      .slice(0, 8)
       .map((i) => ({
-        title: safeStr(i.title, 100),
-        detail: safeStr(i.detail, 350),
+        title: safeStr(i.title, 120),
+        detail: safeStr(i.detail, 500),
         risk: ["high", "medium", "low"].includes(String(i.risk).toLowerCase())
           ? String(i.risk).toLowerCase()
           : "medium",
