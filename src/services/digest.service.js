@@ -48,6 +48,13 @@ function effectivePreferences(user) {
   };
 }
 
+// The weekly firm summary is for firm administrators. SUPER_ADMIN owns/operates
+// the firm and must be treated as an admin here too, otherwise the owner can
+// neither preview nor receive the weekly summary (it silently stays empty).
+function isFirmAdminRole(role) {
+  return role === "FIRM_ADMIN" || role === "SUPER_ADMIN";
+}
+
 function validTimezone(value) {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
@@ -490,7 +497,7 @@ export async function enqueueDueDigests({ now = new Date() } = {}) {
         }
         if (
           firmWeeklyDue &&
-          recipient.role === "FIRM_ADMIN" &&
+          isFirmAdminRole(recipient.role) &&
           preferences.weeklyEnabled
         ) {
           await enqueueRecipientDigest({
@@ -813,7 +820,7 @@ export async function previewDigest({
   if (kind === WEEKLY_KIND && !weeklyEnabled) {
     throw new DigestError("Weekly summary is unavailable", 404, "WEEKLY_SUMMARY_DISABLED");
   }
-  if (kind === WEEKLY_KIND && role !== "FIRM_ADMIN") {
+  if (kind === WEEKLY_KIND && !isFirmAdminRole(role)) {
     throw new DigestError("Weekly firm summary is firm-admin only", 403, "FIRM_ADMIN_ONLY");
   }
   const firm = await Firm.findOne({ _id: firmId, isActive: true })
