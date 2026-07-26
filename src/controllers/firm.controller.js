@@ -74,6 +74,7 @@ async function workspaceSummary(firm, membership, activeFirmId) {
       membership.role === "OWNER" || membership.role === "ADMIN"
         ? firm.joinCode
         : undefined,
+    sharingEnabled: firm.sharingEnabled !== false,
     isActive: String(firm._id) === String(activeFirmId),
   };
 }
@@ -215,6 +216,7 @@ export const listWorkspaces = async (req, res, next) => {
           role: m.role,
           memberCount: countById.get(String(firm._id)) || 1,
           joinCode: elevated ? firm.joinCode : undefined,
+          sharingEnabled: firm.sharingEnabled !== false,
           isActive: String(firm._id) === String(user.firmId),
         };
       })
@@ -420,12 +422,14 @@ export const updateFirm = async (req, res, next) => {
     const { firmId } = req.params;
     const firm = await assertFirmAdmin(userId, firmId);
 
-    const { displayName, description, practiceAreas, joinCode } = req.body || {};
+    const { displayName, description, practiceAreas, joinCode, sharingEnabled } = req.body || {};
     
     // Update basic fields
     if (displayName !== undefined) firm.displayName = displayName.trim();
     if (description !== undefined) firm.description = description || "";
     if (Array.isArray(practiceAreas)) firm.practiceAreas = practiceAreas;
+    // Owner-only privacy switch (assertFirmAdmin above already enforced ownership).
+    if (typeof sharingEnabled === "boolean") firm.sharingEnabled = sharingEnabled;
 
     // Handle custom join code update
     if (joinCode) {
@@ -518,6 +522,16 @@ export const joinFirmByCode = async (req, res, next) => {
     const existing = await FirmMembership.findOne({ userId, firmId: firm._id });
     const alreadyMember = !!existing && existing.status === "ACTIVE";
     const isOwner = String(firm.ownerUserId) === String(userId);
+
+    // Private workspace: refuse new joins. Existing members and the owner are
+    // unaffected (they use switch, not join). Legacy firms without the flag are
+    // treated as sharing-enabled.
+    if (firm.sharingEnabled === false && !isOwner && !alreadyMember) {
+      return res.status(403).json({
+        ok: false,
+        error: "This workspace is private. Ask the owner to turn on sharing before you can join.",
+      });
+    }
 
     const membership = await ensureFirmMembership(userId, firm._id, {
       role: isOwner ? "OWNER" : "MEMBER",

@@ -52,6 +52,13 @@ const FirmSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  // When false, the firm is private: the invite/join code will not admit new
+  // members. Existing members and the owner are unaffected. Absent on legacy
+  // documents, which are treated as sharing-enabled (backward compatible).
+  sharingEnabled: {
+    type: Boolean,
+    default: true,
+  },
   timezone: {
     type: String,
     trim: true,

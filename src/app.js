@@ -122,15 +122,6 @@ const globalLimiter = rateLimit({
 });
 app.use(globalLimiter);
 
-// Auth endpoints: stricter - 10 requests per 15 minutes per IP
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { ok: false, error: "Too many auth attempts, please try again later." },
-});
-
 // Super admin endpoints: moderate - 50 requests per 15 minutes
 const superLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -276,7 +267,10 @@ app.get("/admin", (req, res) =>
 /* ===============================
    API ROUTES
 ================================ */
-app.use("/api/auth", authLimiter, authRoutes);
+// NOTE: per-route limiters (send-otp/verify-otp/google) live in auth.routes.js.
+// The whole group must NOT carry the strict 10/15min limiter, or /api/auth/me
+// (called on every workspace refresh/switch) 429s and bounces users to sign-in.
+app.use("/api/auth", authRoutes);
 app.use("/api/reminders", reminderRoutes);
 app.use("/api/firms", firmRoutes);
 app.use("/api/stats", statsRoutes);
