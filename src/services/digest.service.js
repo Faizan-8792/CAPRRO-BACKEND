@@ -841,6 +841,45 @@ export async function previewDigest({
   });
 }
 
+// Super-admin diagnostic: compute the current digest live and email it once to
+// the requester, WITHOUT creating/altering any DigestDelivery (so it never
+// interferes with the real per-week dedup). Used to verify digest email
+// delivery on demand. Feature flags are read fresh here.
+export async function sendTestDigestNow({
+  userId,
+  firmId,
+  role,
+  toEmail,
+  kind = WEEKLY_KIND,
+  now = new Date(),
+}) {
+  if (!toEmail) throw new DigestError("A recipient email is required", 400);
+  const flags = await AppConfig.getFeatureFlags();
+  const summary = await previewDigest({
+    userId,
+    firmId,
+    role,
+    kind,
+    dailyEnabled: flags.dailyDigest === true,
+    weeklyEnabled: flags.weeklySummary === true,
+    noticeCasesEnabled: flags.noticeCases === true,
+    now,
+  });
+  const copy = digestCopy(summary.kind, summary.periodKey);
+  const response = await sendDigestEmail({
+    toEmail,
+    subject: `[Test] ${copy.subject}`,
+    heading: copy.heading,
+    periodLabel: copy.periodLabel,
+    lines: summaryLines(summary),
+    idempotencyKey: `test-digest:${String(firmId)}:${summary.kind}:${summary.periodKey}:${now.getTime()}`,
+  });
+  return {
+    summary,
+    providerMessageId: String(response?.data?.id || response?.id || "").slice(0, 240),
+  };
+}
+
 export async function listDigestInbox({ userId, firmId, query = {} }) {
   const { page, limit, skip } = pagination(query);
   const filter = {

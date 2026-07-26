@@ -17,6 +17,7 @@ import {
   deleteFirmForSuper,
   runSystemSelfTest,
   sendSuperTestEmail,
+  sendTestDigest,
   forceLogoutUser,
 } from "../controllers/super.controller.js";
 import { requireSuperAdmin } from "../middleware/authorization.middleware.js";
@@ -39,6 +40,8 @@ router.use(authRequired);
 router.post("/self-test", diagnosticsLimiter, requireSuperAdmin, runSystemSelfTest);
 // Send a real test email to the admin's own address (super admin only)
 router.post("/send-test-email", diagnosticsLimiter, requireSuperAdmin, sendSuperTestEmail);
+// Send a real digest email (weekly/daily) to the admin to verify digest delivery (super admin only)
+router.post("/send-test-digest", diagnosticsLimiter, requireSuperAdmin, sendTestDigest);
 
 // Super admin dashboard stats
 router.get("/dashboard-stats", getSuperDashboardStats);

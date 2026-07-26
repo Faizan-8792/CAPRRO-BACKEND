@@ -7,6 +7,7 @@ import Reminder from "../models/Reminder.js";
 import FirmMembership from "../models/FirmMembership.js";
 import { runSelfTest } from "../services/self-test.service.js";
 import { sendTestEmail } from "../services/email.service.js";
+import { sendTestDigestNow } from "../services/digest.service.js";
 
 const SUPER_EMAIL = "saifullahfaizan786@gmail.com";
 
@@ -660,6 +661,51 @@ export const sendSuperTestEmail = async (req, res, next) => {
       // Surface the real provider error to the admin diagnostic instead of a 500,
       // so "is email working?" gets a precise answer (rate limit, domain, key, etc.).
       return res.json({ ok: false, to, error: String(mailErr?.message || mailErr).slice(0, 500) });
+    }
+  } catch (err) {
+    return next(err);
+  }
+};
+
+// Super-admin only: compute the current digest live and email it once to the
+// admin, to confirm the digest email (content + delivery) is working. This does
+// NOT create or alter any DigestDelivery, so it never affects the weekly dedup.
+// Body: { kind?: "WEEKLY_FIRM" | "DAILY_PERSONAL" } (defaults to WEEKLY_FIRM).
+export const sendTestDigest = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    if (!req.user.firmId) {
+      return res.status(400).json({
+        ok: false,
+        error: "No active firm to summarize. Switch to a firm workspace first.",
+      });
+    }
+    const kind = String(req.body?.kind || "WEEKLY_FIRM").toUpperCase();
+    try {
+      const result = await sendTestDigestNow({
+        userId: req.user.id,
+        firmId: req.user.firmId,
+        role: req.user.role,
+        toEmail: req.user.email,
+        kind,
+      });
+      return res.json({
+        ok: true,
+        sentTo: req.user.email,
+        kind,
+        periodKey: result.summary.periodKey,
+        counts: result.summary.counts,
+        providerMessageId: result.providerMessageId,
+      });
+    } catch (sendErr) {
+      // A DigestError carries a status/code; surface it precisely. Otherwise
+      // report the provider error so the diagnostic stays informative.
+      const status = sendErr?.status || sendErr?.statusCode || 400;
+      return res.status(status).json({
+        ok: false,
+        error: String(sendErr?.message || sendErr).slice(0, 500),
+        code: sendErr?.code || null,
+      });
     }
   } catch (err) {
     return next(err);
