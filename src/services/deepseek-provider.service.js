@@ -1,10 +1,12 @@
 const DEEPSEEK_URL =
   process.env.DEEPSEEK_URL || "https://api.deepseek.com/chat/completions";
-// Model is env-configurable so provider naming changes never need a code deploy.
-// Default targets the current DeepSeek V4 line ("deepseek-chat" is retired).
-const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-v4-pro";
+// Models are env-configurable so provider naming changes never need a code
+// deploy ("deepseek-chat" is retired). Default general model is the cheaper/
+// faster "flash"; callers that need maximum accuracy (e.g. the classifier) pass
+// an explicit model. Fallback is the higher-accuracy "pro" for reliability.
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-v4-flash";
 const DEEPSEEK_MODEL_FALLBACK =
-  process.env.DEEPSEEK_MODEL_FALLBACK || "deepseek-v4-flash";
+  process.env.DEEPSEEK_MODEL_FALLBACK || "deepseek-v4-pro";
 
 function boundedString(value, max = 4000) {
   return String(value ?? "").slice(0, max);
@@ -112,13 +114,15 @@ async function callDeepSeek({
   maxTokens = 600,
   timeoutMs = 25000,
   temperature = 0.3,
+  model,
 }) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) {
     return { ok: false, reason: "DEEPSEEK_API_KEY not configured" };
   }
-  const models = [DEEPSEEK_MODEL];
-  if (DEEPSEEK_MODEL_FALLBACK && DEEPSEEK_MODEL_FALLBACK !== DEEPSEEK_MODEL) {
+  const primary = model || DEEPSEEK_MODEL;
+  const models = [primary];
+  if (DEEPSEEK_MODEL_FALLBACK && DEEPSEEK_MODEL_FALLBACK !== primary) {
     models.push(DEEPSEEK_MODEL_FALLBACK);
   }
   let last = { ok: false, reason: "LLM not attempted", status: 0 };

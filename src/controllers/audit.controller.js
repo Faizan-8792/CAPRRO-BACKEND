@@ -8,6 +8,15 @@ function safeStr(v, max = 4000) {
   return String(v ?? "").slice(0, max);
 }
 
+// Classification runs on the most accurate model by default. The classify call
+// is short, so using the "pro" model keeps accuracy high at low cost, while
+// insights and other longer calls use the cheaper general model. Both are
+// env-configurable; a request may override the classifier model only within
+// this allowlist (used for A/B evaluation).
+const ALLOWED_LLM_MODELS = new Set(["deepseek-v4-pro", "deepseek-v4-flash"]);
+const CLASSIFIER_MODEL =
+  process.env.DEEPSEEK_CLASSIFIER_MODEL || "deepseek-v4-pro";
+
 // Canonical audit-area taxonomy (mirrors the extension's data/topics.json ids).
 // Used so the LLM can classify against ALL areas even when the local keyword
 // engine returns weak or no candidates (broken/OCR/garbled text). If a caller
@@ -84,11 +93,16 @@ ${safeStr(rawText, 3500)}
 
 export async function refineAuditClassification(req, res, next) {
   try {
-    const { rawText, candidates, catalog } = req.body || {};
+    const { rawText, candidates, catalog, model } = req.body || {};
 
     if (!rawText || typeof rawText !== "string" || !rawText.trim()) {
       return res.status(400).json({ ok: false, error: "rawText required" });
     }
+    // Classifier runs on the accuracy-focused model by default; a request may
+    // override it only within the allowlist (A/B evaluation).
+    const classifierModel = ALLOWED_LLM_MODELS.has(model)
+      ? model
+      : CLASSIFIER_MODEL;
     // Candidates are an optional hint now: broken/garbled text may produce none,
     // and we still classify against the full audit-area catalog below.
     const cands = Array.isArray(candidates) ? candidates : [];
@@ -110,11 +124,17 @@ export async function refineAuditClassification(req, res, next) {
       jsonResponse: true,
       maxTokens: 400,
       temperature: 0,
+      model: classifierModel,
     });
 
     if (!r.ok) {
       console.error("DeepSeek refine error:", r.reason);
-      return res.json({ ok: true, refined: false, reason: r.reason });
+      return res.json({
+        ok: true,
+        refined: false,
+        reason: r.reason,
+        model: classifierModel,
+      });
     }
 
     const parsed = parseJsonObject(r.content);
@@ -144,6 +164,7 @@ export async function refineAuditClassification(req, res, next) {
       chosenId,
       confidence: confidence ?? (isAuditText ? 0.6 : 0.1),
       reason,
+      model: classifierModel,
     });
   } catch (err) {
     console.error("refineAuditClassification error:", err);
