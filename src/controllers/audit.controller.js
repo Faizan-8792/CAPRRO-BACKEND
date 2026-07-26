@@ -195,12 +195,13 @@ export async function generateInsights(req, res, next) {
 
     const prompt = `Read the audit text below. It may contain OCR noise, broken grammar, misspellings, abbreviations, ALL CAPS, or a Hindi-English (Hinglish) mix — infer the real meaning and do not be thrown off by formatting.
 
-For the audit area "${safeStr(topicName || topicId || "General audit", 100)}", produce 5 to 8 AUDIT PROCEDURES the engagement team must perform for THIS text. This is audit documentation, not management commentary.
+For the audit area "${safeStr(topicName || topicId || "General audit", 100)}", produce 6 to 8 AUDIT PROCEDURES the engagement team must perform for THIS text. This is audit documentation, not management commentary.
 
 Hard rules:
-- Each "detail" MUST be an audit procedure phrased as an imperative action, starting with a verb such as Obtain, Inspect, Confirm, Recompute, Trace, Vouch, Perform, Reconcile, Assess, Evaluate or Test. Never write business or management advice.
+- Each "detail" MUST be an audit procedure phrased as an imperative action, starting with a verb such as Obtain, Inspect, Confirm, Recompute, Trace, Vouch, Perform, Reconcile, Assess, Evaluate, Test, Determine, Select, Send or Request. Never write business or management advice.
 - Tie each procedure to something the text actually mentions (amounts, parties, dates, transactions).
-- Where relevant to this area, you MUST cover: (a) determining materiality and the basis for sample size / selection [SA 320, SA 530]; (b) external third-party confirmations [SA 505]; (c) obtaining written representations from management [SA 580]; (d) a roll-forward / roll-back reconciliation if any physical count or verification date differs from the reporting date; (e) the effect on the going concern assessment where the matter is significant [SA 570]; (f) a subsequent events review [SA 560 / Ind AS 10] where relevant; (g) tax-audit implications and the relevant Form 3CD clause / GST where the area is tax-relevant.
+- ALWAYS include one distinct procedure for EACH of these three, in every response: (i) determine materiality/performance materiality and the basis for sample size and selection [SA 320, SA 530]; (ii) obtain external third-party confirmations [SA 505] for balances, holdings or amounts involving outside parties (banks, customers, suppliers, job-workers, lenders, lawyers); (iii) obtain written representations from management [SA 580] covering the completeness and key assertions of this area.
+- ALSO include when the text or area makes them relevant: a roll-forward / roll-back reconciliation if any count or verification date differs from the reporting date; the effect on the going concern assessment [SA 570]; a subsequent events review [SA 560 / Ind AS 10]; and tax-audit implications with the relevant Form 3CD clause / GST where the area is tax-relevant.
 - Reference the precise standard or section (e.g. SA 501, SA 505, SA 580, SA 570, SA 560, SA 240, SA 315, SA 320, SA 530, Ind AS 2/16/36/37/109/115, Schedule II/III, Companies Act 2013, CARO 2020, Income-tax Act / Form 3CD, CGST Act). Put a specific section/clause number ONLY when you are certain; if unsure of the exact number, name the standard without inventing a number.
 - No generic filler, no repeated points.
 
