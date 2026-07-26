@@ -67,8 +67,13 @@ async function callDeepSeek({
     });
 
     if (!response.ok) {
-      await response.text().catch(() => "");
-      return { ok: false, reason: `LLM HTTP ${response.status}` };
+      const errBody = await response.text().catch(() => "");
+      const snippet = boundedString(errBody, 400).replace(/\s+/g, " ").trim();
+      console.error(`DeepSeek HTTP ${response.status}: ${snippet}`);
+      return {
+        ok: false,
+        reason: `LLM HTTP ${response.status}${snippet ? `: ${snippet}` : ""}`,
+      };
     }
     const payload = await response.json().catch(() => null);
     const content = payload?.choices?.[0]?.message?.content;
