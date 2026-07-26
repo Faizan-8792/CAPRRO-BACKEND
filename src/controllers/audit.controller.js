@@ -16,9 +16,12 @@ function safeStr(v, max = 4000) {
 const ALLOWED_LLM_MODELS = new Set(["deepseek-v4-pro", "deepseek-v4-flash"]);
 const CLASSIFIER_MODEL =
   process.env.DEEPSEEK_CLASSIFIER_MODEL || "deepseek-v4-pro";
-// Insights are audit-grade documentation and quality-critical, so they default
-// to the accuracy model. Override to flash for cost via DEEPSEEK_INSIGHTS_MODEL.
-const INSIGHTS_MODEL = process.env.DEEPSEEK_INSIGHTS_MODEL || CLASSIFIER_MODEL;
+// Insights use the fast model by default: it is reliable and low-latency for
+// this longer generation, and the strengthened prompt (mandatory coverage +
+// imperative framing) drives the quality. The higher-accuracy model is slower
+// here and can time out on 6-8 detailed procedures. Override via
+// DEEPSEEK_INSIGHTS_MODEL if desired.
+const INSIGHTS_MODEL = process.env.DEEPSEEK_INSIGHTS_MODEL || "deepseek-v4-flash";
 
 // Canonical audit-area taxonomy (mirrors the extension's data/topics.json ids).
 // Used so the LLM can classify against ALL areas even when the local keyword
@@ -221,6 +224,7 @@ ${safeStr(rawText, 3500)}
       jsonResponse: true,
       maxTokens: 1600,
       temperature: 0.2,
+      timeoutMs: 40000,
       model: INSIGHTS_MODEL,
     });
 
