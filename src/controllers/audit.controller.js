@@ -2,54 +2,96 @@
 // Hybrid NLP + DeepSeek LLM audit text classifier.
 // Plus: insights generation, reminder message generation.
 
-import { callDeepSeek } from "../services/deepseek-provider.service.js";
+import { callDeepSeek, parseJsonObject } from "../services/deepseek-provider.service.js";
 
 function safeStr(v, max = 4000) {
   return String(v ?? "").slice(0, max);
 }
 
-function buildPrompt(rawText, candidates) {
-  const candidatesBlock = candidates
-    .map(
-      (c, i) =>
-        `[${i + 1}] id="${c.id}" name="${c.name || c.id}" score=${c.score} hits=${c.hits} keywords=${(c.keywords || []).slice(0, 8).join(", ")}`
-    )
-    .join("\n");
+// Canonical audit-area taxonomy (mirrors the extension's data/topics.json ids).
+// Used so the LLM can classify against ALL areas even when the local keyword
+// engine returns weak or no candidates (broken/OCR/garbled text). If a caller
+// sends its own catalog, that is used instead (keeps ids single-sourced).
+const AUDIT_TOPICS = [
+  { id: "Inventory", name: "Inventory & Stock" },
+  { id: "Revenue", name: "Revenue Recognition" },
+  { id: "Receivables", name: "Accounts Receivable / Debtors" },
+  { id: "Payables", name: "Accounts Payable / Creditors & Provisions" },
+  { id: "FixedAssets", name: "Property, Plant & Equipment / Fixed Assets" },
+  { id: "IntangibleAssets", name: "Intangible Assets & Goodwill" },
+  { id: "CashBank", name: "Cash & Bank" },
+  { id: "Borrowings", name: "Borrowings & Loans" },
+  { id: "Equity", name: "Share Capital & Equity / Reserves" },
+  { id: "Tax", name: "Taxation (Income Tax, GST, TDS, Deferred Tax)" },
+  { id: "Payroll", name: "Payroll & Employee Benefits" },
+  { id: "RelatedParty", name: "Related Party Transactions" },
+  { id: "GoingConcern", name: "Going Concern" },
+  { id: "EventsAfter", name: "Events After the Reporting Period" },
+  { id: "Contingencies", name: "Contingencies, Provisions & Litigation" },
+  { id: "Segment", name: "Segment Reporting" },
+  { id: "Consolidation", name: "Consolidation & Group Accounts" },
+  { id: "Fraud", name: "Fraud Risk (SA 240)" },
+  { id: "InternalControls", name: "Internal Controls / ICFR" },
+  { id: "CSR", name: "Corporate Social Responsibility (CSR)" },
+];
 
-  return `You are an expert auditing text classifier for Indian Chartered Accountants.
+function catalogFromRequest(reqCatalog) {
+  if (Array.isArray(reqCatalog) && reqCatalog.length) {
+    const seen = new Set();
+    const out = [];
+    for (const t of reqCatalog) {
+      const id = typeof t?.id === "string" ? t.id.trim() : "";
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push({ id, name: safeStr(t.name || t.display_name || id, 80) });
+      if (out.length >= 60) break;
+    }
+    if (out.length) return out;
+  }
+  return AUDIT_TOPICS;
+}
 
-Task: Decide whether the provided EXTRACTED_TEXT is genuinely about an audit/accounting topic, and if so pick the single best matching candidate id.
+function buildRefinePrompt(rawText, candidates, catalog) {
+  const catalogBlock = catalog.map((t) => `- ${t.id}: ${t.name}`).join("\n");
+  const hintsBlock = (candidates || [])
+    .filter((c) => c && c.id)
+    .map((c) => `${c.id} (nlp ${c.score ?? "?"}/${c.hits ?? 0} hits)`)
+    .join("; ");
 
-Rules:
-- If the text is unrelated to audit/accounting/finance (e.g. job applications, news, marketing, recipes), respond with isAuditText=false.
-- If the text mentions audit terminology incidentally only (e.g. "software" used to describe a job listing, not a software intangible asset), set isAuditText=false.
-- Only set isAuditText=true when the text describes an audit area, financial transaction, accounting standard, compliance, or similar.
-- Pick the candidate id that BEST matches the meaning of the text. If none match well, set chosenId=null and isAuditText=false.
-- confidence is 0.0 to 1.0 reflecting your certainty. Be strict; do not inflate.
+  return `You are a senior Indian Chartered Accountant classifying a snippet of text into ONE audit/accounting area.
 
-Respond ONLY with a JSON object of this exact shape (no markdown, no commentary):
+The text may be messy: OCR errors, broken grammar, no punctuation, ALL CAPS, misspellings, shorthand/abbreviations, or a Hindi-English (Hinglish) mix. Read PAST these problems and infer the true meaning. Never reject text just because it is poorly written or incomplete.
+
+Decide:
+1) isAuditText — true ONLY if the text is genuinely about auditing, accounting, finance, tax, or statutory compliance. Set false for unrelated content (jobs, news, recipes, travel, marketing, chit-chat), even if a stray finance-sounding word appears incidentally.
+2) chosenId — when isAuditText is true, the SINGLE best-matching audit-area id from the list below. Choose the closest area even if the wording is imperfect. Only use null if it is audit text but genuinely no area fits.
+
+AUDIT AREAS (chosenId MUST be exactly one of these ids):
+${catalogBlock}
+
+LOCAL ENGINE HINTS (a keyword tool's guesses; may be wrong, weak, or empty — use only as a faint hint, do not over-trust): ${hintsBlock || "(none)"}
+
+confidence: 0.0 to 1.0, your honest certainty. Be strict; do not inflate.
+
+Respond with ONLY this JSON (no markdown, no commentary):
 {"isAuditText": boolean, "chosenId": string|null, "confidence": number, "reason": string}
 
-EXTRACTED_TEXT:
+TEXT:
 """
 ${safeStr(rawText, 3500)}
-"""
-
-CANDIDATES (from local NLP engine):
-${candidatesBlock || "(none)"}
-`;
+"""`;
 }
 
 export async function refineAuditClassification(req, res, next) {
   try {
-    const { rawText, candidates } = req.body || {};
+    const { rawText, candidates, catalog } = req.body || {};
 
-    if (!rawText || typeof rawText !== "string") {
+    if (!rawText || typeof rawText !== "string" || !rawText.trim()) {
       return res.status(400).json({ ok: false, error: "rawText required" });
     }
-    if (!Array.isArray(candidates)) {
-      return res.status(400).json({ ok: false, error: "candidates array required" });
-    }
+    // Candidates are an optional hint now: broken/garbled text may produce none,
+    // and we still classify against the full audit-area catalog below.
+    const cands = Array.isArray(candidates) ? candidates : [];
 
     if (!process.env.DEEPSEEK_API_KEY) {
       return res.json({
@@ -59,24 +101,15 @@ export async function refineAuditClassification(req, res, next) {
       });
     }
 
-    if (!candidates.length) {
-      return res.json({
-        ok: true,
-        refined: true,
-        isAuditText: false,
-        chosenId: null,
-        confidence: 0.05,
-        reason: "No NLP candidates",
-      });
-    }
-
-    const prompt = buildPrompt(rawText, candidates);
+    const topicCatalog = catalogFromRequest(catalog);
+    const prompt = buildRefinePrompt(rawText, cands, topicCatalog);
     const r = await callDeepSeek({
-      system: "You are a strict JSON-only classifier. Output only valid JSON, no extra text.",
+      system:
+        "You are a strict JSON-only audit-text classifier for Indian Chartered Accountants. Output only valid JSON, no extra text.",
       prompt,
       jsonResponse: true,
       maxTokens: 400,
-      temperature: 0.1,
+      temperature: 0,
     });
 
     if (!r.ok) {
@@ -84,19 +117,8 @@ export async function refineAuditClassification(req, res, next) {
       return res.json({ ok: true, refined: false, reason: r.reason });
     }
 
-    let parsed = null;
-    try {
-      parsed = JSON.parse(r.content);
-    } catch {
-      const m = r.content.match(/\{[\s\S]*\}/);
-      if (m) {
-        try {
-          parsed = JSON.parse(m[0]);
-        } catch {}
-      }
-    }
-
-    if (!parsed || typeof parsed !== "object") {
+    const parsed = parseJsonObject(r.content);
+    if (!parsed) {
       return res.json({ ok: true, refined: false, reason: "Could not parse LLM response" });
     }
 
@@ -109,9 +131,11 @@ export async function refineAuditClassification(req, res, next) {
         : null;
     const reason = safeStr(parsed.reason, 500);
 
-    const validIds = new Set(candidates.map((c) => String(c.id || "")));
+    // Validate against the FULL catalog (not just the local candidates) so the
+    // LLM can correctly pick an area the keyword engine missed.
+    const validIds = new Set(topicCatalog.map((t) => t.id));
     const chosenId =
-      chosenIdRaw && validIds.has(chosenIdRaw) ? chosenIdRaw : null;
+      isAuditText && chosenIdRaw && validIds.has(chosenIdRaw) ? chosenIdRaw : null;
 
     return res.json({
       ok: true,
@@ -142,46 +166,35 @@ export async function generateInsights(req, res, next) {
     }
 
     const system =
-      "You are a senior Chartered Accountant audit advisor. Return only valid JSON. No markdown.";
+      "You are a senior Indian Chartered Accountant and audit manager. Return ONLY valid JSON. No markdown, no commentary.";
 
-    const prompt = `Given this audit text and the matched topic, generate 3-5 SPECIFIC, ACTIONABLE insights an auditor should pay attention to in THIS specific text. Avoid generic advice. Focus on concrete things mentioned in the text.
+    const prompt = `Read the audit text below. It may contain OCR noise, broken grammar, misspellings, abbreviations, ALL CAPS, or a Hindi-English (Hinglish) mix — infer the real meaning and do not be thrown off by formatting.
 
-Topic: ${safeStr(topicName || topicId || "General Audit", 100)}
+For the audit area "${safeStr(topicName || topicId || "General audit", 100)}", list 3 to 6 SPECIFIC, ACTIONABLE checks a Chartered Accountant must perform for THIS text. Tie each point to something the text actually mentions (amounts, parties, dates, transactions). Reference the relevant Indian authority where apt (e.g. SA 501, SA 505, SA 240, Ind AS 2, Ind AS 36, Ind AS 37, Schedule II, Companies Act 2013, CGST Act, Income-tax Act). Avoid generic filler and do not repeat points.
+
+Respond ONLY with JSON of this exact shape:
+{"insights": [{"title": "short imperative title", "detail": "1-2 sentence concrete step tied to the text", "risk": "high|medium|low", "standard": "relevant standard/section or empty string"}]}
+
+Keep title under 70 characters and detail under 220 characters. Be precise to the text content.
 
 EXTRACTED TEXT:
 """
 ${safeStr(rawText, 3500)}
-"""
-
-Respond ONLY with JSON of this exact shape:
-{"insights": [{"title": "short title", "detail": "1-2 sentence specific recommendation", "risk": "high|medium|low"}]}
-
-Keep title under 60 characters. Detail under 200 characters. Be precise to the text content.`;
+"""`;
 
     const r = await callDeepSeek({
       system,
       prompt,
       jsonResponse: true,
-      maxTokens: 800,
-      temperature: 0.3,
+      maxTokens: 900,
+      temperature: 0.25,
     });
 
     if (!r.ok) {
       return res.json({ ok: true, generated: false, reason: r.reason, insights: [] });
     }
 
-    let parsed = null;
-    try {
-      parsed = JSON.parse(r.content);
-    } catch {
-      const m = r.content.match(/\{[\s\S]*\}/);
-      if (m) {
-        try {
-          parsed = JSON.parse(m[0]);
-        } catch {}
-      }
-    }
-
+    const parsed = parseJsonObject(r.content);
     const arr = Array.isArray(parsed?.insights) ? parsed.insights : [];
     const insights = arr
       .filter((i) => i && typeof i === "object")
@@ -192,6 +205,7 @@ Keep title under 60 characters. Detail under 200 characters. Be precise to the t
         risk: ["high", "medium", "low"].includes(String(i.risk).toLowerCase())
           ? String(i.risk).toLowerCase()
           : "medium",
+        standard: safeStr(i.standard, 60),
       }))
       .filter((i) => i.title && i.detail);
 

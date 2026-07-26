@@ -1,5 +1,10 @@
-const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
-const DEEPSEEK_MODEL = "deepseek-chat";
+const DEEPSEEK_URL =
+  process.env.DEEPSEEK_URL || "https://api.deepseek.com/chat/completions";
+// Model is env-configurable so provider naming changes never need a code deploy.
+// Default targets the current DeepSeek V4 line ("deepseek-chat" is retired).
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-v4-pro";
+const DEEPSEEK_MODEL_FALLBACK =
+  process.env.DEEPSEEK_MODEL_FALLBACK || "deepseek-v4-flash";
 
 function boundedString(value, max = 4000) {
   return String(value ?? "").slice(0, max);
@@ -28,24 +33,27 @@ function redactPII(text) {
     .replace(/\b\d{11,18}\b/g, "[NUM]");
 }
 
-async function callDeepSeek({
+function isRetriable(status) {
+  return status === 0 || status === 429 || (status >= 500 && status <= 599);
+}
+
+// Single request attempt against one model. Returns { ok, content } or
+// { ok:false, status, reason } so the caller can decide to retry / fall back.
+async function attemptDeepSeek({
+  apiKey,
+  model,
   system,
   prompt,
-  jsonResponse = false,
-  maxTokens = 600,
-  timeoutMs = 25000,
-  temperature = 0.3,
+  jsonResponse,
+  maxTokens,
+  timeoutMs,
+  temperature,
 }) {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) {
-    return { ok: false, reason: "DEEPSEEK_API_KEY not configured" };
-  }
-
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const body = {
-      model: DEEPSEEK_MODEL,
+      model,
       messages: [
         { role: "system", content: boundedString(system, 12000) },
         // User content carries the caller's data — redact identifiers first.
@@ -69,26 +77,74 @@ async function callDeepSeek({
     if (!response.ok) {
       const errBody = await response.text().catch(() => "");
       const snippet = boundedString(errBody, 400).replace(/\s+/g, " ").trim();
-      console.error(`DeepSeek HTTP ${response.status}: ${snippet}`);
+      console.error(`DeepSeek HTTP ${response.status} (model=${model}): ${snippet}`);
       return {
         ok: false,
+        status: response.status,
         reason: `LLM HTTP ${response.status}${snippet ? `: ${snippet}` : ""}`,
       };
     }
     const payload = await response.json().catch(() => null);
     const content = payload?.choices?.[0]?.message?.content;
     if (typeof content !== "string" || !content.trim()) {
-      return { ok: false, reason: "LLM returned no content" };
+      return { ok: false, status: 502, reason: "LLM returned no content" };
     }
-    return { ok: true, content, provider: "DEEPSEEK", model: DEEPSEEK_MODEL };
+    return { ok: true, content, provider: "DEEPSEEK", model };
   } catch (error) {
+    const timeout = error?.name === "AbortError";
     return {
       ok: false,
-      reason: error?.name === "AbortError" ? "LLM timeout" : "LLM request failed",
+      status: timeout ? 504 : 0,
+      reason: timeout ? "LLM timeout" : "LLM request failed",
     };
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Resilient DeepSeek call: retries transient failures (network/timeout/429/5xx)
+// up to twice per model, and falls back to a second model on a hard 400 (e.g.
+// a retired/invalid model name) so provider changes degrade gracefully.
+async function callDeepSeek({
+  system,
+  prompt,
+  jsonResponse = false,
+  maxTokens = 600,
+  timeoutMs = 25000,
+  temperature = 0.3,
+}) {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) {
+    return { ok: false, reason: "DEEPSEEK_API_KEY not configured" };
+  }
+  const models = [DEEPSEEK_MODEL];
+  if (DEEPSEEK_MODEL_FALLBACK && DEEPSEEK_MODEL_FALLBACK !== DEEPSEEK_MODEL) {
+    models.push(DEEPSEEK_MODEL_FALLBACK);
+  }
+  let last = { ok: false, reason: "LLM not attempted", status: 0 };
+  for (const model of models) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const r = await attemptDeepSeek({
+        apiKey,
+        model,
+        system,
+        prompt,
+        jsonResponse,
+        maxTokens,
+        timeoutMs,
+        temperature,
+      });
+      if (r.ok) return r;
+      last = r;
+      if (!isRetriable(r.status)) break;
+      await new Promise((s) => setTimeout(s, 400 * (attempt + 1)));
+    }
+    // Try the fallback model only when another model could help: a hard 400
+    // (bad/retired model name) or an exhausted transient. Auth/balance/param
+    // errors (401/402/422) won't be fixed by a different model.
+    if (last.status && !isRetriable(last.status) && last.status !== 400) break;
+  }
+  return { ok: false, reason: last.reason, provider: "DEEPSEEK" };
 }
 
 function parseJsonObject(content) {
