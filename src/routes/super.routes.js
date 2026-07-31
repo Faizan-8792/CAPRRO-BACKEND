@@ -16,6 +16,8 @@ import {
   deleteFirmUserForSuper,
   deleteFirmForSuper,
   runSystemSelfTest,
+  getSystemSelfTestRun,
+  getLatestSystemSelfTestRun,
   sendSuperTestEmail,
   sendTestDigest,
   forceLogoutUser,
@@ -36,8 +38,11 @@ const diagnosticsLimiter = rateLimit({
 
 router.use(authRequired);
 
-// One-button full system self-test (super admin only)
+// Isolated deep system review (super admin only). POST starts an asynchronous
+// run; GET endpoints provide real progress and the latest retained report.
 router.post("/self-test", diagnosticsLimiter, requireSuperAdmin, runSystemSelfTest);
+router.get("/self-test/latest", requireSuperAdmin, getLatestSystemSelfTestRun);
+router.get("/self-test/:runId", requireSuperAdmin, getSystemSelfTestRun);
 // Send a real test email to the admin's own address (super admin only)
 router.post("/send-test-email", diagnosticsLimiter, requireSuperAdmin, sendSuperTestEmail);
 // Send a real digest email (weekly/daily) to the admin to verify digest delivery (super admin only)

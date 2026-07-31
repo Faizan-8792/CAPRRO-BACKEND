@@ -40,9 +40,22 @@ function validObjectId(value) {
   return /^[a-f\d]{24}$/i.test(String(value || ""));
 }
 
+const DAILY_FREQUENCIES = new Set(["DAILY", "EVERY_3_DAYS", "WEEKLY", "OFF"]);
+
+function effectiveDailyFrequency(user) {
+  const raw = user?.digestPreferences?.dailyFrequency;
+  if (DAILY_FREQUENCIES.has(raw)) return raw;
+  // Legacy accounts without the field: derive from the old on/off flag.
+  return user?.digestPreferences?.dailyEnabled === false ? "OFF" : "DAILY";
+}
+
 function effectivePreferences(user) {
+  const dailyFrequency = effectiveDailyFrequency(user);
   return {
-    dailyEnabled: user?.digestPreferences?.dailyEnabled !== false,
+    dailyFrequency,
+    // dailyEnabled stays true unless the cadence is OFF, so existing consumers
+    // (and the legacy on/off toggle) keep behaving sensibly.
+    dailyEnabled: dailyFrequency !== "OFF",
     weeklyEnabled: user?.digestPreferences?.weeklyEnabled !== false,
     emailEnabled: user?.digestPreferences?.emailEnabled !== false,
   };
@@ -176,6 +189,20 @@ function weeklyDue(parts, settings) {
   if (currentFromMonday < targetFromMonday) return false;
   if (currentFromMonday > targetFromMonday) return true;
   return parts.hour >= Number(settings.weeklyHour ?? 8);
+}
+
+// Personal daily-digest cadence. The periodKey stays the local date, so the
+// per-day dedup index is unchanged; here we only decide whether *today* is a
+// sending day for this recipient's chosen cadence.
+function dailyDigestDueForFrequency(dailyFrequency, parts) {
+  if (dailyFrequency === "OFF") return false;
+  if (dailyFrequency === "DAILY") return true;
+  if (dailyFrequency === "WEEKLY") return parts.weekday === 1; // Monday
+  if (dailyFrequency === "EVERY_3_DAYS") {
+    const { utcMs } = parseDateKey(parts.dateKey);
+    return Math.floor(utcMs / 86400000) % 3 === 0;
+  }
+  return true;
 }
 
 function pagination(query = {}) {
@@ -366,6 +393,18 @@ function summaryLines(summary) {
   return lines;
 }
 
+// Decides whether a queued digest email must still be suppressed, using the
+// recipient's preferences as they are RIGHT NOW. Returns null when the email
+// should be sent, otherwise the reason it is being held back.
+function digestEmailSuppressionReason(kind, recipient) {
+  const preferences = effectivePreferences(recipient);
+  const subscribedToKind =
+    kind === DAILY_KIND ? preferences.dailyEnabled : preferences.weeklyEnabled;
+  if (!subscribedToKind) return "UNSUBSCRIBED";
+  if (!preferences.emailEnabled) return "EMAIL_DISABLED";
+  return null;
+}
+
 async function enqueueRecipientDigest({
   firm,
   recipient,
@@ -484,7 +523,10 @@ export async function enqueueDueDigests({ now = new Date() } = {}) {
         .lean();
       for (const recipient of recipients) {
         const preferences = effectivePreferences(recipient);
-        if (dailyDue && preferences.dailyEnabled) {
+        if (
+          dailyDue &&
+          dailyDigestDueForFrequency(preferences.dailyFrequency, parts)
+        ) {
           await enqueueRecipientDigest({
             firm,
             recipient,
@@ -572,7 +614,13 @@ export async function processDigestDeliveryJob(job, { assertLease } = {}) {
     );
     return { outcome: "DIGEST_RECIPIENT_UNAVAILABLE", deliveryId };
   }
-  if (!effectivePreferences(recipient).emailEnabled) {
+  // Re-check the recipient's CURRENT preferences at send time, not just the
+  // ones captured when the delivery was queued. A recipient who switches the
+  // daily cadence to OFF, unsubscribes from the weekly summary, or turns off
+  // email copies must not receive an email from a job queued earlier.
+  const suppression = digestEmailSuppressionReason(delivery.kind, recipient);
+  if (suppression) {
+    const subscribedToKind = suppression === "EMAIL_DISABLED";
     await DigestDelivery.updateOne(
       { _id: delivery._id, "email.state": { $ne: "SENT" } },
       {
@@ -585,7 +633,12 @@ export async function processDigestDeliveryJob(job, { assertLease } = {}) {
         },
       }
     );
-    return { outcome: "DIGEST_EMAIL_DISABLED_IN_APP_AVAILABLE", deliveryId };
+    return {
+      outcome: subscribedToKind
+        ? "DIGEST_EMAIL_DISABLED_IN_APP_AVAILABLE"
+        : "DIGEST_UNSUBSCRIBED_IN_APP_AVAILABLE",
+      deliveryId,
+    };
   }
 
   const copy = digestCopy(delivery.kind, delivery.periodKey);
@@ -697,13 +750,33 @@ export async function updateDigestPreferences({
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new DigestError("Digest preferences object is required");
   }
-  const allowed = ["dailyEnabled", "weeklyEnabled", "emailEnabled"];
+  const allowed = ["dailyFrequency", "dailyEnabled", "weeklyEnabled", "emailEnabled"];
   const unknown = Object.keys(input).filter((key) => !allowed.includes(key));
   if (unknown.length) {
     throw new DigestError(`Unsupported digest preferences: ${unknown.join(", ")}`);
   }
   const update = {};
-  for (const key of allowed) {
+  // Daily cadence: dailyFrequency is authoritative. Keep the legacy
+  // dailyEnabled flag in sync so older clients keep working.
+  if (Object.prototype.hasOwnProperty.call(input, "dailyFrequency")) {
+    const freq = String(input.dailyFrequency || "");
+    if (!DAILY_FREQUENCIES.has(freq)) {
+      throw new DigestError(
+        "dailyFrequency must be one of DAILY, EVERY_3_DAYS, WEEKLY, OFF"
+      );
+    }
+    update["digestPreferences.dailyFrequency"] = freq;
+    update["digestPreferences.dailyEnabled"] = freq !== "OFF";
+  } else if (Object.prototype.hasOwnProperty.call(input, "dailyEnabled")) {
+    if (typeof input.dailyEnabled !== "boolean") {
+      throw new DigestError("dailyEnabled must be boolean");
+    }
+    update["digestPreferences.dailyEnabled"] = input.dailyEnabled;
+    update["digestPreferences.dailyFrequency"] = input.dailyEnabled
+      ? "DAILY"
+      : "OFF";
+  }
+  for (const key of ["weeklyEnabled", "emailEnabled"]) {
     if (!Object.prototype.hasOwnProperty.call(input, key)) continue;
     if (typeof input[key] !== "boolean") {
       throw new DigestError(`${key} must be boolean`);
@@ -945,6 +1018,9 @@ export {
   FIRM_SCAN_BATCH,
   WEEKLY_KIND,
   buildDigestSummary,
+  dailyDigestDueForFrequency,
+  digestEmailSuppressionReason,
+  effectiveDailyFrequency,
   effectivePreferences,
   summaryLines,
   validTimezone,

@@ -5,7 +5,11 @@ import Firm from "../models/Firm.js";
 import Task from "../models/Task.js";
 import Reminder from "../models/Reminder.js";
 import FirmMembership from "../models/FirmMembership.js";
-import { runSelfTest } from "../services/self-test.service.js";
+import {
+  getDeepSelfTestRun,
+  getLatestDeepSelfTestRun,
+  startDeepSelfTest,
+} from "../services/self-test.service.js";
 import { sendTestEmail } from "../services/email.service.js";
 import { sendTestDigestNow } from "../services/digest.service.js";
 
@@ -632,16 +636,50 @@ export const forceLogoutUser = async (req, res, next) => {
   }
 };
 
-// One-button full system self-test. Super-admin only. Runs infrastructure,
-// engine/API-logic, data-model, and notification checks in-process and returns
-// a structured per-check report. The notification group performs a REAL email
-// deliverability probe: it sends an actual test email (via Resend) to the
-// super admin's own address, so a green mail check proves email truly works.
+// Start an isolated, asynchronous deep-system review. The runner seeds only
+// dedicated synthetic records, verifies section outputs, removes every seeded
+// record, and sends the synthetic evidence summary to DeepSeek for an advisory
+// semantic cross-check. Real email delivery remains a separate explicit probe.
 export const runSystemSelfTest = async (req, res, next) => {
   try {
     assertSuper(req.user);
-    const report = await runSelfTest({ mailProbeTo: req.user.email });
-    return res.json({ ok: true, report });
+    if (req.body?.confirmation !== "RUN_ISOLATED_DEEP_TEST") {
+      return res.status(400).json({
+        ok: false,
+        code: "SYSTEM_TEST_CONFIRMATION_REQUIRED",
+        error: "Explicit deep-test confirmation is required",
+      });
+    }
+    const run = await startDeepSelfTest({ requestedBy: req.user.id });
+    return res.status(202).json({ ok: true, run });
+  } catch (err) {
+    if (err?.code === "SYSTEM_TEST_ALREADY_RUNNING") {
+      return res.status(409).json({
+        ok: false,
+        code: err.code,
+        error: err.message,
+        runId: err.runId,
+      });
+    }
+    return next(err);
+  }
+};
+
+export const getSystemSelfTestRun = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    const run = await getDeepSelfTestRun(req.params.runId);
+    return res.json({ ok: true, run });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const getLatestSystemSelfTestRun = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    const run = await getLatestDeepSelfTestRun();
+    return res.json({ ok: true, run });
   } catch (err) {
     return next(err);
   }

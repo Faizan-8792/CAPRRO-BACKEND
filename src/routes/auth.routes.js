@@ -1,6 +1,6 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
-import { sendOtp, verifyOtpAndLogin, googleLogin, getMe } from "../controllers/auth.controller.js";
+import { sendOtp, verifyOtpAndLogin, googleLogin, getMe, updateMe } from "../controllers/auth.controller.js";
 import { authRequired } from "../middleware/auth.middleware.js";
 
 const router = Router();
@@ -36,5 +36,6 @@ router.post("/send-otp", sendOtpLimiter, sendOtp);
 router.post("/verify-otp", verifyOtpLimiter, verifyOtpAndLogin);
 router.post("/google", googleLoginLimiter, googleLogin);
 router.get("/me", authRequired, getMe);
+router.patch("/me", authRequired, updateMe);
 
 export default router;

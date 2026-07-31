@@ -84,6 +84,15 @@ const UserSchema = new mongoose.Schema(
       default: null,
     },
     digestPreferences: {
+      // Cadence for the personal "daily work digest" email.
+      // DAILY = every day, EVERY_3_DAYS, WEEKLY = once a week, OFF = never.
+      dailyFrequency: {
+        type: String,
+        enum: ["DAILY", "EVERY_3_DAYS", "WEEKLY", "OFF"],
+        default: "DAILY",
+      },
+      // Retained for backward compatibility and kept in sync with
+      // dailyFrequency (false === OFF). New clients use dailyFrequency.
       dailyEnabled: { type: Boolean, default: true },
       weeklyEnabled: { type: Boolean, default: true },
       emailEnabled: { type: Boolean, default: true },

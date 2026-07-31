@@ -1056,100 +1056,550 @@ async function initSuperPage() {
 document.addEventListener("DOMContentLoaded", () => { initSuperPage(); });
 
 
-// ─── System Self-Test ───────────────────────────────────────────────
-async function runSelfTest() {
-  const btn = qs("runSelfTestBtn");
+// Deep System Review
+const SELF_TEST_ACTIVE_RUN_KEY = "caproDeepSystemTestRunId";
+const SELF_TEST_POLL_MS = 1000;
+let selfTestPollTimer = null;
+let selfTestIsRunning = false;
+let selfTestRequestEpoch = 0;
+
+function isActiveSelfTest(run) {
+  return ["QUEUED", "RUNNING", "RECOVERING", "CLEANUP_FAILED"].includes(run?.status);
+}
+
+function statusLabel(status) {
+  const value = String(status || "pending").toLowerCase();
+  if (value === "pass") return "Pass";
+  if (value === "warn") return "Warning";
+  if (value === "fail") return "Fail";
+  return "Pending";
+}
+
+function makeStatusBadge(status) {
+  const badge = document.createElement("span");
+  const normalized = String(status || "pending").toLowerCase();
+  badge.className = `st-status st-status-${normalized}`;
+  badge.textContent = statusLabel(normalized);
+  return badge;
+}
+
+function formatSelfTestJson(value) {
+  if (value == null) return "Not supplied";
+  try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+}
+
+function makeMetric(label, value) {
+  const metric = document.createElement("div");
+  metric.className = "st-metric";
+  const number = document.createElement("strong");
+  number.textContent = String(value ?? 0);
+  const caption = document.createElement("span");
+  caption.textContent = label;
+  metric.append(number, caption);
+  return metric;
+}
+
+function appendListSection(parent, title, values) {
+  if (!Array.isArray(values) || !values.length) return;
+  const heading = document.createElement("h4");
+  heading.textContent = title;
+  const list = document.createElement("ul");
+  for (const value of values) {
+    const item = document.createElement("li");
+    item.textContent = String(value);
+    list.appendChild(item);
+  }
+  parent.append(heading, list);
+}
+
+function captureSelfTestDisclosureState(results) {
+  const state = { groups: new Map(), evidence: new Map(), focusKey: "" };
+  if (!results) return state;
+
+  for (const details of results.querySelectorAll(".st-group[data-section-id]")) {
+    state.groups.set(details.dataset.sectionId, details.open);
+  }
+  for (const details of results.querySelectorAll(".st-evidence[data-evidence-key]")) {
+    state.evidence.set(details.dataset.evidenceKey, details.open);
+  }
+
+  const active = document.activeElement;
+  if (active?.tagName === "SUMMARY") {
+    const evidence = active.parentElement?.closest(".st-evidence[data-evidence-key]");
+    const group = active.parentElement?.closest(".st-group[data-section-id]");
+    if (evidence) state.focusKey = `evidence:${evidence.dataset.evidenceKey}`;
+    else if (group) state.focusKey = `group:${group.dataset.sectionId}`;
+  }
+  return state;
+}
+
+function restoreSelfTestFocus(results, focusKey) {
+  if (!results || !focusKey) return;
+  const [kind, ...parts] = focusKey.split(":");
+  const key = parts.join(":");
+  const selector = kind === "evidence"
+    ? ".st-evidence[data-evidence-key]"
+    : ".st-group[data-section-id]";
+  const details = [...results.querySelectorAll(selector)].find((entry) =>
+    kind === "evidence"
+      ? entry.dataset.evidenceKey === key
+      : entry.dataset.sectionId === key
+  );
+  details?.querySelector(":scope > summary")?.focus({ preventScroll: true });
+}
+
+function renderSelfTestCheck(check, sectionId, disclosureState) {
+  const wrapper = document.createElement("div");
+  wrapper.className = `st-check st-check-${check.status || "pending"}`;
+  wrapper.dataset.checkId = String(check.id || "unnamed");
+
+  const row = document.createElement("div");
+  row.className = "st-check-row";
+  row.appendChild(makeStatusBadge(check.status));
+
+  const copy = document.createElement("div");
+  copy.className = "st-check-copy";
+  const name = document.createElement("strong");
+  name.textContent = check.name || check.id || "Unnamed check";
+  const detail = document.createElement("span");
+  detail.textContent = check.detail || "No detail returned";
+  copy.append(name, detail);
+
+  const timing = document.createElement("span");
+  timing.className = "st-ms";
+  timing.textContent = `${Number(check.ms || 0)} ms`;
+  row.append(copy, timing);
+  wrapper.appendChild(row);
+
+  if (check.expected != null || check.actual != null || check.evidence != null) {
+    const evidence = document.createElement("details");
+    evidence.className = "st-evidence";
+    const evidenceKey = `${sectionId}:${check.id || "unnamed"}`;
+    evidence.dataset.evidenceKey = evidenceKey;
+    if (disclosureState.evidence.has(evidenceKey)) {
+      evidence.open = disclosureState.evidence.get(evidenceKey);
+    }
+    const summary = document.createElement("summary");
+    summary.textContent = "Expected, actual, and supporting evidence";
+    evidence.appendChild(summary);
+
+    const grid = document.createElement("div");
+    grid.className = "st-evidence-grid";
+    for (const [label, value] of [
+      ["Expected", check.expected],
+      ["Actual", check.actual],
+      ["Evidence", check.evidence],
+    ]) {
+      if (value == null) continue;
+      const block = document.createElement("div");
+      const heading = document.createElement("h5");
+      heading.textContent = label;
+      const pre = document.createElement("pre");
+      pre.textContent = formatSelfTestJson(value);
+      block.append(heading, pre);
+      grid.appendChild(block);
+    }
+    evidence.appendChild(grid);
+    wrapper.appendChild(evidence);
+  }
+  return wrapper;
+}
+
+function renderSelfTestGroup(group, runActive, disclosureState) {
+  const details = document.createElement("details");
+  details.className = `st-group st-group-${group.status || "pending"}`;
+  details.dataset.sectionId = String(group.id || "unnamed");
+  const defaultOpen = runActive || group.status === "fail" || group.status === "warn";
+  details.open = disclosureState.groups.has(details.dataset.sectionId)
+    ? disclosureState.groups.get(details.dataset.sectionId)
+    : defaultOpen;
+
+  const summary = document.createElement("summary");
+  summary.appendChild(makeStatusBadge(group.status));
+  const title = document.createElement("strong");
+  title.textContent = group.name || group.id || "Unnamed section";
+  const count = document.createElement("span");
+  count.className = "st-group-count";
+  count.textContent = `${group.checks?.length || 0} check${group.checks?.length === 1 ? "" : "s"}`;
+  summary.append(title, count);
+  details.appendChild(summary);
+
+  const checks = document.createElement("div");
+  checks.className = "st-checks";
+  for (const check of group.checks || []) {
+    checks.appendChild(renderSelfTestCheck(check, details.dataset.sectionId, disclosureState));
+  }
+  if (!group.checks?.length) {
+    const pending = document.createElement("div");
+    pending.className = "st-empty-group";
+    pending.textContent = "This section is starting.";
+    checks.appendChild(pending);
+  }
+  details.appendChild(checks);
+  return details;
+}
+
+function renderDeepSeekReview(review) {
+  if (!review) return null;
+  const effectiveVerdict = String(review.advisoryStatus || review.verdict || "WARN").toUpperCase();
+  const effectiveStatus = effectiveVerdict === "PASS" ? "pass" : effectiveVerdict === "FAIL" ? "fail" : "warn";
+  const panel = document.createElement("section");
+  panel.className = `st-ai-review st-ai-${effectiveStatus}`;
+  const heading = document.createElement("div");
+  heading.className = "st-ai-heading";
+  const title = document.createElement("h3");
+  title.textContent = "DeepSeek evidence review";
+  heading.append(title, makeStatusBadge(effectiveStatus));
+  panel.appendChild(heading);
+
+  const meta = document.createElement("p");
+  const confidence = Number.isFinite(Number(review.confidence))
+    ? `${Math.round(Number(review.confidence) * 100)}% confidence`
+    : "confidence unavailable";
+  const verdictContext = review.completed && review.verdict && effectiveVerdict !== review.verdict
+    ? `, provider verdict ${review.verdict}, normalized advisory ${effectiveVerdict}`
+    : "";
+  meta.textContent = review.completed
+    ? `${review.provider || "DeepSeek"}${review.model ? `, ${review.model}` : ""}, ${confidence}${verdictContext}`
+    : review.reason || "DeepSeek review did not complete";
+  panel.appendChild(meta);
+
+  if (review.summary) {
+    const summary = document.createElement("p");
+    summary.className = "st-ai-summary";
+    summary.textContent = review.summary;
+    panel.appendChild(summary);
+  }
+  appendListSection(panel, "Consistency warnings", review.consistencyIssues);
+  appendListSection(panel, "Contradictions", review.contradictions);
+  appendListSection(panel, "Coverage gaps", review.coverageGaps);
+  appendListSection(panel, "Findings", review.findings);
+  appendListSection(
+    panel,
+    "Section assessments",
+    Array.isArray(review.sectionAssessments)
+      ? review.sectionAssessments.map((entry) => {
+        const status = entry.deterministicStatus
+          ? `AI ${entry.status}; deterministic ${entry.deterministicStatus}`
+          : entry.status;
+        return `${entry.sectionId}: ${status} — ${entry.rationale}`;
+      })
+      : []
+  );
+  return panel;
+}
+
+function renderSelfTestReport(run) {
   const idle = qs("selfTestIdle");
   const wrap = qs("selfTestProgressWrap");
   const results = qs("selfTestResults");
   const bar = qs("selfTestBar");
   const counts = qs("selfTestCounts");
   const headline = qs("selfTestHeadline");
-  if (!btn) return;
+  const meta = qs("selfTestRunMeta");
+  if (!results || !bar || !counts || !headline) return;
 
-  btn.disabled = true;
-  btn.textContent = "Running…";
-  if (idle) idle.classList.add("d-none");
-  if (wrap) wrap.classList.remove("d-none");
-  results.innerHTML = "";
-  bar.style.width = "0%";
+  const active = isActiveSelfTest(run);
+  selfTestIsRunning = active;
+  idle?.classList.add("d-none");
+  wrap?.classList.remove("d-none");
+
+  const progress = run.progress || {};
+  const percent = Math.max(0, Math.min(100, Number(progress.percent || 0)));
+  headline.textContent = progress.currentCheck || run.phase || "Preparing deep review";
+  counts.textContent = `${Number(progress.completed || 0)} / ${Number(progress.total || 0)}`;
+  bar.style.width = `${percent}%`;
+  bar.setAttribute("aria-valuenow", String(percent));
   bar.className = "progress-bar";
-  headline.textContent = "Running system checks…";
+  if (!active && run.summary?.overall === "FAIL") bar.classList.add("bg-danger");
+  else if (!active && run.summary?.overall === "WARN") bar.classList.add("bg-warning");
+  else if (!active && run.summary?.overall === "PASS") bar.classList.add("bg-success");
 
-  let report;
+  if (meta) {
+    const started = run.startedAt ? new Date(run.startedAt).toLocaleString() : "not started";
+    meta.textContent = `Run ${run.id || "pending"} | ${run.status || "QUEUED"} | Started ${started}`;
+  }
+
+  const disclosureState = captureSelfTestDisclosureState(results);
+  results.replaceChildren();
+  const summary = run.summary || {};
+  if (run.status === "CLEANUP_FAILED" || run.status === "RECOVERING") {
+    const banner = document.createElement("div");
+    banner.className = `st-banner ${run.status === "CLEANUP_FAILED" ? "bad" : "warn"}`;
+    banner.textContent = run.status === "CLEANUP_FAILED"
+      ? "Cleanup is not yet verified. The global test lock remains active and automatic recovery will retry."
+      : "A stale review is being recovered. Cleanup verification must finish before the global lock is released.";
+    results.appendChild(banner);
+  } else if (!active && (run.status === "COMPLETED" || run.status === "CRASHED")) {
+    const banner = document.createElement("div");
+    const overall = run.status === "CRASHED" ? "FAIL" : summary.overall || "FAIL";
+    banner.className = `st-banner ${overall === "PASS" ? "ok" : overall === "WARN" ? "warn" : "bad"}`;
+    banner.textContent = overall === "PASS"
+      ? "Deep review passed. Deterministic checks, DeepSeek review, and cleanup all completed."
+      : overall === "WARN"
+        ? "Review completed with warnings. Inspect DeepSeek, provider, and section evidence below."
+        : `Deep review found failures.${run.error ? ` ${run.error}` : " Inspect failed sections below."}`;
+    results.appendChild(banner);
+  }
+
+  if (summary.total || !active) {
+    const metrics = document.createElement("div");
+    metrics.className = "st-summary-grid";
+    metrics.append(
+      makeMetric("Passed", summary.passed),
+      makeMetric("Warnings", summary.warned),
+      makeMetric("Failed", summary.failed),
+      makeMetric("Sections", `${summary.sectionsCovered || 0}/${summary.sectionsExpected || 0}`),
+      makeMetric("Cleanup residue", run.cleanup?.residualCount ?? "Pending")
+    );
+    results.appendChild(metrics);
+  }
+
+  const groups = document.createElement("div");
+  groups.className = "st-groups";
+  for (const group of run.groups || []) {
+    groups.appendChild(renderSelfTestGroup(group, active, disclosureState));
+  }
+  results.appendChild(groups);
+
+  const aiReview = renderDeepSeekReview(run.deepSeekReview);
+  if (aiReview) results.appendChild(aiReview);
+  restoreSelfTestFocus(results, disclosureState.focusKey);
+  updateSelfTestControls();
+}
+
+function renderSelfTestRequestError(message, {
+  preserveReport = false,
+  headline = "Deep review request failed",
+} = {}) {
+  const results = qs("selfTestResults");
+  if (!results) return;
+  const headlineElement = qs("selfTestHeadline");
+  if (headlineElement) headlineElement.textContent = headline;
+  results.querySelector(".st-request-error")?.remove();
+  const banner = document.createElement("div");
+  banner.className = "st-banner bad st-request-error";
+  banner.setAttribute("role", "alert");
+  banner.setAttribute("aria-atomic", "true");
+  banner.textContent = message || "Could not run the deep system review.";
+  if (preserveReport && results.childElementCount) results.prepend(banner);
+  else results.replaceChildren(banner);
+}
+
+function updateSelfTestControls() {
+  const button = qs("runSelfTestBtn");
+  const confirmation = qs("selfTestConfirm");
+  if (!button) return;
+  button.disabled = selfTestIsRunning || !confirmation?.checked;
+  button.textContent = selfTestIsRunning ? "Review Running" : "Run Deep Review";
+}
+
+function stopSelfTestPolling() {
+  if (selfTestPollTimer) window.clearTimeout(selfTestPollTimer);
+  selfTestPollTimer = null;
+}
+
+function beginSelfTestRequestFlow() {
+  stopSelfTestPolling();
+  selfTestRequestEpoch += 1;
+  return selfTestRequestEpoch;
+}
+
+function isCurrentSelfTestRequest(requestEpoch) {
+  return requestEpoch === selfTestRequestEpoch;
+}
+
+function clearStoredSelfTestRun(runId) {
+  const storedRunId = localStorage.getItem(SELF_TEST_ACTIVE_RUN_KEY);
+  if (!runId || storedRunId === String(runId)) {
+    localStorage.removeItem(SELF_TEST_ACTIVE_RUN_KEY);
+  }
+}
+
+function scheduleSelfTestPoll(runId, options, delayMs = SELF_TEST_POLL_MS) {
+  selfTestPollTimer = window.setTimeout(() => {
+    void pollSelfTestRun(runId, options);
+  }, delayMs);
+}
+
+async function loadLatestSelfTestRun({
+  excludedRunId = "",
+  reportFailure = false,
+  requestEpoch = selfTestRequestEpoch,
+} = {}) {
   try {
-    const data = await api("/super/self-test", { method: "POST" });
-    report = data.report;
-  } catch (err) {
-    results.innerHTML = `<div class="st-banner bad">Could not run the self-test: ${escapeHtml(err.message || "request failed")}</div>`;
-    btn.disabled = false;
-    btn.textContent = "▶ Run Full System Test";
+    const data = await api("/super/self-test/latest");
+    if (!isCurrentSelfTestRequest(requestEpoch)) return false;
+
+    const run = data.run;
+    if (!run || (excludedRunId && String(run.id) === String(excludedRunId))) {
+      selfTestIsRunning = false;
+      updateSelfTestControls();
+      if (reportFailure) {
+        renderSelfTestRequestError(
+          "Saved review expired and no newer system-test report is available.",
+          { headline: "No saved deep review available" }
+        );
+      }
+      return false;
+    }
+
+    renderSelfTestReport(run);
+    if (isActiveSelfTest(run)) {
+      await pollSelfTestRun(run.id, { fallbackToLatest: false, requestEpoch });
+    }
+    return true;
+  } catch (error) {
+    if (!isCurrentSelfTestRequest(requestEpoch)) return false;
+    selfTestIsRunning = false;
+    updateSelfTestControls();
+    if (reportFailure) {
+      renderSelfTestRequestError(
+        `Could not restore latest system-test report: ${error.message || "request failed"}`,
+        { headline: "Could not restore latest deep review" }
+      );
+    } else {
+      console.warn("Deep system review history unavailable:", error.message);
+    }
+    return false;
+  }
+}
+
+async function pollSelfTestRun(runId, {
+  fallbackToLatest = false,
+  requestEpoch = selfTestRequestEpoch,
+} = {}) {
+  if (!isCurrentSelfTestRequest(requestEpoch)) return false;
+  stopSelfTestPolling();
+  if (!runId) return false;
+
+  selfTestIsRunning = true;
+  updateSelfTestControls();
+  localStorage.setItem(SELF_TEST_ACTIVE_RUN_KEY, runId);
+  try {
+    const data = await api(`/super/self-test/${encodeURIComponent(runId)}`);
+    if (!isCurrentSelfTestRequest(requestEpoch)) return false;
+
+    const run = data.run;
+    renderSelfTestReport(run);
+    if (isActiveSelfTest(run)) {
+      scheduleSelfTestPoll(runId, { fallbackToLatest, requestEpoch });
+    } else {
+      clearStoredSelfTestRun(runId);
+      selfTestIsRunning = false;
+      updateSelfTestControls();
+    }
+    return true;
+  } catch (error) {
+    if (!isCurrentSelfTestRequest(requestEpoch)) return false;
+
+    if (error?.status === 401 || error?.status === 403) {
+      clearStoredSelfTestRun(runId);
+      selfTestIsRunning = false;
+      updateSelfTestControls();
+      renderSelfTestRequestError(
+        `Progress request failed: ${error.message || "authorization failed"}`,
+        { headline: "Progress request failed" }
+      );
+      return false;
+    }
+
+    if (error?.status === 400 || error?.status === 404) {
+      clearStoredSelfTestRun(runId);
+      if (fallbackToLatest) {
+        if (qs("selfTestHeadline")) qs("selfTestHeadline").textContent = "Restoring latest available review";
+        return loadLatestSelfTestRun({
+          excludedRunId: runId,
+          reportFailure: true,
+          requestEpoch,
+        });
+      }
+      selfTestIsRunning = false;
+      updateSelfTestControls();
+      renderSelfTestRequestError(
+        "This system-test run no longer exists.",
+        { headline: "Deep review no longer available" }
+      );
+      return false;
+    }
+
+    selfTestIsRunning = true;
+    updateSelfTestControls();
+    renderSelfTestRequestError(
+      `Progress temporarily unavailable; retrying: ${error.message || "request failed"}`,
+      {
+        preserveReport: true,
+        headline: "Progress temporarily unavailable; retrying",
+      }
+    );
+    scheduleSelfTestPoll(runId, { fallbackToLatest, requestEpoch }, 3000);
+    return false;
+  }
+}
+
+async function runSelfTest() {
+  const confirmation = qs("selfTestConfirm");
+  if (!confirmation?.checked) {
+    renderSelfTestRequestError(
+      "Confirm the synthetic-data safety notice before starting.",
+      { headline: "Confirmation required" }
+    );
+    confirmation?.focus();
     return;
   }
 
-  // Build rows (all pending) grouped, then reveal one-by-one for a live feel.
-  const rowEls = [];
-  let lastGroup = null;
-  for (const group of report.groups) {
-    for (const check of group.checks) {
-      if (group.name !== lastGroup) {
-        const title = document.createElement("div");
-        title.className = "st-group-title";
-        title.textContent = group.name;
-        results.appendChild(title);
-        lastGroup = group.name;
-      }
-      const row = document.createElement("div");
-      row.className = "st-row";
-      row.innerHTML = `<span class="st-ic pending"></span><span class="st-name">${escapeHtml(check.name)}</span><span class="st-ms"></span>`;
-      results.appendChild(row);
-      rowEls.push({ row, check });
+  const requestEpoch = beginSelfTestRequestFlow();
+  selfTestIsRunning = true;
+  updateSelfTestControls();
+  qs("selfTestIdle")?.classList.add("d-none");
+  qs("selfTestProgressWrap")?.classList.remove("d-none");
+  if (qs("selfTestHeadline")) qs("selfTestHeadline").textContent = "Starting isolated deep review";
+  if (qs("selfTestCounts")) qs("selfTestCounts").textContent = "0 / 0";
+  if (qs("selfTestResults")) qs("selfTestResults").replaceChildren();
+
+  try {
+    const data = await api("/super/self-test", {
+      method: "POST",
+      body: { confirmation: "RUN_ISOLATED_DEEP_TEST" },
+    });
+    if (!isCurrentSelfTestRequest(requestEpoch)) return;
+    renderSelfTestReport(data.run);
+    await pollSelfTestRun(data.run.id, { fallbackToLatest: false, requestEpoch });
+  } catch (error) {
+    if (!isCurrentSelfTestRequest(requestEpoch)) return;
+    const activeRunId = error?.data?.runId;
+    if (error?.status === 409 && activeRunId) {
+      await pollSelfTestRun(activeRunId, { fallbackToLatest: false, requestEpoch });
+      return;
     }
+    selfTestIsRunning = false;
+    updateSelfTestControls();
+    renderSelfTestRequestError(
+      `Could not start deep review: ${error.message || "request failed"}`,
+      { headline: "Could not start deep review" }
+    );
   }
-
-  const total = rowEls.length;
-  counts.textContent = `0 / ${total}`;
-  let done = 0;
-  let anyFail = false;
-
-  for (const { row, check } of rowEls) {
-    // small stagger so each check visibly resolves from spinner -> result
-    // eslint-disable-next-line no-await-in-loop
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    const ic = row.querySelector(".st-ic");
-    ic.className = `st-ic ${check.status}`;
-    ic.textContent = check.status === "pass" ? "✓" : check.status === "warn" ? "!" : "✗";
-    row.querySelector(".st-ms").textContent = `${check.ms}ms`;
-    row.classList.add(check.status === "fail" ? "done-fail" : check.status === "warn" ? "done-warn" : "done-pass");
-    if (check.status !== "pass") {
-      const detail = document.createElement("div");
-      detail.className = `st-detail${check.status === "fail" ? " fail" : ""}`;
-      detail.textContent = check.detail;
-      row.after(detail);
-    }
-    if (check.status === "fail") anyFail = true;
-    done += 1;
-    counts.textContent = `${done} / ${total}`;
-    bar.style.width = `${Math.round((done / total) * 100)}%`;
-    bar.className = "progress-bar" + (anyFail ? " bg-danger" : "");
-  }
-
-  const s = report.summary;
-  const banner = document.createElement("div");
-  banner.className = "st-banner " + (report.ok ? "ok" : "bad");
-  banner.textContent = report.ok
-    ? `✓ All systems operational — ${s.passed}/${s.total} passed${s.warned ? `, ${s.warned} warning(s)` : ""} (${report.durationMs} ms)`
-    : `✗ ${s.failed} check(s) failed — ${s.passed}/${s.total} passed${s.warned ? `, ${s.warned} warning(s)` : ""}. See details above.`;
-  results.prepend(banner);
-  headline.textContent = report.ok ? "System healthy" : "Issues found";
-  btn.disabled = false;
-  btn.textContent = "▶ Run Full System Test";
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  const btn = qs("runSelfTestBtn");
-  if (btn) btn.addEventListener("click", runSelfTest);
-});
+async function initializeSelfTestPanel() {
+  const button = qs("runSelfTestBtn");
+  const confirmation = qs("selfTestConfirm");
+  if (!button || !confirmation) return;
+  button.addEventListener("click", runSelfTest);
+  confirmation.addEventListener("change", updateSelfTestControls);
+  const requestEpoch = beginSelfTestRequestFlow();
+  selfTestIsRunning = true;
+  updateSelfTestControls();
+
+  const savedRunId = localStorage.getItem(SELF_TEST_ACTIVE_RUN_KEY);
+  if (savedRunId) {
+    await pollSelfTestRun(savedRunId, { fallbackToLatest: true, requestEpoch });
+    return;
+  }
+  await loadLatestSelfTestRun({ requestEpoch });
+}
+
+document.addEventListener("DOMContentLoaded", initializeSelfTestPanel);
 
 
 // ─── Send test email (admin diagnostics) ────────────────────────────

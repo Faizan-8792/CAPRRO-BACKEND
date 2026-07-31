@@ -362,3 +362,55 @@ export const getMe = async (req, res, next) => {
     next(err);
   }
 };
+
+// ---------------- UPDATE ME (display name) ----------------
+// PATCH /api/auth/me   Body: { name }
+// Self-service update of the signed-in user's display name. Email, role, and
+// firm membership are never changed here.
+export const updateMe = async (req, res, next) => {
+  try {
+    const { id } = req.user;
+    const { name } = req.body || {};
+
+    if (typeof name !== "string") {
+      return res.status(400).json({ ok: false, error: "name must be a string" });
+    }
+    const trimmed = name.trim();
+    if (trimmed.length < 1 || trimmed.length > 120) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "name must be between 1 and 120 characters" });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      id,
+      { $set: { name: trimmed } },
+      { new: true, runValidators: true }
+    ).select(
+      "email name role accountType firmId personalFirmId isActive createdAt updatedAt welcomeSeenVersion"
+    );
+
+    if (!user) {
+      return res.status(404).json({ ok: false, error: "User not found" });
+    }
+
+    return res.json({
+      ok: true,
+      user: {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        accountType: user.accountType,
+        firmId: user.firmId || null,
+        personalFirmId: user.personalFirmId || null,
+        isActive: user.isActive,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+        welcomeSeenVersion: user.welcomeSeenVersion || null,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};

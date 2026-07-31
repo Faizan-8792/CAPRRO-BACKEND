@@ -5,7 +5,7 @@
     <title>CA PRO Toolkit – Super Admin</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="bootstrap.min.css" />
-    <link rel="stylesheet" href="admin.css?v=11" />
+    <link rel="stylesheet" href="admin.css?v=12" />
     <link rel="icon" type="image/png" href="logo.png" />
   </head>
   <body class="super-admin-body">
@@ -46,33 +46,56 @@
 
     <main class="container-fluid px-4 my-4 super-admin-main">
 
-      <!-- SYSTEM SELF-TEST -->
-      <section class="mb-4">
-        <div class="mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
-          <div>
-            <h1 class="h5 mb-1">🧪 System Self-Test</h1>
+      <!-- DEEP SYSTEM REVIEW -->
+      <section class="mb-4" aria-labelledby="deepSystemReviewTitle">
+        <div class="mb-3 d-flex align-items-start justify-content-between flex-wrap gap-3">
+          <div class="st-heading-copy">
+            <h1 class="h5 mb-1" id="deepSystemReviewTitle">Deep System Review</h1>
             <p class="text-muted mb-0 small">
-              One click checks everything — backend, database, every engine and API, and email configuration. Read-only; nothing is written and no email is sent.
+              Seeds an isolated synthetic workspace, verifies every product section against expected outputs, removes all seeded records, then asks DeepSeek to cross-check the evidence.
             </p>
           </div>
           <div class="d-flex align-items-center gap-2 flex-wrap">
-            <button id="sendTestEmailBtn" class="btn btn-outline-primary" type="button">✉ Send test email</button>
-            <button id="runSelfTestBtn" class="btn btn-primary" type="button">▶ Run Full System Test</button>
+            <button id="sendTestEmailBtn" class="btn btn-outline-primary" type="button">Send test email</button>
+            <button id="runSelfTestBtn" class="btn btn-primary" type="button" disabled>Run Deep Review</button>
           </div>
         </div>
+
+        <div class="st-safety-panel mb-3">
+          <div class="st-safety-grid" aria-label="Deep review safety controls">
+            <div><strong>Synthetic only</strong><span>No production firm or client receives seeded data.</span></div>
+            <div><strong>Verified cleanup</strong><span>Exact record IDs are deleted and checked for residue.</span></div>
+            <div><strong>Grounded AI review</strong><span>DeepSeek receives synthetic, redacted expected-versus-actual evidence only.</span></div>
+          </div>
+          <label class="st-confirm" for="selfTestConfirm">
+            <input class="form-check-input" id="selfTestConfirm" type="checkbox" />
+            <span>I understand this review writes temporary synthetic records and may take several minutes.</span>
+          </label>
+        </div>
+
         <div id="sendTestEmailStatus" class="small mb-2" aria-live="polite"></div>
         <div class="card p-3 super-admin-card">
           <div id="selfTestIdle" class="text-muted small">
-            Click “Run Full System Test” to verify the whole system is working. Each check appears live with a spinner, then a green tick (passed) or red mark (failed) with full detail.
+            Confirm the safety notice, then run the review. Results show real server progress, expected and actual values, DeepSeek findings, and cleanup proof.
           </div>
-          <div id="selfTestProgressWrap" class="d-none">
-            <div class="d-flex align-items-center justify-content-between mb-1">
-              <div class="fw-semibold" id="selfTestHeadline">Running system checks…</div>
-              <div class="small text-muted" id="selfTestCounts">0 / 0</div>
+          <div id="selfTestProgressWrap" class="d-none" aria-live="polite" aria-atomic="true">
+            <div class="d-flex align-items-center justify-content-between gap-3 mb-1">
+              <div class="fw-semibold" id="selfTestHeadline">Preparing deep review</div>
+              <div class="small text-muted text-nowrap" id="selfTestCounts">0 / 0</div>
             </div>
             <div class="progress" style="height: 8px;">
-              <div id="selfTestBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+              <div
+                id="selfTestBar"
+                class="progress-bar"
+                role="progressbar"
+                aria-label="Deep system review progress"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow="0"
+                style="width: 0%"
+              ></div>
             </div>
+            <div class="st-run-meta" id="selfTestRunMeta"></div>
           </div>
           <div id="selfTestResults" class="mt-3"></div>
         </div>
@@ -392,6 +415,6 @@
 
     <!-- Bootstrap JS no longer needed (custom modal). Kept removed. -->
     <script src="file-tools.js"></script>
-    <script src="super.js?v=14"></script>
+    <script src="super.js?v=18"></script>
   </body>
 </html>

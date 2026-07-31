@@ -55,7 +55,24 @@ const PUBLIC_ERROR_CODES = new Set([
   "AUDIT_PROPOSAL_ALREADY_DECIDED",
   "AUDIT_SOURCE_ROW_CHANGED",
   "AUDIT_AI_CONSENT_REQUIRED",
+  "IMPORT_MAPPING_UNSUPPORTED_FIELDS",
+  "IMPORT_MAPPING_MISSING_FIELDS",
+  "IMPORT_MAPPING_HEADER_NOT_FOUND",
+  "IMPORT_MAPPING_DUPLICATE_SOURCE",
+  "GST_IMPORT_CLIENT_NOT_FOUND",
+  "GST_IMPORT_PREVIEW_STALE",
+  "RECIPIENT_GSTIN_MISMATCH",
 ]);
+
+const PUBLIC_IMPORT_ERROR_MESSAGES = Object.freeze({
+  IMPORT_MAPPING_UNSUPPORTED_FIELDS: "Column mapping contains unsupported fields.",
+  IMPORT_MAPPING_MISSING_FIELDS: "Required column mappings are missing.",
+  IMPORT_MAPPING_HEADER_NOT_FOUND: "A mapped source heading is not present in this file.",
+  IMPORT_MAPPING_DUPLICATE_SOURCE: "Each source column can map to only one import field.",
+  GST_IMPORT_CLIENT_NOT_FOUND: "Selected client is not available in the active firm.",
+  GST_IMPORT_PREVIEW_STALE: "Import inputs changed after preview. Preview current data again.",
+  RECIPIENT_GSTIN_MISMATCH: "Recipient GSTIN does not match selected registration.",
+});
 
 const app = express();
 
@@ -312,6 +329,8 @@ function errorCategory(status) {
 
 function publicErrorMessage({ err, status, multerStatus, publicCode }) {
   if (!isProd) return err?.message || "Internal server error";
+  const fixedImportMessage = PUBLIC_IMPORT_ERROR_MESSAGES[err?.code];
+  if (fixedImportMessage) return fixedImportMessage;
   if (publicCode && err?.message) return err.message;
   if (multerStatus === 413) return "The selected file exceeds the permitted size.";
   if (multerStatus === 400) return "The selected file could not be processed. Review it and try again.";
@@ -331,6 +350,25 @@ function publicErrorMessage({ err, status, multerStatus, publicCode }) {
   return "The request could not be completed. Review the information and try again.";
 }
 
+function publicErrorDetails(err) {
+  if (err?.code === "RECIPIENT_GSTIN_MISMATCH") {
+    const rows = Array.isArray(err?.details?.rows)
+      ? err.details.rows.filter((row) => Number.isInteger(row) && row >= 2 && row <= 501).slice(0, 100)
+      : [];
+    return rows.length ? { rows } : null;
+  }
+  if (/^IMPORT_MAPPING_/.test(String(err?.code || ""))) {
+    const fields = Array.isArray(err?.details?.fields)
+      ? err.details.fields
+        .filter((field) => /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(String(field)))
+        .map(String)
+        .slice(0, 100)
+      : [];
+    return fields.length ? { fields } : null;
+  }
+  return null;
+}
+
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   const multerStatus = err?.name === "MulterError"
@@ -345,12 +383,14 @@ app.use((err, req, res, next) => {
     err?.code === "FEATURE_ROLLOUT_CHANGED" &&
     Object.prototype.hasOwnProperty.call(DEFAULT_FEATURE_FLAGS, err?.featureFlag);
   const publicCode = rolloutChanged || PUBLIC_ERROR_CODES.has(err?.code);
+  const publicDetails = publicCode ? publicErrorDetails(err) : null;
   res.status(status).json({
     ok: false,
     error: publicErrorMessage({ err, status, multerStatus, publicCode }),
     category: errorCategory(status),
     requestId: req.id || "",
     ...(publicCode ? { code: err.code } : {}),
+    ...(publicDetails ? { details: publicDetails } : {}),
     ...(rolloutChanged ? { featureFlag: err.featureFlag } : {}),
     ...(!isProd && { stack: err?.stack }),
   });

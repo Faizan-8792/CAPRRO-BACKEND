@@ -71,7 +71,11 @@ function parseDelimited(text, delimiter) {
       if (row.some((value) => value.trim() !== "")) rows.push(row);
       row = [];
       if (rows.length > MAX_ROWS + 1) {
-        throw new Error(`Import exceeds ${MAX_ROWS} data rows`);
+        throw importRequestError(
+          `Import exceeds ${MAX_ROWS} data rows`,
+          "IMPORT_ROW_LIMIT_EXCEEDED",
+          { maxRows: MAX_ROWS }
+        );
       }
     } else {
       cell += character;
@@ -81,6 +85,13 @@ function parseDelimited(text, delimiter) {
   if (quoted) throw new Error("Import contains an unclosed quoted value");
   row.push(cell);
   if (row.some((value) => value.trim() !== "")) rows.push(row);
+  if (rows.length > MAX_ROWS + 1) {
+    throw importRequestError(
+      `Import exceeds ${MAX_ROWS} data rows`,
+      "IMPORT_ROW_LIMIT_EXCEEDED",
+      { maxRows: MAX_ROWS }
+    );
+  }
   return rows;
 }
 
@@ -107,6 +118,14 @@ function normalizeClientValue(field, rawValue) {
 
 function formulaRisk(value) {
   return /^[\s]*[=+@-]/.test(String(value || ""));
+}
+
+function importRequestError(message, code, details = null) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  error.code = code;
+  if (details) error.details = details;
+  return error;
 }
 
 function validateRequest({ kind, text, mapping, delimiter }) {
@@ -142,16 +161,43 @@ function validateRequest({ kind, text, mapping, delimiter }) {
     (field) => !spec.allowed.includes(field)
   );
   if (unknownFields.length) {
-    throw new Error(`Unsupported mapped fields: ${unknownFields.join(", ")}`);
+    throw importRequestError(
+      `Unsupported mapped fields: ${unknownFields.join(", ")}`,
+      "IMPORT_MAPPING_UNSUPPORTED_FIELDS",
+      { fields: unknownFields }
+    );
   }
   const missingRequired = spec.required.filter((field) => !mapping[field]);
   if (missingRequired.length) {
-    throw new Error(`Missing required mappings: ${missingRequired.join(", ")}`);
+    throw importRequestError(
+      `Missing required mappings: ${missingRequired.join(", ")}`,
+      "IMPORT_MAPPING_MISSING_FIELDS",
+      { fields: missingRequired }
+    );
   }
+
+  const fieldsBySourceHeader = new Map();
   for (const [field, sourceHeader] of Object.entries(mapping)) {
     if (!headers.includes(sourceHeader)) {
-      throw new Error(`Mapped column not found for ${field}: ${sourceHeader}`);
+      throw importRequestError(
+        `Mapped column not found for ${field}: ${sourceHeader}`,
+        "IMPORT_MAPPING_HEADER_NOT_FOUND",
+        { fields: [field] }
+      );
     }
+    const assignedFields = fieldsBySourceHeader.get(sourceHeader) || [];
+    assignedFields.push(field);
+    fieldsBySourceHeader.set(sourceHeader, assignedFields);
+  }
+  const duplicateAssignments = [...fieldsBySourceHeader.values()].filter(
+    (assignedFields) => assignedFields.length > 1
+  );
+  if (duplicateAssignments.length) {
+    throw importRequestError(
+      "Each source column can map to only one import field",
+      "IMPORT_MAPPING_DUPLICATE_SOURCE",
+      { fields: duplicateAssignments.flat() }
+    );
   }
 
   return { headers, normalizedKind, parsed, selectedDelimiter, spec };

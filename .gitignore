@@ -23,3 +23,7 @@ Thumbs.db
 # One-off recovery artifacts (never commit)
 super-token.txt
 __recover.mjs
+
+# Marketing campaign runtime artifacts (one-off ops script)
+scripts/campaign-log.jsonl
+scripts/preview.html

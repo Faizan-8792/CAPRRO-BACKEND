@@ -97,9 +97,11 @@ export async function previewMappedImport(req, res, next) {
         statementType: req.body.statementType,
       });
     } else if (preview.kind !== "CLIENTS") {
-      authorization = createGstImportPreviewAuthorization({
+      authorization = await createGstImportPreviewAuthorization({
+        firmId: req.user.firmId,
         sourceHash: preview.sourceHash,
         kind: preview.kind,
+        text: req.body.text,
         mapping: preview.mapping,
         delimiter: preview.delimiter,
         clientId: req.body.clientId,

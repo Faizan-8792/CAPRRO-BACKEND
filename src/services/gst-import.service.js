@@ -21,9 +21,10 @@ import {
 const GST_IMPORT_NORMALIZATION_VERSION = "gst-import-v2";
 const GST_IMPORT_PROCESSING_LEASE_MS = 10 * 60 * 1000;
 
-function serviceError(message, statusCode = 400, details = null) {
+function serviceError(message, statusCode = 400, details = null, code = "") {
   const error = new Error(message);
   error.statusCode = statusCode;
+  error.code = code || details?.code || "";
   if (details) error.details = details;
   return error;
 }
@@ -93,15 +94,26 @@ function previewTokenMatches(importFingerprint, received) {
   return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(received, "hex"));
 }
 
-function createGstImportPreviewAuthorization({
+function recipientGstinMismatchRows(parsed, normalizedKind, normalizedGstin) {
+  if (normalizedKind === "GSTR3B_SUMMARY") return [];
+  return parsed.rows
+    .filter((row) => isValidGstin(row.values.recipientGstin))
+    .filter((row) => row.values.recipientGstin !== normalizedGstin)
+    .map((row) => row.row);
+}
+
+async function createGstImportPreviewAuthorization({
+  firmId,
   sourceHash,
   kind,
+  text,
   mapping,
   delimiter,
   clientId,
   gstin,
   period,
 }) {
+  assertObjectId(firmId, "Firm");
   assertObjectId(clientId, "Client");
   const normalizedKind = String(kind || "").toUpperCase();
   if (!GST_IMPORT_KINDS.includes(normalizedKind)) {
@@ -110,6 +122,41 @@ function createGstImportPreviewAuthorization({
   const normalizedGstin = normalizeGstin(gstin);
   if (!isValidGstin(normalizedGstin)) throw serviceError("A valid GSTIN is required");
   if (!isValidPeriod(period)) throw serviceError("Period must use YYYY-MM");
+
+  const clientExists = await Client.exists({ _id: clientId, firmId });
+  if (!clientExists) {
+    throw serviceError(
+      "Client not found in active firm",
+      404,
+      { code: "GST_IMPORT_CLIENT_NOT_FOUND" }
+    );
+  }
+
+  const parsed = parseMappedImport({
+    kind: normalizedKind,
+    text,
+    mapping,
+    delimiter: delimiter === "TAB" ? "\t" : delimiter,
+  });
+  if (parsed.sourceHash !== sourceHash) {
+    throw serviceError(
+      "Import inputs changed while previewing; preview the current source and mapping again",
+      409,
+      { code: "GST_IMPORT_PREVIEW_STALE" }
+    );
+  }
+  const mismatchedRows = recipientGstinMismatchRows(parsed, normalizedKind, normalizedGstin);
+  if (mismatchedRows.length) {
+    throw serviceError(
+      "Recipient GSTIN does not match selected registration",
+      422,
+      {
+        code: "RECIPIENT_GSTIN_MISMATCH",
+        rows: mismatchedRows.slice(0, 100),
+      }
+    );
+  }
+
   const importFingerprint = buildImportFingerprint({
     sourceHash,
     kind: normalizedKind,
@@ -202,7 +249,8 @@ export async function commitGstImport({
   if (!previewTokenMatches(importFingerprint, previewToken)) {
     throw serviceError(
       "Import inputs changed after preview; preview the current source and mapping again",
-      409
+      409,
+      { code: "GST_IMPORT_PREVIEW_STALE" }
     );
   }
 
@@ -227,12 +275,19 @@ export async function commitGstImport({
   ) {
     throw serviceError(
       "Import inputs changed after preview; preview the current source and mapping again",
-      409
+      409,
+      { code: "GST_IMPORT_PREVIEW_STALE" }
     );
   }
 
   const clientExists = await Client.exists({ _id: clientId, firmId });
-  if (!clientExists) throw serviceError("Client not found in active firm", 404);
+  if (!clientExists) {
+    throw serviceError(
+      "Client not found in active firm",
+      404,
+      { code: "GST_IMPORT_CLIENT_NOT_FOUND" }
+    );
+  }
 
   if (parsed.summary.invalidRows > 0) {
     throw serviceError("Import contains invalid rows and was not committed", 422, {
@@ -241,16 +296,12 @@ export async function commitGstImport({
     });
   }
 
-  if (normalizedKind !== "GSTR3B_SUMMARY") {
-    const mismatchedRows = parsed.rows
-      .filter((row) => row.values.recipientGstin !== normalizedGstin)
-      .map((row) => row.row);
-    if (mismatchedRows.length) {
-      throw serviceError("Recipient GSTIN does not match selected registration", 422, {
-        code: "RECIPIENT_GSTIN_MISMATCH",
-        rows: mismatchedRows.slice(0, 100),
-      });
-    }
+  const mismatchedRows = recipientGstinMismatchRows(parsed, normalizedKind, normalizedGstin);
+  if (mismatchedRows.length) {
+    throw serviceError("Recipient GSTIN does not match selected registration", 422, {
+      code: "RECIPIENT_GSTIN_MISMATCH",
+      rows: mismatchedRows.slice(0, 100),
+    });
   }
 
   let gstr3bControl = null;
