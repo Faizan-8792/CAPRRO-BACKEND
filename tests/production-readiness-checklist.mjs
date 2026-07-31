@@ -14,6 +14,7 @@ const db = readFileSync(join(BACKEND, "src", "config", "db.js"), "utf8");
 const auth = readFileSync(join(BACKEND, "src", "middleware", "auth.middleware.js"), "utf8");
 const usage = readFileSync(join(BACKEND, "src", "middleware", "usage-tracker.middleware.js"), "utf8");
 const reqId = readFileSync(join(BACKEND, "src", "middleware", "request-id.middleware.js"), "utf8");
+const authRoutes = readFileSync(join(BACKEND, "src", "routes", "auth.routes.js"), "utf8");
 const userModel = readFileSync(join(BACKEND, "src", "models", "User.js"), "utf8");
 const superCtrl = readFileSync(join(BACKEND, "src", "controllers", "super.controller.js"), "utf8");
 
@@ -30,8 +31,12 @@ check(
 
 check(
   "Rate limiting: global, auth, super tiers",
-  /globalLimiter/.test(app) && /authLimiter/.test(app) && /superLimiter/.test(app),
-  "Three-tier rate limiting prevents abuse"
+  /globalLimiter/.test(app) &&
+    /superLimiter/.test(app) &&
+    /sendOtpLimiter/.test(authRoutes) &&
+    /verifyOtpLimiter/.test(authRoutes) &&
+    /googleLoginLimiter/.test(authRoutes),
+  "Global and super tiers plus endpoint-specific OTP and Google auth limits prevent abuse"
 );
 
 check(
