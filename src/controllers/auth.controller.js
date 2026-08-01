@@ -14,11 +14,34 @@ const MAX_OTP_ATTEMPTS = 5; // wrong tries before lockout
 const OTP_LOCK_MS = 15 * 60 * 1000; // lockout duration after too many tries
 const OTP_RESEND_COOLDOWN_MS = 30 * 1000; // min gap between OTP sends
 
-// Google Sign-In: verifier for the Google-issued ID token.
-// GOOGLE_CLIENT_ID must match the client ID used by the extension/web to
-// obtain the token, since it is validated as the token audience.
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-const googleClient = GOOGLE_CLIENT_ID ? new OAuth2Client(GOOGLE_CLIENT_ID) : null;
+// Google Sign-In: accept the existing extension/web audience plus the native
+// desktop audience. OAuth client IDs are public identifiers.
+const DEFAULT_DESKTOP_GOOGLE_CLIENT_ID =
+  "978304461373-1ombfrb0ergt0nq942cjbg7jnq9qqb0u.apps.googleusercontent.com";
+const DESKTOP_GOOGLE_CLIENT_ID =
+  String(process.env.GOOGLE_DESKTOP_CLIENT_ID || DEFAULT_DESKTOP_GOOGLE_CLIENT_ID).trim();
+const GOOGLE_CLIENT_IDS = [
+  process.env.GOOGLE_CLIENT_ID,
+  DESKTOP_GOOGLE_CLIENT_ID,
+  ...(process.env.GOOGLE_CLIENT_IDS || "").split(","),
+]
+  .map((value) => String(value || "").trim())
+  .filter(Boolean)
+  .filter((value, index, values) => values.indexOf(value) === index);
+const googleClient = GOOGLE_CLIENT_IDS.length ? new OAuth2Client() : null;
+
+// Google issues installed-app ("Desktop app") clients a client secret and
+// requires it at the token endpoint. Installed apps cannot keep a secret
+// confidential, so the secret lives only in this server's environment and the
+// desktop app exchanges its authorization code through the route below.
+const DESKTOP_GOOGLE_CLIENT_SECRET = String(
+  process.env.GOOGLE_DESKTOP_CLIENT_SECRET || ""
+).trim();
+const GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+const MAX_AUTHORIZATION_CODE_LENGTH = 2048;
+const MAX_CODE_VERIFIER_LENGTH = 128;
+const MIN_CODE_VERIFIER_LENGTH = 43;
+const CODE_VERIFIER_PATTERN = /^[A-Za-z0-9\-._~]+$/;
 
 const SUPER_ADMIN_EMAIL = "saifullahfaizan786@gmail.com";
 
@@ -239,7 +262,7 @@ export const googleLogin = async (req, res, next) => {
         // Web / GIS path: verify the ID token (JWT) and read its claims.
         const ticket = await googleClient.verifyIdToken({
           idToken: oidcToken,
-          audience: GOOGLE_CLIENT_ID,
+          audience: GOOGLE_CLIENT_IDS,
         });
         const payload = ticket.getPayload();
         email = payload?.email;
@@ -249,7 +272,7 @@ export const googleLogin = async (req, res, next) => {
         // Chrome extension path (chrome.identity.getAuthToken): validate the
         // access token, ensure it was minted for OUR client, then read profile.
         const info = await googleClient.getTokenInfo(accessToken);
-        if (info.aud !== GOOGLE_CLIENT_ID) {
+        if (!GOOGLE_CLIENT_IDS.includes(info.aud)) {
           return res
             .status(401)
             .json({ ok: false, error: "Google token audience mismatch" });
@@ -323,6 +346,114 @@ export const googleLogin = async (req, res, next) => {
     next(err);
   }
 };
+
+// ---------------- GOOGLE DESKTOP CODE EXCHANGE ----------------
+// POST /api/auth/google/desktop-token
+// Body: { code, codeVerifier, redirectUri }
+// Completes the installed-app authorization-code exchange on the server so the
+// Google client secret never ships inside the desktop build. Only the resulting
+// OpenID Connect ID token is returned; Google access and refresh tokens are
+// discarded here and never persisted.
+export const googleDesktopToken = async (req, res, next) => {
+  try {
+    if (!DESKTOP_GOOGLE_CLIENT_SECRET) {
+      return res.status(500).json({
+        ok: false,
+        error: "Desktop Google sign-in is not configured on the server",
+      });
+    }
+
+    const { code, codeVerifier, redirectUri } = req.body || {};
+
+    const authorizationCode = String(code || "").trim();
+    const verifier = String(codeVerifier || "").trim();
+    const redirect = String(redirectUri || "").trim();
+
+    if (!authorizationCode || authorizationCode.length > MAX_AUTHORIZATION_CODE_LENGTH) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "A Google authorization code is required" });
+    }
+
+    if (
+      verifier.length < MIN_CODE_VERIFIER_LENGTH ||
+      verifier.length > MAX_CODE_VERIFIER_LENGTH ||
+      !CODE_VERIFIER_PATTERN.test(verifier)
+    ) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "A valid PKCE code verifier is required" });
+    }
+
+    if (!isLoopbackRedirectUri(redirect)) {
+      return res.status(400).json({
+        ok: false,
+        error: "The redirect URI must be an HTTP loopback address",
+      });
+    }
+
+    let googleResponse;
+    try {
+      googleResponse = await fetch(GOOGLE_TOKEN_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: DESKTOP_GOOGLE_CLIENT_ID,
+          client_secret: DESKTOP_GOOGLE_CLIENT_SECRET,
+          code: authorizationCode,
+          code_verifier: verifier,
+          grant_type: "authorization_code",
+          redirect_uri: redirect,
+        }),
+      });
+    } catch {
+      return res
+        .status(502)
+        .json({ ok: false, error: "Google could not be reached. Try again." });
+    }
+
+    let payload = {};
+    try {
+      payload = await googleResponse.json();
+    } catch {
+      payload = {};
+    }
+
+    if (!googleResponse.ok) {
+      // Surface only Google's short description, never the secret or request body.
+      const description = String(payload?.error_description || "").slice(0, 240);
+      return res.status(401).json({
+        ok: false,
+        error: description || "Google rejected the sign-in request. Try again.",
+      });
+    }
+
+    const idToken = payload?.id_token;
+    if (typeof idToken !== "string" || !idToken) {
+      return res
+        .status(502)
+        .json({ ok: false, error: "Google did not return an identity token" });
+    }
+
+    return res.json({ ok: true, idToken });
+  } catch (err) {
+    next(err);
+  }
+};
+
+function isLoopbackRedirectUri(value) {
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+
+  if (parsed.protocol !== "http:") return false;
+
+  const host = parsed.hostname.replace(/^\[|\]$/g, "");
+  return host === "127.0.0.1" || host === "::1" || host === "localhost";
+}
 
 // ---------------- GET ME ----------------
 // GET /api/auth/me
