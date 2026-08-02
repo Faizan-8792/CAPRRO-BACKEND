@@ -13,15 +13,15 @@ const BACKEND = join(__dirname, "..");
 
 const ctrl = readFileSync(
   join(BACKEND, "src", "controllers", "task.controller.js"),
-  "utf8"
+  "utf8",
 );
 const routes = readFileSync(
   join(BACKEND, "src", "routes", "task.routes.js"),
-  "utf8"
+  "utf8",
 );
 const taskModel = readFileSync(
   join(BACKEND, "src", "models", "Task.js"),
-  "utf8"
+  "utf8",
 );
 
 const checks = [];
@@ -32,7 +32,9 @@ function check(name, pass, detail = "") {
 
 // --- 1. getMyOpenTasks scopes by assignedTo ---
 {
-  const m = ctrl.match(/getMyOpenTasks[\s\S]*?(?=export const|\nexport function|$)/);
+  const m = ctrl.match(
+    /getMyOpenTasks[\s\S]*?(?=export const|\nexport function|$)/,
+  );
   const block = m ? m[0] : "";
   const ok =
     /assignedTo:\s*user\.id/.test(block) &&
@@ -41,7 +43,7 @@ function check(name, pass, detail = "") {
   check(
     "getMyOpenTasks filters by firmId + isActive + assignedTo=user.id",
     ok,
-    ok ? "Only the logged-in assignee sees their tasks" : "Filter incomplete!"
+    ok ? "Only the logged-in assignee sees their tasks" : "Filter incomplete!",
   );
 }
 
@@ -60,7 +62,7 @@ function check(name, pass, detail = "") {
   check(
     "getMyOpenTasks status filter includes only open states (excludes CLOSED/FILED)",
     hasOpenStatuses && excludesClosed,
-    `Status filter: ${statusList || "MISSING"}`
+    `Status filter: ${statusList || "MISSING"}`,
   );
 }
 
@@ -78,7 +80,7 @@ function check(name, pass, detail = "") {
     ok,
     ok
       ? "Only assignee can mark their own task done; sets status=CLOSED"
-      : "Missing scope check!"
+      : "Missing scope check!",
   );
 }
 
@@ -87,12 +89,11 @@ function check(name, pass, detail = "") {
   const m = ctrl.match(/completeTaskFromUser[\s\S]*?(?=export const|$)/);
   const block = m ? m[0] : "";
   const ok =
-    /completedByUserId:\s*user\.id/.test(block) &&
-    /completedAt:/.test(block);
+    /completedByUserId:\s*user\.id/.test(block) && /completedAt:/.test(block);
   check(
     "completeTaskFromUser logs completedBy + completedAt metadata",
     ok,
-    "Provides audit trail of who closed the task and when"
+    "Provides audit trail of who closed the task and when",
   );
 }
 
@@ -104,7 +105,7 @@ function check(name, pass, detail = "") {
   check(
     "createTask validates assignedTo user is in the same firm",
     ok,
-    "Prevents assigning tasks to users outside the firm"
+    "Prevents assigning tasks to users outside the firm",
   );
 }
 
@@ -116,7 +117,7 @@ function check(name, pass, detail = "") {
   check(
     "updateTask validates new assignedTo user is in the same firm",
     ok,
-    "Reassignment cannot leak tasks to other firms"
+    "Reassignment cannot leak tasks to other firms",
   );
 }
 
@@ -133,7 +134,9 @@ function check(name, pass, detail = "") {
   let allScoped = true;
   const missing = [];
   for (const h of handlers) {
-    const re = new RegExp(`(export const|export function)\\s+${h}[\\s\\S]*?(?=export const|export function|$)`);
+    const re = new RegExp(
+      `(export const|export function)\\s+${h}[\\s\\S]*?(?=export const|export function|$)`,
+    );
     const block = (ctrl.match(re) || [""])[0];
     const ok =
       /firmId/.test(block) && /Firm not linked|firmId\s*[:,]/.test(block);
@@ -147,29 +150,33 @@ function check(name, pass, detail = "") {
     allScoped,
     allScoped
       ? "Cross-firm leakage prevented"
-      : `Missing firmId scope: ${missing.join(", ")}`
+      : `Missing firmId scope: ${missing.join(", ")}`,
   );
 }
 
-// --- 8. Routes are auth-protected ---
+// --- 8. Routes are auth-protected and firm-scoped ---
 {
-  const ok = /router\.use\(authRequired\)/.test(routes);
+  const ok =
+    /router\.use\(\s*authRequired\s*,\s*requireFirmMember\s*,\s*requireFirmWriteAccess\s*\)/.test(
+      routes,
+    );
   check(
-    "All /api/tasks routes require authentication",
+    "All /api/tasks routes require authentication and active firm membership",
     ok,
-    "JWT required to access any task endpoint"
+    "JWT required to access any task endpoint",
   );
 }
 
 // --- 9. PATCH /:id/complete-from-user route exists ---
 {
-  const ok = /\.patch\(\s*["']\/:id\/complete-from-user["']\s*,\s*completeTaskFromUser/.test(
-    routes
-  );
+  const ok =
+    /\.patch\(\s*["']\/:id\/complete-from-user["']\s*,\s*completeTaskFromUser/.test(
+      routes,
+    );
   check(
     "PATCH /:id/complete-from-user route is wired",
     ok,
-    "Extension can mark tasks complete via this endpoint"
+    "Extension can mark tasks complete via this endpoint",
   );
 }
 
@@ -184,33 +191,35 @@ function check(name, pass, detail = "") {
     ok,
     ok
       ? "getMyOpenTasks lookup is O(log n) — fast even with many tasks"
-      : "MISSING INDEX — queries will be slow at scale"
+      : "MISSING INDEX — queries will be slow at scale",
   );
 }
 
 // --- 11. Status field uses enum (prevents arbitrary values) ---
 {
-  const ok = /enum:\s*\[\s*["']NOT_STARTED["'][\s\S]*?["']CLOSED["'][\s\S]*?\]/.test(
-    taskModel
-  );
+  const ok =
+    /enum:\s*\[\s*["']NOT_STARTED["'][\s\S]*?["']CLOSED["'][\s\S]*?\]/.test(
+      taskModel,
+    );
   check(
     "Task.status field uses Mongoose enum",
     ok,
-    "Mongoose validates status against allowed values; no rogue states"
+    "Mongoose validates status against allowed values; no rogue states",
   );
 }
 
 // --- 12. No code path silently un-closes tasks ---
 {
   // Search for any place that sets status away from CLOSED without explicit user intent
-  const closedReverse = /status\s*=\s*["'](?!CLOSED)(?:NOT_STARTED|WAITING_DOCS|IN_PROGRESS|FILED)["']/g;
+  const closedReverse =
+    /status\s*=\s*["'](?!CLOSED)(?:NOT_STARTED|WAITING_DOCS|IN_PROGRESS|FILED)["']/g;
   const matches = ctrl.match(closedReverse) || [];
   // only allowed in updateTask (admin can change status)
   const ok = matches.length === 0;
   check(
     "No automatic flip-back: only updateTask allows status changes from CLOSED",
     ok,
-    `Status reassignment count outside updateTask: ${matches.length}`
+    `Status reassignment count outside updateTask: ${matches.length}`,
   );
 }
 
@@ -226,25 +235,30 @@ checks.forEach((c, i) => {
   if (c.detail) console.log(`        ${c.detail}`);
 });
 
-console.log(`\nResult: ${passed} passed, ${failed} failed (out of ${checks.length})\n`);
+console.log(
+  `\nResult: ${passed} passed, ${failed} failed (out of ${checks.length})\n`,
+);
 
 if (failed === 0) {
   console.log("ALL CHECKS PASSED. Task flow integrity verified.\n");
   console.log("Manual test checklist (run in browser):");
+  console.log("  1. As Firm Admin: create task assigned to staff user A");
   console.log(
-    "  1. As Firm Admin: create task assigned to staff user A");
+    "  2. As staff A: open extension → My Tasks → task should appear",
+  );
   console.log(
-    "  2. As staff A: open extension → My Tasks → task should appear");
+    "  3. As staff B (different user, same firm): My Tasks → task should NOT appear",
+  );
+  console.log("  4. As staff A: click 'Mark Done' → task disappears from list");
   console.log(
-    "  3. As staff B (different user, same firm): My Tasks → task should NOT appear");
+    "  5. As staff A: refresh My Tasks → task still gone (no flip-back)",
+  );
   console.log(
-    "  4. As staff A: click 'Mark Done' → task disappears from list");
+    "  6. As Firm Admin: open Compliance Board → task shown in CLOSED column",
+  );
   console.log(
-    "  5. As staff A: refresh My Tasks → task still gone (no flip-back)");
-  console.log(
-    "  6. As Firm Admin: open Compliance Board → task shown in CLOSED column");
-  console.log(
-    "  7. As staff B: even after refresh, NEVER sees staff A's task\n");
+    "  7. As staff B: even after refresh, NEVER sees staff A's task\n",
+  );
 } else {
   console.log("FAILURES DETECTED — review code paths above.\n");
   process.exit(1);

@@ -91,7 +91,12 @@ console.log(
 );
 if (!isMounted) failures.push("route is public and mounted under /api/auth");
 
+// Node's fetch pool can retain loopback keep-alive sockets after every body is
+// consumed. No requests remain at this point, so close this test server's
+// connections before the standard graceful listener shutdown.
+server.closeAllConnections();
 await new Promise((resolve) => server.close(resolve));
+server.unref();
 
 console.log(
   `\nResult: ${cases.length + 1 - failures.length} passed, ${failures.length} failed`

@@ -31,7 +31,7 @@ function slugifyBase(input) {
 export async function ensureFirmMembership(
   userId,
   firmId,
-  { role = "MEMBER", isPersonal = false } = {}
+  { role = "MEMBER", isPersonal = false } = {},
 ) {
   const existing = await FirmMembership.findOne({ firmId, userId });
   if (!existing) {
@@ -65,7 +65,7 @@ export async function ensureFirmMembership(
 async function createPersonalFirm(user) {
   const displayName = user.name ? `${user.name}'s Workspace` : "My Workspace";
   const handleBase = slugifyBase(
-    user.name || String(user.email || "").split("@")[0]
+    user.name || String(user.email || "").split("@")[0],
   );
 
   let firm = null;
@@ -115,9 +115,10 @@ async function resolvePersonalFirm(user) {
   }
 
   if (user.firmId) {
-    const active = await Firm.findOne({ _id: user.firmId, isActive: true }).select(
-      "_id ownerUserId kind"
-    );
+    const active = await Firm.findOne({
+      _id: user.firmId,
+      isActive: true,
+    }).select("_id ownerUserId kind");
     if (
       active &&
       String(active.ownerUserId) === String(user._id) &&
@@ -165,9 +166,10 @@ export async function ensurePersonalFirm(user) {
   //    fall back to the personal workspace. Never leave the user without one.
   let activeFirm = null;
   if (user.firmId) {
-    activeFirm = await Firm.findOne({ _id: user.firmId, isActive: true }).select(
-      "_id ownerUserId kind"
-    );
+    activeFirm = await Firm.findOne({
+      _id: user.firmId,
+      isActive: true,
+    }).select("_id ownerUserId kind");
   }
   if (!activeFirm) {
     if (String(user.firmId || "") !== String(personalFirm._id)) {
@@ -178,9 +180,9 @@ export async function ensurePersonalFirm(user) {
   }
 
   // 3) Membership for the active workspace (backfills pre-collaboration users).
-  const isOwner = String(activeFirm.ownerUserId || user._id) === String(user._id);
-  const isPersonalActive =
-    String(activeFirm._id) === String(personalFirm._id);
+  const isOwner =
+    String(activeFirm.ownerUserId || user._id) === String(user._id);
+  const isPersonalActive = String(activeFirm._id) === String(personalFirm._id);
   await ensureFirmMembership(user._id, activeFirm._id, {
     role: isOwner ? "OWNER" : "MEMBER",
     isPersonal: isPersonalActive,
@@ -198,10 +200,9 @@ export async function ensurePersonalFirm(user) {
       userChanged = true;
     }
   }
-  if (user.isActive === false) {
-    user.isActive = true;
-    userChanged = true;
-  }
+  // Activation is deliberately untouched. Workspace provisioning runs on every
+  // sign-in, so reactivating here let a suspended or not-yet-approved account
+  // clear its own isActive flag simply by signing in again.
 
   if (userChanged) await user.save();
   return user;

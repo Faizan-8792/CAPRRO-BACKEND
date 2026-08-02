@@ -1,6 +1,36 @@
 // User.js
 import mongoose from "mongoose";
 
+const WorkspaceOperationReceiptSchema = new mongoose.Schema(
+  {
+    operationId: {
+      type: String,
+      required: true,
+      lowercase: true,
+      trim: true,
+      match: /^[a-f0-9]{32}$/,
+    },
+    kind: {
+      type: String,
+      enum: ["CREATE", "SWITCH", "JOIN"],
+      required: true,
+    },
+    requestHash: {
+      type: String,
+      required: true,
+      match: /^[a-f0-9]{64}$/,
+    },
+    activeFirmId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Firm",
+      required: true,
+    },
+    startedAt: { type: Date, required: true },
+    completedAt: { type: Date, required: true },
+  },
+  { _id: false },
+);
+
 const UserSchema = new mongoose.Schema(
   {
     email: {
@@ -16,7 +46,7 @@ const UserSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["USER", "FIRM_ADMIN", "SUPER_ADMIN"],   // ✅ yahan underscore + caps
+      enum: ["USER", "FIRM_ADMIN", "SUPER_ADMIN"], // ✅ yahan underscore + caps
       default: "USER",
     },
     accountType: {
@@ -36,6 +66,28 @@ const UserSchema = new mongoose.Schema(
     personalFirmId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Firm",
+      default: null,
+    },
+    // Bounded terminal receipts make active-firm change and operation success
+    // one atomic User-document update. Status reads check these before the
+    // secondary operation record, closing the delayed-response race.
+    workspaceOperationReceipts: {
+      type: [WorkspaceOperationReceiptSchema],
+      default: [],
+      validate: {
+        validator: (values) =>
+          values.length <= 20 &&
+          new Set(values.map((value) => value.operationId)).size ===
+            values.length,
+        message: "Workspace operation receipts must be unique and bounded",
+      },
+    },
+    // When the user asked to become a firm admin. Pending approval is tracked
+    // here rather than by clearing isActive: overloading the activation flag let
+    // a suspended account look pending, and let a pending account be locked out
+    // with no route back once its role was recomputed on the next sign-in.
+    firmAdminRequestedAt: {
+      type: Date,
       default: null,
     },
     otpCodeHash: String,
@@ -98,7 +150,7 @@ const UserSchema = new mongoose.Schema(
       emailEnabled: { type: Boolean, default: true },
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const User = mongoose.model("User", UserSchema);

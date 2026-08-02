@@ -11,41 +11,43 @@ const BACKEND = join(__dirname, "..");
 
 const ctrl = readFileSync(
   join(BACKEND, "src", "controllers", "taxworker.controller.js"),
-  "utf8"
+  "utf8",
 );
 const routes = readFileSync(
   join(BACKEND, "src", "routes", "taxworker.routes.js"),
-  "utf8"
+  "utf8",
 );
 const clientModel = readFileSync(
   join(BACKEND, "src", "models", "Client.js"),
-  "utf8"
+  "utf8",
 );
 const sessionModel = readFileSync(
   join(BACKEND, "src", "models", "TaxWorkSession.js"),
-  "utf8"
+  "utf8",
 );
 const tpl = readFileSync(
   join(BACKEND, "src", "config", "tax-templates.js"),
-  "utf8"
+  "utf8",
 );
 const app = readFileSync(join(BACKEND, "src", "app.js"), "utf8");
 
 const checks = [];
 const check = (name, pass, detail = "") => checks.push({ name, pass, detail });
 
-// 1. Routes auth-protected
+// 1. Routes auth-protected and firm-scoped
 check(
-  "All /api/taxworker routes require authentication",
-  /router\.use\(authRequired\)/.test(routes),
-  "JWT required for every taxworker endpoint"
+  "All /api/taxworker routes require authentication and active firm membership",
+  /router\.use\(\s*authRequired\s*,\s*requireFirmMember\s*,\s*requireFirmWriteAccess\s*\)/.test(
+    routes,
+  ),
+  "JWT, ACTIVE membership, and write-access gate on every taxworker endpoint",
 );
 
 // 2. Routes wired in app.js
 check(
   "/api/taxworker mounted in app.js",
   /app\.use\(["']\/api\/taxworker["']\s*,\s*taxworkerRoutes\)/.test(app),
-  "Routes accessible at /api/taxworker"
+  "Routes accessible at /api/taxworker",
 );
 
 // 3. Every controller scopes by firmId or ownerUserId (via getScope helper)
@@ -68,10 +70,14 @@ const handlers = [
 let allScoped = true;
 const missingScope = [];
 for (const h of handlers) {
-  const re = new RegExp(`(export const|export async function|export function)\\s+${h}[\\s\\S]*?(?=export const|export function|export async function|$)`);
+  const re = new RegExp(
+    `(export const|export async function|export function)\\s+${h}[\\s\\S]*?(?=export const|export function|export async function|$)`,
+  );
   const block = (ctrl.match(re) || [""])[0];
   // Either getScope or getOwnership establishes the scope
-  const ok = /getScope\(req\.user\)/.test(block) || /getOwnership\(req\.user\)/.test(block);
+  const ok =
+    /getScope\(req\.user\)/.test(block) ||
+    /getOwnership\(req\.user\)/.test(block);
   if (!ok) {
     allScoped = false;
     missingScope.push(h);
@@ -80,7 +86,9 @@ for (const h of handlers) {
 check(
   "All controllers establish scope via getScope/getOwnership (firm or solo)",
   allScoped,
-  allScoped ? "Cross-user/cross-firm leakage prevented" : `Missing: ${missingScope.join(", ")}`
+  allScoped
+    ? "Cross-user/cross-firm leakage prevented"
+    : `Missing: ${missingScope.join(", ")}`,
 );
 
 // 4. Cross-firm/user leakage prevented in queries
@@ -92,21 +100,21 @@ const queriesScoped =
 check(
   "Queries spread scope filter (firm-mode firmId OR solo-mode ownerUserId+firmId:null)",
   queriesScoped,
-  "Each user only sees their firm or solo data"
+  "Each user only sees their firm or solo data",
 );
 
 // 5. createSession validates client belongs to scope
 check(
   "createSession validates clientId belongs to scope before creating",
   /Client\.findOne\(\s*\{\s*_id:\s*clientId\s*,\s*\.\.\.scope/.test(ctrl),
-  "Cannot create session for a client outside your scope"
+  "Cannot create session for a client outside your scope",
 );
 
 // 6. createSession snapshots template documents
 check(
   "createSession uses getTemplateDocuments() to snapshot checklist",
   /getTemplateDocuments\(/.test(ctrl),
-  "Template snapshot on create — future template edits don't disrupt active sessions"
+  "Template snapshot on create — future template edits don't disrupt active sessions",
 );
 
 // 7. updateDocument logs receivedAt + receivedByUserId
@@ -114,65 +122,87 @@ check(
   "updateDocument logs receivedAt + receivedByUserId on tick",
   /receivedAt\s*=\s*received\s*\?\s*new Date\(\)/.test(ctrl) &&
     /receivedByUserId\s*=\s*received\s*\?\s*req\.user\.id/.test(ctrl),
-  "Audit trail: who received what, when"
+  "Audit trail: who received what, when",
 );
 
 // 8. Status enum is enforced
 check(
   "TaxWorkSession.status uses enum (DRAFT/IN_PROGRESS/COMPLETE/ARCHIVED)",
   /enum:\s*STATUSES/.test(sessionModel) &&
-    /STATUSES\s*=\s*\[\s*["']DRAFT["'][\s\S]*?["']ARCHIVED["']/.test(sessionModel),
-  "No rogue status values allowed"
+    /STATUSES\s*=\s*\[\s*["']DRAFT["'][\s\S]*?["']ARCHIVED["']/.test(
+      sessionModel,
+    ),
+  "No rogue status values allowed",
 );
 
 // 9. taxType enum is enforced
 check(
   "TaxWorkSession.taxType uses enum",
   /enum:\s*TAX_TYPES/.test(sessionModel),
-  "Only known tax types accepted"
+  "Only known tax types accepted",
 );
 
 // 10. ObjectId validation on params
 check(
   "ObjectId format validated for :id params",
   /isValidObjectId\(/.test(ctrl),
-  "Invalid IDs rejected with 400 instead of crashing"
+  "Invalid IDs rejected with 400 instead of crashing",
 );
 
 // 11. Delete is soft (sets isActive=false / status=ARCHIVED)
 check(
   "Delete operations are SOFT (no hard data loss)",
-  /isActive\s*=\s*false/.test(ctrl) && /status\s*=\s*["']ARCHIVED["']/.test(ctrl),
-  "Soft-delete preserved in both Client and Session"
+  /isActive\s*=\s*false/.test(ctrl) &&
+    /status\s*=\s*["']ARCHIVED["']/.test(ctrl),
+  "Soft-delete preserved in both Client and Session",
 );
 
 // 12. Indexes on Client model
 check(
   "Client model has firmId compound indexes",
   /ClientSchema\.index\(\s*\{\s*firmId:\s*1/.test(clientModel),
-  "List clients query is fast at scale"
+  "List clients query is fast at scale",
 );
 
 // 13. Indexes on TaxWorkSession model
 check(
   "TaxWorkSession model has firmId compound indexes (status, clientId, taxType, assignedTo, dueDate)",
-  /TaxWorkSessionSchema\.index\(\s*\{\s*firmId:\s*1[\s\S]{0,80}status/.test(sessionModel) &&
-    /TaxWorkSessionSchema\.index\(\s*\{\s*firmId:\s*1[\s\S]{0,80}clientId/.test(sessionModel) &&
-    /TaxWorkSessionSchema\.index\(\s*\{\s*firmId:\s*1[\s\S]{0,80}assignedTo/.test(sessionModel),
-  "Common queries (by status/client/assignee) are O(log n)"
+  /TaxWorkSessionSchema\.index\(\s*\{\s*firmId:\s*1[\s\S]{0,80}status/.test(
+    sessionModel,
+  ) &&
+    /TaxWorkSessionSchema\.index\(\s*\{\s*firmId:\s*1[\s\S]{0,80}clientId/.test(
+      sessionModel,
+    ) &&
+    /TaxWorkSessionSchema\.index\(\s*\{\s*firmId:\s*1[\s\S]{0,80}assignedTo/.test(
+      sessionModel,
+    ),
+  "Common queries (by status/client/assignee) are O(log n)",
 );
 
 // 14. Templates catalog has all 14 tax types
 const expectedTypes = [
-  "GST_MONTHLY","GST_QUARTERLY","GST_ANNUAL","GST_AUDIT","TDS_QUARTERLY",
-  "ITR_INDIVIDUAL","ITR_FIRM","ITR_COMPANY","TAX_AUDIT","ROC_ANNUAL",
-  "PT","PF_ESI","EQUALISATION_LEVY","OTHER"
+  "GST_MONTHLY",
+  "GST_QUARTERLY",
+  "GST_ANNUAL",
+  "GST_AUDIT",
+  "TDS_QUARTERLY",
+  "ITR_INDIVIDUAL",
+  "ITR_FIRM",
+  "ITR_COMPANY",
+  "TAX_AUDIT",
+  "ROC_ANNUAL",
+  "PT",
+  "PF_ESI",
+  "EQUALISATION_LEVY",
+  "OTHER",
 ];
-const missingTypes = expectedTypes.filter((t) => !new RegExp(`^\\s*${t}:`, "m").test(tpl));
+const missingTypes = expectedTypes.filter(
+  (t) => !new RegExp(`^\\s*${t}:`, "m").test(tpl),
+);
 check(
   "All 14 tax types present in template catalog",
   missingTypes.length === 0,
-  missingTypes.length ? `Missing: ${missingTypes.join(", ")}` : "All present"
+  missingTypes.length ? `Missing: ${missingTypes.join(", ")}` : "All present",
 );
 
 // 15. Period/due-date suggestion exists
@@ -182,21 +212,23 @@ check(
     /===\s*["']monthly["']/.test(tpl) &&
     /===\s*["']quarterly["']/.test(tpl) &&
     /===\s*["']fy["']/.test(tpl),
-  "Auto-suggestion logic for all period formats"
+  "Auto-suggestion logic for all period formats",
 );
 
 // 16. Documents can be removed (template + custom)
 check(
   "removeCustomDocument removes any document from session checklist",
-  /session\.documents\s*=\s*session\.documents\.filter\(\(d\)\s*=>\s*d\.docKey\s*!==\s*docKey\)/.test(ctrl),
-  "User has full control over their checklist (template + custom)"
+  /session\.documents\s*=\s*session\.documents\.filter\(\(d\)\s*=>\s*d\.docKey\s*!==\s*docKey\)/.test(
+    ctrl,
+  ),
+  "User has full control over their checklist (template + custom)",
 );
 
 // 16b. Bulk add supported via items array
 check(
   "addCustomDocument supports bulk add via items[] array",
   /Array\.isArray\(items\)/.test(ctrl) && /addedCount/.test(ctrl),
-  "Add Documents modal can submit multiple suggestions in one call"
+  "Add Documents modal can submit multiple suggestions in one call",
 );
 
 // 17. Period format validation in custom docs (slug from name)
@@ -204,15 +236,17 @@ check(
   "addCustomDocument generates slug-based docKey",
   /docKey\s*=\s*`custom_\$\{slug\}`/.test(ctrl) ||
     /custom_\$\{slug\}/.test(ctrl),
-  "Custom docs get unique slugified keys to avoid collisions"
+  "Custom docs get unique slugified keys to avoid collisions",
 );
 
 // 18. Solo mode: getScope returns ownerUserId-based filter for unlinked users
 check(
   "getScope() supports SOLO mode (firmId:null + ownerUserId) for unlinked users",
-  /if\s*\(\s*user\.firmId\s*\)\s*return\s*\{\s*firmId:\s*user\.firmId\s*\}/.test(ctrl) &&
+  /if\s*\(\s*user\.firmId\s*\)\s*return\s*\{\s*firmId:\s*user\.firmId\s*\}/.test(
+    ctrl,
+  ) &&
     /return\s*\{\s*firmId:\s*null,\s*ownerUserId:\s*user\.id\s*\}/.test(ctrl),
-  "Users not linked to any firm can use Tax Worker independently"
+  "Users not linked to any firm can use Tax Worker independently",
 );
 
 // 19. Models support solo mode (firmId optional, ownerUserId required)
@@ -222,7 +256,7 @@ check(
     /ownerUserId[\s\S]{0,80}required:\s*true/.test(clientModel) &&
     /firmId[\s\S]{0,80}default:\s*null/.test(sessionModel) &&
     /ownerUserId[\s\S]{0,80}required:\s*true/.test(sessionModel),
-  "Solo mode supported at schema level"
+  "Solo mode supported at schema level",
 );
 
 // ─── Print report ────────────────────────────────────────────────
@@ -237,13 +271,17 @@ checks.forEach((c, i) => {
   if (c.detail) console.log(`        ${c.detail}`);
 });
 
-console.log(`\nResult: ${passed} passed, ${failed} failed (out of ${checks.length})\n`);
+console.log(
+  `\nResult: ${passed} passed, ${failed} failed (out of ${checks.length})\n`,
+);
 
 if (failed === 0) {
   console.log("ALL CHECKS PASSED. Tax Work Tracker integrity verified.\n");
   console.log("Manual UX checklist:");
   console.log("  1. Click 'Tax Work Tracker' button in popup → page opens");
-  console.log("  2. Click '+ New Session' → modal opens with client + tax type pickers");
+  console.log(
+    "  2. Click '+ New Session' → modal opens with client + tax type pickers",
+  );
   console.log("  3. Add new client inline → saved to firm");
   console.log("  4. Pick tax type → period + due date auto-suggested");
   console.log("  5. Create session → checklist auto-loaded");

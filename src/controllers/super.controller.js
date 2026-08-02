@@ -15,6 +15,16 @@ import { sendTestDigestNow } from "../services/digest.service.js";
 
 const SUPER_EMAIL = "saifullahfaizan786@gmail.com";
 
+// One definition of "pending firm-admin request", so the queue and the dashboard
+// count cannot drift apart. The first clause is the current marker; the second
+// keeps accounts created under the older isActive convention visible.
+const PENDING_FIRM_ADMIN_FILTER = {
+  $or: [
+    { firmAdminRequestedAt: { $ne: null } },
+    { role: "FIRM_ADMIN", isActive: false },
+  ],
+};
+
 function assertSuper(user) {
   if (!user || user.role !== "SUPER_ADMIN" || user.email !== SUPER_EMAIL) {
     const err = new Error("Super admin only");
@@ -53,7 +63,9 @@ export const getUsageStats = async (req, res, next) => {
     // Activity by day for last 14 days
     const dailyActivity = await User.aggregate([
       {
-        $match: { lastActiveAt: { $gte: new Date(now.getTime() - 14 * dayMs) } },
+        $match: {
+          lastActiveAt: { $gte: new Date(now.getTime() - 14 * dayMs) },
+        },
       },
       {
         $group: {
@@ -85,9 +97,7 @@ export const getUsageStats = async (req, res, next) => {
         totalUsers,
         totalApiCalls,
         activationRate:
-          totalUsers > 0
-            ? Math.round((totalEverActive / totalUsers) * 100)
-            : 0,
+          totalUsers > 0 ? Math.round((totalEverActive / totalUsers) * 100) : 0,
         retentionRate:
           totalEverActive > 0 ? Math.round((wau / totalEverActive) * 100) : 0,
         dailyActivity,
@@ -124,7 +134,7 @@ export const getSuperDashboardStats = async (req, res, next) => {
       Firm.countDocuments({ isActive: true }),
       Task.countDocuments({}),
       Task.countDocuments({ isActive: true }),
-      User.countDocuments({ role: "FIRM_ADMIN", isActive: false }),
+      User.countDocuments(PENDING_FIRM_ADMIN_FILTER),
       Reminder.countDocuments({}),
     ]);
 
@@ -215,13 +225,22 @@ export const listAllUsers = async (req, res, next) => {
     assertSuper(req.user);
 
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+    const limit = Math.min(
+      100,
+      Math.max(1, parseInt(req.query.limit, 10) || 25),
+    );
     const skip = (page - 1) * limit;
 
     const search = String(req.query.search || "").trim();
-    const activity = String(req.query.activity || "").trim().toLowerCase();
-    const role = String(req.query.role || "").trim().toUpperCase();
-    const sort = String(req.query.sort || "recent").trim().toLowerCase();
+    const activity = String(req.query.activity || "")
+      .trim()
+      .toLowerCase();
+    const role = String(req.query.role || "")
+      .trim()
+      .toUpperCase();
+    const sort = String(req.query.sort || "recent")
+      .trim()
+      .toLowerCase();
 
     const filter = {};
     if (search) {
@@ -249,14 +268,14 @@ export const listAllUsers = async (req, res, next) => {
       sort === "signup"
         ? { createdAt: -1 }
         : sort === "usage"
-        ? { totalApiCalls: -1 }
-        : { lastActiveAt: -1, createdAt: -1 };
+          ? { totalApiCalls: -1 }
+          : { lastActiveAt: -1, createdAt: -1 };
 
     const [total, users] = await Promise.all([
       User.countDocuments(filter),
       User.find(filter)
         .select(
-          "email name role accountType isActive firmId personalFirmId lastActiveAt lastSeenIp totalApiCalls createdAt"
+          "email name role accountType isActive firmId personalFirmId lastActiveAt lastSeenIp totalApiCalls createdAt",
         )
         .sort(sortSpec)
         .skip(skip)
@@ -266,7 +285,12 @@ export const listAllUsers = async (req, res, next) => {
 
     // Enrich with active firm summary and how many workspaces each user belongs to.
     const firmIds = [
-      ...new Set(users.map((u) => u.firmId).filter(Boolean).map(String)),
+      ...new Set(
+        users
+          .map((u) => u.firmId)
+          .filter(Boolean)
+          .map(String),
+      ),
     ];
     const firms = await Firm.find({ _id: { $in: firmIds } })
       .select("displayName handle kind")
@@ -279,7 +303,7 @@ export const listAllUsers = async (req, res, next) => {
       { $group: { _id: "$userId", count: { $sum: 1 } } },
     ]);
     const workspaceCountByUser = new Map(
-      membershipCounts.map((m) => [String(m._id), m.count])
+      membershipCounts.map((m) => [String(m._id), m.count]),
     );
 
     const rows = users.map((u) => {
@@ -302,7 +326,12 @@ export const listAllUsers = async (req, res, next) => {
         totalApiCalls: u.totalApiCalls || 0,
         workspaceCount: workspaceCountByUser.get(String(u._id)) || 0,
         activeFirm: firm
-          ? { id: u.firmId, displayName: firm.displayName, handle: firm.handle, kind: firm.kind || "SHARED" }
+          ? {
+              id: u.firmId,
+              displayName: firm.displayName,
+              handle: firm.handle,
+              kind: firm.kind || "SHARED",
+            }
           : null,
       };
     });
@@ -328,15 +357,22 @@ export const listPendingAdmins = async (req, res, next) => {
   try {
     assertSuper(req.user);
 
-    const users = await User.find({
-      role: "FIRM_ADMIN",
-      isActive: false,
-    })
-      .select("email name firmId createdAt")
+    const users = await User.find(PENDING_FIRM_ADMIN_FILTER)
+      .select("email name firmId createdAt firmAdminRequestedAt isActive role")
       .sort({ createdAt: -1 })
       .lean();
 
-    return res.json({ ok: true, users });
+    // The legacy shape cannot distinguish a pending request from a suspension,
+    // so it is labelled rather than treated as an approvable request.
+    return res.json({
+      ok: true,
+      users: users.map((user) => ({
+        ...user,
+        requestShape: user.firmAdminRequestedAt
+          ? "REQUESTED"
+          : "LEGACY_INACTIVE",
+      })),
+    });
   } catch (err) {
     next(err);
   }
@@ -350,24 +386,40 @@ export const approveAdmin = async (req, res, next) => {
     const { userId } = req.params;
     const user = await User.findById(userId);
 
-    if (!user || user.role !== "FIRM_ADMIN") {
+    if (!user) {
       return res
         .status(404)
-        .json({ ok: false, error: "Firm admin not found" });
+        .json({ ok: false, error: "Firm admin request not found" });
     }
 
-    if (user.isActive) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "Already approved" });
+    if (user.role === "FIRM_ADMIN" && user.isActive !== false) {
+      return res.status(400).json({ ok: false, error: "Already approved" });
     }
 
-    user.isActive = true;
+    // Only an explicit request can be approved. An inactive FIRM_ADMIN without
+    // one is indistinguishable from a suspended account, and approving it would
+    // silently lift that suspension.
+    if (!user.firmAdminRequestedAt) {
+      return res.status(409).json({
+        ok: false,
+        error:
+          "This account has no recorded firm-admin request. It may be suspended rather than pending. Set its role and active status directly instead.",
+      });
+    }
+
+    user.role = "FIRM_ADMIN";
+    user.accountType = "FIRM_USER";
+    user.firmAdminRequestedAt = null;
     await user.save();
 
     return res.json({
       ok: true,
-      user: { id: user._id, email: user.email, isActive: true },
+      user: {
+        id: user._id,
+        email: user.email,
+        role: user.role,
+        isActive: true,
+      },
     });
   } catch (err) {
     next(err);
@@ -382,15 +434,16 @@ export const revokeAdmin = async (req, res, next) => {
     const { userId } = req.params;
     const user = await User.findById(userId);
 
-    if (!user || user.role !== "FIRM_ADMIN") {
-      return res
-        .status(404)
-        .json({ ok: false, error: "Firm admin not found" });
+    // Also covers declining a request that was never approved.
+    if (!user || (user.role !== "FIRM_ADMIN" && !user.firmAdminRequestedAt)) {
+      return res.status(404).json({ ok: false, error: "Firm admin not found" });
     }
 
+    // Activation is deliberately untouched: demoting or declining must not lift
+    // a suspension that was applied separately.
     user.role = "USER";
     user.accountType = "INDIVIDUAL";
-    user.isActive = true;
+    user.firmAdminRequestedAt = null;
     user.firmId = null;
 
     await user.save();
@@ -409,9 +462,7 @@ export const listFirms = async (req, res, next) => {
   try {
     assertSuper(req.user);
 
-    const firms = await Firm.find({})
-      .sort({ createdAt: -1 })
-      .lean();
+    const firms = await Firm.find({}).sort({ createdAt: -1 }).lean();
 
     const ownerIds = firms.map((f) => f.ownerUserId);
     const owners = await User.find({ _id: { $in: ownerIds } })
@@ -511,7 +562,9 @@ export const updateFirmUserForSuper = async (req, res, next) => {
 
     const user = await User.findOne({ _id: userId, firmId });
     if (!user) {
-      return res.status(404).json({ ok: false, error: "User not found in firm" });
+      return res
+        .status(404)
+        .json({ ok: false, error: "User not found in firm" });
     }
 
     if (role && ["USER", "FIRM_ADMIN", "SUPER_ADMIN"].includes(role)) {
@@ -547,7 +600,9 @@ export const deleteFirmUserForSuper = async (req, res, next) => {
 
     const user = await User.findOne({ _id: userId, firmId });
     if (!user) {
-      return res.status(404).json({ ok: false, error: "User not found in firm" });
+      return res
+        .status(404)
+        .json({ ok: false, error: "User not found in firm" });
     }
 
     if (user.role === "SUPER_ADMIN") {
@@ -556,9 +611,11 @@ export const deleteFirmUserForSuper = async (req, res, next) => {
         .json({ ok: false, error: "Cannot delete super admin account" });
     }
 
-    // Remove the account and all of its workspace memberships.
-    await FirmMembership.deleteMany({ userId: user._id });
+    // Delete the account first. Removing memberships first would, if this step
+    // then failed, leave a live account pointing at a firm with no membership
+    // rows, which firm guards read as a legacy account rather than a removal.
     await user.deleteOne();
+    await FirmMembership.deleteMany({ userId: user._id });
 
     return res.json({ ok: true });
   } catch (err) {
@@ -588,7 +645,7 @@ export const deleteFirmForSuper = async (req, res, next) => {
           role: "USER",
           accountType: "INDIVIDUAL",
         },
-      }
+      },
     );
 
     // Remove all memberships for this firm so no orphan rows remain.
@@ -605,7 +662,6 @@ export const deleteFirmForSuper = async (req, res, next) => {
     next(err);
   }
 };
-
 
 // Force-logout a user on every device by bumping their tokenVersion. Every JWT
 // issued before this instant immediately fails authentication — the response
@@ -685,7 +741,6 @@ export const getLatestSystemSelfTestRun = async (req, res, next) => {
   }
 };
 
-
 // Super-admin only: send a real test email to the admin's own address to
 // confirm the email pipeline (Resend) is delivering.
 export const sendSuperTestEmail = async (req, res, next) => {
@@ -694,11 +749,19 @@ export const sendSuperTestEmail = async (req, res, next) => {
     const to = req.user.email;
     try {
       const result = await sendTestEmail(to);
-      return res.json({ ok: true, to, id: result?.data?.id || result?.id || "" });
+      return res.json({
+        ok: true,
+        to,
+        id: result?.data?.id || result?.id || "",
+      });
     } catch (mailErr) {
       // Surface the real provider error to the admin diagnostic instead of a 500,
       // so "is email working?" gets a precise answer (rate limit, domain, key, etc.).
-      return res.json({ ok: false, to, error: String(mailErr?.message || mailErr).slice(0, 500) });
+      return res.json({
+        ok: false,
+        to,
+        error: String(mailErr?.message || mailErr).slice(0, 500),
+      });
     }
   } catch (err) {
     return next(err);

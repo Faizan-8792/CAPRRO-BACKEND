@@ -3,6 +3,7 @@ import express from "express";
 import { authRequired } from "../middleware/auth.middleware.js";
 import {
   requireFirmAdmin,
+  requireFirmMember,
   requireFirmWriteAccess,
 } from "../middleware/authorization.middleware.js";
 import { captureOptionalFeatureFlag } from "../middleware/rollout.middleware.js";
@@ -17,7 +18,9 @@ import {
 const router = express.Router();
 const captureNoticeCases = captureOptionalFeatureFlag("noticeCases");
 
-router.use(authRequired, requireFirmWriteAccess);
+// requireFirmMember gates the mutations too, so an inactive firm or a removed
+// membership is refused rather than passed through by the write-access guard.
+router.use(authRequired, requireFirmMember, requireFirmWriteAccess);
 
 // Create reminder (extension / admin)
 router.post("/", createReminder);
@@ -26,17 +29,13 @@ router.post("/", createReminder);
 router.get("/", captureNoticeCases, listReminders);
 
 // Today fired reminders (for dashboard)
-router.get(
-  "/today",
-  captureNoticeCases,
-  getTodayReminders
-);
+router.get("/today", captureNoticeCases, getTodayReminders);
 
 // Resolve an ambiguous provider outcome after external verification.
 router.post(
   "/:id/delivery-attempts/:attemptKey/resolve",
   requireFirmAdmin,
-  resolveReminderDeliveryAttempt
+  resolveReminderDeliveryAttempt,
 );
 
 // Update / deactivate reminder

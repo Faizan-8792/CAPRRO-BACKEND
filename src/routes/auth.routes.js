@@ -8,9 +8,12 @@ import {
   getMe,
   updateMe,
 } from "../controllers/auth.controller.js";
+import { getCurrentTerms } from "../controllers/terms.controller.js";
 import { authRequired } from "../middleware/auth.middleware.js";
 
 const router = Router();
+
+router.get("/terms/current", getCurrentTerms);
 
 // Rate limit: max 5 OTP sends per IP per 15 minutes
 const sendOtpLimiter = rateLimit({

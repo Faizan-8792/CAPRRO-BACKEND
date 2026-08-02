@@ -1,7 +1,10 @@
 // src/routes/taxworker.routes.js
 import { Router } from "express";
 import { authRequired } from "../middleware/auth.middleware.js";
-import { requireFirmWriteAccess } from "../middleware/authorization.middleware.js";
+import {
+  requireFirmMember,
+  requireFirmWriteAccess,
+} from "../middleware/authorization.middleware.js";
 import {
   getTemplates,
   listClients,
@@ -21,7 +24,9 @@ import {
 
 const router = Router();
 
-router.use(authRequired, requireFirmWriteAccess);
+// requireFirmMember gates the mutations too, so an inactive firm or a removed
+// membership is refused rather than passed through by the write-access guard.
+router.use(authRequired, requireFirmMember, requireFirmWriteAccess);
 
 // Templates catalog
 router.get("/templates", getTemplates);

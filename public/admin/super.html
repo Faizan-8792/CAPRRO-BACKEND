@@ -307,6 +307,96 @@
         </div>
       </section>
 
+      <!-- TERMS ACCEPTANCE HISTORY -->
+      <section class="mb-4" aria-labelledby="termsAcceptanceTitle">
+        <div class="row g-3 mb-3 align-items-center">
+          <div class="col">
+            <h2 class="h5 mb-1" id="termsAcceptanceTitle">Terms acceptance history</h2>
+            <p class="text-muted mb-0 small">
+              Immutable server records for desktop acceptance. Times show the viewer's local zone and the exact UTC value stored by the server.
+            </p>
+          </div>
+        </div>
+
+        <div class="card shadow-sm border-0 super-admin-card">
+          <div class="card-body">
+            <div class="rounded border p-3 mb-3" aria-label="Current terms receipt">
+              <div class="small-label mb-1">Current required document</div>
+              <div class="d-flex flex-column gap-1">
+                <strong id="termsCurrentVersion">Version —</strong>
+                <code id="termsCurrentHash" class="small text-break">SHA-256 —</code>
+              </div>
+            </div>
+
+            <form id="termsAcceptanceFilters" class="row g-2 mb-3">
+              <div class="col-lg-4 col-md-6">
+                <label class="form-label small-label" for="termsAcceptanceSearch">Email</label>
+                <input
+                  id="termsAcceptanceSearch"
+                  class="form-control form-control-sm"
+                  type="search"
+                  maxlength="320"
+                  autocomplete="off"
+                  placeholder="Search accepted email"
+                />
+              </div>
+              <div class="col-lg-2 col-md-6">
+                <label class="form-label small-label" for="termsAcceptanceVersion">Version</label>
+                <input
+                  id="termsAcceptanceVersion"
+                  class="form-control form-control-sm"
+                  type="text"
+                  maxlength="64"
+                  autocomplete="off"
+                  placeholder="2026-08-01"
+                />
+              </div>
+              <div class="col-lg-2 col-md-4">
+                <label class="form-label small-label" for="termsAcceptanceFrom">Accepted from</label>
+                <input id="termsAcceptanceFrom" class="form-control form-control-sm" type="date" />
+              </div>
+              <div class="col-lg-2 col-md-4">
+                <label class="form-label small-label" for="termsAcceptanceTo">Accepted to</label>
+                <input id="termsAcceptanceTo" class="form-control form-control-sm" type="date" />
+              </div>
+              <div class="col-lg-2 col-md-4 d-flex align-items-end gap-2">
+                <button id="termsAcceptanceApply" class="btn btn-sm btn-primary flex-grow-1" type="submit">Apply</button>
+                <button id="termsAcceptanceClear" class="btn btn-sm btn-outline-secondary" type="button">Clear</button>
+              </div>
+            </form>
+
+            <div class="d-flex align-items-center gap-2 mb-3">
+              <p id="termsAcceptanceStatus" class="text-muted mb-0 small" role="status" aria-live="polite">
+                Loading acceptance history...
+              </p>
+              <button id="termsAcceptanceRetry" class="btn btn-sm btn-outline-secondary d-none" type="button">Retry</button>
+            </div>
+
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th scope="col">Email</th>
+                    <th scope="col" style="min-width: 250px;">Accepted at</th>
+                    <th scope="col">Version</th>
+                    <th scope="col">Source</th>
+                    <th scope="col" style="min-width: 300px;">Document SHA-256</th>
+                    <th scope="col">Record ID</th>
+                  </tr>
+                </thead>
+                <tbody id="termsAcceptanceBody"></tbody>
+              </table>
+            </div>
+
+            <div class="d-flex align-items-center justify-content-between mt-3">
+              <button id="termsAcceptancePrev" class="btn btn-sm btn-outline-secondary" type="button" disabled>Previous</button>
+              <span id="termsAcceptanceMeta" class="text-muted small">—</span>
+              <button id="termsAcceptanceNext" class="btn btn-sm btn-outline-secondary" type="button" disabled>Next</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- PENDING ADMINS -->
       <section class="mb-4">
         <div class="row g-3 mb-3 align-items-center">
@@ -415,6 +505,6 @@
 
     <!-- Bootstrap JS no longer needed (custom modal). Kept removed. -->
     <script src="file-tools.js"></script>
-    <script src="super.js?v=18"></script>
+    <script src="super.js?v=20"></script>
   </body>
 </html>

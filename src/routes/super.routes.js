@@ -22,6 +22,7 @@ import {
   sendTestDigest,
   forceLogoutUser,
 } from "../controllers/super.controller.js";
+import { listTermsAcceptances } from "../controllers/terms.controller.js";
 import { requireSuperAdmin } from "../middleware/authorization.middleware.js";
 import rateLimit from "express-rate-limit";
 
@@ -37,6 +38,13 @@ const diagnosticsLimiter = rateLimit({
 });
 
 router.use(authRequired);
+
+// Immutable, server-timestamped Terms & Conditions acceptance audit.
+router.get(
+  "/terms-acceptances",
+  requireSuperAdmin,
+  listTermsAcceptances
+);
 
 // Isolated deep system review (super admin only). POST starts an asynchronous
 // run; GET endpoints provide real progress and the latest retained report.

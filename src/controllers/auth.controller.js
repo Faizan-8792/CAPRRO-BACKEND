@@ -4,6 +4,10 @@ import { OAuth2Client } from "google-auth-library";
 import User from "../models/User.js";
 import { sendOtpEmail } from "../services/email.service.js";
 import { ensurePersonalFirm } from "../services/firm-provisioning.service.js";
+import {
+  recordCurrentTermsAcceptance,
+  validateCurrentTermsAcceptance,
+} from "../services/terms-acceptance.service.js";
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error("JWT_SECRET env var is required");
@@ -244,7 +248,13 @@ export const googleLogin = async (req, res, next) => {
         .json({ ok: false, error: "Google sign-in is not configured on the server" });
     }
 
-    const { idToken, credential, accessToken } = req.body || {};
+    const {
+      idToken,
+      credential,
+      accessToken,
+      clientType,
+      termsAcceptance,
+    } = req.body || {};
     const oidcToken = idToken || credential;
 
     if (!oidcToken && !accessToken) {
@@ -256,6 +266,7 @@ export const googleLogin = async (req, res, next) => {
     let email;
     let emailVerified;
     let name;
+    let googleAudience;
 
     try {
       if (oidcToken) {
@@ -268,6 +279,7 @@ export const googleLogin = async (req, res, next) => {
         email = payload?.email;
         emailVerified = payload?.email_verified;
         name = payload?.name;
+        googleAudience = payload?.aud;
       } else {
         // Chrome extension path (chrome.identity.getAuthToken): validate the
         // access token, ensure it was minted for OUR client, then read profile.
@@ -279,8 +291,9 @@ export const googleLogin = async (req, res, next) => {
         }
         email = info.email;
         emailVerified = info.email_verified;
+        googleAudience = info.aud;
 
-        // getTokenInfo omits the display name — fetch it from userinfo (best-effort).
+        // getTokenInfo omits the display name - fetch it from userinfo (best-effort).
         try {
           const uiRes = await fetch(
             "https://www.googleapis.com/oauth2/v3/userinfo",
@@ -293,7 +306,7 @@ export const googleLogin = async (req, res, next) => {
             if (emailVerified === undefined) emailVerified = ui.email_verified;
           }
         } catch {
-          // Name is optional — ignore userinfo failures.
+          // Name is optional - ignore userinfo failures.
         }
       }
     } catch {
@@ -304,6 +317,40 @@ export const googleLogin = async (req, res, next) => {
       return res
         .status(401)
         .json({ ok: false, error: "Google account email is not verified" });
+    }
+
+    // Only the audience from Google's verified token can identify a desktop
+    // sign-in. clientType is untrusted request metadata and may only detect a
+    // misconfigured or forged desktop declaration; it cannot author evidence.
+    const declaredClientType =
+      typeof clientType === "string" ? clientType.trim().toUpperCase() : "";
+    if (
+      declaredClientType === "DESKTOP" &&
+      googleAudience !== DESKTOP_GOOGLE_CLIENT_ID
+    ) {
+      return res.status(401).json({
+        ok: false,
+        code: "GOOGLE_DESKTOP_AUDIENCE_REQUIRED",
+        error: "Google token was not issued for the desktop application.",
+        requestId: req.id || "",
+      });
+    }
+
+    const isDesktopSignIn = googleAudience === DESKTOP_GOOGLE_CLIENT_ID;
+
+    if (isDesktopSignIn) {
+      const acceptanceError = validateCurrentTermsAcceptance(termsAcceptance);
+      if (acceptanceError) {
+        return res.status(acceptanceError.status).json({
+          ok: false,
+          code: acceptanceError.code,
+          error: acceptanceError.error,
+          ...(acceptanceError.details
+            ? { details: acceptanceError.details }
+            : {}),
+          requestId: req.id || "",
+        });
+      }
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
@@ -334,6 +381,15 @@ export const googleLogin = async (req, res, next) => {
     // immediately, without being forced to create or join a firm.
     await ensurePersonalFirm(user);
 
+    // This write happens before JWT issuance. acceptedAt comes from the server,
+    // and the unique user/version key makes sign-in retries idempotent.
+    const termsAcceptanceReceipt = isDesktopSignIn
+      ? await recordCurrentTermsAcceptance({
+          userId: user._id,
+          email: normalizedEmail,
+        })
+      : null;
+
     const tokenPayload = buildTokenPayload(user);
     const jwtToken = jwt.sign(
       { ...tokenPayload, tv: user.tokenVersion || 0 },
@@ -341,7 +397,12 @@ export const googleLogin = async (req, res, next) => {
       { expiresIn: JWT_EXPIRES_IN }
     );
 
-    return res.json({ ok: true, token: jwtToken, user: tokenPayload });
+    return res.json({
+      ok: true,
+      token: jwtToken,
+      user: tokenPayload,
+      ...(termsAcceptanceReceipt ? { termsAcceptanceReceipt } : {}),
+    });
   } catch (err) {
     next(err);
   }

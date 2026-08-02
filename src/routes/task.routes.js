@@ -25,45 +25,26 @@ import {
 const router = express.Router();
 const captureNoticeCases = captureOptionalFeatureFlag("noticeCases");
 
-router.use(authRequired, requireFirmWriteAccess);
+// requireFirmMember gates every task route, including the mutations, so an
+// inactive firm or a removed membership is refused. requireFirmWriteAccess only
+// adds the read-only-member block and passes a missing firm through.
+router.use(authRequired, requireFirmMember, requireFirmWriteAccess);
 
 router.post("/", createTask);
-router.get(
-  "/board",
-  requireFirmMember,
-  captureNoticeCases,
-  getTaskBoard
-);
-router.post(
-  "/bulk/preview",
-  requireFirmAdmin,
-  previewBulkTaskUpdate
-);
+// requireFirmMember already runs for every route in this router.
+router.get("/board", captureNoticeCases, getTaskBoard);
+router.post("/bulk/preview", requireFirmAdmin, previewBulkTaskUpdate);
 router.post(
   "/bulk/:operationId/commit",
   requireFirmAdmin,
-  commitBulkTaskUpdate
+  commitBulkTaskUpdate,
 );
-router.get(
-  "/bulk/:operationId",
-  requireFirmAdmin,
-  readBulkTaskOperation
-);
+router.get("/bulk/:operationId", requireFirmAdmin, readBulkTaskOperation);
 router.patch("/:id", updateTask);
 router.delete("/:id", archiveTask);
 
-router.get(
-  "/my-open",
-  requireFirmMember,
-  captureNoticeCases,
-  getMyOpenTasks
-);
-router.get(
-  "/:id",
-  requireFirmMember,
-  captureNoticeCases,
-  getTaskSource
-);
+router.get("/my-open", captureNoticeCases, getMyOpenTasks);
+router.get("/:id", captureNoticeCases, getTaskSource);
 router.patch("/:id/complete-from-user", completeTaskFromUser);
 
 export default router;

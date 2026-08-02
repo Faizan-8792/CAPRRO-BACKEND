@@ -12,27 +12,6 @@ function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-// Token handoff: the extension can open this page as /admin/super.html?t=<jwt>.
-// Absorb the token into localStorage and strip it from the URL so a reload or
-// shared link never leaks it. Runs before any authenticated request.
-function absorbTokenFromUrl() {
-  try {
-    const url = new URL(window.location.href);
-    const handoff = url.searchParams.get("t");
-    if (handoff) {
-      localStorage.setItem(TOKEN_KEY, handoff);
-      url.searchParams.delete("t");
-      window.history.replaceState(
-        {},
-        document.title,
-        url.pathname + (url.search ? url.search : "") + url.hash
-      );
-    }
-  } catch {
-    /* ignore malformed URLs */
-  }
-}
-
 async function apiGetMe() {
   const token = getToken();
   if (!token) throw new Error("No token");
@@ -972,12 +951,224 @@ function bindUserDirectoryControls() {
   }
 }
 
+// ─── Terms acceptance history ───────────────────────────────────────
+const termsAcceptanceHistory = {
+  page: 1,
+  limit: 25,
+  search: "",
+  version: "",
+  from: "",
+  to: "",
+  totalPages: 1,
+  requestEpoch: 0,
+};
+
+function formatExactAcceptanceTime(value) {
+  const raw = String(value || "").trim();
+  const parsed = new Date(raw);
+  if (!raw || Number.isNaN(parsed.getTime())) {
+    return {
+      local: "Timestamp unavailable",
+      utc: raw || "—",
+    };
+  }
+
+  let local;
+  try {
+    local = new Intl.DateTimeFormat(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: 3,
+      timeZoneName: "short",
+    }).format(parsed);
+  } catch {
+    local = parsed.toLocaleString();
+  }
+
+  return { local, utc: parsed.toISOString() };
+}
+
+function renderTermsAcceptanceRow(acceptance) {
+  const timestamp = formatExactAcceptanceTime(acceptance.acceptedAt);
+  const source = String(acceptance.source || "—").toUpperCase();
+  const sourceBadge = source === "DESKTOP"
+    ? `<span class="badge good">Desktop</span>`
+    : `<span class="badge bg-secondary">${escapeHtml(source)}</span>`;
+
+  return `
+    <tr>
+      <td><strong>${escapeHtml(acceptance.email || "—")}</strong></td>
+      <td>
+        <span>${escapeHtml(timestamp.local)}</span><br>
+        <code class="small text-break">${escapeHtml(timestamp.utc)}</code>
+      </td>
+      <td><span class="badge bg-secondary">${escapeHtml(acceptance.version || "—")}</span></td>
+      <td>${sourceBadge}</td>
+      <td><code class="small text-break">${escapeHtml(acceptance.documentHash || "—")}</code></td>
+      <td><code class="small text-break">${escapeHtml(acceptance.id || "—")}</code></td>
+    </tr>`;
+}
+
+function setTermsAcceptanceBusy(isBusy) {
+  const apply = qs("termsAcceptanceApply");
+  const clear = qs("termsAcceptanceClear");
+  const previous = qs("termsAcceptancePrev");
+  const next = qs("termsAcceptanceNext");
+  if (apply) apply.disabled = isBusy;
+  if (clear) clear.disabled = isBusy;
+  if (previous && isBusy) previous.disabled = true;
+  if (next && isBusy) next.disabled = true;
+}
+
+async function loadTermsAcceptanceHistory() {
+  const epoch = ++termsAcceptanceHistory.requestEpoch;
+  const body = qs("termsAcceptanceBody");
+  const status = qs("termsAcceptanceStatus");
+  const meta = qs("termsAcceptanceMeta");
+  const retry = qs("termsAcceptanceRetry");
+
+  setTermsAcceptanceBusy(true);
+  if (status) {
+    status.className = "text-muted mb-0 small";
+    status.textContent = "Loading acceptance history...";
+  }
+  if (retry) retry.classList.add("d-none");
+  if (body) {
+    body.innerHTML = `<tr><td colspan="6" class="text-center text-muted small">Loading acceptance records...</td></tr>`;
+  }
+
+  try {
+    const params = new URLSearchParams({
+      page: String(termsAcceptanceHistory.page),
+      limit: String(termsAcceptanceHistory.limit),
+    });
+    if (termsAcceptanceHistory.search) params.set("search", termsAcceptanceHistory.search);
+    if (termsAcceptanceHistory.version) params.set("version", termsAcceptanceHistory.version);
+    if (termsAcceptanceHistory.from) params.set("from", termsAcceptanceHistory.from);
+    if (termsAcceptanceHistory.to) params.set("to", termsAcceptanceHistory.to);
+
+    const data = await api(`/super/terms-acceptances?${params.toString()}`);
+    if (epoch !== termsAcceptanceHistory.requestEpoch) return;
+
+    const acceptances = Array.isArray(data?.acceptances) ? data.acceptances : [];
+    const pagination = data?.pagination || {};
+    termsAcceptanceHistory.totalPages = Math.max(1, Number(pagination.totalPages) || 1);
+
+    const currentVersion = String(data?.currentTerms?.version || "—");
+    const currentHash = String(data?.currentTerms?.documentHash || "—");
+    if (qs("termsCurrentVersion")) {
+      qs("termsCurrentVersion").textContent = `Version ${currentVersion}`;
+    }
+    if (qs("termsCurrentHash")) {
+      qs("termsCurrentHash").textContent = `SHA-256 ${currentHash}`;
+    }
+
+    if (body) {
+      body.innerHTML = acceptances.length
+        ? acceptances.map(renderTermsAcceptanceRow).join("")
+        : `<tr><td colspan="6" class="text-center text-muted small">No acceptance records match these filters.</td></tr>`;
+    }
+    if (status) {
+      status.className = "text-muted mb-0 small";
+      status.textContent = acceptances.length
+        ? `Showing ${acceptances.length} acceptance record${acceptances.length === 1 ? "" : "s"} on this page.`
+        : "No acceptance records match these filters.";
+    }
+    if (meta) {
+      meta.textContent = `Page ${pagination.page || 1} of ${termsAcceptanceHistory.totalPages} · ${pagination.total || 0} records`;
+    }
+
+    const previous = qs("termsAcceptancePrev");
+    const next = qs("termsAcceptanceNext");
+    if (previous) previous.disabled = (pagination.page || 1) <= 1;
+    if (next) next.disabled = !pagination.hasMore;
+  } catch (error) {
+    if (epoch !== termsAcceptanceHistory.requestEpoch) return;
+    if (status) {
+      status.className = "text-danger mb-0 small";
+      status.textContent = error.message || "Acceptance history could not be loaded.";
+    }
+    if (body) {
+      body.innerHTML = `<tr><td colspan="6" class="text-center text-danger small">Acceptance history is unavailable. No record data is shown.</td></tr>`;
+    }
+    if (meta) meta.textContent = "—";
+    if (retry) retry.classList.remove("d-none");
+  } finally {
+    if (epoch === termsAcceptanceHistory.requestEpoch) {
+      setTermsAcceptanceBusy(false);
+    }
+  }
+}
+
+function applyTermsAcceptanceFilters() {
+  const search = qs("termsAcceptanceSearch")?.value.trim() || "";
+  const version = qs("termsAcceptanceVersion")?.value.trim() || "";
+  const from = qs("termsAcceptanceFrom")?.value || "";
+  const to = qs("termsAcceptanceTo")?.value || "";
+  const status = qs("termsAcceptanceStatus");
+
+  if (from && to && from > to) {
+    if (status) {
+      status.className = "text-danger mb-0 small";
+      status.textContent = "Accepted from date must not be after accepted to date.";
+    }
+    return;
+  }
+
+  Object.assign(termsAcceptanceHistory, {
+    page: 1,
+    search,
+    version,
+    from,
+    to,
+  });
+  loadTermsAcceptanceHistory();
+}
+
+function bindTermsAcceptanceControls() {
+  qs("termsAcceptanceFilters")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    applyTermsAcceptanceFilters();
+  });
+  qs("termsAcceptanceClear")?.addEventListener("click", () => {
+    for (const id of [
+      "termsAcceptanceSearch",
+      "termsAcceptanceVersion",
+      "termsAcceptanceFrom",
+      "termsAcceptanceTo",
+    ]) {
+      const input = qs(id);
+      if (input) input.value = "";
+    }
+    Object.assign(termsAcceptanceHistory, {
+      page: 1,
+      search: "",
+      version: "",
+      from: "",
+      to: "",
+    });
+    loadTermsAcceptanceHistory();
+  });
+  qs("termsAcceptanceRetry")?.addEventListener("click", loadTermsAcceptanceHistory);
+  qs("termsAcceptancePrev")?.addEventListener("click", () => {
+    if (termsAcceptanceHistory.page <= 1) return;
+    termsAcceptanceHistory.page -= 1;
+    loadTermsAcceptanceHistory();
+  });
+  qs("termsAcceptanceNext")?.addEventListener("click", () => {
+    if (termsAcceptanceHistory.page >= termsAcceptanceHistory.totalPages) return;
+    termsAcceptanceHistory.page += 1;
+    loadTermsAcceptanceHistory();
+  });
+}
+
 // ─── Init ───────────────────────────────────────────────────────────
 async function initSuperPage() {
   if (!qs("superLogoutBtn")) return;
-
-  // Accept a token passed via ?t= (extension handoff) before any auth check.
-  absorbTokenFromUrl();
 
   const isAuthenticated = await ensureSuperAdminAuth();
   if (!isAuthenticated) return;
@@ -1004,14 +1195,16 @@ async function initSuperPage() {
     if (!requireSuperAdmin(me)) { window.location.href = "/admin/admin.html"; return; }
     if (qs("superEmail")) qs("superEmail").textContent = me.email || "—";
 
-    // Load app config, usage analytics, dashboard stats, user directory — parallel
+    // Load app config, usage analytics, dashboard stats, user directory, and Terms acceptance history in parallel.
     bindAppConfigHandlers();
     bindUserDirectoryControls();
+    bindTermsAcceptanceControls();
     await Promise.all([
       loadAppConfigSection(),
       loadUsageStats(),
       loadDashboardStats(),
       loadUserDirectory(),
+      loadTermsAcceptanceHistory(),
     ]);
 
     // Load pending admins

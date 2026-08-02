@@ -62,6 +62,9 @@ async function authenticate(req, res, next, { recordUsage }) {
       role: user.role,
       accountType: user.accountType,
       firmId: user.firmId || null,
+      // The version this request was authorized under. Later writes condition on
+      // it so a force-logout that lands mid-request cannot be committed through.
+      tokenVersion: user.tokenVersion || 0,
     };
 
     if (recordUsage) {

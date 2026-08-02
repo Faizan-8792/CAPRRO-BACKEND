@@ -2,8 +2,7 @@
 // Used by public/index.html
 const API_BASE = "https://api.caprotoolkit.in/api";
 
-
-const TOKEN_KEY = 'caproadminjwt';
+const TOKEN_KEY = "caproadminjwt";
 
 function saveToken(token) {
   localStorage.setItem(TOKEN_KEY, token);
@@ -20,8 +19,8 @@ function clearToken() {
 async function api(path, opts) {
   const token = getToken();
   const headers = Object.assign(
-    { 'Content-Type': 'application/json' },
-    opts?.headers
+    { "Content-Type": "application/json" },
+    opts?.headers,
   );
 
   if (token) {
@@ -29,7 +28,7 @@ async function api(path, opts) {
   }
 
   const res = await fetch(`${API_BASE}${path}`, {
-    method: opts?.method || 'GET',
+    method: opts?.method || "GET",
     headers,
     body: opts?.body ? JSON.stringify(opts.body) : undefined,
   });
@@ -42,7 +41,7 @@ async function api(path, opts) {
   }
 
   if (!res.ok) {
-    const msg = data?.error || data?.message || 'Request failed';
+    const msg = data?.error || data?.message || "Request failed";
     const err = new Error(msg);
     err.status = res.status;
     err.data = data;
@@ -53,142 +52,150 @@ async function api(path, opts) {
 }
 
 function isSuperAdmin(user) {
-  return user.role === 'SUPER_ADMIN' ||
-         user.email === 'saifullahfaizan786@gmail.com';
+  return (
+    user.role === "SUPER_ADMIN" || user.email === "saifullahfaizan786@gmail.com"
+  );
 }
 
 // ---------------- LOGIN PAGE (public/index.html) ----------------
 
 async function initLoginPage() {
-  const sendOtpBtn = document.getElementById('sendOtp');
+  const sendOtpBtn = document.getElementById("sendOtp");
   if (!sendOtpBtn) return; // not on login page
 
-  const emailEl = document.getElementById('email');
-  const otpEl = document.getElementById('otp');
-  const statusEl = document.getElementById('status');
-  const otpBlock = document.getElementById('otpBlock');
-  const goVerify = document.getElementById('goVerify');
-  const verifyBtn = document.getElementById('verifyOtp');
+  const emailEl = document.getElementById("email");
+  const otpEl = document.getElementById("otp");
+  const statusEl = document.getElementById("status");
+  const otpBlock = document.getElementById("otpBlock");
+  const goVerify = document.getElementById("goVerify");
+  const verifyBtn = document.getElementById("verifyOtp");
 
   // ---------- UI handlers ----------
 
-  goVerify?.addEventListener('click', () => {
-    otpBlock.style.display = 'block';
-    statusEl.textContent = 'Enter OTP and verify.';
+  goVerify?.addEventListener("click", () => {
+    otpBlock.style.display = "block";
+    statusEl.textContent = "Enter OTP and verify.";
   });
 
-  sendOtpBtn.addEventListener('click', async () => {
+  sendOtpBtn.addEventListener("click", async () => {
     try {
       const email = emailEl.value.trim();
       if (!email) {
-        statusEl.textContent = 'Email required.';
+        statusEl.textContent = "Email required.";
         return;
       }
 
-      statusEl.textContent = 'Sending OTP...';
+      statusEl.textContent = "Sending OTP...";
 
       const res = await fetch(`${API_BASE}/auth/send-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data?.error || data?.message || 'Failed to send OTP');
+        throw new Error(data?.error || data?.message || "Failed to send OTP");
       }
 
-      otpBlock.style.display = 'block';
-      statusEl.textContent = 'OTP sent. Check your email.';
+      otpBlock.style.display = "block";
+      statusEl.textContent = "OTP sent. Check your email.";
     } catch (e) {
-      console.error('Send OTP error:', e);
-      statusEl.textContent = e.message || 'Failed to send OTP.';
+      console.error("Send OTP error:", e);
+      statusEl.textContent = e.message || "Failed to send OTP.";
     }
   });
 
-  verifyBtn.addEventListener('click', async () => {
+  verifyBtn.addEventListener("click", async () => {
     try {
       const email = emailEl.value.trim();
       const otpCode = otpEl.value.trim();
 
       if (!email || !otpCode) {
-        statusEl.textContent = 'Email & OTP required.';
+        statusEl.textContent = "Email & OTP required.";
         return;
       }
 
-      statusEl.textContent = 'Verifying OTP...';
+      statusEl.textContent = "Verifying OTP...";
 
       const res = await fetch(`${API_BASE}/auth/verify-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, otpCode }),
       });
 
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data?.error || data?.message || 'Failed to verify OTP');
+        throw new Error(data?.error || data?.message || "Failed to verify OTP");
       }
 
       // Save JWT
       saveToken(data.token);
 
-      // Fetch user and redirect
-      const me = await api('/auth/me');
-      const user = me.user;
-      console.log('Login successful user:', user);
+      // The login response already carries role, firmId, and isActive. An
+      // inactive account cannot call /auth/me (it returns 403), so re-fetching
+      // first would throw and hide the pending-approval message below.
+      const loginUser = data.user || null;
+      const user =
+        loginUser && loginUser.isActive === false
+          ? loginUser
+          : (await api("/auth/me")).user;
+      console.log("Login successful user:", user);
 
       if (isSuperAdmin(user)) {
-        statusEl.textContent = 'Super Admin login successful. Redirecting...';
+        statusEl.textContent = "Super Admin login successful. Redirecting...";
         setTimeout(() => {
-          window.location.href = '/admin/super.html';
+          window.location.href = "/admin/super.html";
         }, 800);
         return;
-      } else if (user.role === 'FIRM_ADMIN' && user.isActive === true) {
-        statusEl.textContent = 'Firm Admin login successful. Redirecting...';
+      } else if (user.role === "FIRM_ADMIN" && user.isActive === true) {
+        statusEl.textContent = "Firm Admin login successful. Redirecting...";
         setTimeout(() => {
-          window.location.href = '/admin/admin.html#dashboard';
+          window.location.href = "/admin/admin.html#dashboard";
         }, 800);
         return;
       }
 
-      // 1) Agar already FIRM_ADMIN hai but pending
-      if (user.role === 'FIRM_ADMIN' && user.isActive === false) {
+      // 1) Account is not active on the server. That covers both an unapproved
+      //    firm-admin request and a suspension, and the API refuses every call
+      //    either way, so do not claim success and do not open the dashboard.
+      if (user.isActive === false) {
         statusEl.innerHTML =
-          'Successfully signed up for Firm Admin! ' +
-          'Your request is now pending Super Admin approval. ' +
-          'Check back later or contact Super Admin at ' +
-          'saifullahfaizan786@gmail.com.';
-        setTimeout(() => {
-          window.location.href = '/admin/admin.html#dashboard';
-        }, 2500);
+          "This account is not active on the server, so the admin panel cannot load. " +
+          "If you asked to become a Firm Admin, the request is waiting for Super Admin approval at " +
+          "saifullahfaizan786@gmail.com.";
+        clearToken();
         return;
       }
 
       // 2) USER with NO firm → truly new person
-      if (user.role === 'USER' && !user.firmId) {
+      if (user.role === "USER" && !user.firmId) {
         statusEl.innerHTML =
-          'First create a firm from the admin panel, then come back to this page to sign in as Firm Admin.';
+          "First create a firm from the admin panel, then come back to this page to sign in as Firm Admin.";
         clearToken();
         return;
       }
 
       // 3) USER already linked to a firm → yahan se admin request create karenge
-      if (user.role === 'USER' && user.firmId && user.isActive === true) {
+      if (user.role === "USER" && user.firmId && user.isActive === true) {
         try {
-          statusEl.textContent = 'Creating Firm Admin request...';
-          const resp = await api('/firms/request-admin', { method: 'POST' });
+          statusEl.textContent = "Creating Firm Admin request...";
+          const resp = await api("/firms/request-admin", { method: "POST" });
 
-          if (resp.ok) {
+          if (resp.ok && resp.alreadyPending) {
             statusEl.textContent =
-              'Request as Firm Admin has been successfully sent. Please wait for approval from your existing admin.';
+              "A Firm Admin request for this account is already waiting for Super Admin approval.";
+          } else if (resp.ok) {
+            statusEl.textContent =
+              "Firm Admin request sent. It is waiting for Super Admin approval.";
           } else {
             statusEl.textContent =
-              resp.error || 'Failed to create Firm Admin request.';
+              resp.error || "Failed to create Firm Admin request.";
           }
         } catch (err) {
-          console.error('request-admin error:', err);
+          console.error("request-admin error:", err);
           statusEl.textContent =
-            err.message || 'Failed to create Firm Admin request.';
+            err.message || "Failed to create Firm Admin request.";
         }
 
         clearToken();
@@ -196,24 +203,27 @@ async function initLoginPage() {
       }
 
       // 4) General case: linked firm + already pending
-      if ((user.role === 'USER' || user.role === 'FIRM_ADMIN') &&
-          user.firmId && user.isActive === false) {
+      if (
+        (user.role === "USER" || user.role === "FIRM_ADMIN") &&
+        user.firmId &&
+        user.isActive === false
+      ) {
         statusEl.textContent =
-          'Request as Firm Admin has been successfully sent. Please wait for approval from your existing admin.';
+          "Request as Firm Admin has been successfully sent. Please wait for approval from your existing admin.";
         return;
       }
 
       // fallback
       clearToken();
-      statusEl.textContent = '';
+      statusEl.textContent = "";
     } catch (e) {
-      console.error('Login / verify OTP error:', e);
-      statusEl.textContent = e.message || 'Login failed.';
+      console.error("Login / verify OTP error:", e);
+      statusEl.textContent = e.message || "Login failed.";
       clearToken();
     }
   });
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener("DOMContentLoaded", () => {
   initLoginPage();
 });
