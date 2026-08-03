@@ -1,5 +1,10 @@
 import { Router } from "express";
 import { authRequired } from "../middleware/auth.middleware.js";
+import {
+  requireFirmAdmin,
+  requireFirmMember,
+  requireFirmWriteAccess,
+} from "../middleware/authorization.middleware.js";
 import { requireRoles } from "../middleware/role.middleware.js";
 import {
   getFirmOverviewStats,
@@ -9,28 +14,28 @@ import {
 
 const router = Router();
 
-
 router.use(authRequired);
-
 
 router.get(
   "/firm/:firmId/overview",
   requireRoles("FIRM_ADMIN", "SUPER_ADMIN"),
-  getFirmOverviewStats
+  requireFirmAdmin,
+  getFirmOverviewStats,
 );
-
 
 router.get(
   "/clients-to-chase-today",
   requireRoles("FIRM_ADMIN", "USER", "SUPER_ADMIN"),
-  getClientsToChaseToday
+  requireFirmMember,
+  getClientsToChaseToday,
 );
-
 
 router.post(
   "/clients-to-chase-today/complete",
   requireRoles("FIRM_ADMIN", "USER", "SUPER_ADMIN"),
-  postChaseComplete
+  requireFirmMember,
+  requireFirmWriteAccess,
+  postChaseComplete,
 );
 
 export default router;

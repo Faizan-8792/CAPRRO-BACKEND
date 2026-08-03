@@ -1,6 +1,7 @@
 // src/controllers/stats.controller.js - COMPLETE 100% FIXED VERSION
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 import User from "../models/User.js";
+import FirmMembership from "../models/FirmMembership.js";
 import Reminder from "../models/Reminder.js";
 import Task from "../models/Task.js";
 
@@ -38,8 +39,8 @@ export async function getClientsToChaseToday(req, res, next) {
       isActive: true,
       $or: [
         { status: { $in: ["WAITING_DOCS", "OPEN"] } },
-        { "meta.docsStatus": "PENDING" }
-      ]
+        { "meta.docsStatus": "PENDING" },
+      ],
     };
 
     const pendingTasks = await Task.find(pendingFilter)
@@ -60,7 +61,7 @@ export async function getClientsToChaseToday(req, res, next) {
           title: t.title || "No title",
           dueDateISO: t.dueDateISO,
           daysPending,
-          status: t.status
+          status: t.status,
         };
       })
       .filter((x) => x.daysPending >= 3)
@@ -71,7 +72,7 @@ export async function getClientsToChaseToday(req, res, next) {
       firmId,
       isActive: true,
       status: { $in: ["FILED", "CLOSED"] },
-      "meta.delayDays": { $gt: 0 }
+      "meta.delayDays": { $gt: 0 },
     };
 
     const lateTasks = await Task.find(lateFilter)
@@ -91,7 +92,9 @@ export async function getClientsToChaseToday(req, res, next) {
       const two = arr.slice(0, 2);
       if (two.length < 2) continue;
 
-      const lateCount = two.filter((t) => Number(t.meta?.delayDays || 0) > 0).length;
+      const lateCount = two.filter(
+        (t) => Number(t.meta?.delayDays || 0) > 0,
+      ).length;
       if (lateCount === 2) {
         const latest = two[0];
         chronicLateClients.push({
@@ -100,18 +103,20 @@ export async function getClientsToChaseToday(req, res, next) {
           serviceType: latest.serviceType || "OTHER",
           lastPeriodDelayDays: Number(latest.meta?.delayDays || 0),
           latePeriodsCount: 2,
-          riskLevel: "HIGH"
+          riskLevel: "HIGH",
         });
       }
     }
 
-    chronicLateClients.sort((a, b) => b.lastPeriodDelayDays - a.lastPeriodDelayDays);
+    chronicLateClients.sort(
+      (a, b) => b.lastPeriodDelayDays - a.lastPeriodDelayDays,
+    );
 
     return res.json({
       ok: true,
       todayDate: today.toISOString().slice(0, 10),
       pendingDocsClients,
-      chronicLateClients: chronicLateClients.slice(0, 30)
+      chronicLateClients: chronicLateClients.slice(0, 30),
     });
   } catch (err) {
     console.error("getClientsToChaseToday error:", err);
@@ -133,7 +138,9 @@ export async function postChaseComplete(req, res, next) {
     const userFirmId = req.user.firmId;
 
     if (!taskId || !type) {
-      return res.status(400).json({ ok: false, error: "Missing taskId or type" });
+      return res
+        .status(400)
+        .json({ ok: false, error: "Missing taskId or type" });
     }
     if (!["pending", "risk"].includes(type)) {
       return res.status(400).json({ ok: false, error: "Invalid chase type" });
@@ -141,17 +148,17 @@ export async function postChaseComplete(req, res, next) {
 
     // ✅ RAW COLLECTION UPDATE - BYPASSES ALL Mongoose validation
     const db = mongoose.connection.db;
-    const tasksCollection = db.collection('tasks');
+    const tasksCollection = db.collection("tasks");
 
     const transitionAt = new Date();
     const transitionBy = new mongoose.Types.ObjectId(req.user.id);
     const setFields = { updatedAt: transitionAt };
 
     if (type === "pending") {
-      setFields['meta.docsStatus'] = "DONE";
+      setFields["meta.docsStatus"] = "DONE";
       setFields.status = "CLOSED";
     } else if (type === "risk") {
-      setFields['meta.delayDays'] = 0;
+      setFields["meta.delayDays"] = 0;
       setFields.status = "CLOSED";
     }
 
@@ -169,16 +176,16 @@ export async function postChaseComplete(req, res, next) {
     console.log("Raw MongoDB update:", updatePipeline);
 
     const result = await tasksCollection.updateOne(
-      { 
+      {
         _id: new mongoose.Types.ObjectId(taskId),
-        firmId: new mongoose.Types.ObjectId(userFirmId)
+        firmId: new mongoose.Types.ObjectId(userFirmId),
       },
-      updatePipeline
+      updatePipeline,
     );
 
     console.log("Raw MongoDB result:", {
       matchedCount: result.matchedCount,
-      modifiedCount: result.modifiedCount
+      modifiedCount: result.modifiedCount,
     });
 
     if (result.matchedCount === 0) {
@@ -186,18 +193,17 @@ export async function postChaseComplete(req, res, next) {
     }
 
     console.log("✅ SUCCESS - Raw MongoDB update complete");
-    return res.json({ 
-      ok: true, 
+    return res.json({
+      ok: true,
       message: "Task marked complete ✅",
       matchedCount: result.matchedCount,
-      modifiedCount: result.modifiedCount
+      modifiedCount: result.modifiedCount,
     });
-
   } catch (err) {
     console.error("💥 postChaseComplete ERROR:", err.message);
-    res.status(500).json({ 
-      ok: false, 
-      error: "Database update failed"
+    res.status(500).json({
+      ok: false,
+      error: "Database update failed",
     });
   }
 }
@@ -214,10 +220,22 @@ export const getFirmOverviewStats = async (req, res, next) => {
       req.user.role !== "SUPER_ADMIN" &&
       String(req.user.firmId) !== String(firmId)
     ) {
-      return res.status(403).json({ ok: false, error: "Forbidden: not your firm" });
+      return res
+        .status(403)
+        .json({ ok: false, error: "Forbidden: not your firm" });
     }
 
-    const userCount = await User.countDocuments({ firmId, isActive: true });
+    const memberships = await FirmMembership.find({
+      firmId,
+      status: "ACTIVE",
+    })
+      .select("userId")
+      .lean();
+    const memberUserIds = memberships.map((membership) => membership.userId);
+    const userCount = await User.countDocuments({
+      _id: { $in: memberUserIds },
+      isActive: true,
+    });
     const reminderCount = await Reminder.countDocuments({ firmId });
     const taskCount = await Task.countDocuments({ firmId, isActive: true });
 
@@ -227,7 +245,7 @@ export const getFirmOverviewStats = async (req, res, next) => {
         userCount,
         taskCount,
         reminderCount,
-        scanCount: 0
+        scanCount: 0,
       },
     });
   } catch (err) {

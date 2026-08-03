@@ -24,41 +24,63 @@ function slugifyBase(input) {
 }
 
 /**
- * Upserts an ACTIVE membership row for (firm, user). Existing rows are
- * reactivated and, when a stronger role/isPersonal flag is supplied, upgraded —
- * membership authority is never silently downgraded here.
+ * Ensures a membership row exists for (firm, user). A retained REMOVED row is
+ * reactivated only when the caller explicitly allows it. Generic sign-in and
+ * legacy backfill must not restore access to a shared workspace the user left
+ * or was removed from.
  */
 export async function ensureFirmMembership(
   userId,
   firmId,
-  { role = "MEMBER", isPersonal = false } = {},
+  {
+    role = "MEMBER",
+    isPersonal,
+    reactivateRemoved = false,
+    session = null,
+  } = {},
 ) {
-  const existing = await FirmMembership.findOne({ firmId, userId });
+  const synchronizePersonalMarker = typeof isPersonal === "boolean";
+  const personalMarker = synchronizePersonalMarker ? isPersonal : false;
+  const membershipQuery = FirmMembership.findOne({ firmId, userId });
+  if (session) membershipQuery.session(session);
+  const existing = await membershipQuery;
   if (!existing) {
-    return FirmMembership.create({
+    const membership = {
       userId,
       firmId,
       role,
       status: "ACTIVE",
-      isPersonal,
+      isPersonal: personalMarker,
       joinedAt: new Date(),
-    });
+    };
+    if (session) {
+      const [created] = await FirmMembership.create([membership], { session });
+      return created;
+    }
+    return FirmMembership.create(membership);
   }
+
+  // Only personal-workspace repair and validated join-by-code may cross this
+  // boundary. Returning the retained row lets generic healing fall back safely.
+  if (existing.status !== "ACTIVE" && !reactivateRemoved) return existing;
 
   let changed = false;
   if (existing.status !== "ACTIVE") {
     existing.status = "ACTIVE";
+    if (existing.role !== role) existing.role = role;
     changed = true;
-  }
-  if (role === "OWNER" && existing.role !== "OWNER") {
+  } else if (role === "OWNER" && existing.role !== "OWNER") {
     existing.role = "OWNER";
     changed = true;
   }
-  if (isPersonal && !existing.isPersonal) {
-    existing.isPersonal = true;
+  if (synchronizePersonalMarker && existing.isPersonal !== personalMarker) {
+    existing.isPersonal = personalMarker;
     changed = true;
   }
-  if (changed) await existing.save();
+  if (changed) {
+    if (session) await existing.save({ session });
+    else await existing.save();
+  }
   return existing;
 }
 
@@ -86,7 +108,7 @@ async function createPersonalFirm(user) {
       });
     } catch (error) {
       lastError = error;
-      if (error && error.code === 11000) continue; // handle/joinCode clash — retry
+      if (error && error.code === 11000) continue; // handle/joinCode clash - retry
       throw error;
     }
   }
@@ -99,37 +121,23 @@ async function createPersonalFirm(user) {
 
 /**
  * Resolves (and if needed creates) the user's personal workspace.
- * Adoption rule: if the user already owns their active firm and it is not an
- * explicitly SHARED firm, that firm becomes their personal workspace. This heals
- * pre-existing accounts (and the auto-provisioned super-admin firm) without
- * creating duplicate empty workspaces.
+ * Repair rule: only an active firm owned by the user with persisted kind exactly
+ * PERSONAL may be reused. A missing kind is ambiguous legacy data and must not
+ * be converted or have a retained membership reactivated by generic healing.
  */
 async function resolvePersonalFirm(user) {
-  if (user.personalFirmId) {
-    const existing = await Firm.findOne({
-      _id: user.personalFirmId,
+  // A pointer is only a repair hint. Ownership plus an explicit persisted kind
+  // must establish personal-workspace identity before repair may reactivate a
+  // retained membership.
+  const candidateIds = [user.personalFirmId, user.firmId].filter(Boolean);
+  for (const candidateId of candidateIds) {
+    const candidate = await Firm.findOne({
+      _id: candidateId,
+      ownerUserId: user._id,
       isActive: true,
-    }).select("_id kind");
-    if (existing) return existing;
-    // Pointer is stale — fall through and re-provision.
-  }
-
-  if (user.firmId) {
-    const active = await Firm.findOne({
-      _id: user.firmId,
-      isActive: true,
+      kind: "PERSONAL",
     }).select("_id ownerUserId kind");
-    if (
-      active &&
-      String(active.ownerUserId) === String(user._id) &&
-      active.kind !== "SHARED"
-    ) {
-      if (active.kind !== "PERSONAL") {
-        active.kind = "PERSONAL";
-        await active.save();
-      }
-      return active;
-    }
+    if (candidate) return candidate;
   }
 
   return createPersonalFirm(user);
@@ -150,51 +158,98 @@ async function resolvePersonalFirm(user) {
 export async function ensurePersonalFirm(user) {
   if (!user) return user;
 
-  // 1) Personal workspace + membership.
+  // Personal membership is the only membership generic healing may reactivate.
   const personalFirm = await resolvePersonalFirm(user);
   let userChanged = false;
   if (String(user.personalFirmId || "") !== String(personalFirm._id)) {
     user.personalFirmId = personalFirm._id;
     userChanged = true;
   }
-  await ensureFirmMembership(user._id, personalFirm._id, {
-    role: "OWNER",
-    isPersonal: true,
-  });
+  const personalMembership = await ensureFirmMembership(
+    user._id,
+    personalFirm._id,
+    {
+      role: "OWNER",
+      isPersonal: true,
+      reactivateRemoved: true,
+    },
+  );
 
-  // 2) Active workspace: keep the current one if it is still valid, otherwise
-  //    fall back to the personal workspace. Never leave the user without one.
+  // Keep the current pointer when it is the resolved personal workspace, an
+  // active persisted SHARED workspace, or a persisted missing-kind workspace
+  // that already has an ACTIVE membership. Query missing kind before hydration:
+  // the model default would otherwise make ambiguous legacy data look SHARED.
   let activeFirm = null;
-  if (user.firmId) {
+  let activeMembership = null;
+  if (String(user.firmId || "") === String(personalFirm._id)) {
+    activeFirm = personalFirm;
+    activeMembership = personalMembership;
+  } else if (user.firmId) {
     activeFirm = await Firm.findOne({
       _id: user.firmId,
       isActive: true,
+      kind: "SHARED",
     }).select("_id ownerUserId kind");
+
+    if (activeFirm) {
+      // Generic sign-in healing may preserve only authority already recorded
+      // for a shared workspace. Membership creation/reactivation belongs to
+      // validated join flow (or explicit firm-owner creation).
+      activeMembership = await FirmMembership.findOne({
+        userId: user._id,
+        firmId: activeFirm._id,
+        status: "ACTIVE",
+      });
+      if (!activeMembership) activeFirm = null;
+    } else {
+      // Missing-kind records are ambiguous legacy data. Preserve an existing
+      // active relationship, but never manufacture or restore one here.
+      const legacyFirm = await Firm.findOne({
+        _id: user.firmId,
+        isActive: true,
+        kind: { $exists: false },
+      }).select("_id ownerUserId kind");
+      if (legacyFirm) {
+        const legacyMembership = await FirmMembership.findOne({
+          userId: user._id,
+          firmId: legacyFirm._id,
+          status: "ACTIVE",
+        });
+        if (legacyMembership) {
+          activeFirm = legacyFirm;
+          activeMembership = legacyMembership;
+        }
+      }
+    }
   }
+
   if (!activeFirm) {
     if (String(user.firmId || "") !== String(personalFirm._id)) {
       user.firmId = personalFirm._id;
       userChanged = true;
     }
     activeFirm = personalFirm;
+    activeMembership = personalMembership;
   }
 
-  // 3) Membership for the active workspace (backfills pre-collaboration users).
-  const isOwner =
-    String(activeFirm.ownerUserId || user._id) === String(user._id);
-  const isPersonalActive = String(activeFirm._id) === String(personalFirm._id);
-  await ensureFirmMembership(user._id, activeFirm._id, {
-    role: isOwner ? "OWNER" : "MEMBER",
-    isPersonal: isPersonalActive,
-  });
+  const hasActiveOwnerMembership =
+    activeMembership?.status === "ACTIVE" &&
+    activeMembership.role === "OWNER" &&
+    Boolean(activeFirm.ownerUserId) &&
+    String(activeFirm.ownerUserId) === String(user._id);
+  const hasActiveAdministrativeMembership =
+    activeMembership?.status === "ACTIVE" && activeMembership.role === "ADMIN";
 
-  // 4) Coherent role/accountType for the active workspace (SUPER_ADMIN pinned).
+  // Coherent role/accountType for the active workspace (SUPER_ADMIN pinned).
   if (user.accountType !== "FIRM_USER") {
     user.accountType = "FIRM_USER";
     userChanged = true;
   }
   if (user.role !== "SUPER_ADMIN") {
-    const desiredRole = isOwner ? "FIRM_ADMIN" : "USER";
+    const desiredRole =
+      hasActiveOwnerMembership || hasActiveAdministrativeMembership
+        ? "FIRM_ADMIN"
+        : "USER";
     if (user.role !== desiredRole) {
       user.role = desiredRole;
       userChanged = true;

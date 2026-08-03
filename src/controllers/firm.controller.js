@@ -1,9 +1,42 @@
 // src/controllers/firm.controller.js
+import mongoose from "mongoose";
 import Firm from "../models/Firm.js";
 import User from "../models/User.js";
 import FirmMembership from "../models/FirmMembership.js";
-import { ensureFirmMembership } from "../services/firm-provisioning.service.js";
+import WorkspaceOperation from "../models/WorkspaceOperation.js";
+import {
+  ensureFirmMembership,
+  ensurePersonalFirm,
+} from "../services/firm-provisioning.service.js";
 import workspaceOperationService from "../services/workspace-operation.service.js";
+
+const MEMBERSHIP_TRANSACTION_OPTIONS = {
+  readConcern: { level: "snapshot" },
+  writeConcern: { w: "majority" },
+};
+
+function membershipLifecycleError(
+  statusCode,
+  message,
+  forwardToErrorMiddleware = false,
+) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  if (forwardToErrorMiddleware) error.forwardToErrorMiddleware = true;
+  return error;
+}
+
+async function withMembershipTransaction(action) {
+  const session = await mongoose.startSession();
+  try {
+    return await session.withTransaction(
+      () => action(session),
+      MEMBERSHIP_TRANSACTION_OPTIONS,
+    );
+  } finally {
+    await session.endSession();
+  }
+}
 
 async function beginWorkspaceRequest(req, res, kind, payload) {
   try {
@@ -82,6 +115,32 @@ async function activateWorkspace(req, res, claim, user, firm, membership) {
   }
 }
 
+function hasActiveOwnerAuthority(firm, membership, userId) {
+  return (
+    membership?.status === "ACTIVE" &&
+    membership.role === "OWNER" &&
+    Boolean(firm?.ownerUserId) &&
+    String(firm.ownerUserId) === String(userId)
+  );
+}
+
+function hasFirmAdminAuthority(firm, membership, userId) {
+  return (
+    hasActiveOwnerAuthority(firm, membership, userId) ||
+    (membership?.status === "ACTIVE" && membership.role === "ADMIN")
+  );
+}
+
+function effectiveMembershipRole(firm, membership, userId) {
+  if (
+    membership?.role === "OWNER" &&
+    !hasActiveOwnerAuthority(firm, membership, userId)
+  ) {
+    return "MEMBER";
+  }
+  return membership?.role;
+}
+
 async function assertFirmAdmin(userId, firmId) {
   const firm = await Firm.findById(firmId);
   if (!firm) {
@@ -90,7 +149,15 @@ async function assertFirmAdmin(userId, firmId) {
     throw err;
   }
 
-  if (String(firm.ownerUserId) !== String(userId)) {
+  const ownerMembership = await FirmMembership.findOne({
+    userId,
+    firmId: firm._id,
+    status: "ACTIVE",
+    role: "OWNER",
+  })
+    .select("_id")
+    .lean();
+  if (String(firm.ownerUserId) !== String(userId) || !ownerMembership) {
     const err = new Error("Not authorized for this firm");
     err.statusCode = 403;
     throw err;
@@ -105,6 +172,11 @@ async function assertFirmMembership(userId, firmId) {
   if (!firm) {
     const err = new Error("Firm not found");
     err.statusCode = 404;
+    throw err;
+  }
+  if (firm.kind === "PERSONAL" && String(firm.ownerUserId) !== String(userId)) {
+    const err = new Error("You are not a member of this firm");
+    err.statusCode = 403;
     throw err;
   }
   const membership = await FirmMembership.findOne({
@@ -151,14 +223,26 @@ async function restoreActiveWorkspace(userId, preferredFirmId) {
 
   const candidates = [preferredFirmId, user.personalFirmId].filter(Boolean);
   for (const candidateFirmId of candidates) {
-    const membership = await FirmMembership.findOne({
-      userId,
-      firmId: candidateFirmId,
-      status: "ACTIVE",
-    });
-    if (!membership) continue;
+    const [firm, membership] = await Promise.all([
+      Firm.findOne({
+        _id: candidateFirmId,
+        isActive: true,
+      }).select("_id kind ownerUserId"),
+      FirmMembership.findOne({
+        userId,
+        firmId: candidateFirmId,
+        status: "ACTIVE",
+      }),
+    ]);
+    if (!firm || !membership) continue;
+    if (
+      firm.kind === "PERSONAL" &&
+      !hasActiveOwnerAuthority(firm, membership, userId)
+    ) {
+      continue;
+    }
 
-    const elevated = membership.role === "OWNER" || membership.role === "ADMIN";
+    const elevated = hasFirmAdminAuthority(firm, membership, userId);
     user.firmId = candidateFirmId;
     if (user.role !== "SUPER_ADMIN") {
       user.role = elevated ? "FIRM_ADMIN" : "USER";
@@ -183,7 +267,7 @@ async function setActiveWorkspace(
   operationClaim = null,
   authorizedTokenVersion = null,
 ) {
-  const elevated = membership.role === "OWNER" || membership.role === "ADMIN";
+  const elevated = hasFirmAdminAuthority(firm, membership, user._id);
   const role =
     user.role === "SUPER_ADMIN"
       ? "SUPER_ADMIN"
@@ -243,27 +327,263 @@ async function setActiveWorkspace(
 }
 
 // Compact summary used by workspace listing/switching responses.
-async function workspaceSummary(firm, membership, activeFirmId) {
-  const memberCount = await FirmMembership.countDocuments({
+async function workspaceSummary(
+  firm,
+  membership,
+  activeFirmId,
+  session = null,
+) {
+  const countQuery = FirmMembership.countDocuments({
     firmId: firm._id,
     status: "ACTIVE",
   });
-  return {
+  if (session) countQuery.session(session);
+  const memberCount = await countQuery;
+  const membershipUserId = membership?.userId;
+  const role = effectiveMembershipRole(firm, membership, membershipUserId);
+  const elevated = hasFirmAdminAuthority(firm, membership, membershipUserId);
+  return Object.freeze({
     id: firm._id,
     displayName: firm.displayName,
     handle: firm.handle,
     kind: firm.kind || "SHARED",
     isPersonal: !!membership.isPersonal,
-    role: membership.role,
+    role,
     memberCount,
     joinCode:
-      membership.role === "OWNER" || membership.role === "ADMIN"
-        ? firm.joinCode
-        : undefined,
+      hasExplicitSharedKind(firm) && elevated ? firm.joinCode : undefined,
     sharingEnabled: firm.sharingEnabled !== false,
     memberAccess: firm.memberAccess === "READ_ONLY" ? "READ_ONLY" : "EDIT",
     isActive: String(firm._id) === String(activeFirmId),
-  };
+  });
+}
+
+function assertActiveLifecycleUser(
+  user,
+  notFoundMessage,
+  forwardToErrorMiddleware = false,
+) {
+  if (!user) {
+    throw membershipLifecycleError(
+      404,
+      notFoundMessage,
+      forwardToErrorMiddleware,
+    );
+  }
+  if (user.isActive === false) {
+    throw membershipLifecycleError(
+      403,
+      "Account is inactive",
+      forwardToErrorMiddleware,
+    );
+  }
+}
+
+async function applyMembershipRemovalToUser(user, removedFirmId, session) {
+  let activeWorkspace = null;
+
+  if (String(user.firmId || "") === String(removedFirmId)) {
+    let personalFirm = null;
+    let personalMembership = null;
+    if (user.personalFirmId) {
+      // The pointer is untrusted. Transactional fallback requires an active,
+      // owned firm whose persisted kind is exactly PERSONAL. Missing-kind
+      // legacy firms remain ambiguous and cannot restore access.
+      personalFirm = await Firm.findOne({
+        _id: user.personalFirmId,
+        ownerUserId: user._id,
+        isActive: true,
+        kind: "PERSONAL",
+      }).session(session);
+      if (personalFirm) {
+        personalMembership = await FirmMembership.findOne({
+          userId: user._id,
+          firmId: personalFirm._id,
+          status: "ACTIVE",
+        }).session(session);
+      }
+    }
+
+    if (personalFirm && personalMembership) {
+      let membershipChanged = false;
+      if (personalMembership.role !== "OWNER") {
+        personalMembership.role = "OWNER";
+        membershipChanged = true;
+      }
+      if (!personalMembership.isPersonal) {
+        personalMembership.isPersonal = true;
+        membershipChanged = true;
+      }
+      if (membershipChanged) {
+        await personalMembership.save({ session });
+      }
+
+      user.firmId = personalFirm._id;
+      user.accountType = "FIRM_USER";
+      if (user.role !== "SUPER_ADMIN") user.role = "FIRM_ADMIN";
+      activeWorkspace = { firm: personalFirm, membership: personalMembership };
+    } else {
+      user.firmId = null;
+      user.accountType = "INDIVIDUAL";
+      if (user.role !== "SUPER_ADMIN") user.role = "USER";
+    }
+  }
+
+  // Membership removal is an authority change even when another workspace was
+  // active. Revoke every token issued before this transaction commits.
+  user.tokenVersion = Number(user.tokenVersion || 0) + 1;
+  await user.save({ session });
+  return activeWorkspace;
+}
+
+async function leaveFirmInTransaction(userId, firmId) {
+  return withMembershipTransaction(async (session) => {
+    const membership = await FirmMembership.findOne({
+      userId,
+      firmId,
+      status: "ACTIVE",
+    }).session(session);
+    if (!membership) {
+      throw membershipLifecycleError(404, "You are not a member of this firm");
+    }
+
+    const user = await User.findById(userId).session(session);
+    assertActiveLifecycleUser(user, "User not found");
+
+    // Persisted kind, not the membership marker, decides whether a workspace
+    // may be left. Personal workspaces are never leaveable.
+    const firm = await Firm.findById(firmId).session(session);
+    if (firm?.kind === "PERSONAL") {
+      throw membershipLifecycleError(
+        400,
+        "Your personal workspace cannot be left",
+      );
+    }
+
+    // Shared ownership must be transferred first even when no other ACTIVE
+    // member remains and even when the owner's membership role drifted.
+    const isSharedFirmOwner =
+      firm?.kind === "SHARED" &&
+      Boolean(firm.ownerUserId) &&
+      String(firm.ownerUserId) === String(userId);
+    if (isSharedFirmOwner) {
+      throw membershipLifecycleError(
+        409,
+        "Transfer ownership before leaving this firm",
+      );
+    }
+
+    membership.status = "REMOVED";
+    await membership.save({ session });
+    const activeWorkspace = await applyMembershipRemovalToUser(
+      user,
+      firmId,
+      session,
+    );
+    const activeWorkspaceSummary = activeWorkspace
+      ? await workspaceSummary(
+          activeWorkspace.firm,
+          activeWorkspace.membership,
+          activeWorkspace.firm._id,
+          session,
+        )
+      : null;
+    return Object.freeze({ activeWorkspace: activeWorkspaceSummary });
+  });
+}
+
+async function removeFirmMemberInTransaction(
+  actorUserId,
+  firmId,
+  targetUserId,
+) {
+  return withMembershipTransaction(async (session) => {
+    const firm = await Firm.findById(firmId).session(session);
+    if (!firm) {
+      throw membershipLifecycleError(404, "Firm not found", true);
+    }
+
+    const actor = await User.findById(actorUserId).session(session);
+    assertActiveLifecycleUser(actor, "User not found", true);
+    const actorMembership = await FirmMembership.findOne({
+      userId: actorUserId,
+      firmId: firm._id,
+      status: "ACTIVE",
+      role: "OWNER",
+    }).session(session);
+    // Controller-level owner authority never follows a global role or a stale
+    // owner pointer: both firm identity and ACTIVE OWNER membership must agree.
+    if (String(firm.ownerUserId) !== String(actorUserId) || !actorMembership) {
+      throw membershipLifecycleError(403, "Not authorized for this firm", true);
+    }
+
+    if (String(targetUserId) === String(actorUserId)) {
+      throw membershipLifecycleError(400, "Cannot delete yourself");
+    }
+
+    const membership = await FirmMembership.findOne({
+      userId: targetUserId,
+      firmId: firm._id,
+      status: "ACTIVE",
+    }).session(session);
+    if (!membership) {
+      throw membershipLifecycleError(404, "User not found in firm");
+    }
+    const isOwnedPersonalFirm =
+      firm.kind === "PERSONAL" &&
+      Boolean(firm.ownerUserId) &&
+      String(firm.ownerUserId) === String(targetUserId);
+    if (isOwnedPersonalFirm) {
+      throw membershipLifecycleError(
+        400,
+        "Cannot remove an owner's personal workspace",
+      );
+    }
+
+    const targetUser = await User.findById(targetUserId).session(session);
+    if (!targetUser) {
+      throw membershipLifecycleError(404, "User not found in firm");
+    }
+    if (targetUser.role === "SUPER_ADMIN") {
+      throw membershipLifecycleError(400, "Cannot remove super admin account");
+    }
+
+    membership.status = "REMOVED";
+    await membership.save({ session });
+    await applyMembershipRemovalToUser(targetUser, firm._id, session);
+
+    // Build the success payload from post-removal snapshot data before commit.
+    // No fallible response read may escape this transaction.
+    const memberships = await FirmMembership.find({
+      firmId: firm._id,
+      status: "ACTIVE",
+    })
+      .session(session)
+      .lean();
+    const memberIds = memberships.map((item) => item.userId);
+    const memberUsers = await User.find({ _id: { $in: memberIds } })
+      .select("email name role accountType createdAt isActive")
+      .session(session)
+      .lean();
+    const roleByUser = new Map(
+      memberships.map((item) => [String(item.userId), item.role]),
+    );
+    const users = Object.freeze(
+      memberUsers.map((memberUser) =>
+        Object.freeze({
+          ...memberUser,
+          membershipRole: roleByUser.get(String(memberUser._id)) || "MEMBER",
+        }),
+      ),
+    );
+    const firmProjection = Object.freeze({
+      id: firm._id,
+      displayName: firm.displayName,
+      handle: firm.handle,
+    });
+
+    return Object.freeze({ firm: firmProjection, users });
+  });
 }
 
 // POST /api/firms
@@ -361,12 +681,52 @@ export const createFirm = async (req, res, next) => {
   }
 };
 
+// A hydrated legacy firm can expose the schema default "SHARED" even though
+// kind was never persisted. Join-code disclosure requires an explicit stored
+// SHARED classification, not a hydration default.
+function hasExplicitSharedKind(firm) {
+  return (
+    firm?.kind === "SHARED" &&
+    !(typeof firm?.$isDefault === "function" && firm.$isDefault("kind"))
+  );
+}
+
+function serializeFirmWithJoinCodeAccess(firm, canViewJoinCode) {
+  const serializedFirm =
+    typeof firm?.toJSON === "function"
+      ? firm.toJSON()
+      : typeof firm?.toObject === "function"
+        ? firm.toObject()
+        : firm;
+  const responseFirm = { ...serializedFirm };
+  if (!canViewJoinCode || !hasExplicitSharedKind(firm)) {
+    delete responseFirm.joinCode;
+  }
+  return responseFirm;
+}
+
 // GET /api/firms/me
+function serializeFirmForViewer(firm, membership, userId) {
+  return serializeFirmWithJoinCodeAccess(
+    firm,
+    hasFirmAdminAuthority(firm, membership, userId),
+  );
+}
+
 export const getMyFirm = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const user = await User.findById(userId);
-    if (!user || !user.firmId) {
+    if (!user) {
+      return res
+        .status(404)
+        .json({ ok: false, error: "User is not linked to any firm" });
+    }
+
+    // Sign-in healing may backfill a missing legacy row, but a retained REMOVED
+    // shared membership forces the active pointer back to the personal workspace.
+    await ensurePersonalFirm(user);
+    if (!user.firmId) {
       return res
         .status(404)
         .json({ ok: false, error: "User is not linked to any firm" });
@@ -377,22 +737,20 @@ export const getMyFirm = async (req, res, next) => {
       return res.status(404).json({ ok: false, error: "Firm not found" });
     }
 
-    let membership = await FirmMembership.findOne({
+    const membership = await FirmMembership.findOne({
       userId,
       firmId: firm._id,
       status: "ACTIVE",
     });
-    // Backfill for accounts that predate the collaborative model.
     if (!membership) {
-      membership = await ensureFirmMembership(userId, firm._id, {
-        role: String(firm.ownerUserId) === String(userId) ? "OWNER" : "MEMBER",
-        isPersonal: String(user.personalFirmId || "") === String(firm._id),
-      });
+      return res
+        .status(404)
+        .json({ ok: false, error: "User is not linked to any firm" });
     }
 
     return res.json({
       ok: true,
-      firm,
+      firm: serializeFirmForViewer(firm, membership, userId),
       workspace: await workspaceSummary(firm, membership, user.firmId),
     });
   } catch (err) {
@@ -433,16 +791,27 @@ export const listWorkspaces = async (req, res, next) => {
       .map((m) => {
         const firm = firmById.get(String(m.firmId));
         if (!firm) return null;
-        const elevated = m.role === "OWNER" || m.role === "ADMIN";
+        // Lean results preserve persisted kind. Historical memberships cannot
+        // surface another user's explicitly PERSONAL workspace, while legacy
+        // missing-kind memberships retain their existing compatibility.
+        if (
+          firm.kind === "PERSONAL" &&
+          String(firm.ownerUserId) !== String(userId)
+        ) {
+          return null;
+        }
+        const role = effectiveMembershipRole(firm, m, userId);
+        const elevated = hasFirmAdminAuthority(firm, m, userId);
         return {
           id: firm._id,
           displayName: firm.displayName,
           handle: firm.handle,
           kind: firm.kind || "SHARED",
           isPersonal: !!m.isPersonal,
-          role: m.role,
+          role,
           memberCount: countById.get(String(firm._id)) || 1,
-          joinCode: elevated ? firm.joinCode : undefined,
+          joinCode:
+            hasExplicitSharedKind(firm) && elevated ? firm.joinCode : undefined,
           sharingEnabled: firm.sharingEnabled !== false,
           memberAccess:
             firm.memberAccess === "READ_ONLY" ? "READ_ONLY" : "EDIT",
@@ -630,71 +999,15 @@ export const listFirmMembers = async (req, res, next) => {
 // leaves their active firm, they fall back to their personal workspace.
 export const leaveFirm = async (req, res, next) => {
   try {
-    const userId = req.user.id;
-    const { firmId } = req.params;
-
-    const membership = await FirmMembership.findOne({
-      userId,
-      firmId,
-      status: "ACTIVE",
-    });
-    if (!membership) {
-      return res
-        .status(404)
-        .json({ ok: false, error: "You are not a member of this firm" });
-    }
-    if (membership.isPersonal) {
-      return res.status(400).json({
-        ok: false,
-        error: "Your personal workspace cannot be left",
-      });
-    }
-
-    const user = await User.findById(userId);
-    if (membership.role === "OWNER") {
-      const otherMembers = await FirmMembership.countDocuments({
-        firmId,
-        status: "ACTIVE",
-        userId: { $ne: userId },
-      });
-      if (otherMembers > 0) {
-        return res.status(409).json({
-          ok: false,
-          error:
-            "Transfer ownership or remove members before leaving this firm",
-        });
-      }
-    }
-
-    membership.status = "REMOVED";
-    await membership.save();
-
-    // If they left their active workspace, return to the personal workspace.
-    let switched = null;
-    if (String(user.firmId) === String(firmId)) {
-      const personalFirmId = user.personalFirmId;
-      const personalFirm = personalFirmId
-        ? await Firm.findById(personalFirmId)
-        : null;
-      const personalMembership = personalFirm
-        ? await FirmMembership.findOne({
-            userId,
-            firmId: personalFirm._id,
-            status: "ACTIVE",
-          })
-        : null;
-      if (personalFirm && personalMembership) {
-        await setActiveWorkspace(user, personalFirm, personalMembership);
-        switched = await workspaceSummary(
-          personalFirm,
-          personalMembership,
-          user.firmId,
-        );
-      }
-    }
-
-    return res.json({ ok: true, activeWorkspace: switched });
+    const { activeWorkspace } = await leaveFirmInTransaction(
+      req.user.id,
+      req.params.firmId,
+    );
+    return res.json({ ok: true, activeWorkspace });
   } catch (err) {
+    if (err?.statusCode) {
+      return res.status(err.statusCode).json({ ok: false, error: err.message });
+    }
     next(err);
   }
 };
@@ -705,7 +1018,10 @@ export const getFirmById = async (req, res, next) => {
     const userId = req.user.id;
     const { firmId } = req.params;
     const firm = await assertFirmAdmin(userId, firmId);
-    return res.json({ ok: true, firm });
+    return res.json({
+      ok: true,
+      firm: serializeFirmWithJoinCodeAccess(firm, true),
+    });
   } catch (err) {
     next(err);
   }
@@ -774,7 +1090,10 @@ export const updateFirm = async (req, res, next) => {
     }
 
     await firm.save();
-    return res.json({ ok: true, firm });
+    return res.json({
+      ok: true,
+      firm: serializeFirmWithJoinCodeAccess(firm, true),
+    });
   } catch (err) {
     next(err);
   }
@@ -801,16 +1120,200 @@ export const rotateJoinCode = async (req, res, next) => {
     firm.joinCode = joinCode;
     await firm.save();
 
-    return res.json({ ok: true, joinCode: firm.joinCode });
+    return res.json({
+      ok: true,
+      ...(hasExplicitSharedKind(firm) ? { joinCode: firm.joinCode } : {}),
+    });
   } catch (err) {
     next(err);
   }
 };
 
+const WORKSPACE_SUCCESS_RECEIPT_LIMIT = 20;
+
+function tokenVersionFilter(tokenVersion) {
+  return tokenVersion === 0 ? { $in: [0, null] } : tokenVersion;
+}
+
+function joinAuthorityChangedError(currentUser) {
+  if (!currentUser) {
+    return membershipLifecycleError(404, "User not found");
+  }
+  return membershipLifecycleError(
+    409,
+    currentUser.isActive === false
+      ? "This account is no longer active, so the workspace change was not applied. Contact your firm administrator."
+      : "This session was signed out on the server, so the workspace change was not applied. Sign in again, then retry.",
+  );
+}
+
+function trackedJoinReceipt(operationClaim, activeFirmId, completedAt) {
+  if (!operationClaim?.tracked) return null;
+  const operation = operationClaim.operation;
+  const startedAt = operation.startedAt || operation.createdAt || completedAt;
+  return {
+    stored: {
+      operationId: operation.operationId,
+      kind: operation.kind,
+      requestHash: operation.requestHash,
+      activeFirmId,
+      startedAt,
+      completedAt,
+    },
+    response: {
+      operationId: String(operation.operationId),
+      kind: String(operation.kind),
+      status: "SUCCEEDED",
+      activeFirmId: String(activeFirmId),
+      startedAt,
+      completedAt,
+    },
+  };
+}
+
+async function joinFirmInTransaction({
+  userId,
+  joinCode,
+  operationClaim,
+  authorizedTokenVersion,
+}) {
+  return withMembershipTransaction(async (session) => {
+    // Persisted kind is part of join authority. Hydration defaults must not turn
+    // an ambiguous legacy row into a joinable shared workspace.
+    const firm = await Firm.findOne({
+      joinCode,
+      kind: "SHARED",
+    }).session(session);
+    if (!firm || !firm.isActive) {
+      throw membershipLifecycleError(404, "Invalid or inactive join code");
+    }
+
+    const user = await User.findById(userId).session(session);
+    if (!user) throw membershipLifecycleError(404, "User not found");
+    if (user.isActive === false) throw joinAuthorityChangedError(user);
+
+    const existing = await FirmMembership.findOne({
+      userId,
+      firmId: firm._id,
+    }).session(session);
+    const alreadyMember = existing?.status === "ACTIVE";
+    const isOwner = String(firm.ownerUserId) === String(userId);
+
+    // A retained removal is not active access. Private workspaces require the
+    // owner to enable sharing before this explicit reactivation path may run.
+    if (firm.sharingEnabled === false && !isOwner && !alreadyMember) {
+      throw membershipLifecycleError(
+        403,
+        "This workspace is private. Ask the owner to turn on sharing before you can join.",
+      );
+    }
+
+    const membership = await ensureFirmMembership(userId, firm._id, {
+      role: isOwner ? "OWNER" : "MEMBER",
+      isPersonal: false,
+      reactivateRemoved: true,
+      session,
+    });
+    const elevated = hasFirmAdminAuthority(firm, membership, userId);
+    const userChanges = {
+      firmId: firm._id,
+      accountType: "FIRM_USER",
+      role:
+        user.role === "SUPER_ADMIN"
+          ? "SUPER_ADMIN"
+          : elevated
+            ? "FIRM_ADMIN"
+            : "USER",
+    };
+
+    const completedAt = new Date();
+    const operationReceipt = trackedJoinReceipt(
+      operationClaim,
+      firm._id,
+      completedAt,
+    );
+    const update = { $set: userChanges };
+    if (operationReceipt) {
+      update.$push = {
+        workspaceOperationReceipts: {
+          $each: [operationReceipt.stored],
+          $slice: -WORKSPACE_SUCCESS_RECEIPT_LIMIT,
+        },
+      };
+    }
+
+    // This compare-and-set binds the mutation to the exact tokenVersion that
+    // authenticated the request. Membership reactivation rolls back if a
+    // suspension or force-logout wins before commit.
+    const activatedUser = await User.findOneAndUpdate(
+      {
+        _id: userId,
+        isActive: { $ne: false },
+        tokenVersion: tokenVersionFilter(authorizedTokenVersion),
+      },
+      update,
+      { new: true, runValidators: true, session },
+    );
+    if (!activatedUser) {
+      const currentUser = await User.findById(userId)
+        .select("isActive tokenVersion")
+        .session(session)
+        .lean();
+      throw joinAuthorityChangedError(currentUser);
+    }
+
+    if (operationReceipt) {
+      // The status row participates in the same authority transaction. A write
+      // error must abort membership reactivation, the user pointer, and receipt.
+      await WorkspaceOperation.updateOne(
+        { _id: operationClaim.operation._id, status: "PENDING" },
+        {
+          $set: {
+            status: "SUCCEEDED",
+            activeFirmId: firm._id,
+            completedAt,
+            failure: null,
+          },
+        },
+        { session },
+      );
+    }
+
+    return {
+      alreadyMember,
+      firm: {
+        id: firm._id,
+        displayName: firm.displayName,
+        handle: firm.handle,
+      },
+      workspace: await workspaceSummary(
+        firm,
+        membership,
+        activatedUser.firmId,
+        session,
+      ),
+      user: {
+        id: activatedUser._id,
+        email: activatedUser.email,
+        name: activatedUser.name,
+        role: activatedUser.role,
+        accountType: activatedUser.accountType,
+        firmId: activatedUser.firmId,
+      },
+      operation: operationReceipt?.response || null,
+    };
+  });
+}
+
 // POST /api/firms/join
 export const joinFirmByCode = async (req, res, next) => {
   try {
     const userId = req.user.id;
+    // Capture once. Transactional code must never adopt a newer version read
+    // after this request passed authentication.
+    const authorizedTokenVersion = Number.isInteger(req.user?.tokenVersion)
+      ? req.user.tokenVersion
+      : 0;
     const { joinCode } = req.body || {};
     const normalizedJoinCode =
       typeof joinCode === "string" ? joinCode.trim().toUpperCase() : "";
@@ -828,79 +1331,46 @@ export const joinFirmByCode = async (req, res, next) => {
       );
     }
 
-    const firm = await Firm.findOne({ joinCode: normalizedJoinCode });
-
-    if (!firm || !firm.isActive) {
-      return rejectWorkspaceRequest(
-        res,
-        request.claim,
-        404,
-        "Invalid or inactive join code",
-      );
+    let result;
+    try {
+      result = await joinFirmInTransaction({
+        userId,
+        joinCode: normalizedJoinCode,
+        operationClaim: request.claim,
+        authorizedTokenVersion,
+      });
+    } catch (error) {
+      if (error?.statusCode) {
+        return rejectWorkspaceRequest(
+          res,
+          request.claim,
+          error.statusCode,
+          error.message,
+        );
+      }
+      if (request.claim?.tracked) {
+        try {
+          return await rejectWorkspaceRequest(
+            res,
+            request.claim,
+            500,
+            "Workspace join could not be completed",
+          );
+        } catch {
+          // Preserve the original failure for global handling when the
+          // operation receipt cannot itself be made terminal.
+        }
+      }
+      throw error;
     }
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return rejectWorkspaceRequest(res, request.claim, 404, "User not found");
-    }
-
-    // Joining is additive: a shared-firm membership is created (or reactivated)
-    // and the firm becomes the active workspace. The user keeps their personal
-    // workspace and any other firms. Joining does not grant firm-admin authority.
-    const existing = await FirmMembership.findOne({ userId, firmId: firm._id });
-    const alreadyMember = !!existing && existing.status === "ACTIVE";
-    const isOwner = String(firm.ownerUserId) === String(userId);
-
-    // Private workspace: refuse new joins. Existing members and the owner are
-    // unaffected (they use switch, not join). Legacy firms without the flag are
-    // treated as sharing-enabled.
-    if (firm.sharingEnabled === false && !isOwner && !alreadyMember) {
-      return rejectWorkspaceRequest(
-        res,
-        request.claim,
-        403,
-        "This workspace is private. Ask the owner to turn on sharing before you can join.",
-      );
-    }
-
-    const membership = await ensureFirmMembership(userId, firm._id, {
-      role: isOwner ? "OWNER" : "MEMBER",
-      isPersonal: String(user.personalFirmId || "") === String(firm._id),
-    });
-
-    const activation = await activateWorkspace(
-      req,
-      res,
-      request.claim,
-      user,
-      firm,
-      membership,
-    );
-    if (activation.handled) return;
-    const activated = activation.activated;
 
     return res.json({
       ok: true,
-      alreadyMember,
-      firm: {
-        id: firm._id,
-        displayName: firm.displayName,
-        handle: firm.handle,
-      },
-      workspace: await workspaceSummary(
-        firm,
-        membership,
-        activated.user.firmId,
-      ),
-      user: {
-        id: activated.user._id,
-        email: activated.user.email,
-        name: activated.user.name,
-        role: activated.user.role,
-        accountType: activated.user.accountType,
-        firmId: activated.user.firmId,
-      },
-      ...(activated.receipt ? { operation: activated.receipt } : {}),
+      alreadyMember: result.alreadyMember,
+      firm: result.firm,
+      workspace: result.workspace,
+      user: result.user,
+      ...(result.operation ? { operation: result.operation } : {}),
     });
   } catch (err) {
     next(err);
@@ -914,7 +1384,14 @@ export const listFirmUsers = async (req, res, next) => {
     const { firmId } = req.params;
     const firm = await assertFirmAdmin(userId, firmId);
 
-    const users = await User.find({ firmId: firm._id }).select(
+    const memberships = await FirmMembership.find({
+      firmId: firm._id,
+      status: "ACTIVE",
+    })
+      .select("userId")
+      .lean();
+    const memberUserIds = memberships.map((membership) => membership.userId);
+    const users = await User.find({ _id: { $in: memberUserIds } }).select(
       "email name role accountType createdAt isActive",
     );
 
@@ -988,96 +1465,17 @@ export const requestFirmAdmin = async (req, res, next) => {
 // Firm owner can delete firm members (not self)
 export const deleteFirmUser = async (req, res, next) => {
   try {
-    const userId = req.user.id;
-    const { firmId, userId: targetUserId } = req.params;
-
-    const firm = await assertFirmAdmin(userId, firmId);
-    if (!firm)
-      return res.status(404).json({ ok: false, error: "Firm not found" });
-
-    // Cannot delete self
-    if (String(targetUserId) === String(userId)) {
-      return res
-        .status(400)
-        .json({ ok: false, error: "Cannot delete yourself" });
-    }
-
-    const membership = await FirmMembership.findOne({
-      userId: targetUserId,
-      firmId: firm._id,
-      status: "ACTIVE",
-    });
-    if (!membership) {
-      return res
-        .status(404)
-        .json({ ok: false, error: "User not found in firm" });
-    }
-    if (membership.isPersonal) {
-      return res.status(400).json({
-        ok: false,
-        error: "Cannot remove an owner's personal workspace",
-      });
-    }
-
-    const targetUser = await User.findById(targetUserId);
-    if (targetUser && targetUser.role === "SUPER_ADMIN") {
-      return res
-        .status(400)
-        .json({ ok: false, error: "Cannot remove super admin account" });
-    }
-
-    // Remove the membership. If the removed user was actively in this firm,
-    // move them back to their own personal workspace instead of stranding them.
-    membership.status = "REMOVED";
-    await membership.save();
-
-    if (targetUser && String(targetUser.firmId) === String(firm._id)) {
-      const personalFirm = targetUser.personalFirmId
-        ? await Firm.findById(targetUser.personalFirmId)
-        : null;
-      const personalMembership = personalFirm
-        ? await FirmMembership.findOne({
-            userId: targetUserId,
-            firmId: personalFirm._id,
-            status: "ACTIVE",
-          })
-        : null;
-      if (personalFirm && personalMembership) {
-        await setActiveWorkspace(targetUser, personalFirm, personalMembership);
-      } else {
-        targetUser.firmId = null;
-        if (targetUser.role !== "SUPER_ADMIN") targetUser.role = "USER";
-        await targetUser.save();
-      }
-    }
-
-    // Return the updated active member list for this firm.
-    const memberships = await FirmMembership.find({
-      firmId: firm._id,
-      status: "ACTIVE",
-    }).lean();
-    const memberIds = memberships.map((m) => m.userId);
-    const memberUsers = await User.find({ _id: { $in: memberIds } })
-      .select("email name role accountType createdAt isActive")
-      .lean();
-    const roleByUser = new Map(
-      memberships.map((m) => [String(m.userId), m.role]),
+    const { firm, users } = await removeFirmMemberInTransaction(
+      req.user.id,
+      req.params.firmId,
+      req.params.userId,
     );
-    const users = memberUsers.map((u) => ({
-      ...u,
-      membershipRole: roleByUser.get(String(u._id)) || "MEMBER",
-    }));
 
-    return res.json({
-      ok: true,
-      firm: {
-        id: firm._id,
-        displayName: firm.displayName,
-        handle: firm.handle,
-      },
-      users,
-    });
+    return res.json({ ok: true, firm, users });
   } catch (err) {
+    if (err?.statusCode && !err.forwardToErrorMiddleware) {
+      return res.status(err.statusCode).json({ ok: false, error: err.message });
+    }
     next(err);
   }
 };

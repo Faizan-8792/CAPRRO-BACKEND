@@ -24,6 +24,15 @@ export function createFirmAuthorization({
     return MembershipModel.findOne({ userId, firmId }).select(fields).lean();
   }
 
+  function rejectWithoutActiveMembership(req, res, membership) {
+    return reject(
+      req,
+      res,
+      403,
+      membership ? REMOVED_MEMBER_MESSAGE : "Firm membership required",
+    );
+  }
+
   async function requireActiveFirm(req, res, next, { adminOnly = false } = {}) {
     try {
       if (!req.user) return reject(req, res, 401, "Unauthorized");
@@ -33,7 +42,7 @@ export function createFirmAuthorization({
 
       const [firm, membership] = await Promise.all([
         FirmModel.findOne({ _id: req.user.firmId, isActive: true })
-          .select("_id ownerUserId")
+          .select("_id ownerUserId kind")
           .lean(),
         findMembership(req.user.id, req.user.firmId, "role status"),
       ]);
@@ -41,36 +50,26 @@ export function createFirmAuthorization({
         return reject(req, res, 403, "Firm is inactive or unavailable");
       }
 
-      const isOwner = String(firm.ownerUserId || "") === String(req.user.id);
+      const hasActiveMembership = membership?.status === "ACTIVE";
+      const isOwner =
+        String(firm.ownerUserId || "") === String(req.user.id) &&
+        hasActiveMembership &&
+        membership.role === "OWNER";
+      const isFirmAdmin = hasActiveMembership && membership.role === "ADMIN";
       const isSuperAdmin = req.user.role === "SUPER_ADMIN";
 
-      // FirmMembership is the source of truth for which firms a user may act
-      // in. User.firmId can still point at a firm the user was removed from,
-      // either because removal raced a workspace switch or because the pointer
-      // was not repointed, so a REMOVED membership is refused on every request.
-      if (
-        membership &&
-        membership.status !== "ACTIVE" &&
-        !isOwner &&
-        !isSuperAdmin
-      ) {
-        return reject(req, res, 403, REMOVED_MEMBER_MESSAGE);
+      if (!isOwner && !isSuperAdmin && firm.kind === "PERSONAL") {
+        return reject(req, res, 403, "Firm membership required");
       }
 
-      if (adminOnly) {
-        // Firm-admin authority comes from this firm: owning it, or holding an
-        // OWNER/ADMIN membership in it. The global role is only consulted for
-        // accounts that predate memberships, so a stale FIRM_ADMIN pointer can
-        // never elevate someone recorded as a plain MEMBER here.
-        const membershipRole =
-          membership && membership.status === "ACTIVE" ? membership.role : null;
-        const elevatedInFirm =
-          membershipRole === "OWNER" || membershipRole === "ADMIN";
-        const legacyElevated = !membership && req.user.role === "FIRM_ADMIN";
+      // SUPER_ADMIN remains the only explicit global bypass. Firm ownership
+      // requires both ownerUserId and an ACTIVE OWNER membership to agree.
+      if (!isOwner && !isSuperAdmin && !hasActiveMembership) {
+        return rejectWithoutActiveMembership(req, res, membership);
+      }
 
-        if (!isOwner && !isSuperAdmin && !elevatedInFirm && !legacyElevated) {
-          return reject(req, res, 403, "Firm admin only");
-        }
+      if (adminOnly && !isOwner && !isSuperAdmin && !isFirmAdmin) {
+        return reject(req, res, 403, "Firm admin only");
       }
 
       req.firm = firm;
@@ -81,44 +80,59 @@ export function createFirmAuthorization({
     }
   }
 
-  // Blocks write requests from plain members when the active firm is READ_ONLY,
-  // and from members whose membership is no longer ACTIVE. Non-mutating
-  // methods, users without a firm, missing firms, and the firm owner pass
-  // through unchanged.
+  // Production route chains run requireFirmMember first. Mutations deliberately
+  // query again so membership removal, firm deactivation, and firm-local role
+  // changes are rechecked immediately before write policy is applied.
   async function requireFirmWriteAccess(req, res, next) {
+    if (!MUTATING_METHODS.has(req.method)) return next();
+
     try {
-      if (!MUTATING_METHODS.has(req.method)) return next();
-      if (!req.user || !req.user.firmId) return next();
-
-      const firm = await FirmModel.findOne({ _id: req.user.firmId })
-        .select("_id ownerUserId memberAccess")
-        .lean();
-      if (!firm) return next();
-      const isOwner = String(firm.ownerUserId || "") === String(req.user.id);
-      if (isOwner) return next();
-      if (req.user.role === "SUPER_ADMIN") return next();
-
-      // A removed member keeps no write access, whatever their global role says.
-      const membership = await findMembership(
-        req.user.id,
-        req.user.firmId,
-        "role status",
-      );
-      if (membership && membership.status !== "ACTIVE") {
-        return reject(req, res, 403, REMOVED_MEMBER_MESSAGE);
+      if (!req.user) return reject(req, res, 401, "Unauthorized");
+      if (!req.user.firmId) {
+        return reject(req, res, 403, "Firm membership required");
       }
 
-      // Elevation is decided by authority in this firm, matching
-      // requireFirmAdmin. A stale global FIRM_ADMIN pointer must not let a plain
-      // member write in a read-only workspace; it is honoured only for accounts
-      // that predate memberships.
-      const membershipRole =
-        membership && membership.status === "ACTIVE" ? membership.role : null;
-      const elevatedInFirm =
-        membershipRole === "OWNER" || membershipRole === "ADMIN";
-      const legacyElevated = !membership && req.user.role === "FIRM_ADMIN";
-      if (elevatedInFirm || legacyElevated) return next();
+      const [firm, membership] = await Promise.all([
+        FirmModel.findOne({ _id: req.user.firmId, isActive: true })
+          .select("_id ownerUserId kind memberAccess")
+          .lean(),
+        findMembership(req.user.id, req.user.firmId, "role status"),
+      ]);
+      if (!firm) {
+        return reject(req, res, 403, "Firm is inactive or unavailable");
+      }
 
+      const hasActiveMembership = membership?.status === "ACTIVE";
+      const isOwner =
+        String(firm.ownerUserId || "") === String(req.user.id) &&
+        hasActiveMembership &&
+        membership.role === "OWNER";
+      const isFirmAdmin = hasActiveMembership && membership.role === "ADMIN";
+      const isSuperAdmin = req.user.role === "SUPER_ADMIN";
+
+      if (!isOwner && !isSuperAdmin && firm.kind === "PERSONAL") {
+        return reject(req, res, 403, "Firm membership required");
+      }
+      if (isOwner || isSuperAdmin) {
+        req.firm = firm;
+        req.firmMembership = membership || null;
+        return next();
+      }
+
+      if (!hasActiveMembership) {
+        return rejectWithoutActiveMembership(req, res, membership);
+      }
+
+      // ADMIN remains a firm-local bypass. A stale OWNER row belonging to a
+      // non-owner follows ordinary member write policy instead.
+      if (isFirmAdmin) {
+        req.firm = firm;
+        req.firmMembership = membership;
+        return next();
+      }
+
+      // Absent on legacy firms means EDIT. Only an explicit READ_ONLY policy
+      // blocks an ACTIVE plain member.
       if (firm.memberAccess === "READ_ONLY") {
         return reject(
           req,
@@ -127,6 +141,9 @@ export function createFirmAuthorization({
           "This workspace is read-only for you. Ask the firm owner to allow member edits.",
         );
       }
+
+      req.firm = firm;
+      req.firmMembership = membership;
       return next();
     } catch (error) {
       return next(error);

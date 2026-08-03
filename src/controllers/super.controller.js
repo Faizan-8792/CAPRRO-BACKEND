@@ -33,6 +33,21 @@ function assertSuper(user) {
   }
 }
 
+function serializeFirmForSuper(firm) {
+  const serializedFirm =
+    typeof firm?.toJSON === "function"
+      ? firm.toJSON()
+      : typeof firm?.toObject === "function"
+        ? firm.toObject()
+        : firm;
+  const responseFirm = { ...serializedFirm };
+  const isExplicitShared =
+    firm?.kind === "SHARED" &&
+    !(typeof firm?.$isDefault === "function" && firm.$isDefault("kind"));
+  if (!isExplicitShared) delete responseFirm.joinCode;
+  return responseFirm;
+}
+
 // 0a) Extension Usage Analytics (DAU/WAU/MAU)
 export const getUsageStats = async (req, res, next) => {
   try {
@@ -473,7 +488,7 @@ export const listFirms = async (req, res, next) => {
     owners.forEach((u) => ownersById.set(String(u._id), u));
 
     const enriched = firms.map((firm) => ({
-      ...firm,
+      ...serializeFirmForSuper(firm),
       // Legacy plan values remain in storage for backward compatibility only.
       // Product access is free and does not expire for every firm.
       planType: "FREE",
@@ -500,14 +515,21 @@ export const listFirmUsersForSuper = async (req, res, next) => {
       return res.status(404).json({ ok: false, error: "Firm not found" });
     }
 
-    const users = await User.find({ firmId })
+    const memberships = await FirmMembership.find({
+      firmId,
+      status: "ACTIVE",
+    })
+      .select("userId")
+      .lean();
+    const memberUserIds = memberships.map((membership) => membership.userId);
+    const users = await User.find({ _id: { $in: memberUserIds } })
       .select("email name role accountType isActive createdAt")
       .sort({ createdAt: 1 })
       .lean();
 
     return res.json({
       ok: true,
-      firm,
+      firm: serializeFirmForSuper(firm),
       users,
     });
   } catch (err) {
@@ -541,7 +563,7 @@ export const updateFirmPlan = async (req, res, next) => {
     return res.json({
       ok: true,
       firm: {
-        ...firm.toObject(),
+        ...serializeFirmForSuper(firm),
         planType: "FREE",
         planExpiry: null,
         accessModel: "FREE",
