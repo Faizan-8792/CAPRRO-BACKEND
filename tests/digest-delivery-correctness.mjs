@@ -27,6 +27,7 @@ import {
   claimDigestDelivery,
   digestBusinessIdentity,
   digestSendingRecoveryReason,
+  drainDigestRecovery,
   enqueueDueDigests,
   enqueueRecipientDigest as enqueueRecipientDigestProduction,
   getDigestPreferences,
@@ -1287,6 +1288,20 @@ function createProcessHarness({
     async isFeatureEnabled(name, options) {
       featureCalls.push({ name, options: clone(options) });
       if (featureError) throw featureError;
+      const callCount = featureCalls.length;
+      if (typeof featureEnabled === "function") {
+        return featureEnabled({
+          name,
+          options: clone(options),
+          callCount,
+        });
+      }
+      if (Array.isArray(featureEnabled)) {
+        if (featureEnabled.length === 0) return false;
+        return featureEnabled[
+          Math.min(callCount - 1, featureEnabled.length - 1)
+        ];
+      }
       return featureEnabled;
     },
   };
@@ -6887,28 +6902,67 @@ await check(
 );
 
 await check(
-  "server source guards bootstrap retries and scheduler startup",
+  "server source guards bootstrap retries and ordered digest startup",
   () => {
     const serverSource = readFileSync(
       new URL("../src/server.js", import.meta.url),
       "utf8",
     );
-    const readinessCall = serverSource.indexOf(
-      "await assertDigestIndexesReady();",
+    const startupDefinition = serverSource.indexOf(
+      "export async function completeDigestStartup",
     );
-    const schedulerCall = serverSource.indexOf(
-      "startSchedulers();",
+    const readinessCall = serverSource.indexOf(
+      "await assertIndexes();",
+      startupDefinition,
+    );
+    const shutdownAfterIndexes = serverSource.indexOf(
+      "if (isShuttingDown()) return false;",
       readinessCall,
     );
+    const drainCall = serverSource.indexOf(
+      "await drainRecovery();",
+      shutdownAfterIndexes,
+    );
+    const shutdownAfterDrain = serverSource.indexOf(
+      "if (isShuttingDown()) return false;",
+      shutdownAfterIndexes + 1,
+    );
+    const schedulerCall = serverSource.indexOf(
+      "await startSchedulers();",
+      drainCall,
+    );
+    const readyCall = serverSource.indexOf("setReady(true);", schedulerCall);
     const initializingCall = serverSource.indexOf(
       "setBackgroundReadiness(false);",
     );
     const listenCall = serverSource.indexOf("app.listen(");
 
-    assert.ok(readinessCall >= 0, "digest readiness assertion call is missing");
+    assert.ok(startupDefinition >= 0, "digest startup seam is missing");
+    assert.ok(readinessCall > startupDefinition, "index phase is missing");
     assert.ok(
-      schedulerCall > readinessCall,
-      "scheduler starts before digest readiness completes",
+      shutdownAfterIndexes > readinessCall,
+      "shutdown guard after index phase is missing",
+    );
+    assert.ok(
+      drainCall > shutdownAfterIndexes,
+      "recovery drain phase is missing",
+    );
+    assert.ok(
+      shutdownAfterDrain > drainCall,
+      "shutdown guard after drain phase is missing",
+    );
+    assert.ok(
+      schedulerCall > shutdownAfterDrain,
+      "scheduler starts before recovery drain completes",
+    );
+    assert.ok(
+      readyCall > schedulerCall,
+      "background readiness is set before schedulers start",
+    );
+    assert.match(
+      serverSource,
+      /return completeDigestStartup\(\{\s*assertIndexes: assertDigestIndexesReady,\s*drainRecovery: drainDigestRecovery,\s*startSchedulers,\s*setReady: setBackgroundReadiness,\s*isShuttingDown: \(\) => shuttingDown,\s*\}\);/,
+      "bootstrap does not inject the complete digest startup phases",
     );
     assert.ok(
       initializingCall >= 0 && initializingCall < listenCall,
@@ -9850,7 +9904,11 @@ await check(
     const cases = [
       {
         label: "exact active owner",
-        user: makeUser({ _id: IDS.owner, isActive: true }),
+        user: makeUser({
+          _id: IDS.owner,
+          isActive: true,
+          role: "SUPER_ADMIN",
+        }),
         membership: makeMembership({
           userId: IDS.owner,
           status: "ACTIVE",
@@ -9999,6 +10057,7 @@ await check(
           {
             userId: testCase.user._id,
             firmId: IDS.firm,
+            role: "SUPER_ADMIN",
             toEmail: testCase.user.email,
             kind: DAILY_KIND,
             now: new Date(FIXED_NOW),
@@ -10011,6 +10070,9 @@ await check(
                   weeklySummary: true,
                   noticeCases: false,
                 };
+              },
+              async isFeatureEnabled() {
+                return true;
               },
             },
             ...models(),
@@ -10141,7 +10203,7 @@ await check(
       ["legacy", undefined],
     ]) {
       const firm = makeFirm({ kind });
-      const user = makeUser({ isActive: true });
+      const user = makeUser({ isActive: true, role: "SUPER_ADMIN" });
       const membership = makeMembership({ status: "ACTIVE", role: "MEMBER" });
       const models = () => ({
         Firm: createLookupModel(firm, []),
@@ -10177,6 +10239,7 @@ await check(
         {
           userId: IDS.recipient,
           firmId: IDS.firm,
+          role: "SUPER_ADMIN",
           toEmail: user.email,
           kind: DAILY_KIND,
           now: new Date(FIXED_NOW),
@@ -10189,6 +10252,9 @@ await check(
                 weeklySummary: true,
                 noticeCases: false,
               };
+            },
+            async isFeatureEnabled() {
+              return true;
             },
           },
           ...models(),
@@ -10431,26 +10497,35 @@ await check(
         mutate: (state) => {
           state.user = makeUser({
             isActive: true,
+            role: "SUPER_ADMIN",
             digestPreferences: { emailEnabled: false },
           });
         },
       },
       {
-        label: "weekly OWNER downgraded to MEMBER",
-        code: "FIRM_ADMIN_ONLY",
+        label: "weekly OWNER downgraded and SUPER_ADMIN demoted",
+        code: "SUPER_ADMIN_ONLY",
         weekly: true,
         initialMembershipRole: "OWNER",
         mutate: (state) => {
           state.membership = makeMembership({ role: "MEMBER" });
+          state.user = makeUser({
+            isActive: true,
+            role: "FIRM_ADMIN",
+          });
         },
       },
       {
-        label: "weekly ADMIN downgraded to MEMBER",
-        code: "FIRM_ADMIN_ONLY",
+        label: "weekly ADMIN downgraded and SUPER_ADMIN demoted",
+        code: "SUPER_ADMIN_ONLY",
         weekly: true,
         initialMembershipRole: "ADMIN",
         mutate: (state) => {
           state.membership = makeMembership({ role: "MEMBER" });
+          state.user = makeUser({
+            isActive: true,
+            role: "FIRM_ADMIN",
+          });
         },
       },
       {
@@ -10460,6 +10535,7 @@ await check(
         mutate: (state) => {
           state.user = makeUser({
             isActive: true,
+            role: "SUPER_ADMIN",
             digestPreferences: { weeklyEnabled: false },
           });
         },
@@ -10490,7 +10566,11 @@ await check(
         firm: testCase.personal
           ? makeFirm({ kind: "PERSONAL", ownerUserId: IDS.owner })
           : makeFirm(),
-        user: makeUser({ _id: userId, isActive: true }),
+        user: makeUser({
+          _id: userId,
+          isActive: true,
+          role: "SUPER_ADMIN",
+        }),
         membership: makeMembership({
           userId,
           status: "ACTIVE",
@@ -10519,6 +10599,7 @@ await check(
             {
               userId,
               firmId: IDS.firm,
+              role: "SUPER_ADMIN",
               toEmail: "test@example.test",
               kind: testCase.weekly ? WEEKLY_KIND : DAILY_KIND,
               now: new Date(FIXED_NOW),
@@ -10531,6 +10612,9 @@ await check(
                     weeklySummary: true,
                     noticeCases: false,
                   };
+                },
+                async isFeatureEnabled() {
+                  return true;
                 },
               },
               Firm,
@@ -10960,6 +11044,7 @@ await check("digest entry points accept canonical IDs only", async () => {
           {
             userId: invalid,
             firmId: IDS.firm,
+            role: "SUPER_ADMIN",
             toEmail: "test@example.test",
             kind: DAILY_KIND,
             now: new Date(FIXED_NOW),
@@ -11218,6 +11303,7 @@ await check(
   "malformed email attempts and recovery revisions quarantine without increment",
   async () => {
     const malformedNumericCases = [
+      { label: "null", value: null },
       { label: "negative", value: -1 },
       { label: "fractional", value: 1.5 },
       { label: "maximum safe integer", value: Number.MAX_SAFE_INTEGER },
@@ -11352,6 +11438,960 @@ await check(
         ),
         false,
         label,
+      );
+    }
+  },
+);
+
+await check(
+  "send-test rechecks SUPER_ADMIN role immediately before provider delivery",
+  async () => {
+    const summary = {
+      kind: DAILY_KIND,
+      periodKey: "2026-03-20",
+      counts: { open: 1 },
+    };
+    let currentUser = makeUser({ isActive: true, role: "SUPER_ADMIN" });
+    const providerCalls = [];
+
+    await assert.rejects(
+      () =>
+        sendTestDigestNow(
+          {
+            userId: IDS.recipient,
+            firmId: IDS.firm,
+            role: "SUPER_ADMIN",
+            toEmail: "stale@example.test",
+            kind: DAILY_KIND,
+            now: new Date(FIXED_NOW),
+          },
+          {
+            AppConfig: {
+              async getFeatureFlags() {
+                return {
+                  dailyDigest: true,
+                  weeklySummary: true,
+                  noticeCases: false,
+                };
+              },
+              async isFeatureEnabled() {
+                return true;
+              },
+            },
+            Firm: createLookupModel(makeFirm(), []),
+            FirmMembership: createLookupModel(makeMembership(), []),
+            User: createLookupModel(() => currentUser, []),
+            previewDigest: async () => clone(summary),
+            beforeProviderAuthorityReload: async () => {
+              currentUser = makeUser({ isActive: true, role: "MEMBER" });
+            },
+            sendDigestEmail: async (input) => {
+              providerCalls.push(clone(input));
+              return { data: { id: "must-not-send" } };
+            },
+          },
+        ),
+      (error) => {
+        assert.equal(error.status, 403);
+        assert.equal(error.code, "SUPER_ADMIN_ONLY");
+        return true;
+      },
+    );
+
+    assert.equal(providerCalls.length, 0);
+  },
+);
+
+await check(
+  "send-test uses fresh normalized user email and rejects invalid or missing reload email",
+  async () => {
+    const summary = {
+      kind: DAILY_KIND,
+      periodKey: "2026-03-20",
+      counts: { open: 1 },
+    };
+    const createCase = ({ finalEmail, missing = false }) => {
+      let currentUser = makeUser({
+        isActive: true,
+        role: "SUPER_ADMIN",
+        email: "initial@example.test",
+      });
+      const providerCalls = [];
+      const featureCalls = [];
+      return {
+        providerCalls,
+        featureCalls,
+        run: () =>
+          sendTestDigestNow(
+            {
+              userId: IDS.recipient,
+              firmId: IDS.firm,
+              role: "SUPER_ADMIN",
+              toEmail: "stale-caller@example.test",
+              kind: DAILY_KIND,
+              now: new Date(FIXED_NOW),
+            },
+            {
+              AppConfig: {
+                async getFeatureFlags() {
+                  return {
+                    dailyDigest: true,
+                    weeklySummary: true,
+                    noticeCases: false,
+                  };
+                },
+                async isFeatureEnabled(name, options) {
+                  featureCalls.push({ name, options: clone(options) });
+                  return true;
+                },
+              },
+              Firm: createLookupModel(makeFirm(), []),
+              FirmMembership: createLookupModel(makeMembership(), []),
+              User: createLookupModel(() => currentUser, []),
+              previewDigest: async () => clone(summary),
+              beforeProviderAuthorityReload: async () => {
+                const reloaded = makeUser({
+                  isActive: true,
+                  role: "SUPER_ADMIN",
+                  email: finalEmail,
+                });
+                if (missing) delete reloaded.email;
+                currentUser = reloaded;
+              },
+              sendDigestEmail: async (input) => {
+                providerCalls.push(clone(input));
+                return { data: { id: "fresh-email-message" } };
+              },
+            },
+          ),
+      };
+    };
+
+    const fresh = createCase({ finalEmail: "  Fresh.User@Example.TEST  " });
+    const result = await fresh.run();
+    assert.equal(result.providerMessageId, "fresh-email-message");
+    assert.equal(fresh.providerCalls.length, 1);
+    assert.equal(fresh.providerCalls[0].toEmail, "fresh.user@example.test");
+    assert.notEqual(
+      fresh.providerCalls[0].toEmail,
+      "stale-caller@example.test",
+    );
+    assert.deepEqual(fresh.featureCalls, [
+      { name: "dailyDigest", options: { fresh: true } },
+    ]);
+
+    for (const testCase of [
+      { label: "invalid", finalEmail: "not-an-email" },
+      { label: "missing", finalEmail: undefined, missing: true },
+    ]) {
+      const blocked = createCase(testCase);
+      await assert.rejects(blocked.run, (error) => {
+        assert.equal(error.status, 400, testCase.label);
+        assert.equal(error.code, "DIGEST_EMAIL_INVALID", testCase.label);
+        return true;
+      });
+      assert.equal(blocked.providerCalls.length, 0, testCase.label);
+      assert.equal(blocked.featureCalls.length, 0, testCase.label);
+    }
+  },
+);
+
+await check(
+  "new digest upsert explicitly persists zero attempts with nested insert defaults",
+  async () => {
+    const insertOperations = [];
+    const DigestDeliveryModel = {
+      findOne() {
+        return Promise.resolve(null);
+      },
+      async findOneAndUpdate(filter, update, options) {
+        insertOperations.push({
+          filter: clone(filter),
+          update: clone(update),
+          options: clone(options),
+        });
+        return {
+          _id: IDS.deliveryA,
+          ...clone(update.$setOnInsert),
+          automationJobId: null,
+          email: clone(update.$setOnInsert.email),
+          inApp: clone(update.$setOnInsert.inApp),
+        };
+      },
+    };
+
+    const delivery = await enqueueRecipientDigest(
+      {
+        firm: makeFirm(),
+        recipient: makeUser({
+          digestPreferences: { emailEnabled: false },
+        }),
+        kind: DAILY_KIND,
+        periodKey: "2026-03-20",
+        noticeCasesEnabled: false,
+        now: new Date(FIXED_NOW),
+      },
+      {
+        DigestDelivery: DigestDeliveryModel,
+        buildDigestSummary: async () => clone(makeDelivery().summary),
+        enqueueJob: async () => {
+          throw new Error("disabled email insert must not enqueue");
+        },
+      },
+    );
+
+    assert.equal(insertOperations.length, 1);
+    assert.deepEqual(insertOperations[0].options, {
+      upsert: true,
+      new: true,
+      setDefaultsOnInsert: true,
+    });
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(
+        insertOperations[0].update.$setOnInsert.email,
+        "attempts",
+      ),
+      true,
+    );
+    assert.equal(insertOperations[0].update.$setOnInsert.email.attempts, 0);
+    assert.equal(delivery.email.attempts, 0);
+  },
+);
+
+await check(
+  "BSON-missing email attempts normalize under full claim CAS then persist one",
+  async () => {
+    const delivery = makeDelivery();
+    delete delivery.email.attempts;
+    const harness = createProcessHarness({ delivery });
+
+    const result = await harness.run();
+    const stored = harness.store.get(IDS.deliveryA);
+    const claimOperation = harness.store.operations.find(
+      (operation) =>
+        operation.method === "findOneAndUpdate" &&
+        operation.update?.$set?.["email.state"] === "SENDING",
+    );
+    const normalization = harness.store.operations.find(
+      (operation) =>
+        operation.method === "updateOne" &&
+        operation.update?.$set?.["email.attempts"] === 0,
+    );
+    const sentWrite = harness.store.operations.find(
+      (operation) =>
+        operation.method === "updateOne" &&
+        operation.update?.$set?.["email.state"] === "SENT",
+    );
+
+    assert.deepEqual(result, {
+      outcome: "DIGEST_EMAIL_SENT",
+      deliveryId: IDS.deliveryA,
+    });
+    assert.equal(harness.providerCalls.length, 1);
+    assert.equal(stored.email.attempts, 1);
+    assert.equal(stored.email.state, "SENT");
+    assert.ok(normalization);
+    assertStrictObjectIdEquality(normalization.filter, "_id", IDS.deliveryA);
+    assertStrictObjectIdEquality(normalization.filter, "firmId", IDS.firm);
+    assertStrictObjectIdEquality(
+      normalization.filter,
+      "automationJobId",
+      IDS.jobA,
+    );
+    assertLiteralEquality(
+      normalization.filter,
+      "email.claimToken",
+      claimOperation.update.$set["email.claimToken"],
+    );
+    assertLiteralEquality(normalization.filter, "email.state", "SENDING");
+    assert.equal(
+      queryHasDirectCondition(
+        normalization.filter,
+        "email.attempts",
+        (condition) => condition?.$exists === false,
+      ),
+      true,
+    );
+    assert.deepEqual(normalization.update, {
+      $set: { "email.attempts": 0 },
+    });
+    assert.equal(sentWrite.update.$set["email.attempts"], 1);
+    assert.equal(sentWrite.update.$inc, undefined);
+    assert.equal(
+      harness.store.operations.some(
+        (operation) => operation.update?.$inc?.["email.attempts"] !== undefined,
+      ),
+      false,
+    );
+  },
+);
+
+await check(
+  "BSON-missing attempts normalization loses safely to a replacement claim",
+  async () => {
+    const delivery = makeDelivery();
+    delete delivery.email.attempts;
+    const harness = createProcessHarness({ delivery });
+    const persistUpdate = harness.store.model.updateOne;
+    let replacementInjected = false;
+    let normalizationFilter = null;
+    harness.store.model.updateOne = async (filter, update, options) => {
+      if (!replacementInjected && update?.$set?.["email.attempts"] === 0) {
+        replacementInjected = true;
+        normalizationFilter = clone(filter);
+        const replaced = await persistUpdate(filter, {
+          $set: { "email.claimToken": "replacement-missing-attempts-claim" },
+        });
+        assert.equal(replaced.matchedCount, 1);
+      }
+      return persistUpdate(filter, update, options);
+    };
+
+    const result = await harness.run();
+    const stored = harness.store.get(IDS.deliveryA);
+
+    assert.deepEqual(result, {
+      outcome: "DIGEST_CLAIM_LOST",
+      deliveryId: IDS.deliveryA,
+      defer: true,
+      reason: "Digest send claim changed before completion",
+      retryAfterMs: 30 * 1000,
+    });
+    assert.equal(replacementInjected, true);
+    assert.equal(harness.providerCalls.length, 0);
+    assert.equal(stored.email.state, "SENDING");
+    assert.equal(stored.email.claimToken, "replacement-missing-attempts-claim");
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(stored.email, "attempts"),
+      false,
+    );
+    assert.equal(
+      queryHasDirectCondition(
+        normalizationFilter,
+        "email.attempts",
+        (condition) => condition?.$exists === false,
+      ),
+      true,
+    );
+    assert.equal(
+      harness.store.operations.some(
+        (operation) => operation.update?.$inc?.["email.attempts"] !== undefined,
+      ),
+      false,
+    );
+  },
+);
+
+await check(
+  "legacy missing recovery revision acquires as zero and persists revision one",
+  async () => {
+    const delivery = makeDelivery({ automationJobId: null });
+    delete delivery.jobRecovery.revision;
+    const deliveryStore = createInMemoryDigestDelivery([delivery]);
+    const automationJobs = createInMemoryAutomationJob();
+    const enqueueCalls = [];
+
+    await enqueueRecipientDigest(
+      {
+        firm: makeFirm(),
+        recipient: makeUser(),
+        kind: DAILY_KIND,
+        periodKey: delivery.periodKey,
+        noticeCasesEnabled: false,
+        now: new Date(FIXED_NOW),
+      },
+      {
+        AutomationJob: automationJobs.model,
+        DigestDelivery: deliveryStore.model,
+        recoveryClock: () => new Date(FIXED_NOW),
+        enqueueJob: async (input) => {
+          enqueueCalls.push(clone(input));
+          const job = makeAutomationJob({
+            _id: IDS.jobA,
+            idempotencyKey: input.idempotencyKey,
+            payload: input.payload,
+          });
+          automationJobs.insert(job);
+          return clone(job);
+        },
+      },
+    );
+
+    const acquisition = deliveryStore.operations.find(
+      (operation) =>
+        operation.method === "findOneAndUpdate" &&
+        operation.update?.$set?.["jobRecovery.token"] &&
+        operation.update?.$set?.["jobRecovery.revision"] === 1,
+    );
+    const stored = deliveryStore.get(IDS.deliveryA);
+    assert.ok(acquisition);
+    assert.equal(
+      queryHasDirectCondition(
+        acquisition.filter,
+        "jobRecovery.revision",
+        (condition) => condition?.$exists === false,
+      ),
+      true,
+    );
+    assert.equal(acquisition.update.$set["jobRecovery.revision"], 1);
+    assert.equal(acquisition.update.$inc, undefined);
+    assert.equal(enqueueCalls.length, 1);
+    assertObjectIdEquals(stored.automationJobId, IDS.jobA);
+    assert.equal(stored.email.state, "PENDING");
+    assert.equal(stored.jobRecovery.revision, 1);
+    assert.equal(stored.jobRecovery.token, null);
+    assert.equal(stored.jobRecovery.expiresAt, null);
+    assert.equal(
+      deliveryStore.operations.some(
+        (operation) =>
+          operation.update?.$inc?.["jobRecovery.revision"] !== undefined,
+      ),
+      false,
+    );
+  },
+);
+
+await check(
+  "background delivery rechecks rollout and terminalizes before provider",
+  async () => {
+    const harness = createProcessHarness({ featureEnabled: [true, false] });
+
+    const result = await harness.run();
+    const stored = harness.store.get(IDS.deliveryA);
+
+    assert.deepEqual(result, {
+      outcome: "DIGEST_ROLLOUT_BLOCKED",
+      deliveryId: IDS.deliveryA,
+    });
+    assert.deepEqual(harness.featureCalls, [
+      { name: "dailyDigest", options: { fresh: true } },
+      { name: "dailyDigest", options: { fresh: true } },
+    ]);
+    assert.equal(harness.providerCalls.length, 0);
+    assert.equal(stored.status, "PARTIAL");
+    assert.equal(stored.email.state, "ROLLOUT_BLOCKED");
+    assert.equal(
+      stored.email.lastError,
+      "Feature rollout disabled before email delivery",
+    );
+    assert.equal(stored.email.claimToken, null);
+    assert.equal(stored.email.claimedAt, null);
+    assert.equal(stored.email.attempts, 0);
+    assert.equal(stored.inApp.state, "AVAILABLE");
+    assert.equal(
+      stored.inApp.availableAt.toISOString(),
+      FIXED_NOW.toISOString(),
+    );
+    assert.equal(stored.inApp.readAt, null);
+  },
+);
+
+await check(
+  "rollout terminal CAS cannot overwrite a replacement delivery claim",
+  async () => {
+    let harness;
+    let replacementWrites = 0;
+    harness = createProcessHarness({
+      featureEnabled: async ({ callCount }) => {
+        if (callCount === 1) return true;
+        const current = harness.store.get(IDS.deliveryA);
+        const replaced = await harness.store.model.updateOne(
+          {
+            _id: current._id,
+            firmId: current.firmId,
+            automationJobId: current.automationJobId,
+            "email.state": "SENDING",
+            "email.claimToken": current.email.claimToken,
+          },
+          { $set: { "email.claimToken": "replacement-rollout-claim" } },
+        );
+        replacementWrites += replaced.matchedCount;
+        return false;
+      },
+    });
+
+    const result = await harness.run();
+    const stored = harness.store.get(IDS.deliveryA);
+
+    assert.deepEqual(result, {
+      outcome: "DIGEST_CLAIM_LOST",
+      deliveryId: IDS.deliveryA,
+      defer: true,
+      reason: "Digest send claim changed before completion",
+      retryAfterMs: 30 * 1000,
+    });
+    assert.equal(replacementWrites, 1);
+    assert.equal(harness.featureCalls.length, 2);
+    assert.ok(
+      harness.featureCalls.every(
+        (call) => call.name === "dailyDigest" && call.options?.fresh === true,
+      ),
+    );
+    assert.equal(harness.providerCalls.length, 0);
+    assert.equal(stored.status, "QUEUED");
+    assert.equal(stored.email.state, "SENDING");
+    assert.equal(stored.email.claimToken, "replacement-rollout-claim");
+    assert.equal(stored.email.attempts, 0);
+    assert.equal(stored.inApp.state, "HIDDEN");
+  },
+);
+
+await check(
+  "interactive send-test rejects stale daily and weekly rollout flags",
+  async () => {
+    const cases = [
+      {
+        kind: DAILY_KIND,
+        periodKey: "2026-03-20",
+        flag: "dailyDigest",
+        code: "DAILY_DIGEST_DISABLED",
+        message: "Daily digest is unavailable",
+      },
+      {
+        kind: WEEKLY_KIND,
+        periodKey: "2026-03-16",
+        flag: "weeklySummary",
+        code: "WEEKLY_SUMMARY_DISABLED",
+        message: "Weekly summary is unavailable",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const cachedFlagCalls = [];
+      const actualFlagCalls = [];
+      const previewInputs = [];
+      const providerCalls = [];
+      await assert.rejects(
+        () =>
+          sendTestDigestNow(
+            {
+              userId: IDS.recipient,
+              firmId: IDS.firm,
+              role: "SUPER_ADMIN",
+              toEmail: "stale-caller@example.test",
+              kind: testCase.kind,
+              now: new Date(FIXED_NOW),
+            },
+            {
+              AppConfig: {
+                async getFeatureFlags() {
+                  cachedFlagCalls.push("cached");
+                  return {
+                    dailyDigest: true,
+                    weeklySummary: true,
+                    noticeCases: false,
+                  };
+                },
+                async isFeatureEnabled(name, options) {
+                  actualFlagCalls.push({ name, options: clone(options) });
+                  return false;
+                },
+              },
+              Firm: createLookupModel(makeFirm(), []),
+              FirmMembership: createLookupModel(
+                makeMembership({ role: "OWNER" }),
+                [],
+              ),
+              User: createLookupModel(
+                makeUser({ isActive: true, role: "SUPER_ADMIN" }),
+                [],
+              ),
+              previewDigest: async (input) => {
+                previewInputs.push(clone(input));
+                return {
+                  kind: testCase.kind,
+                  periodKey: testCase.periodKey,
+                  counts: { open: 1 },
+                };
+              },
+              sendDigestEmail: async (input) => {
+                providerCalls.push(clone(input));
+                return { data: { id: "must-not-send" } };
+              },
+            },
+          ),
+        (error) => {
+          assert.equal(error.status, 404, testCase.kind);
+          assert.equal(error.code, testCase.code, testCase.kind);
+          assert.equal(error.message, testCase.message, testCase.kind);
+          return true;
+        },
+      );
+
+      assert.deepEqual(cachedFlagCalls, ["cached"], testCase.kind);
+      assert.equal(previewInputs.length, 1, testCase.kind);
+      assert.equal(previewInputs[0].dailyEnabled, true, testCase.kind);
+      assert.equal(previewInputs[0].weeklyEnabled, true, testCase.kind);
+      assert.deepEqual(actualFlagCalls, [
+        { name: testCase.flag, options: { fresh: true } },
+      ]);
+      assert.equal(providerCalls.length, 0, testCase.kind);
+    }
+  },
+);
+
+await check(
+  "completeDigestStartup executes ordered phases and propagates failures",
+  async () => {
+    const serverSource = readFileSync(
+      new URL("../src/server.js", import.meta.url),
+      "utf8",
+    );
+    const match = serverSource.match(
+      /export (async function completeDigestStartup\([\s\S]*?\r?\n\})\r?\n\r?\n\/\/ Start listening/,
+    );
+    assert.ok(match, "completeDigestStartup source extraction failed");
+    const completeDigestStartup = Function(
+      `"use strict"; return (${match[1]});`,
+    )();
+
+    const order = [];
+    const completed = await completeDigestStartup({
+      assertIndexes: async () => order.push("indexes"),
+      drainRecovery: async () => order.push("drain"),
+      startSchedulers: async () => order.push("start"),
+      setReady: (ready) => order.push(`ready:${ready}`),
+      isShuttingDown: () => {
+        order.push("shutdown-check");
+        return false;
+      },
+    });
+    assert.equal(completed, true);
+    assert.deepEqual(order, [
+      "indexes",
+      "shutdown-check",
+      "drain",
+      "shutdown-check",
+      "start",
+      "ready:true",
+    ]);
+
+    const indexFailure = new Error("index phase failed");
+    const indexFailureEvents = [];
+    await assert.rejects(
+      () =>
+        completeDigestStartup({
+          assertIndexes: async () => {
+            indexFailureEvents.push("indexes");
+            throw indexFailure;
+          },
+          drainRecovery: async () => indexFailureEvents.push("drain"),
+          startSchedulers: async () => indexFailureEvents.push("start"),
+          setReady: () => indexFailureEvents.push("ready"),
+          isShuttingDown: () => false,
+        }),
+      (error) => error === indexFailure,
+    );
+    assert.deepEqual(indexFailureEvents, ["indexes"]);
+
+    const drainFailure = new Error("drain phase failed");
+    const drainFailureEvents = [];
+    await assert.rejects(
+      () =>
+        completeDigestStartup({
+          assertIndexes: async () => drainFailureEvents.push("indexes"),
+          drainRecovery: async () => {
+            drainFailureEvents.push("drain");
+            throw drainFailure;
+          },
+          startSchedulers: async () => drainFailureEvents.push("start"),
+          setReady: () => drainFailureEvents.push("ready"),
+          isShuttingDown: () => {
+            drainFailureEvents.push("shutdown-check");
+            return false;
+          },
+        }),
+      (error) => error === drainFailure,
+    );
+    assert.deepEqual(drainFailureEvents, [
+      "indexes",
+      "shutdown-check",
+      "drain",
+    ]);
+
+    for (const stopAfterCheck of [1, 2]) {
+      const shutdownEvents = [];
+      let shutdownChecks = 0;
+      const result = await completeDigestStartup({
+        assertIndexes: async () => shutdownEvents.push("indexes"),
+        drainRecovery: async () => shutdownEvents.push("drain"),
+        startSchedulers: async () => shutdownEvents.push("start"),
+        setReady: () => shutdownEvents.push("ready"),
+        isShuttingDown: () => {
+          shutdownChecks += 1;
+          shutdownEvents.push(`shutdown-${shutdownChecks}`);
+          return shutdownChecks === stopAfterCheck;
+        },
+      });
+      assert.equal(result, false, `shutdown check ${stopAfterCheck}`);
+      assert.equal(
+        shutdownEvents.includes("start"),
+        false,
+        `shutdown check ${stopAfterCheck}`,
+      );
+      assert.equal(
+        shutdownEvents.includes("ready"),
+        false,
+        `shutdown check ${stopAfterCheck}`,
+      );
+      assert.deepEqual(
+        shutdownEvents,
+        stopAfterCheck === 1
+          ? ["indexes", "shutdown-1"]
+          : ["indexes", "shutdown-1", "drain", "shutdown-2"],
+      );
+    }
+  },
+);
+
+await check(
+  "drainDigestRecovery completes a finite high-water set beyond 500",
+  async () => {
+    const rowsPerPass =
+      DIGEST_RECOVERY_BATCH_SIZE * DIGEST_RECOVERY_MAX_BATCHES;
+    const total = rowsPerPass + 50;
+    assert.ok(total > 500);
+    const deliveries = Array.from({ length: total }, (_, index) =>
+      makeRecoverableDelivery(index + 1, {
+        email: { state: "PENDING", claimToken: null, claimedAt: null },
+      }),
+    );
+    const deliveryStore = createInMemoryDigestDelivery(deliveries);
+    const recoveryCursor = createInMemoryDigestRecoveryCursor();
+    const recoveredPeriods = [];
+    const featureCalls = [];
+    let yieldCalls = 0;
+    const movingTailPeriod = `recovery-${String(total + 100).padStart(4, "0")}`;
+
+    const result = await drainDigestRecovery(
+      { now: new Date(FIXED_NOW) },
+      {
+        AppConfig: {
+          async isFeatureEnabled(name, options) {
+            featureCalls.push({ name, options: clone(options) });
+            return false;
+          },
+        },
+        DigestDelivery: deliveryStore.model,
+        DigestRecoveryCursor: recoveryCursor.model,
+        enqueueRecipientDigest: async ({ periodKey }) => {
+          recoveredPeriods.push(periodKey);
+          if (recoveredPeriods.length === 1) {
+            deliveryStore.insert(
+              makeRecoverableDelivery(total + 100, {
+                email: {
+                  state: "PENDING",
+                  claimToken: null,
+                  claimedAt: null,
+                },
+              }),
+            );
+          }
+        },
+        recoveryClock: () => new Date(FIXED_NOW),
+        reportRecoveryError: async () => {},
+        yieldControl: async () => {
+          yieldCalls += 1;
+        },
+      },
+    );
+
+    assert.deepEqual(result, {
+      completed: true,
+      passes: 2,
+      rowsProcessed: total,
+      rowFailures: [],
+    });
+    assert.equal(recoveredPeriods.length, total);
+    assert.equal(recoveredPeriods.includes(movingTailPeriod), false);
+    assert.equal(yieldCalls, 1);
+    assert.deepEqual(featureCalls, [
+      { name: "noticeCases", options: { fresh: true } },
+    ]);
+    assert.equal(recoveryCursor.get().afterId, null);
+    assert.equal(recoveryCursor.get().cycleEndId, null);
+    assert.equal(recoveryCursor.get().lease.token, null);
+  },
+);
+
+await check(
+  "drainDigestRecovery aggregates row failures through finite completion",
+  async () => {
+    const rowsPerPass =
+      DIGEST_RECOVERY_BATCH_SIZE * DIGEST_RECOVERY_MAX_BATCHES;
+    const total = rowsPerPass + 1;
+    const deliveryStore = createInMemoryDigestDelivery(
+      Array.from({ length: total }, (_, index) =>
+        makeRecoverableDelivery(index + 1, {
+          email: { state: "PENDING", claimToken: null, claimedAt: null },
+        }),
+      ),
+    );
+    const recoveryCursor = createInMemoryDigestRecoveryCursor();
+    const attemptedPeriods = [];
+    const reported = [];
+    let yieldCalls = 0;
+
+    await assert.rejects(
+      () =>
+        drainDigestRecovery(
+          { now: new Date(FIXED_NOW) },
+          {
+            AppConfig: {
+              async isFeatureEnabled() {
+                return false;
+              },
+            },
+            DigestDelivery: deliveryStore.model,
+            DigestRecoveryCursor: recoveryCursor.model,
+            enqueueRecipientDigest: async ({ periodKey }) => {
+              attemptedPeriods.push(periodKey);
+              if (periodKey === "recovery-0002") {
+                const error = new Error("row two failed");
+                error.code = "ROW_TWO_FAILED";
+                throw error;
+              }
+              if (periodKey === `recovery-${String(total).padStart(4, "0")}`) {
+                const error = new Error("last row failed");
+                error.code = "LAST_ROW_FAILED";
+                throw error;
+              }
+            },
+            recoveryClock: () => new Date(FIXED_NOW),
+            reportRecoveryError: async (entry) => {
+              reported.push(clone(entry));
+            },
+            yieldControl: async () => {
+              yieldCalls += 1;
+            },
+          },
+        ),
+      (error) => {
+        assert.equal(error.code, "DIGEST_RECOVERY_ROWS_FAILED");
+        assert.equal(error.passes, 2);
+        assert.equal(error.rowsProcessed, total);
+        assert.deepEqual(error.rowFailures, [
+          { deliveryId: orderedObjectId(2), code: "ROW_TWO_FAILED" },
+          {
+            deliveryId: orderedObjectId(total),
+            code: "LAST_ROW_FAILED",
+          },
+        ]);
+        return true;
+      },
+    );
+
+    assert.equal(attemptedPeriods.length, total);
+    assert.equal(yieldCalls, 1);
+    assert.deepEqual(reported, [
+      { code: "ROW_TWO_FAILED" },
+      { code: "LAST_ROW_FAILED" },
+    ]);
+    assert.equal(recoveryCursor.get().afterId, null);
+    assert.equal(recoveryCursor.get().cycleEndId, null);
+  },
+);
+
+await check(
+  "drainDigestRecovery rejects busy and lease-loss passes without completion",
+  async () => {
+    const cases = [
+      {
+        state: "busy",
+        flag: "busy",
+        code: "DIGEST_RECOVERY_BUSY",
+      },
+      {
+        state: "leaseLost",
+        flag: "leaseLost",
+        code: "DIGEST_RECOVERY_CURSOR_LEASE_LOST",
+      },
+    ];
+
+    for (const testCase of cases) {
+      let passCalls = 0;
+      let yieldCalls = 0;
+      await assert.rejects(
+        () =>
+          drainDigestRecovery(
+            { now: new Date(FIXED_NOW) },
+            {
+              AppConfig: {
+                async isFeatureEnabled() {
+                  return false;
+                },
+              },
+              reconcileRecoveryPass: async () => {
+                passCalls += 1;
+                return {
+                  state: testCase.state,
+                  [testCase.flag]: true,
+                  completed: true,
+                  rowsProcessed: 7,
+                  rowFailures: [],
+                };
+              },
+              yieldControl: async () => {
+                yieldCalls += 1;
+              },
+            },
+          ),
+        (error) => {
+          assert.equal(error.code, testCase.code, testCase.state);
+          assert.equal(error.passes, 1, testCase.state);
+          assert.equal(error.rowsProcessed, 7, testCase.state);
+          assert.equal(error.completed, undefined, testCase.state);
+          return true;
+        },
+      );
+      assert.equal(passCalls, 1, testCase.state);
+      assert.equal(yieldCalls, 0, testCase.state);
+    }
+  },
+);
+
+await check(
+  "provider attempts persist only through explicit set on success and failure",
+  async () => {
+    const successHarness = createProcessHarness();
+    const success = await successHarness.run();
+    const successWrite = successHarness.store.operations.find(
+      (operation) => operation.update?.$set?.["email.state"] === "SENT",
+    );
+    assert.equal(success.outcome, "DIGEST_EMAIL_SENT");
+    assert.equal(successHarness.providerCalls.length, 1);
+    assert.equal(successWrite.update.$set["email.attempts"], 1);
+    assert.equal(successWrite.update.$inc, undefined);
+    assert.equal(
+      successHarness.store.get(IDS.deliveryA).email.providerMessageId,
+      "provider-message-fixed",
+    );
+
+    const providerError = new Error("provider rejected digest");
+    const failureHarness = createProcessHarness({
+      provider: async () => {
+        throw providerError;
+      },
+    });
+    await assert.rejects(
+      () => failureHarness.run(),
+      (error) => error === providerError,
+    );
+    const failureWrite = failureHarness.store.operations.find(
+      (operation) => operation.update?.$set?.["email.state"] === "FAILED",
+    );
+    assert.equal(failureHarness.providerCalls.length, 1);
+    assert.equal(failureWrite.update.$set["email.attempts"], 1);
+    assert.equal(failureWrite.update.$inc, undefined);
+    assert.equal(failureHarness.store.get(IDS.deliveryA).email.attempts, 1);
+
+    for (const harness of [successHarness, failureHarness]) {
+      assert.equal(
+        harness.store.operations.some(
+          (operation) =>
+            operation.update?.$inc?.["email.attempts"] !== undefined,
+        ),
+        false,
       );
     }
   },
