@@ -49,8 +49,10 @@ if ($trackedStatus.Count -gt 0) {
     exit 1
 }
 
-$commit = (& git -C $RepoRoot rev-parse --verify "HEAD^{commit}" | Select-Object -First 1)
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commit)) {
+$commitOutput = @(& git -C $RepoRoot rev-parse --verify "HEAD^{commit}")
+$commitExit = $LASTEXITCODE
+$commit = $commitOutput | Select-Object -First 1
+if ($commitExit -ne 0 -or [string]::IsNullOrWhiteSpace($commit)) {
     Write-Output "REFUSED: unable to resolve the backend HEAD commit"
     exit 1
 }
