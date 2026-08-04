@@ -4,8 +4,10 @@
 # the live API. The build step on the server runs the install, so node_modules is excluded
 # deliberately rather than by oversight.
 #
+# Only tracked files from a clean HEAD are staged. Untracked campaign output, local previews,
+# and other developer artifacts must never become production inputs by existing beside the repo.
 # Secrets must never enter the archive. Environment values live in Hostinger environment
-# variables. This script refuses to produce an archive if any .env file slipped in.
+# variables. This script refuses to produce an archive if any secret-bearing file slipped in.
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File tools\make-deploy-archive.ps1
 
@@ -20,6 +22,23 @@ $ErrorActionPreference = "Stop"
 $excludedDirectories = @(".git", "node_modules", "dist", ".codescout", "coverage", "tools")
 $excludedFilePatterns = @("^\.env", "\.log$", "\.zip$")
 
+$trackedStatus = @(& git -C $RepoRoot status --porcelain --untracked-files=no)
+if ($LASTEXITCODE -ne 0) {
+    Write-Output "REFUSED: unable to verify the backend git worktree"
+    exit 1
+}
+if ($trackedStatus.Count -gt 0) {
+    Write-Output "REFUSED: tracked backend files differ from HEAD; commit or restore them first"
+    $trackedStatus | ForEach-Object { Write-Output ("  " + $_) }
+    exit 1
+}
+
+$trackedFiles = @(& git -C $RepoRoot ls-files --cached)
+if ($LASTEXITCODE -ne 0 -or $trackedFiles.Count -eq 0) {
+    Write-Output "REFUSED: unable to enumerate tracked backend files"
+    exit 1
+}
+
 $stamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
 $archivePath = Join-Path $OutputDirectory "capro-backend_$stamp.zip"
 $stagingPath = Join-Path $env:TEMP "capro-backend-stage-$stamp"
@@ -27,35 +46,51 @@ $stagingPath = Join-Path $env:TEMP "capro-backend-stage-$stamp"
 if (Test-Path $stagingPath) { Remove-Item $stagingPath -Recurse -Force }
 New-Item -ItemType Directory -Path $stagingPath | Out-Null
 
-$rootLength = (Resolve-Path $RepoRoot).Path.Length + 1
 $copied = 0
 $staged = New-Object System.Collections.Generic.List[object]
 
-Get-ChildItem -Path $RepoRoot -Recurse -File | ForEach-Object {
-    $relative = $_.FullName.Substring($rootLength)
-    $segments = $relative -split "\\"
-
-    foreach ($segment in $segments[0..($segments.Length - 2)]) {
-        if ($excludedDirectories -contains $segment) { return }
+foreach ($relative in $trackedFiles) {
+    if ([string]::IsNullOrWhiteSpace($relative)) { continue }
+    $segments = $relative -split "/"
+    $directorySegments = if ($segments.Length -gt 1) {
+        $segments[0..($segments.Length - 2)]
     }
+    else {
+        @()
+    }
+    $skip = $false
+    foreach ($segment in $directorySegments) {
+        if ($excludedDirectories -contains $segment) {
+            $skip = $true
+            break
+        }
+    }
+    if ($skip) { continue }
 
+    $fileName = $segments[-1]
     foreach ($pattern in $excludedFilePatterns) {
-        if ($_.Name -match $pattern) { return }
+        if ($fileName -match $pattern) {
+            $skip = $true
+            break
+        }
     }
+    if ($skip) { continue }
 
-    $destination = Join-Path $stagingPath $relative
+    $source = Join-Path $RepoRoot ($relative.Replace("/", "\"))
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        Remove-Item $stagingPath -Recurse -Force
+        Write-Output "REFUSED: tracked file is missing from the clean worktree: $relative"
+        exit 1
+    }
+    $destination = Join-Path $stagingPath ($relative.Replace("/", "\"))
     $destinationDirectory = Split-Path $destination -Parent
     if (-not (Test-Path $destinationDirectory)) {
         New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
     }
 
-    Copy-Item -LiteralPath $_.FullName -Destination $destination
-    $script:copied++
-
-    # The relative path is recorded here rather than recomputed from the staging root later.
-    # $env:TEMP can resolve to an 8.3 short path while Get-ChildItem returns the long form,
-    # and the resulting substring offset silently truncates every entry name in the archive.
-    $staged.Add([pscustomobject]@{ Source = $destination; Entry = $relative.Replace("\", "/") })
+    Copy-Item -LiteralPath $source -Destination $destination
+    $copied++
+    $staged.Add([pscustomobject]@{ Source = $destination; Entry = $relative })
 }
 
 # Refuse rather than warn. A secret in a deployment archive is not recoverable by deleting
