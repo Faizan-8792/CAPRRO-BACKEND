@@ -1,7 +1,13 @@
+import { randomUUID } from "node:crypto";
 import mongoose from "mongoose";
 import AppConfig from "../models/AppConfig.js";
-import DigestDelivery from "../models/DigestDelivery.js";
+import AutomationJob from "../models/AutomationJob.js";
+import DigestDelivery, {
+  DIGEST_RECOVERY_CURSOR_ID,
+  DigestRecoveryCursor,
+} from "../models/DigestDelivery.js";
 import Firm from "../models/Firm.js";
+import FirmMembership from "../models/FirmMembership.js";
 import Task from "../models/Task.js";
 import User from "../models/User.js";
 import { safeRecordActivity } from "./activity.service.js";
@@ -20,6 +26,13 @@ const OPEN_STATUSES = Object.freeze([
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 100;
 const FIRM_SCAN_BATCH = 200;
+// A send claim older than this is treated as dead and may be taken over. It is
+// deliberately longer than the automation job lease of 10 minutes, so a worker
+// that is merely slow does not lose its claim to a second worker.
+const SEND_CLAIM_STALE_MS = 15 * 60 * 1000;
+const DIGEST_JOB_RECOVERY_LEASE_MS = 2 * 60 * 1000;
+const DIGEST_RECOVERY_CURSOR_LEASE_MS = 2 * 60 * 1000;
+const DIGEST_AUTHORITY_DEFER_MS = 30 * 1000;
 
 class DigestError extends Error {
   constructor(message, status = 400, code = "DIGEST_INVALID") {
@@ -36,8 +49,154 @@ function safeError(error) {
     .slice(0, 500);
 }
 
+function canonicalObjectId(value) {
+  if (typeof value === "string") {
+    return /^[a-f\d]{24}$/i.test(value) ? value.toLowerCase() : null;
+  }
+  if (!(value instanceof mongoose.Types.ObjectId)) return null;
+  const canonical = value.toHexString();
+  return /^[a-f\d]{24}$/.test(canonical) ? canonical.toLowerCase() : null;
+}
+
 function validObjectId(value) {
-  return /^[a-f\d]{24}$/i.test(String(value || ""));
+  return canonicalObjectId(value) !== null;
+}
+
+function requireCanonicalObjectId(value, label = "ObjectId") {
+  const canonical = canonicalObjectId(value);
+  if (!canonical) throw new TypeError(`${label} must be a canonical ObjectId`);
+  return canonical;
+}
+
+function exactObjectIdClauses(fieldPath, value) {
+  const canonical = requireCanonicalObjectId(value, fieldPath);
+  return [
+    { $eq: [{ $type: `$${fieldPath}` }, "objectId"] },
+    {
+      $eq: [
+        `$${fieldPath}`,
+        { $literal: new mongoose.Types.ObjectId(canonical) },
+      ],
+    },
+  ];
+}
+
+function exactCanonicalObjectIdStringClauses(fieldPath, value) {
+  const canonical = requireCanonicalObjectId(value, fieldPath);
+  return [
+    { $eq: [{ $type: `$${fieldPath}` }, "string"] },
+    literalSnapshotClause(fieldPath, canonical),
+  ];
+}
+
+function literalSnapshotClause(fieldPath, value) {
+  if (value === undefined) {
+    return { $eq: [{ $type: `$${fieldPath}` }, "missing"] };
+  }
+  return { $eq: [`$${fieldPath}`, { $literal: value }] };
+}
+
+function expressionFilter(clauses) {
+  return { $expr: { $and: clauses } };
+}
+
+function strictObjectIdFilter(entries) {
+  const canonicalEntries = Object.fromEntries(
+    Object.entries(entries).map(([fieldPath, value]) => [
+      fieldPath,
+      new mongoose.Types.ObjectId(requireCanonicalObjectId(value, fieldPath)),
+    ]),
+  );
+  return {
+    $and: [
+      canonicalEntries,
+      expressionFilter(
+        Object.entries(entries).flatMap(([fieldPath, value]) =>
+          exactObjectIdClauses(fieldPath, value),
+        ),
+      ),
+    ],
+  };
+}
+
+function strictOptionalObjectIdSnapshotFilter(fieldPath, value) {
+  if (value === null || value === undefined) {
+    return snapshotFilter({ [fieldPath]: value });
+  }
+  return strictObjectIdFilter({ [fieldPath]: value });
+}
+
+function snapshotFilter(entries) {
+  return expressionFilter(
+    Object.entries(entries).map(([fieldPath, value]) =>
+      literalSnapshotClause(fieldPath, value),
+    ),
+  );
+}
+
+function strictStringFilter(entries) {
+  const clauses = Object.entries(entries).flatMap(([fieldPath, value]) => {
+    if (typeof value !== "string") {
+      throw new TypeError(`${fieldPath} must be a primitive string`);
+    }
+    return [
+      { $eq: [{ $type: `$${fieldPath}` }, "string"] },
+      literalSnapshotClause(fieldPath, value),
+    ];
+  });
+  return { $and: [entries, expressionFilter(clauses)] };
+}
+
+function combineQueryFilters(...filters) {
+  const present = filters.filter(Boolean);
+  if (present.length === 0) return {};
+  if (present.length === 1) return present[0];
+  return { $and: present };
+}
+
+function nonnegativeSafeInteger(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function normalizeDigestEmail(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized.length > 254 || /[\s\u0000-\u001f\u007f]/u.test(normalized)) {
+    return null;
+  }
+
+  const atIndex = normalized.indexOf("@");
+  if (atIndex <= 0 || atIndex !== normalized.lastIndexOf("@")) return null;
+  const localPart = normalized.slice(0, atIndex);
+  const domain = normalized.slice(atIndex + 1);
+  if (
+    localPart.length > 64 ||
+    localPart.startsWith(".") ||
+    localPart.endsWith(".") ||
+    localPart.includes("..") ||
+    !/^[a-z0-9.!#$%&'*+\/=?^_`{|}~-]+$/u.test(localPart)
+  ) {
+    return null;
+  }
+
+  const domainLabels = domain.split(".");
+  if (
+    domain.length > 253 ||
+    domainLabels.length < 2 ||
+    domainLabels.some(
+      (label) =>
+        label.length < 1 ||
+        label.length > 63 ||
+        label.startsWith("-") ||
+        label.endsWith("-") ||
+        !/^[a-z0-9-]+$/u.test(label),
+    )
+  ) {
+    return null;
+  }
+  return normalized;
 }
 
 const DAILY_FREQUENCIES = new Set(["DAILY", "EVERY_3_DAYS", "WEEKLY", "OFF"]);
@@ -61,11 +220,103 @@ function effectivePreferences(user) {
   };
 }
 
-// The weekly firm summary is for firm administrators. SUPER_ADMIN owns/operates
-// the firm and must be treated as an admin here too, otherwise the owner can
-// neither preview nor receive the weekly summary (it silently stays empty).
-function isFirmAdminRole(role) {
-  return role === "FIRM_ADMIN" || role === "SUPER_ADMIN";
+function hasWeeklyDigestAuthority({ membership, user }) {
+  return (
+    membership?.status === "ACTIVE" &&
+    (["OWNER", "ADMIN"].includes(membership.role) ||
+      user?.role === "SUPER_ADMIN")
+  );
+}
+
+function digestRecipientPolicy({ firm, recipientUserId, membership }) {
+  const hasActiveMembership = membership?.status === "ACTIVE";
+  if (!firm) {
+    return {
+      allowed: false,
+      reason: "ACTIVE_FIRM_REQUIRED",
+    };
+  }
+  if (firm.kind !== "PERSONAL") {
+    return {
+      allowed: hasActiveMembership,
+      reason: hasActiveMembership ? null : "ACTIVE_MEMBERSHIP_REQUIRED",
+    };
+  }
+  if (!sameObjectId(recipientUserId, firm.ownerUserId)) {
+    return {
+      allowed: false,
+      reason: "PERSONAL_OWNER_MISMATCH",
+      outcome: "DIGEST_PERSONAL_RECIPIENT_NOT_OWNER",
+      lastError: "Personal firm digest recipient is not the firm owner",
+    };
+  }
+  if (!hasActiveMembership || membership.role !== "OWNER") {
+    return {
+      allowed: false,
+      reason: "PERSONAL_OWNER_MEMBERSHIP_REQUIRED",
+      outcome: "DIGEST_PERSONAL_OWNER_AUTHORITY_REVOKED",
+      lastError: "Personal firm owner no longer has an active OWNER membership",
+    };
+  }
+  return { allowed: true, reason: null };
+}
+
+async function requireActiveDigestAccess(
+  { userId, firmId },
+  {
+    Firm: FirmModel = Firm,
+    FirmMembership: FirmMembershipModel = FirmMembership,
+    User: UserModel = User,
+  } = {},
+) {
+  const canonicalUserId = requireCanonicalObjectId(userId, "userId");
+  const canonicalFirmId = requireCanonicalObjectId(firmId, "firmId");
+  const [firm, membership, user] = await Promise.all([
+    FirmModel.findOne(
+      combineQueryFilters(strictObjectIdFilter({ _id: canonicalFirmId }), {
+        isActive: true,
+      }),
+    )
+      .select("kind ownerUserId timezone digestSettings")
+      .lean(),
+    FirmMembershipModel.findOne(
+      combineQueryFilters(
+        strictObjectIdFilter({
+          firmId: canonicalFirmId,
+          userId: canonicalUserId,
+        }),
+        { status: "ACTIVE" },
+      ),
+    )
+      .select("role status")
+      .lean(),
+    UserModel.findOne(
+      combineQueryFilters(strictObjectIdFilter({ _id: canonicalUserId }), {
+        isActive: true,
+      }),
+    )
+      .select("email role digestPreferences")
+      .lean(),
+  ]);
+  const recipientPolicy = digestRecipientPolicy({
+    firm,
+    recipientUserId: canonicalUserId,
+    membership,
+  });
+  if (!firm || !user || !recipientPolicy.allowed) {
+    throw new DigestError(
+      "Digest access is unavailable",
+      403,
+      "DIGEST_ACCESS_FORBIDDEN",
+    );
+  }
+
+  return {
+    firm,
+    user,
+    membership,
+    weeklyAuthorized: hasWeeklyDigestAuthority({ membership, user }),
+  };
 }
 
 function validTimezone(value) {
@@ -91,7 +342,7 @@ function zonedParts(now, timezone) {
     formatter
       .formatToParts(now)
       .filter((part) => part.type !== "literal")
-      .map((part) => [part.type, part.value])
+      .map((part) => [part.type, part.value]),
   );
   const weekday = {
     Sun: 0,
@@ -152,7 +403,7 @@ function zonedOffsetMilliseconds(instant, timezone) {
     formatter
       .formatToParts(instant)
       .filter((part) => part.type !== "literal")
-      .map((part) => [part.type, part.value])
+      .map((part) => [part.type, part.value]),
   );
   const representedUtc = Date.UTC(
     Number(parts.year),
@@ -160,7 +411,7 @@ function zonedOffsetMilliseconds(instant, timezone) {
     Number(parts.day),
     Number(parts.hour),
     Number(parts.minute),
-    Number(parts.second)
+    Number(parts.second),
   );
   return representedUtc - Math.floor(instant.getTime() / 1000) * 1000;
 }
@@ -212,7 +463,9 @@ function pagination(query = {}) {
     throw new DigestError("page must be an integer between 1 and 100000");
   }
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
-    throw new DigestError(`limit must be an integer between 1 and ${MAX_LIMIT}`);
+    throw new DigestError(
+      `limit must be an integer between 1 and ${MAX_LIMIT}`,
+    );
   }
   return { page, limit, skip: (page - 1) * limit };
 }
@@ -230,34 +483,37 @@ function pageMetadata(page, limit, total) {
 }
 
 function taskScope({ firmId, userId, kind, noticeCasesEnabled }) {
-  return {
-    firmId: new mongoose.Types.ObjectId(String(firmId)),
+  const identityFields = { firmId };
+  if (kind === DAILY_KIND) identityFields.assignedTo = userId;
+  return combineQueryFilters(strictObjectIdFilter(identityFields), {
     isActive: true,
-    ...(kind === DAILY_KIND
-      ? { assignedTo: new mongoose.Types.ObjectId(String(userId)) }
-      : {}),
     ...(noticeCasesEnabled ? {} : { source: { $ne: "CASE" } }),
-  };
+  });
 }
 
-async function buildDigestSummary({
-  firmId,
-  userId,
-  kind,
-  periodKey,
-  timezone,
-  noticeCasesEnabled,
-  now = new Date(),
-}) {
+async function buildDigestSummary(
+  {
+    firmId,
+    userId,
+    kind,
+    periodKey,
+    timezone,
+    noticeCasesEnabled,
+    now = new Date(),
+  },
+  { Task: TaskModel = Task } = {},
+) {
   if (!DIGEST_KINDS.has(kind)) throw new DigestError("Digest kind is invalid");
   const scope = taskScope({ firmId, userId, kind, noticeCasesEnabled });
-  const localTodayKey = zonedParts(now, timezone).dateKey;
-  const todayISO = `${localTodayKey}T00:00:00.000Z`;
-  const dueSoonISO = `${addDateKeyDays(localTodayKey, 8)}T00:00:00.000Z`;
+  // Deadlines are UTC days. Firm-local dates still govern digest scheduling
+  // and period identity, but must never shift a statutory due-day boundary.
+  const utcTodayKey = now.toISOString().slice(0, 10);
+  const todayISO = `${utcTodayKey}T00:00:00.000Z`;
+  const dueSoonISO = `${addDateKeyDays(utcTodayKey, 8)}T00:00:00.000Z`;
   const periodStart =
     kind === WEEKLY_KIND ? zonedDateKeyStart(periodKey, timezone) : null;
   const [countsRows, completedThisWeek, topTasks] = await Promise.all([
-    Task.aggregate([
+    TaskModel.aggregate([
       {
         $match: {
           ...scope,
@@ -315,13 +571,13 @@ async function buildDigestSummary({
       },
     ]),
     kind === WEEKLY_KIND
-      ? Task.countDocuments({
+      ? TaskModel.countDocuments({
           ...scope,
           status: { $in: ["FILED", "CLOSED"] },
           completedAt: { $gte: periodStart, $lte: now },
         })
       : 0,
-    Task.find({ ...scope, status: { $in: OPEN_STATUSES } })
+    TaskModel.find({ ...scope, status: { $in: OPEN_STATUSES } })
       .select("title clientName dueDateISO status")
       .sort({ dueDateISO: 1, _id: 1 })
       .limit(10)
@@ -385,9 +641,9 @@ function summaryLines(summary) {
     lines.push(
       { label: "Unassigned", value: counts.unassigned || 0 },
       {
-        label: "Filed/closed in last 7 days",
+        label: "Filed/closed this week",
         value: counts.completedThisWeek || 0,
-      }
+      },
     );
   }
   return lines;
@@ -405,23 +661,1300 @@ function digestEmailSuppressionReason(kind, recipient) {
   return null;
 }
 
-async function enqueueRecipientDigest({
-  firm,
-  recipient,
-  kind,
-  periodKey,
-  noticeCasesEnabled,
-  now,
+function digestBusinessIdentity({ firmId, kind, periodKey, recipientUserId }) {
+  const canonicalFirmId = requireCanonicalObjectId(firmId, "firmId");
+  const canonicalRecipientUserId = requireCanonicalObjectId(
+    recipientUserId,
+    "recipientUserId",
+  );
+  return `digest:${canonicalFirmId}:${String(kind)}:${String(periodKey)}:${canonicalRecipientUserId}`;
+}
+
+function digestSendingRecoveryReason(delivery, now = new Date()) {
+  if (delivery?.email?.state !== "SENDING") return null;
+
+  const claimToken = delivery.email?.claimToken;
+  if (
+    claimToken === null ||
+    claimToken === undefined ||
+    String(claimToken).trim() === ""
+  ) {
+    return "MISSING_CLAIM_TOKEN";
+  }
+
+  const claimedAt = delivery.email?.claimedAt;
+  if (claimedAt === null || claimedAt === undefined) {
+    return "MISSING_CLAIM_TIME";
+  }
+
+  const nowMs = new Date(now).getTime();
+  if (!Number.isFinite(nowMs)) {
+    throw new TypeError("Digest recovery requires a valid current time");
+  }
+  const claimedAtMs = new Date(claimedAt).getTime();
+  if (!Number.isFinite(claimedAtMs)) return "INVALID_CLAIM_TIME";
+  return claimedAtMs < nowMs - SEND_CLAIM_STALE_MS ? "STALE_CLAIM" : null;
+}
+
+function updateProvesMatch(result) {
+  return (
+    typeof result?.matchedCount === "number" &&
+    Number.isSafeInteger(result.matchedCount) &&
+    result.matchedCount > 0
+  );
+}
+
+async function claimDigestDelivery({
+  deliveryId,
+  firmId,
+  automationJobId,
+  now = new Date(),
+  claimToken = randomUUID(),
+  deliveryModel = DigestDelivery,
 }) {
-  const existing = await DigestDelivery.findOne({
+  const nowMs = new Date(now).getTime();
+  if (!Number.isFinite(nowMs)) {
+    throw new TypeError("Digest claim requires a valid current time");
+  }
+  const identityFilter = strictObjectIdFilter({
+    _id: deliveryId,
+    firmId,
+    automationJobId,
+  });
+  const claimedAt = new Date(nowMs);
+  const staleBefore = new Date(nowMs - SEND_CLAIM_STALE_MS);
+  const delivery = await deliveryModel.findOneAndUpdate(
+    combineQueryFilters(identityFilter, {
+      $or: [
+        { "email.state": "PENDING" },
+        {
+          "email.state": "SENDING",
+          $or: [
+            { "email.claimToken": null },
+            { "email.claimToken": "" },
+            { "email.claimToken": { $exists: false } },
+            { "email.claimedAt": { $lt: staleBefore } },
+            { "email.claimedAt": null },
+            { "email.claimedAt": { $exists: false } },
+            { "email.claimedAt": { $not: { $type: "date" } } },
+          ],
+        },
+      ],
+    }),
+    {
+      $set: {
+        "email.state": "SENDING",
+        "email.claimToken": claimToken,
+        "email.claimedAt": claimedAt,
+      },
+    },
+    { new: true, lean: true },
+  );
+  return delivery ? { delivery, claimToken } : null;
+}
+
+const ACTIVE_DIGEST_JOB_STATUSES = new Set([
+  "PENDING",
+  "PROCESSING",
+  "RETRY_SCHEDULED",
+]);
+const REPAIRABLE_DIGEST_JOB_STATUSES = Object.freeze([
+  "PENDING",
+  "RETRY_SCHEDULED",
+]);
+const RECOVERABLE_SENDING_REPAIRABLE_DIGEST_JOB_STATUSES = Object.freeze([
+  ...REPAIRABLE_DIGEST_JOB_STATUSES,
+  "FAILED",
+]);
+
+function isActiveDigestJob(job) {
+  return ACTIVE_DIGEST_JOB_STATUSES.has(job?.status);
+}
+
+function withDigestRecoverySession(query, session) {
+  if (session && query && typeof query.session === "function") {
+    return query.session(session);
+  }
+  return query;
+}
+
+async function findDigestJob(
+  AutomationJobModel,
+  filter,
+  { session = null } = {},
+) {
+  let query = withDigestRecoverySession(
+    AutomationJobModel.findOne(filter),
+    session,
+  );
+  if (query && typeof query.lean === "function") query = query.lean();
+  return query;
+}
+
+function sameObjectId(left, right) {
+  const canonicalLeft = canonicalObjectId(left);
+  const canonicalRight = canonicalObjectId(right);
+  return (
+    canonicalLeft !== null &&
+    canonicalRight !== null &&
+    canonicalLeft === canonicalRight
+  );
+}
+
+function digestJobPayloadFilter(deliveryId) {
+  return {
+    $expr: {
+      $or: [
+        {
+          $and: exactCanonicalObjectIdStringClauses(
+            "payload.deliveryId",
+            deliveryId,
+          ),
+        },
+        {
+          $and: exactObjectIdClauses("payload.deliveryId", deliveryId),
+        },
+      ],
+    },
+  };
+}
+
+async function findDigestDelivery(
+  DigestDeliveryModel,
+  filter,
+  { session = null } = {},
+) {
+  let query = withDigestRecoverySession(
+    DigestDeliveryModel.findOne(filter),
+    session,
+  );
+  if (query && typeof query.lean === "function") query = query.lean();
+  return query;
+}
+
+function jobRecoveryLeaseFilter(lease) {
+  return snapshotFilter({
+    "jobRecovery.token": lease.token,
+    "jobRecovery.revision": lease.revision,
+  });
+}
+
+function currentJobRecoveryLeaseFilter(lease, now) {
+  return combineQueryFilters(jobRecoveryLeaseFilter(lease), {
+    "jobRecovery.expiresAt": { $gt: now },
+  });
+}
+
+function jobRecoveryLeaseExpiry(now) {
+  return new Date(new Date(now).getTime() + DIGEST_JOB_RECOVERY_LEASE_MS);
+}
+
+function recoverableSendingStateFilter(now) {
+  const nowMs = new Date(now).getTime();
+  if (!Number.isFinite(nowMs)) {
+    throw new TypeError("Digest recovery requires a valid current time");
+  }
+  const staleBefore = new Date(nowMs - SEND_CLAIM_STALE_MS);
+  return {
+    "email.state": "SENDING",
+    $or: [
+      { "email.claimToken": null },
+      { "email.claimToken": "" },
+      { "email.claimToken": { $exists: false } },
+      { "email.claimedAt": { $lt: staleBefore } },
+      { "email.claimedAt": null },
+      { "email.claimedAt": { $exists: false } },
+      { "email.claimedAt": { $not: { $type: "date" } } },
+    ],
+  };
+}
+
+function digestJobRecoveryPolicy(delivery, now) {
+  if (delivery?.email?.state === "PENDING") {
+    return { state: "PENDING", allowFailedRetry: false, reason: null };
+  }
+  const reason = digestSendingRecoveryReason(delivery, now);
+  return reason
+    ? { state: "RECOVERABLE_SENDING", allowFailedRetry: true, reason }
+    : null;
+}
+
+function digestEmailSnapshotFilter(delivery) {
+  return snapshotFilter({
+    "email.state": delivery.email?.state,
+    "email.claimToken": delivery.email?.claimToken,
+    "email.claimedAt": delivery.email?.claimedAt,
+  });
+}
+
+function digestRecoverySnapshotFilter(delivery, now) {
+  const policy = digestJobRecoveryPolicy(delivery, now);
+  if (!policy) return null;
+  const emailSnapshot = digestEmailSnapshotFilter(delivery);
+  if (policy.state === "PENDING") return emailSnapshot;
+  return combineQueryFilters(recoverableSendingStateFilter(now), emailSnapshot);
+}
+
+function digestRecoveryEligibleStateFilter(now) {
+  const recoverableSending = recoverableSendingStateFilter(now);
+  return {
+    $or: [{ "email.state": "PENDING" }, recoverableSending],
+  };
+}
+
+function digestTerminalQuarantineFields(
+  lastError,
+  { clearRecovery = true } = {},
+) {
+  return {
+    status: "FAILED",
+    "email.state": "FAILED",
+    "email.lastError": String(lastError).slice(0, 500),
+    "email.claimToken": null,
+    "email.claimedAt": null,
+    "inApp.state": "HIDDEN",
+    "inApp.availableAt": null,
+    "inApp.readAt": null,
+    ...(clearRecovery
+      ? {
+          "jobRecovery.token": null,
+          "jobRecovery.expiresAt": null,
+        }
+      : {}),
+  };
+}
+
+async function acquireDigestJobRecoveryLease({
+  deliveryId,
+  firmId,
+  now,
+  DigestDeliveryModel,
+  token = randomUUID(),
+}) {
+  const identityFilter = strictObjectIdFilter({ _id: deliveryId, firmId });
+  const current = await findDigestDelivery(
+    DigestDeliveryModel,
+    combineQueryFilters(identityFilter, digestRecoveryEligibleStateFilter(now)),
+  );
+  if (!current) return null;
+
+  const rawRevision = current.jobRecovery?.revision;
+  const revisionIsMissing = rawRevision === undefined;
+  const revision = revisionIsMissing ? 0 : nonnegativeSafeInteger(rawRevision);
+  if (revision === null || revision === Number.MAX_SAFE_INTEGER) {
+    const quarantined = await DigestDeliveryModel.updateOne(
+      combineQueryFilters(
+        identityFilter,
+        digestRecoveryEligibleStateFilter(now),
+        digestEmailSnapshotFilter(current),
+        snapshotFilter({ "jobRecovery.revision": rawRevision }),
+      ),
+      {
+        $set: digestTerminalQuarantineFields(
+          "Digest recovery revision is invalid",
+        ),
+      },
+    );
+    if (!updateProvesMatch(quarantined)) return null;
+    return null;
+  }
+
+  const revisionFilter = revisionIsMissing
+    ? { "jobRecovery.revision": { $exists: false } }
+    : snapshotFilter({ "jobRecovery.revision": rawRevision });
+  const nextRevision = revision + 1;
+  const locked = await DigestDeliveryModel.findOneAndUpdate(
+    combineQueryFilters(
+      identityFilter,
+      digestRecoveryEligibleStateFilter(now),
+      digestEmailSnapshotFilter(current),
+      revisionFilter,
+      {
+        $or: [
+          { "jobRecovery.token": null },
+          { "jobRecovery.token": "" },
+          { "jobRecovery.token": { $exists: false } },
+          { "jobRecovery.expiresAt": { $lte: now } },
+          { "jobRecovery.expiresAt": null },
+          { "jobRecovery.expiresAt": { $exists: false } },
+          { "jobRecovery.expiresAt": { $not: { $type: "date" } } },
+        ],
+      },
+    ),
+    {
+      $set: {
+        "jobRecovery.token": token,
+        "jobRecovery.expiresAt": jobRecoveryLeaseExpiry(now),
+        "jobRecovery.revision": nextRevision,
+      },
+    },
+    { new: true, lean: true },
+  );
+  if (!locked) return null;
+
+  const lockedRevision = nonnegativeSafeInteger(locked.jobRecovery?.revision);
+  if (lockedRevision !== nextRevision) {
+    const quarantined = await DigestDeliveryModel.updateOne(
+      combineQueryFilters(
+        identityFilter,
+        digestEmailSnapshotFilter(locked),
+        snapshotFilter({
+          "jobRecovery.token": token,
+          "jobRecovery.revision": locked.jobRecovery?.revision,
+        }),
+      ),
+      {
+        $set: digestTerminalQuarantineFields(
+          "Digest recovery revision is invalid",
+        ),
+      },
+    );
+    if (!updateProvesMatch(quarantined)) return null;
+    return null;
+  }
+  return { delivery: locked, token, revision: nextRevision };
+}
+
+async function releaseDigestJobRecoveryLease({ lease, DigestDeliveryModel }) {
+  const result = await DigestDeliveryModel.updateOne(
+    combineQueryFilters(
+      strictObjectIdFilter({
+        _id: lease.delivery._id,
+        firmId: lease.delivery.firmId,
+      }),
+      jobRecoveryLeaseFilter(lease),
+    ),
+    {
+      $set: {
+        "jobRecovery.token": null,
+        "jobRecovery.expiresAt": null,
+      },
+    },
+  );
+  return updateProvesMatch(result);
+}
+
+async function readDigestAuthority({
+  deliveryId,
+  firmId,
+  AutomationJobModel,
+  DigestDeliveryModel,
+}) {
+  const currentDelivery = await findDigestDelivery(
+    DigestDeliveryModel,
+    strictObjectIdFilter({ _id: deliveryId, firmId }),
+  );
+  if (!canonicalObjectId(currentDelivery?.automationJobId)) {
+    return { delivery: currentDelivery, job: null };
+  }
+  const job = await findDigestJob(
+    AutomationJobModel,
+    combineQueryFilters(
+      strictObjectIdFilter({
+        _id: currentDelivery.automationJobId,
+        firmId,
+      }),
+      strictStringFilter({ kind: DIGEST_JOB_KIND }),
+      digestJobPayloadFilter(currentDelivery._id),
+    ),
+  );
+  return { delivery: currentDelivery, job };
+}
+
+async function loadDigestJobCandidates({
+  delivery,
+  firmId,
+  businessIdentity,
+  AutomationJobModel,
+}) {
+  const payloadFilter = digestJobPayloadFilter(delivery._id);
+  const canonicalLinkedJobId = canonicalObjectId(delivery.automationJobId);
+  if (canonicalLinkedJobId) {
+    const linkedJob = await findDigestJob(
+      AutomationJobModel,
+      combineQueryFilters(
+        strictObjectIdFilter({
+          _id: canonicalLinkedJobId,
+          firmId,
+        }),
+        strictStringFilter({ kind: DIGEST_JOB_KIND }),
+        payloadFilter,
+      ),
+    );
+    if (linkedJob) return linkedJob;
+  }
+
+  const legacyIdentity = `digest-delivery:${requireCanonicalObjectId(
+    delivery._id,
+    "deliveryId",
+  )}`;
+  const [legacyJob, businessJob] = await Promise.all([
+    findDigestJob(
+      AutomationJobModel,
+      combineQueryFilters(
+        strictObjectIdFilter({ firmId }),
+        strictStringFilter({
+          kind: DIGEST_JOB_KIND,
+          idempotencyKey: legacyIdentity,
+        }),
+        payloadFilter,
+      ),
+    ),
+    findDigestJob(
+      AutomationJobModel,
+      combineQueryFilters(
+        strictObjectIdFilter({ firmId }),
+        strictStringFilter({
+          kind: DIGEST_JOB_KIND,
+          idempotencyKey: businessIdentity,
+        }),
+        payloadFilter,
+      ),
+    ),
+  ]);
+  return (
+    [legacyJob, businessJob].find(isActiveDigestJob) ||
+    legacyJob ||
+    businessJob ||
+    null
+  );
+}
+
+function sameBusinessDigestJobFilter(firmId, businessIdentity) {
+  return combineQueryFilters(
+    strictObjectIdFilter({ firmId }),
+    strictStringFilter({
+      kind: DIGEST_JOB_KIND,
+      idempotencyKey: businessIdentity,
+    }),
+  );
+}
+
+function canonicalDigestPayloadDeliveryId(value) {
+  const canonical = canonicalObjectId(value);
+  if (canonical === null) return null;
+  if (value instanceof mongoose.Types.ObjectId) return canonical;
+  return typeof value === "string" && value === canonical ? canonical : null;
+}
+
+function digestJobPayloadMatches(job, deliveryId) {
+  const canonicalDeliveryId = canonicalObjectId(deliveryId);
+  const canonicalPayloadDeliveryId = canonicalDigestPayloadDeliveryId(
+    job?.payload?.deliveryId,
+  );
+  return (
+    canonicalDeliveryId !== null &&
+    canonicalPayloadDeliveryId !== null &&
+    canonicalPayloadDeliveryId === canonicalDeliveryId
+  );
+}
+
+async function repairDigestJobPayloadUnderLease({
+  lease,
+  firmId,
+  businessIdentity,
+  observedJob,
+  recoveryClock,
+  AutomationJobModel,
+  DigestDeliveryModel,
+  runRecoveryTransactionProvider,
+}) {
+  const result = await runRecoveryTransactionProvider(async (session) => {
+    if (!session) {
+      throw new TypeError("Digest recovery transaction requires a session");
+    }
+    const transactionNow = digestRecoveryClockNow(recoveryClock);
+    const deliveryFence = combineQueryFilters(
+      strictObjectIdFilter({ _id: lease.delivery._id, firmId }),
+      currentJobRecoveryLeaseFilter(lease, transactionNow),
+      digestRecoveryEligibleStateFilter(transactionNow),
+      digestEmailSnapshotFilter(lease.delivery),
+      strictOptionalObjectIdSnapshotFilter(
+        "automationJobId",
+        lease.delivery.automationJobId,
+      ),
+    );
+    const currentDelivery = await findDigestDelivery(
+      DigestDeliveryModel,
+      deliveryFence,
+      { session },
+    );
+    if (!currentDelivery) throw digestRecoveryFenceLostError();
+    const currentPolicy = digestJobRecoveryPolicy(
+      currentDelivery,
+      transactionNow,
+    );
+    if (!currentPolicy) throw digestRecoveryFenceLostError();
+    const repairableStatuses = currentPolicy.allowFailedRetry
+      ? RECOVERABLE_SENDING_REPAIRABLE_DIGEST_JOB_STATUSES
+      : REPAIRABLE_DIGEST_JOB_STATUSES;
+
+    const observedJobId = canonicalObjectId(observedJob?._id);
+    let currentJob = null;
+    if (observedJobId) {
+      currentJob = await findDigestJob(
+        AutomationJobModel,
+        combineQueryFilters(
+          strictObjectIdFilter({ _id: observedJobId, firmId }),
+          strictStringFilter({
+            kind: DIGEST_JOB_KIND,
+            idempotencyKey: businessIdentity,
+          }),
+          snapshotFilter({
+            status: observedJob.status,
+            "payload.deliveryId": observedJob.payload?.deliveryId,
+          }),
+        ),
+        { session },
+      );
+    }
+
+    if (!currentJob) {
+      const reread = await findDigestJob(
+        AutomationJobModel,
+        sameBusinessDigestJobFilter(firmId, businessIdentity),
+        { session },
+      );
+      if (
+        canonicalObjectId(reread?._id) &&
+        digestJobPayloadMatches(reread, currentDelivery._id)
+      ) {
+        return { observedSameKey: true, job: reread };
+      }
+      if (reread) {
+        const terminalized = await DigestDeliveryModel.updateOne(
+          deliveryFence,
+          {
+            $set: digestTerminalQuarantineFields(
+              "Digest automation job payload could not be safely repaired",
+              { clearRecovery: false },
+            ),
+          },
+          { session },
+        );
+        if (!updateProvesMatch(terminalized)) {
+          throw digestRecoveryFenceLostError();
+        }
+        return { observedSameKey: true, job: null, terminalized: true };
+      }
+      return { observedSameKey: true, job: null };
+    }
+
+    const currentDeliveryId = requireCanonicalObjectId(
+      currentDelivery._id,
+      "deliveryId",
+    );
+    const currentDeliveryObjectId = new mongoose.Types.ObjectId(
+      currentDeliveryId,
+    );
+    const otherJobOwner = await findDigestDelivery(
+      DigestDeliveryModel,
+      expressionFilter([
+        ...exactObjectIdClauses("automationJobId", currentJob._id),
+        { $eq: [{ $type: "$_id" }, "objectId"] },
+        { $ne: ["$_id", { $literal: currentDeliveryObjectId }] },
+      ]),
+      { session },
+    );
+    const rawPayloadDeliveryId = currentJob.payload?.deliveryId;
+    const payloadTargetId =
+      canonicalDigestPayloadDeliveryId(rawPayloadDeliveryId);
+    const payloadIsCanonicalScalar = payloadTargetId !== null;
+    const otherPayloadTarget =
+      payloadIsCanonicalScalar && payloadTargetId !== currentDeliveryId
+        ? await findDigestDelivery(
+            DigestDeliveryModel,
+            strictObjectIdFilter({ _id: payloadTargetId }),
+            { session },
+          )
+        : null;
+    const immutableOrOwned =
+      !repairableStatuses.includes(currentJob.status) ||
+      !payloadIsCanonicalScalar ||
+      Boolean(otherJobOwner) ||
+      Boolean(otherPayloadTarget);
+
+    if (immutableOrOwned) {
+      const terminalized = await DigestDeliveryModel.updateOne(
+        deliveryFence,
+        {
+          $set: digestTerminalQuarantineFields(
+            "Digest automation job payload conflicts with another delivery",
+            { clearRecovery: false },
+          ),
+        },
+        { session },
+      );
+      if (!updateProvesMatch(terminalized)) {
+        throw digestRecoveryFenceLostError();
+      }
+      return { observedSameKey: true, job: null, terminalized: true };
+    }
+
+    const repaired = await AutomationJobModel.updateOne(
+      combineQueryFilters(
+        strictObjectIdFilter({ _id: currentJob._id, firmId }),
+        strictStringFilter({
+          kind: DIGEST_JOB_KIND,
+          idempotencyKey: businessIdentity,
+          status: currentJob.status,
+        }),
+        snapshotFilter({
+          "payload.deliveryId": currentJob.payload?.deliveryId,
+        }),
+        { status: { $in: repairableStatuses } },
+      ),
+      { $set: { "payload.deliveryId": currentDeliveryId } },
+      { session },
+    );
+    const reread = await findDigestJob(
+      AutomationJobModel,
+      sameBusinessDigestJobFilter(firmId, businessIdentity),
+      { session },
+    );
+    const rereadIsUsable =
+      canonicalObjectId(reread?._id) &&
+      digestJobPayloadMatches(reread, currentDelivery._id);
+    if (rereadIsUsable) {
+      return { observedSameKey: true, job: reread };
+    }
+    if (reread) {
+      const terminalized = await DigestDeliveryModel.updateOne(
+        deliveryFence,
+        {
+          $set: digestTerminalQuarantineFields(
+            updateProvesMatch(repaired)
+              ? "Digest automation job payload repair was not durable"
+              : "Digest automation job payload repair lost its fence",
+            { clearRecovery: false },
+          ),
+        },
+        { session },
+      );
+      if (!updateProvesMatch(terminalized)) {
+        throw digestRecoveryFenceLostError();
+      }
+      return { observedSameKey: true, job: null, terminalized: true };
+    }
+    return { observedSameKey: true, job: null };
+  });
+  if (result?.terminalized) {
+    lease.delivery.status = "FAILED";
+    lease.delivery.email = {
+      ...lease.delivery.email,
+      state: "FAILED",
+      claimToken: null,
+      claimedAt: null,
+    };
+  }
+  return result;
+}
+
+async function ensureDigestJobExists({
+  lease,
+  firmId,
+  recipientUserId,
+  periodKey,
+  businessIdentity,
+  recoveryClock,
+  AutomationJobModel,
+  DigestDeliveryModel,
+  enqueueJobProvider,
+  runRecoveryTransactionProvider,
+}) {
+  const existingJob = await loadDigestJobCandidates({
+    delivery: lease.delivery,
+    firmId,
+    businessIdentity,
+    AutomationJobModel,
+  });
+  if (existingJob) return existingJob;
+
+  const sameBusinessJob = await findDigestJob(
+    AutomationJobModel,
+    sameBusinessDigestJobFilter(firmId, businessIdentity),
+  );
+  if (sameBusinessJob) {
+    if (
+      canonicalObjectId(sameBusinessJob._id) &&
+      digestJobPayloadMatches(sameBusinessJob, lease.delivery._id)
+    ) {
+      return sameBusinessJob;
+    }
+    const repairResult = await repairDigestJobPayloadUnderLease({
+      lease,
+      firmId,
+      businessIdentity,
+      observedJob: sameBusinessJob,
+      recoveryClock,
+      AutomationJobModel,
+      DigestDeliveryModel,
+      runRecoveryTransactionProvider,
+    });
+    return repairResult?.job || null;
+  }
+
+  let enqueuedJob = null;
+  try {
+    enqueuedJob = await enqueueJobProvider({
+      firmId,
+      kind: DIGEST_JOB_KIND,
+      idempotencyKey: businessIdentity,
+      payload: {
+        deliveryId: requireCanonicalObjectId(lease.delivery._id, "deliveryId"),
+      },
+      createdBy: requireCanonicalObjectId(recipientUserId, "recipientUserId"),
+      requestId: `digest-scheduler:${periodKey}`,
+      maxAttempts: 5,
+    });
+  } catch (error) {
+    if (error?.code !== 11000) throw error;
+  }
+
+  const hintedJob =
+    canonicalObjectId(enqueuedJob?._id) !== null
+      ? await findDigestJob(
+          AutomationJobModel,
+          combineQueryFilters(
+            strictObjectIdFilter({ _id: enqueuedJob._id, firmId }),
+            strictStringFilter({
+              kind: DIGEST_JOB_KIND,
+              idempotencyKey: businessIdentity,
+            }),
+            digestJobPayloadFilter(lease.delivery._id),
+          ),
+        )
+      : null;
+  if (hintedJob) return hintedJob;
+
+  const postEnqueueSameBusinessJob = await findDigestJob(
+    AutomationJobModel,
+    sameBusinessDigestJobFilter(firmId, businessIdentity),
+  );
+  if (
+    canonicalObjectId(postEnqueueSameBusinessJob?._id) &&
+    digestJobPayloadMatches(postEnqueueSameBusinessJob, lease.delivery._id)
+  ) {
+    return postEnqueueSameBusinessJob;
+  }
+  const repairResult = await repairDigestJobPayloadUnderLease({
+    lease,
+    firmId,
+    businessIdentity,
+    observedJob: postEnqueueSameBusinessJob,
+    recoveryClock,
+    AutomationJobModel,
+    DigestDeliveryModel,
+    runRecoveryTransactionProvider,
+  });
+  return repairResult?.job || null;
+}
+
+async function setDigestJobAuthorityUnderLease({
+  lease,
+  firmId,
+  job,
+  recoveryClock,
+  DigestDeliveryModel,
+}) {
+  if (!job?._id) return null;
+  const authorityNow = digestRecoveryClockNow(recoveryClock);
+  const policy = digestJobRecoveryPolicy(lease.delivery, authorityNow);
+  const eligibilityFilter = digestRecoverySnapshotFilter(
+    lease.delivery,
+    authorityNow,
+  );
+  if (!policy || !eligibilityFilter) return null;
+
+  const nextExpiry = jobRecoveryLeaseExpiry(authorityNow);
+  const result = await DigestDeliveryModel.updateOne(
+    combineQueryFilters(
+      strictObjectIdFilter({ _id: lease.delivery._id, firmId }),
+      strictOptionalObjectIdSnapshotFilter(
+        "automationJobId",
+        lease.delivery.automationJobId,
+      ),
+      currentJobRecoveryLeaseFilter(lease, authorityNow),
+      eligibilityFilter,
+    ),
+    {
+      $set: {
+        automationJobId: job._id,
+        "jobRecovery.expiresAt": nextExpiry,
+      },
+    },
+  );
+  if (!updateProvesMatch(result)) return null;
+
+  lease.delivery.automationJobId = job._id;
+  lease.delivery.jobRecovery.expiresAt = nextExpiry;
+  return policy;
+}
+
+function defaultRunRecoveryTransaction(work) {
+  return mongoose.connection.transaction(async (session) => work(session));
+}
+
+function defaultRunSettingsTransaction(work) {
+  return mongoose.connection.transaction(async (session) => work(session));
+}
+
+function digestRecoveryFenceLostError() {
+  const error = new Error("Digest recovery transaction lost its target fence");
+  error.code = "DIGEST_RECOVERY_JOB_FENCE_LOST";
+  return error;
+}
+
+const DIGEST_JOB_ATTEMPT_HARD_CAP = 100000;
+
+function normalizeDigestRetryCounter(value) {
+  return typeof value === "number" &&
+    Number.isFinite(value) &&
+    Number.isInteger(value) &&
+    value >= 0
+    ? value
+    : null;
+}
+
+function digestJobReactivationPlan(job, policy) {
+  if (
+    job?.status !== "FAILED" ||
+    typeof job.idempotencyKey !== "string" ||
+    policy?.state !== "RECOVERABLE_SENDING"
+  ) {
+    return null;
+  }
+
+  const attemptCount = normalizeDigestRetryCounter(job.attemptCount);
+  const normalizedMaxAttempts = normalizeDigestRetryCounter(job.maxAttempts);
+  if (
+    attemptCount === null ||
+    normalizedMaxAttempts === null ||
+    attemptCount >= DIGEST_JOB_ATTEMPT_HARD_CAP
+  ) {
+    return null;
+  }
+
+  const cappedMaxAttempts = Math.min(
+    normalizedMaxAttempts,
+    DIGEST_JOB_ATTEMPT_HARD_CAP,
+  );
+  if (cappedMaxAttempts <= attemptCount) return null;
+
+  return {
+    maxAttempts: Math.min(
+      DIGEST_JOB_ATTEMPT_HARD_CAP,
+      Math.max(cappedMaxAttempts, attemptCount + 5),
+    ),
+  };
+}
+
+async function reactivateTerminalDigestJobUnderFence(
+  job,
+  {
+    lease,
+    firmId,
+    now,
+    recoveryClock,
+    AutomationJobModel,
+    DigestDeliveryModel,
+    runRecoveryTransactionProvider,
+  },
+) {
+  const terminalStatus = job?.status;
+  if (!["FAILED", "SUCCEEDED", "CANCELLED"].includes(terminalStatus)) {
+    return job;
+  }
+
+  const transactionResult = await runRecoveryTransactionProvider(
+    async (session) => {
+      if (!session) {
+        throw new TypeError("Digest recovery transaction requires a session");
+      }
+      const transactionNow = digestRecoveryClockNow(recoveryClock);
+      const deliveryFilter = combineQueryFilters(
+        strictObjectIdFilter({
+          _id: lease.delivery._id,
+          firmId,
+          automationJobId: job._id,
+        }),
+        currentJobRecoveryLeaseFilter(lease, transactionNow),
+        digestRecoveryEligibleStateFilter(transactionNow),
+      );
+      const currentDelivery = await findDigestDelivery(
+        DigestDeliveryModel,
+        deliveryFilter,
+        { session },
+      );
+      if (!currentDelivery) return null;
+
+      const currentPolicy = digestJobRecoveryPolicy(
+        currentDelivery,
+        transactionNow,
+      );
+      if (!currentPolicy) return null;
+
+      const currentJob = await findDigestJob(
+        AutomationJobModel,
+        combineQueryFilters(
+          strictObjectIdFilter({ _id: job._id, firmId }),
+          strictStringFilter({
+            kind: DIGEST_JOB_KIND,
+            status: terminalStatus,
+          }),
+          digestJobPayloadFilter(currentDelivery._id),
+        ),
+        { session },
+      );
+      if (!currentJob) return null;
+
+      const deliverySnapshotFilter = digestRecoverySnapshotFilter(
+        currentDelivery,
+        transactionNow,
+      );
+      if (!deliverySnapshotFilter) return null;
+      const nextExpiry = jobRecoveryLeaseExpiry(transactionNow);
+      const reactivationPlan = digestJobReactivationPlan(
+        currentJob,
+        currentPolicy,
+      );
+      const terminalizeDelivery = reactivationPlan === null;
+      const deliverySet = terminalizeDelivery
+        ? {
+            status: "FAILED",
+            "email.state": "FAILED",
+            "email.claimToken": null,
+            "email.claimedAt": null,
+            "inApp.state": "HIDDEN",
+            "inApp.availableAt": null,
+            "inApp.readAt": null,
+            "jobRecovery.expiresAt": nextExpiry,
+          }
+        : {
+            "jobRecovery.expiresAt": nextExpiry,
+            "email.state": "PENDING",
+            "email.claimToken": null,
+            "email.claimedAt": null,
+          };
+      const fencedDeliveryWrite = await DigestDeliveryModel.updateOne(
+        combineQueryFilters(
+          strictObjectIdFilter({
+            _id: currentDelivery._id,
+            firmId,
+            automationJobId: currentJob._id,
+          }),
+          currentJobRecoveryLeaseFilter(lease, transactionNow),
+          deliverySnapshotFilter,
+        ),
+        { $set: deliverySet },
+        { session },
+      );
+      if (!updateProvesMatch(fencedDeliveryWrite)) {
+        throw digestRecoveryFenceLostError();
+      }
+
+      if (terminalizeDelivery) {
+        return {
+          delivery: {
+            ...currentDelivery,
+            status: "FAILED",
+            email: {
+              ...currentDelivery.email,
+              state: "FAILED",
+              claimToken: null,
+              claimedAt: null,
+            },
+            inApp: {
+              ...currentDelivery.inApp,
+              state: "HIDDEN",
+              availableAt: null,
+              readAt: null,
+            },
+            jobRecovery: {
+              ...currentDelivery.jobRecovery,
+              expiresAt: nextExpiry,
+            },
+          },
+          job: currentJob,
+        };
+      }
+
+      const reactivated = await AutomationJobModel.findOneAndUpdate(
+        combineQueryFilters(
+          strictObjectIdFilter({ _id: currentJob._id, firmId }),
+          strictStringFilter({
+            kind: DIGEST_JOB_KIND,
+            idempotencyKey: currentJob.idempotencyKey,
+            status: "FAILED",
+          }),
+          snapshotFilter({
+            attemptCount: currentJob.attemptCount,
+            maxAttempts: currentJob.maxAttempts,
+          }),
+          digestJobPayloadFilter(currentDelivery._id),
+        ),
+        {
+          $set: {
+            status: "PENDING",
+            maxAttempts: reactivationPlan.maxAttempts,
+            nextAttemptAt: now,
+            lastError: "",
+            completedAt: null,
+            resultSummary: null,
+          },
+          $unset: { lease: "" },
+        },
+        { new: true, runValidators: true, session },
+      );
+      if (!reactivated) throw digestRecoveryFenceLostError();
+
+      const recoveredDelivery = {
+        ...currentDelivery,
+        email: {
+          ...currentDelivery.email,
+          state: "PENDING",
+          claimToken: null,
+          claimedAt: null,
+        },
+        jobRecovery: {
+          ...currentDelivery.jobRecovery,
+          expiresAt: nextExpiry,
+        },
+      };
+      return { delivery: recoveredDelivery, job: reactivated };
+    },
+  );
+
+  if (!transactionResult?.job) return null;
+  lease.delivery = transactionResult.delivery;
+  return transactionResult.job;
+}
+
+async function releaseRecoverableSendingClaim({
+  lease,
+  authoritativeJob,
+  recoveryClock,
+  DigestDeliveryModel,
+}) {
+  if (!["PENDING", "RETRY_SCHEDULED"].includes(authoritativeJob?.status)) {
+    return false;
+  }
+  const releaseNow = digestRecoveryClockNow(recoveryClock);
+  const policy = digestJobRecoveryPolicy(lease.delivery, releaseNow);
+  const eligibilityFilter = digestRecoverySnapshotFilter(
+    lease.delivery,
+    releaseNow,
+  );
+  if (!policy?.allowFailedRetry || !eligibilityFilter) return false;
+
+  const result = await DigestDeliveryModel.updateOne(
+    combineQueryFilters(
+      strictObjectIdFilter({
+        _id: lease.delivery._id,
+        firmId: lease.delivery.firmId,
+        automationJobId: authoritativeJob._id,
+      }),
+      currentJobRecoveryLeaseFilter(lease, releaseNow),
+      eligibilityFilter,
+    ),
+    {
+      $set: {
+        "email.state": "PENDING",
+        "email.claimToken": null,
+        "email.claimedAt": null,
+      },
+    },
+  );
+  if (!updateProvesMatch(result)) return false;
+
+  lease.delivery.email.state = "PENDING";
+  lease.delivery.email.claimToken = null;
+  lease.delivery.email.claimedAt = null;
+  return true;
+}
+
+async function activateDigestJobUnderLease({
+  lease,
+  firmId,
+  recipientUserId,
+  periodKey,
+  businessIdentity,
+  now,
+  recoveryClock,
+  AutomationJobModel,
+  DigestDeliveryModel,
+  enqueueJobProvider,
+  runRecoveryTransactionProvider,
+}) {
+  const eligibilityNow = digestRecoveryClockNow(recoveryClock);
+  if (!digestJobRecoveryPolicy(lease.delivery, eligibilityNow)) return null;
+
+  const candidateJob = await ensureDigestJobExists({
+    lease,
+    firmId,
+    recipientUserId,
+    periodKey,
+    businessIdentity,
+    recoveryClock,
+    AutomationJobModel,
+    DigestDeliveryModel,
+    enqueueJobProvider,
+    runRecoveryTransactionProvider,
+  });
+  if (!candidateJob?._id) return null;
+
+  const authorityPolicy = await setDigestJobAuthorityUnderLease({
+    lease,
+    firmId,
+    job: candidateJob,
+    recoveryClock,
+    DigestDeliveryModel,
+  });
+  if (!authorityPolicy) return null;
+
+  let authoritativeJob = await findDigestJob(
+    AutomationJobModel,
+    combineQueryFilters(
+      strictObjectIdFilter({ _id: candidateJob._id, firmId }),
+      strictStringFilter({ kind: DIGEST_JOB_KIND }),
+      digestJobPayloadFilter(lease.delivery._id),
+    ),
+  );
+  if (!authoritativeJob) return null;
+
+  if (["FAILED", "SUCCEEDED", "CANCELLED"].includes(authoritativeJob.status)) {
+    authoritativeJob = await reactivateTerminalDigestJobUnderFence(
+      authoritativeJob,
+      {
+        lease,
+        firmId,
+        now,
+        recoveryClock,
+        AutomationJobModel,
+        DigestDeliveryModel,
+        runRecoveryTransactionProvider,
+      },
+    );
+    if (!authoritativeJob) return null;
+    return authoritativeJob;
+  }
+
+  await releaseRecoverableSendingClaim({
+    lease,
+    authoritativeJob,
+    recoveryClock,
+    DigestDeliveryModel,
+  });
+  return authoritativeJob;
+}
+
+async function activateAuthoritativeDigestJob({
+  delivery,
+  firmId,
+  recipientUserId,
+  periodKey,
+  businessIdentity,
+  now,
+  recoveryClock,
+  AutomationJobModel,
+  DigestDeliveryModel,
+  enqueueJobProvider,
+  runRecoveryTransactionProvider,
+}) {
+  const lease = await acquireDigestJobRecoveryLease({
+    deliveryId: delivery._id,
+    firmId,
+    now: digestRecoveryClockNow(recoveryClock),
+    DigestDeliveryModel,
+  });
+  if (!lease) {
+    const winner = await readDigestAuthority({
+      deliveryId: delivery._id,
+      firmId,
+      AutomationJobModel,
+      DigestDeliveryModel,
+    });
+    delivery.automationJobId = winner.delivery?.automationJobId ?? null;
+    return winner.job;
+  }
+
+  let authoritativeJob = null;
+  let activationError = null;
+  try {
+    authoritativeJob = await activateDigestJobUnderLease({
+      lease,
+      firmId,
+      recipientUserId,
+      periodKey,
+      businessIdentity,
+      now,
+      recoveryClock,
+      AutomationJobModel,
+      DigestDeliveryModel,
+      enqueueJobProvider,
+      runRecoveryTransactionProvider,
+    });
+  } catch (error) {
+    activationError = error;
+  }
+
+  let released = false;
+  try {
+    released = await releaseDigestJobRecoveryLease({
+      lease,
+      DigestDeliveryModel,
+    });
+  } catch (error) {
+    if (!activationError) activationError = error;
+  }
+  if (activationError) throw activationError;
+  if (!authoritativeJob || !released) {
+    const winner = await readDigestAuthority({
+      deliveryId: delivery._id,
+      firmId,
+      AutomationJobModel,
+      DigestDeliveryModel,
+    });
+    delivery.automationJobId = winner.delivery?.automationJobId ?? null;
+    return winner.job;
+  }
+
+  delivery.automationJobId = authoritativeJob._id;
+  return authoritativeJob;
+}
+
+async function enqueueRecipientDigest(
+  { firm, recipient, kind, periodKey, noticeCasesEnabled, now },
+  {
+    AutomationJob: AutomationJobModel = AutomationJob,
+    DigestDelivery: DigestDeliveryModel = DigestDelivery,
+    buildDigestSummary: buildDigestSummaryProvider = buildDigestSummary,
+    enqueueJob: enqueueJobProvider = enqueueJob,
+    runRecoveryTransaction:
+      runRecoveryTransactionProvider = defaultRunRecoveryTransaction,
+    recoveryClock: recoveryClockProvider = () => new Date(),
+  } = {},
+) {
+  const businessIdentity = digestBusinessIdentity({
     firmId: firm._id,
-    recipientUserId: recipient._id,
     kind,
     periodKey,
+    recipientUserId: recipient._id,
   });
+  const deliveryIdentityFilter = combineQueryFilters(
+    strictObjectIdFilter({
+      firmId: firm._id,
+      recipientUserId: recipient._id,
+    }),
+    strictStringFilter({ kind, periodKey }),
+  );
+  const existing = await findDigestDelivery(
+    DigestDeliveryModel,
+    deliveryIdentityFilter,
+  );
   let delivery = existing;
   if (!delivery) {
-    const summary = await buildDigestSummary({
+    const summary = await buildDigestSummaryProvider({
       firmId: firm._id,
       userId: recipient._id,
       kind,
@@ -433,13 +1966,8 @@ async function enqueueRecipientDigest({
     const copy = digestCopy(kind, periodKey);
     const preferences = effectivePreferences(recipient);
     const emailEnabled = preferences.emailEnabled;
-    delivery = await DigestDelivery.findOneAndUpdate(
-      {
-        firmId: firm._id,
-        recipientUserId: recipient._id,
-        kind,
-        periodKey,
-      },
+    delivery = await DigestDeliveryModel.findOneAndUpdate(
+      deliveryIdentityFilter,
       {
         $setOnInsert: {
           firmId: firm._id,
@@ -450,42 +1978,521 @@ async function enqueueRecipientDigest({
           subject: copy.subject,
           summary,
           status: emailEnabled ? "QUEUED" : "DELIVERED",
-          email: { state: emailEnabled ? "PENDING" : "DISABLED" },
+          email: {
+            state: emailEnabled ? "PENDING" : "DISABLED",
+            attempts: 0,
+            idempotencyKey: businessIdentity,
+          },
           inApp: emailEnabled
             ? { state: "HIDDEN" }
             : { state: "AVAILABLE", availableAt: now },
         },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, new: true, setDefaultsOnInsert: true },
     );
   }
 
-  if (["PENDING", "FAILED"].includes(delivery.email?.state)) {
-    const job = await enqueueJob({
-      firmId: firm._id,
-      kind: DIGEST_JOB_KIND,
-      idempotencyKey: `digest:${delivery._id}`,
-      payload: { deliveryId: String(delivery._id) },
-      createdBy: recipient._id,
-      requestId: `digest-scheduler:${periodKey}`,
-      maxAttempts: 5,
-    });
-    if (String(delivery.automationJobId || "") !== String(job._id)) {
-      await DigestDelivery.updateOne(
-        { _id: delivery._id, automationJobId: null },
-        { $set: { automationJobId: job._id } }
-      );
-    }
-  }
+  const shouldEnsureWork =
+    delivery?.email?.state === "PENDING" ||
+    digestSendingRecoveryReason(delivery, now) !== null;
+  if (!shouldEnsureWork) return delivery;
+
+  await activateAuthoritativeDigestJob({
+    delivery,
+    firmId: firm._id,
+    recipientUserId: recipient._id,
+    periodKey,
+    businessIdentity,
+    now,
+    recoveryClock: recoveryClockProvider,
+    AutomationJobModel,
+    DigestDeliveryModel,
+    enqueueJobProvider,
+    runRecoveryTransactionProvider,
+  });
   return delivery;
 }
 
-export async function enqueueDueDigests({ now = new Date() } = {}) {
+const DIGEST_RECOVERY_BATCH_SIZE = 100;
+const DIGEST_RECOVERY_MAX_BATCHES = 5;
+
+function digestRecoveryClockNow(clock) {
+  const value = typeof clock === "function" ? clock() : clock?.now?.();
+  const instant = new Date(value instanceof Date ? value.getTime() : value);
+  if (!Number.isFinite(instant.getTime())) {
+    throw new TypeError("Digest recovery clock returned an invalid time");
+  }
+  return instant;
+}
+
+function digestRecoveryCursorLeaseExpiry(now) {
+  return new Date(new Date(now).getTime() + DIGEST_RECOVERY_CURSOR_LEASE_MS);
+}
+
+async function acquireDigestRecoveryCursorLease({
+  DigestRecoveryCursorModel,
+  clock,
+  token = randomUUID(),
+}) {
+  const now = digestRecoveryClockNow(clock);
+  try {
+    const cursor = await DigestRecoveryCursorModel.findOneAndUpdate(
+      {
+        _id: DIGEST_RECOVERY_CURSOR_ID,
+        $or: [
+          { "lease.token": null },
+          { "lease.token": "" },
+          { "lease.token": { $exists: false } },
+          { "lease.expiresAt": { $lte: now } },
+          { "lease.expiresAt": null },
+          { "lease.expiresAt": { $exists: false } },
+          { "lease.expiresAt": { $not: { $type: "date" } } },
+        ],
+      },
+      {
+        $set: {
+          "lease.token": token,
+          "lease.expiresAt": digestRecoveryCursorLeaseExpiry(now),
+        },
+        $setOnInsert: { afterId: null, cycleEndId: null },
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true },
+    );
+    return cursor ? { cursor, token } : null;
+  } catch (error) {
+    // Concurrent first-use upserts race on the singleton _id. The winner owns
+    // the lease; the duplicate-key loser behaves exactly like live contention.
+    if (error?.code === 11000 || error?.codeName === "DuplicateKey")
+      return null;
+    throw error;
+  }
+}
+
+function safeDigestRecoveryErrorCode(error) {
+  const candidate = String(error?.code || error?.name || "").toUpperCase();
+  return /^[A-Z][A-Z0-9_]{0,79}$/.test(candidate)
+    ? candidate
+    : "DIGEST_RECOVERY_ROW_FAILED";
+}
+
+function defaultDigestRecoveryErrorReporter({ code }) {
+  console.error("[DIGEST] Recovery row failed:", code);
+}
+
+async function reportDigestRecoveryError(reporter, error) {
+  const code = safeDigestRecoveryErrorCode(error);
+  try {
+    await reporter({ code });
+  } catch {
+    console.error("[DIGEST] Recovery error reporter failed");
+  }
+  return code;
+}
+
+async function updateDigestRecoveryCursor({
+  DigestRecoveryCursorModel,
+  token,
+  afterId,
+  cycleEndId,
+  clock,
+}) {
+  const now = digestRecoveryClockNow(clock);
+  const result = await DigestRecoveryCursorModel.updateOne(
+    {
+      _id: DIGEST_RECOVERY_CURSOR_ID,
+      "lease.token": token,
+    },
+    {
+      $set: {
+        afterId,
+        cycleEndId,
+        "lease.expiresAt": digestRecoveryCursorLeaseExpiry(now),
+      },
+    },
+  );
+  return updateProvesMatch(result);
+}
+
+async function releaseDigestRecoveryCursorLease({
+  DigestRecoveryCursorModel,
+  token,
+}) {
+  const result = await DigestRecoveryCursorModel.updateOne(
+    {
+      _id: DIGEST_RECOVERY_CURSOR_ID,
+      "lease.token": token,
+    },
+    {
+      $set: {
+        "lease.token": null,
+        "lease.expiresAt": null,
+      },
+    },
+  );
+  return updateProvesMatch(result);
+}
+
+function digestRecoveryIdRangeFilter({ afterId = null, cycleEndId }) {
+  const canonicalCycleEndId = requireCanonicalObjectId(
+    cycleEndId,
+    "cycleEndId",
+  );
+  return {
+    _id: {
+      ...(afterId
+        ? {
+            $gt: requireCanonicalObjectId(afterId, "afterId"),
+          }
+        : {}),
+      $lte: canonicalCycleEndId,
+    },
+  };
+}
+
+async function findDigestRecoveryCycleEndId({ DigestDeliveryModel }) {
+  const rows = await DigestDeliveryModel.find({})
+    .select("_id")
+    .sort({ _id: -1 })
+    .limit(1)
+    .lean();
+  return rows[0]?._id ?? null;
+}
+
+function digestRecoveryPassResult(
+  state,
+  { rowsProcessed = 0, rowFailures = [] } = {},
+) {
+  return {
+    state,
+    completed: state === "completed",
+    incomplete: state === "incomplete",
+    busy: state === "busy",
+    leaseLost: state === "leaseLost",
+    rowsProcessed,
+    rowFailures,
+  };
+}
+
+async function reconcileRecoverableDigestDeliveries({
+  now,
+  noticeCasesEnabled,
+  DigestDeliveryModel,
+  DigestRecoveryCursorModel,
+  enqueueRecipientDigestProvider,
+  recoveryClock,
+  recoveryErrorReporter,
+}) {
+  const nowMs = new Date(now).getTime();
+  if (!Number.isFinite(nowMs)) {
+    throw new TypeError("Digest reconciliation requires a valid current time");
+  }
+  const rowFailures = [];
+  let rowsProcessed = 0;
+  const cursorLease = await acquireDigestRecoveryCursorLease({
+    DigestRecoveryCursorModel,
+    clock: recoveryClock,
+  });
+  if (!cursorLease) {
+    return digestRecoveryPassResult("busy");
+  }
+
+  let afterId = cursorLease.cursor.afterId ?? null;
+  let cycleEndId = cursorLease.cursor.cycleEndId ?? null;
+  let leaseOwned = true;
+  let state = "incomplete";
+  const markLeaseLost = async () => {
+    if (state === "leaseLost") return;
+    state = "leaseLost";
+    leaseOwned = false;
+    await reportDigestRecoveryError(recoveryErrorReporter, {
+      code: "DIGEST_RECOVERY_CURSOR_LEASE_LOST",
+    });
+  };
+
+  try {
+    if (!cycleEndId) {
+      cycleEndId = await findDigestRecoveryCycleEndId({
+        DigestDeliveryModel,
+      });
+      if (cycleEndId) {
+        const initialized = await updateDigestRecoveryCursor({
+          DigestRecoveryCursorModel,
+          token: cursorLease.token,
+          afterId,
+          cycleEndId,
+          clock: recoveryClock,
+        });
+        if (!initialized) await markLeaseLost();
+      } else if (afterId) {
+        const cleared = await updateDigestRecoveryCursor({
+          DigestRecoveryCursorModel,
+          token: cursorLease.token,
+          afterId: null,
+          cycleEndId: null,
+          clock: recoveryClock,
+        });
+        if (!cleared) {
+          await markLeaseLost();
+        } else {
+          afterId = null;
+          state = "completed";
+        }
+      } else {
+        state = "completed";
+      }
+    }
+
+    if (leaseOwned && cycleEndId) {
+      for (
+        let batchNumber = 0;
+        batchNumber < DIGEST_RECOVERY_MAX_BATCHES;
+        batchNumber += 1
+      ) {
+        const deliveries = await DigestDeliveryModel.find(
+          digestRecoveryIdRangeFilter({ afterId, cycleEndId }),
+        )
+          .select(
+            "firmId recipientUserId kind periodKey timezone email.state email.claimToken email.claimedAt",
+          )
+          .sort({ _id: 1 })
+          .limit(DIGEST_RECOVERY_BATCH_SIZE)
+          .lean();
+        if (!deliveries.length) {
+          const cleared = await updateDigestRecoveryCursor({
+            DigestRecoveryCursorModel,
+            token: cursorLease.token,
+            afterId: null,
+            cycleEndId: null,
+            clock: recoveryClock,
+          });
+          if (!cleared) {
+            await markLeaseLost();
+          } else {
+            afterId = null;
+            cycleEndId = null;
+            state = "completed";
+          }
+          break;
+        }
+
+        for (const delivery of deliveries) {
+          const shouldReconcile =
+            delivery.email?.state === "PENDING" ||
+            digestSendingRecoveryReason(delivery, now) !== null;
+          if (shouldReconcile) {
+            try {
+              await enqueueRecipientDigestProvider({
+                firm: {
+                  _id: delivery.firmId,
+                  timezone: delivery.timezone || "Asia/Kolkata",
+                },
+                recipient: { _id: delivery.recipientUserId },
+                kind: delivery.kind,
+                periodKey: delivery.periodKey,
+                noticeCasesEnabled,
+                now,
+              });
+            } catch (error) {
+              const code = await reportDigestRecoveryError(
+                recoveryErrorReporter,
+                error,
+              );
+              rowFailures.push({
+                deliveryId: String(delivery._id),
+                code,
+              });
+            }
+          }
+
+          // Persist after every row, including non-candidates and poison rows,
+          // so one document can never pin the durable keyset cursor.
+          const advanced = await updateDigestRecoveryCursor({
+            DigestRecoveryCursorModel,
+            token: cursorLease.token,
+            afterId: delivery._id,
+            cycleEndId,
+            clock: recoveryClock,
+          });
+          if (!advanced) {
+            await markLeaseLost();
+            break;
+          }
+          afterId = delivery._id;
+          rowsProcessed += 1;
+        }
+
+        if (!leaseOwned) break;
+        const reachedCycleEnd =
+          deliveries.length < DIGEST_RECOVERY_BATCH_SIZE ||
+          sameObjectId(deliveries.at(-1)?._id, cycleEndId);
+        if (reachedCycleEnd) {
+          const cleared = await updateDigestRecoveryCursor({
+            DigestRecoveryCursorModel,
+            token: cursorLease.token,
+            afterId: null,
+            cycleEndId: null,
+            clock: recoveryClock,
+          });
+          if (!cleared) {
+            await markLeaseLost();
+          } else {
+            afterId = null;
+            cycleEndId = null;
+            state = "completed";
+          }
+          break;
+        }
+      }
+    }
+  } finally {
+    if (leaseOwned) {
+      const released = await releaseDigestRecoveryCursorLease({
+        DigestRecoveryCursorModel,
+        token: cursorLease.token,
+      });
+      if (!released) await markLeaseLost();
+    }
+  }
+
+  return digestRecoveryPassResult(state, { rowsProcessed, rowFailures });
+}
+
+function defaultDigestRecoveryYield() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+function digestRecoveryDrainError(
+  code,
+  message,
+  { passes, rowsProcessed, rowFailures },
+) {
+  const error = new Error(message);
+  error.code = code;
+  error.passes = passes;
+  error.rowsProcessed = rowsProcessed;
+  error.rowFailures = rowFailures;
+  return error;
+}
+
+export async function drainDigestRecovery(
+  { now = new Date() } = {},
+  {
+    AppConfig: AppConfigModel = AppConfig,
+    DigestDelivery: DigestDeliveryModel = DigestDelivery,
+    DigestRecoveryCursor: DigestRecoveryCursorModel = DigestRecoveryCursor,
+    enqueueRecipientDigest:
+      enqueueRecipientDigestProvider = enqueueRecipientDigest,
+    reconcileRecoveryPass:
+      reconcileRecoveryPassProvider = reconcileRecoverableDigestDeliveries,
+    recoveryClock = () => new Date(),
+    reportRecoveryError:
+      recoveryErrorReporter = defaultDigestRecoveryErrorReporter,
+    yieldControl = defaultDigestRecoveryYield,
+  } = {},
+) {
+  if (typeof reconcileRecoveryPassProvider !== "function") {
+    throw new TypeError("Digest recovery pass provider must be a function");
+  }
+  if (typeof yieldControl !== "function") {
+    throw new TypeError("Digest recovery yield provider must be a function");
+  }
+
+  const noticeCasesEnabled =
+    (await AppConfigModel.isFeatureEnabled("noticeCases", {
+      fresh: true,
+    })) === true;
+  const aggregate = {
+    completed: false,
+    passes: 0,
+    rowsProcessed: 0,
+    rowFailures: [],
+  };
+
+  while (true) {
+    const pass = await reconcileRecoveryPassProvider({
+      now,
+      noticeCasesEnabled,
+      DigestDeliveryModel,
+      DigestRecoveryCursorModel,
+      enqueueRecipientDigestProvider,
+      recoveryClock,
+      recoveryErrorReporter,
+    });
+    aggregate.passes += 1;
+    if (Number.isSafeInteger(pass?.rowsProcessed) && pass.rowsProcessed >= 0) {
+      aggregate.rowsProcessed += pass.rowsProcessed;
+    }
+    if (Array.isArray(pass?.rowFailures)) {
+      aggregate.rowFailures.push(...pass.rowFailures);
+    }
+
+    if (pass?.state === "busy" || pass?.busy === true) {
+      throw digestRecoveryDrainError(
+        "DIGEST_RECOVERY_BUSY",
+        "Digest recovery is already running",
+        aggregate,
+      );
+    }
+    if (pass?.state === "leaseLost" || pass?.leaseLost === true) {
+      throw digestRecoveryDrainError(
+        "DIGEST_RECOVERY_CURSOR_LEASE_LOST",
+        "Digest recovery cursor lease was lost",
+        aggregate,
+      );
+    }
+    if (pass?.state === "completed" && pass?.completed === true) {
+      aggregate.completed = true;
+      if (aggregate.rowFailures.length > 0) {
+        throw digestRecoveryDrainError(
+          "DIGEST_RECOVERY_ROWS_FAILED",
+          `Digest recovery completed with ${aggregate.rowFailures.length} row failure(s)`,
+          aggregate,
+        );
+      }
+      return aggregate;
+    }
+    if (pass?.state !== "incomplete" || pass?.incomplete !== true) {
+      throw digestRecoveryDrainError(
+        "DIGEST_RECOVERY_INVALID_PASS_STATE",
+        "Digest recovery pass returned no durable completion state",
+        aggregate,
+      );
+    }
+
+    await yieldControl();
+  }
+}
+
+export async function enqueueDueDigests(
+  { now = new Date() } = {},
+  {
+    AppConfig: AppConfigModel = AppConfig,
+    DigestDelivery: DigestDeliveryModel = DigestDelivery,
+    DigestRecoveryCursor: DigestRecoveryCursorModel = DigestRecoveryCursor,
+    Firm: FirmModel = Firm,
+    FirmMembership: FirmMembershipModel = FirmMembership,
+    User: UserModel = User,
+    enqueueRecipientDigest:
+      enqueueRecipientDigestProvider = enqueueRecipientDigest,
+    recoveryClock = () => new Date(),
+    reportRecoveryError:
+      recoveryErrorReporter = defaultDigestRecoveryErrorReporter,
+  } = {},
+) {
   const [dailyEnabled, weeklyEnabled, noticeCasesEnabled] = await Promise.all([
-    AppConfig.isFeatureEnabled("dailyDigest", { fresh: true }),
-    AppConfig.isFeatureEnabled("weeklySummary", { fresh: true }),
-    AppConfig.isFeatureEnabled("noticeCases", { fresh: true }),
+    AppConfigModel.isFeatureEnabled("dailyDigest", { fresh: true }),
+    AppConfigModel.isFeatureEnabled("weeklySummary", { fresh: true }),
+    AppConfigModel.isFeatureEnabled("noticeCases", { fresh: true }),
   ]);
+  await reconcileRecoverableDigestDeliveries({
+    now,
+    noticeCasesEnabled,
+    DigestDeliveryModel,
+    DigestRecoveryCursorModel,
+    enqueueRecipientDigestProvider,
+    recoveryClock,
+    recoveryErrorReporter,
+  });
   if (!dailyEnabled && !weeklyEnabled) {
     return { firms: 0, daily: 0, weekly: 0, disabled: true };
   }
@@ -493,11 +2500,13 @@ export async function enqueueDueDigests({ now = new Date() } = {}) {
   const result = { firms: 0, daily: 0, weekly: 0, disabled: false };
   let afterId = null;
   while (true) {
-    const firms = await Firm.find({
+    const firms = await FirmModel.find({
       isActive: true,
-      ...(afterId ? { _id: { $gt: afterId } } : {}),
+      ...(afterId
+        ? { _id: { $gt: requireCanonicalObjectId(afterId, "afterId") } }
+        : {}),
     })
-      .select("timezone digestSettings")
+      .select("timezone digestSettings kind ownerUserId")
       .sort({ _id: 1 })
       .limit(FIRM_SCAN_BATCH)
       .lean();
@@ -518,16 +2527,58 @@ export async function enqueueDueDigests({ now = new Date() } = {}) {
       const firmWeeklyDue = weeklyEnabled && weeklyDue(parts, settings);
       if (!dailyDue && !firmWeeklyDue) continue;
 
-      const recipients = await User.find({ firmId: firm._id, isActive: true })
-        .select("role digestPreferences")
+      const memberships = await FirmMembershipModel.find(
+        combineQueryFilters(strictObjectIdFilter({ firmId: firm._id }), {
+          status: "ACTIVE",
+        }),
+      )
+        .select("userId role status")
         .lean();
+      const activeMemberships = memberships.filter(
+        (membership) =>
+          membership?.status === "ACTIVE" &&
+          canonicalObjectId(membership.userId) !== null,
+      );
+      const membershipsByUserId = new Map(
+        activeMemberships.map((membership) => [
+          canonicalObjectId(membership.userId),
+          membership,
+        ]),
+      );
+      const recipientIds = activeMemberships.map(
+        (membership) =>
+          new mongoose.Types.ObjectId(canonicalObjectId(membership.userId)),
+      );
+      const recipients = recipientIds.length
+        ? await UserModel.find(
+            combineQueryFilters(
+              expressionFilter([
+                { $eq: [{ $type: "$_id" }, "objectId"] },
+                { $in: ["$_id", { $literal: recipientIds }] },
+              ]),
+              { isActive: true },
+            ),
+          )
+            .select("role digestPreferences")
+            .lean()
+        : [];
       for (const recipient of recipients) {
+        const membership = membershipsByUserId.get(
+          canonicalObjectId(recipient._id),
+        );
+        const recipientPolicy = digestRecipientPolicy({
+          firm,
+          recipientUserId: recipient._id,
+          membership,
+        });
+        if (!recipientPolicy.allowed) continue;
         const preferences = effectivePreferences(recipient);
         if (
           dailyDue &&
+          preferences.dailyEnabled &&
           dailyDigestDueForFrequency(preferences.dailyFrequency, parts)
         ) {
-          await enqueueRecipientDigest({
+          await enqueueRecipientDigestProvider({
             firm,
             recipient,
             kind: DAILY_KIND,
@@ -537,12 +2588,12 @@ export async function enqueueDueDigests({ now = new Date() } = {}) {
           });
           result.daily += 1;
         }
-        if (
-          firmWeeklyDue &&
-          isFirmAdminRole(recipient.role) &&
-          preferences.weeklyEnabled
-        ) {
-          await enqueueRecipientDigest({
+        const weeklyAuthority = hasWeeklyDigestAuthority({
+          membership,
+          user: recipient,
+        });
+        if (firmWeeklyDue && weeklyAuthority && preferences.weeklyEnabled) {
+          await enqueueRecipientDigestProvider({
             firm,
             recipient,
             kind: WEEKLY_KIND,
@@ -561,115 +2612,686 @@ export async function enqueueDueDigests({ now = new Date() } = {}) {
   return result;
 }
 
-export async function processDigestDeliveryJob(job, { assertLease } = {}) {
-  const deliveryId = String(job.payload?.deliveryId || "");
-  if (!validObjectId(deliveryId)) {
-    throw new Error("Digest job payload is missing a valid deliveryId");
+function inAppAvailabilityFields(delivery, availableAt) {
+  if (delivery?.inApp?.state !== "HIDDEN") return {};
+  return {
+    "inApp.state": "AVAILABLE",
+    "inApp.availableAt": availableAt,
+  };
+}
+
+function digestClaimLostResult(deliveryId) {
+  return {
+    outcome: "DIGEST_CLAIM_LOST",
+    deliveryId,
+    defer: true,
+    reason: "Digest send claim changed before completion",
+    retryAfterMs: 30 * 1000,
+  };
+}
+
+function digestAuthorityFailure({
+  delivery,
+  firm,
+  recipient,
+  membership,
+  resolved = {},
+}) {
+  const firmResolved = resolved.firm !== false;
+  const recipientResolved = resolved.recipient !== false;
+  const membershipResolved = resolved.membership !== false;
+
+  if (firmResolved && !firm) {
+    return {
+      outcome: "DIGEST_FIRM_UNAVAILABLE",
+      fields: {
+        status: "FAILED",
+        "email.state": "FAILED",
+        "email.lastError": "Firm is inactive or unavailable",
+        "email.claimToken": null,
+        "email.claimedAt": null,
+        "inApp.state": "HIDDEN",
+        "inApp.availableAt": null,
+        "inApp.readAt": null,
+      },
+    };
   }
-  const delivery = await DigestDelivery.findOne({
-    _id: deliveryId,
-    firmId: job.firmId,
-  }).lean();
-  if (!delivery) return { outcome: "DIGEST_DELIVERY_MISSING" };
-  if (delivery.email?.state === "SENT") {
-    return { outcome: "DIGEST_ALREADY_SENT", deliveryId };
+  if (!firmResolved) {
+    if (recipientResolved && !recipient) {
+      return {
+        outcome: "DIGEST_RECIPIENT_UNAVAILABLE",
+        fields: {
+          status: "FAILED",
+          "email.state": "FAILED",
+          "email.lastError": "Recipient is inactive or unavailable",
+          "email.claimToken": null,
+          "email.claimedAt": null,
+          "inApp.state": "HIDDEN",
+          "inApp.availableAt": null,
+          "inApp.readAt": null,
+        },
+      };
+    }
+    if (membershipResolved && membership?.status !== "ACTIVE") {
+      return {
+        outcome: "DIGEST_MEMBERSHIP_UNAVAILABLE",
+        fields: {
+          status: "FAILED",
+          "email.state": delivery.kind === WEEKLY_KIND ? "DISABLED" : "FAILED",
+          "email.lastError":
+            "Recipient no longer has an active firm membership",
+          "email.claimToken": null,
+          "email.claimedAt": null,
+          "inApp.state": "HIDDEN",
+          "inApp.availableAt": null,
+          "inApp.readAt": null,
+        },
+      };
+    }
+    return null;
   }
 
-  const featureFlag =
-    delivery.kind === DAILY_KIND ? "dailyDigest" : "weeklySummary";
-  const enabled = await AppConfig.isFeatureEnabled(featureFlag, { fresh: true });
-  if (!enabled) {
-    await DigestDelivery.updateOne(
-      { _id: delivery._id, "email.state": { $ne: "SENT" } },
+  const recipientPolicy = digestRecipientPolicy({
+    firm,
+    recipientUserId: delivery.recipientUserId,
+    membership,
+  });
+  const personalRecipientMismatch =
+    firm.kind === "PERSONAL" &&
+    !sameObjectId(firm.ownerUserId, delivery.recipientUserId);
+  if (
+    firm.kind === "PERSONAL" &&
+    (personalRecipientMismatch ||
+      (membershipResolved && !recipientPolicy.allowed))
+  ) {
+    return {
+      outcome: recipientPolicy.outcome,
+      fields: {
+        status: "FAILED",
+        "email.state": "DISABLED",
+        "email.lastError": recipientPolicy.lastError,
+        "email.claimToken": null,
+        "email.claimedAt": null,
+        "inApp.state": "HIDDEN",
+        "inApp.availableAt": null,
+        "inApp.readAt": null,
+      },
+    };
+  }
+
+  const hasActiveMembership = membershipResolved && recipientPolicy.allowed;
+  if (recipientResolved && !recipient) {
+    const fields = {
+      status: "FAILED",
+      "email.state": "FAILED",
+      "email.lastError": "Recipient is inactive or unavailable",
+      "email.claimToken": null,
+      "email.claimedAt": null,
+    };
+    if (
+      !hasActiveMembership ||
+      delivery.kind === WEEKLY_KIND ||
+      firm.kind === "PERSONAL"
+    ) {
+      Object.assign(fields, {
+        "inApp.state": "HIDDEN",
+        "inApp.availableAt": null,
+        "inApp.readAt": null,
+      });
+    }
+    return { outcome: "DIGEST_RECIPIENT_UNAVAILABLE", fields };
+  }
+
+  const weeklyAuthorityResolved = recipientResolved && membershipResolved;
+  const weeklyAuthority =
+    delivery.kind !== WEEKLY_KIND ||
+    !weeklyAuthorityResolved ||
+    hasWeeklyDigestAuthority({ membership, user: recipient });
+  if (
+    (membershipResolved && !hasActiveMembership) ||
+    (weeklyAuthorityResolved && !weeklyAuthority)
+  ) {
+    const missingMembership = membershipResolved && !hasActiveMembership;
+    const fields = {
+      status: "FAILED",
+      "email.state": delivery.kind === WEEKLY_KIND ? "DISABLED" : "FAILED",
+      "email.lastError": missingMembership
+        ? "Recipient no longer has an active firm membership"
+        : "Recipient no longer has weekly digest authority",
+      "email.claimToken": null,
+      "email.claimedAt": null,
+    };
+    if (missingMembership || delivery.kind === WEEKLY_KIND) {
+      Object.assign(fields, {
+        "inApp.state": "HIDDEN",
+        "inApp.availableAt": null,
+        "inApp.readAt": null,
+      });
+    }
+    return {
+      outcome: missingMembership
+        ? "DIGEST_MEMBERSHIP_UNAVAILABLE"
+        : "DIGEST_WEEKLY_AUTHORITY_REVOKED",
+      fields,
+    };
+  }
+  return null;
+}
+
+export async function processDigestDeliveryJob(
+  job,
+  {
+    assertLease,
+    DigestDelivery: DigestDeliveryModel = DigestDelivery,
+    Firm: FirmModel = Firm,
+    User: UserModel = User,
+    FirmMembership: FirmMembershipModel = FirmMembership,
+    AppConfig: AppConfigModel = AppConfig,
+    sendDigestEmail: sendDigestEmailProvider = sendDigestEmail,
+    safeRecordActivity: recordActivity = safeRecordActivity,
+    beforeProviderAuthorityReload = null,
+    clock = () => new Date(),
+  } = {},
+) {
+  const currentTime = () => {
+    const value = typeof clock === "function" ? clock() : clock?.now?.();
+    const instant = new Date(value instanceof Date ? value.getTime() : value);
+    if (Number.isNaN(instant.getTime())) {
+      throw new Error("Digest clock returned an invalid time");
+    }
+    return instant;
+  };
+  const deliveryId = canonicalObjectId(job?.payload?.deliveryId);
+  if (!deliveryId) {
+    throw new Error("Digest job payload is missing a valid deliveryId");
+  }
+  const jobId = canonicalObjectId(job?._id);
+  if (!jobId) {
+    throw new Error("Digest job is missing a valid authoritative job id");
+  }
+  const firmId = canonicalObjectId(job?.firmId);
+  if (!firmId) {
+    throw new Error("Digest job is missing a valid firm id");
+  }
+
+  const claimAttemptedAt = currentTime();
+  const claim = await claimDigestDelivery({
+    deliveryId,
+    firmId,
+    automationJobId: jobId,
+    now: claimAttemptedAt,
+    deliveryModel: DigestDeliveryModel,
+  });
+  if (!claim) {
+    const existing = await DigestDeliveryModel.findOne(
+      strictObjectIdFilter({ _id: deliveryId, firmId }),
+    )
+      .select("automationJobId email.state email.claimedAt")
+      .lean();
+    if (!existing) return { outcome: "DIGEST_DELIVERY_MISSING" };
+    if (!existing.automationJobId) {
+      return {
+        outcome: "DIGEST_JOB_AUTHORITY_PENDING",
+        deliveryId,
+        defer: true,
+        reason: "Digest job authority is still being linked",
+        retryAfterMs: DIGEST_AUTHORITY_DEFER_MS,
+      };
+    }
+    if (!sameObjectId(existing.automationJobId, job._id)) {
+      return { outcome: "DIGEST_JOB_SUPERSEDED", deliveryId };
+    }
+    if (existing.email?.state === "SENT") {
+      return { outcome: "DIGEST_ALREADY_SENT", deliveryId };
+    }
+    if (existing.email?.state === "SENDING") {
+      const claimedAtMs = existing.email?.claimedAt
+        ? new Date(existing.email.claimedAt).getTime()
+        : Number.NaN;
+      const remainingMs = Number.isFinite(claimedAtMs)
+        ? claimedAtMs + SEND_CLAIM_STALE_MS - claimAttemptedAt.getTime()
+        : SEND_CLAIM_STALE_MS;
+      return {
+        outcome: "DIGEST_SEND_IN_PROGRESS",
+        deliveryId,
+        defer: true,
+        reason: "Another worker owns the digest send claim",
+        retryAfterMs: Math.min(
+          SEND_CLAIM_STALE_MS,
+          Math.max(30 * 1000, remainingMs + 1),
+        ),
+      };
+    }
+    if (existing.email?.state === "PENDING") {
+      return {
+        outcome: "DIGEST_SEND_RETRYABLE_RACE",
+        deliveryId,
+        defer: true,
+        reason: "Digest send state changed while another worker held the claim",
+        retryAfterMs: 30 * 1000,
+      };
+    }
+    return { outcome: "DIGEST_EMAIL_NOT_PENDING", deliveryId };
+  }
+
+  const { delivery, claimToken } = claim;
+  const rawAttempts = delivery.email?.attempts;
+  const baseClaimFilter = combineQueryFilters(
+    strictObjectIdFilter({
+      _id: delivery._id,
+      firmId: delivery.firmId,
+      automationJobId: jobId,
+    }),
+    snapshotFilter({
+      "email.claimToken": claimToken,
+      "email.state": "SENDING",
+    }),
+  );
+  let attempts = nonnegativeSafeInteger(rawAttempts);
+  if (rawAttempts === undefined) {
+    const normalized = await DigestDeliveryModel.updateOne(
+      combineQueryFilters(baseClaimFilter, {
+        "email.attempts": { $exists: false },
+      }),
+      { $set: { "email.attempts": 0 } },
+    );
+    if (!updateProvesMatch(normalized)) {
+      return digestClaimLostResult(deliveryId);
+    }
+    attempts = 0;
+  }
+  if (attempts === null || attempts === Number.MAX_SAFE_INTEGER) {
+    const quarantined = await DigestDeliveryModel.updateOne(
+      combineQueryFilters(
+        baseClaimFilter,
+        snapshotFilter({ "email.attempts": rawAttempts }),
+      ),
       {
+        $set: digestTerminalQuarantineFields(
+          "Digest email attempts is invalid",
+        ),
+      },
+    );
+    if (!updateProvesMatch(quarantined)) {
+      return digestClaimLostResult(deliveryId);
+    }
+    return { outcome: "DIGEST_DELIVERY_QUARANTINED", deliveryId };
+  }
+  const claimFilter = combineQueryFilters(
+    baseClaimFilter,
+    snapshotFilter({ "email.attempts": attempts }),
+  );
+  let authorityConfirmed = false;
+  let sendAttemptStarted = false;
+  let providerAccepted = false;
+
+  try {
+    const featureFlag =
+      delivery.kind === DAILY_KIND ? "dailyDigest" : "weeklySummary";
+    const [enabledResult, activeFirmResult, recipientResult, membershipResult] =
+      await Promise.allSettled([
+        AppConfigModel.isFeatureEnabled(featureFlag, { fresh: true }),
+        FirmModel.findOne(
+          combineQueryFilters(strictObjectIdFilter({ _id: delivery.firmId }), {
+            isActive: true,
+          }),
+        )
+          .select("_id kind ownerUserId")
+          .lean(),
+        UserModel.findOne(
+          combineQueryFilters(
+            strictObjectIdFilter({ _id: delivery.recipientUserId }),
+            { isActive: true },
+          ),
+        )
+          .select("email role digestPreferences")
+          .lean(),
+        FirmMembershipModel.findOne(
+          combineQueryFilters(
+            strictObjectIdFilter({
+              firmId: delivery.firmId,
+              userId: delivery.recipientUserId,
+            }),
+            { status: "ACTIVE" },
+          ),
+        )
+          .select("role status")
+          .lean(),
+      ]);
+
+    if (activeFirmResult.status === "fulfilled" && !activeFirmResult.value) {
+      const firmWrite = await DigestDeliveryModel.updateOne(claimFilter, {
+        $set: {
+          status: "FAILED",
+          "email.state": "FAILED",
+          "email.lastError": "Firm is inactive or unavailable",
+          "email.claimToken": null,
+          "email.claimedAt": null,
+          "inApp.state": "HIDDEN",
+          "inApp.availableAt": null,
+          "inApp.readAt": null,
+        },
+      });
+      if (!updateProvesMatch(firmWrite)) {
+        return digestClaimLostResult(deliveryId);
+      }
+      return { outcome: "DIGEST_FIRM_UNAVAILABLE", deliveryId };
+    }
+    if (activeFirmResult.status === "rejected") {
+      throw activeFirmResult.reason;
+    }
+    const companionFailure = [
+      enabledResult,
+      recipientResult,
+      membershipResult,
+    ].find((result) => result.status === "rejected");
+    if (companionFailure) throw companionFailure.reason;
+
+    const enabled = enabledResult.value;
+    const activeFirm = activeFirmResult.value;
+    const recipient = recipientResult.value;
+    const membership = membershipResult.value;
+    const recipientPolicy = digestRecipientPolicy({
+      firm: activeFirm,
+      recipientUserId: delivery.recipientUserId,
+      membership,
+    });
+    if (activeFirm.kind === "PERSONAL" && !recipientPolicy.allowed) {
+      const policyWrite = await DigestDeliveryModel.updateOne(claimFilter, {
+        $set: {
+          status: "FAILED",
+          "email.state": "DISABLED",
+          "email.lastError": recipientPolicy.lastError,
+          "email.claimToken": null,
+          "email.claimedAt": null,
+          "inApp.state": "HIDDEN",
+          "inApp.availableAt": null,
+          "inApp.readAt": null,
+        },
+      });
+      if (!updateProvesMatch(policyWrite)) {
+        return digestClaimLostResult(deliveryId);
+      }
+      return { outcome: recipientPolicy.outcome, deliveryId };
+    }
+
+    const hasActiveMembership = recipientPolicy.allowed;
+
+    if (!recipient) {
+      const recipientUnavailable = {
+        status: "FAILED",
+        "email.state": "FAILED",
+        "email.lastError": "Recipient is inactive or unavailable",
+        "email.claimToken": null,
+        "email.claimedAt": null,
+      };
+      if (
+        !hasActiveMembership ||
+        delivery.kind === WEEKLY_KIND ||
+        activeFirm.kind === "PERSONAL"
+      ) {
+        Object.assign(recipientUnavailable, {
+          "inApp.state": "HIDDEN",
+          "inApp.availableAt": null,
+          "inApp.readAt": null,
+        });
+      }
+      const recipientWrite = await DigestDeliveryModel.updateOne(claimFilter, {
+        $set: recipientUnavailable,
+      });
+      if (!updateProvesMatch(recipientWrite)) {
+        return digestClaimLostResult(deliveryId);
+      }
+      return { outcome: "DIGEST_RECIPIENT_UNAVAILABLE", deliveryId };
+    }
+
+    const weeklyAuthority =
+      delivery.kind !== WEEKLY_KIND ||
+      hasWeeklyDigestAuthority({ membership, user: recipient });
+    if (!hasActiveMembership || !weeklyAuthority) {
+      const missingMembership = !hasActiveMembership;
+      const authorityUnavailable = {
+        status: "FAILED",
+        "email.state": delivery.kind === WEEKLY_KIND ? "DISABLED" : "FAILED",
+        "email.lastError": missingMembership
+          ? "Recipient no longer has an active firm membership"
+          : "Recipient no longer has weekly digest authority",
+        "email.claimToken": null,
+        "email.claimedAt": null,
+      };
+      if (missingMembership || delivery.kind === WEEKLY_KIND) {
+        Object.assign(authorityUnavailable, {
+          "inApp.state": "HIDDEN",
+          "inApp.availableAt": null,
+          "inApp.readAt": null,
+        });
+      }
+      const authorityWrite = await DigestDeliveryModel.updateOne(claimFilter, {
+        $set: authorityUnavailable,
+      });
+      if (!updateProvesMatch(authorityWrite)) {
+        return digestClaimLostResult(deliveryId);
+      }
+      return {
+        outcome: missingMembership
+          ? "DIGEST_MEMBERSHIP_UNAVAILABLE"
+          : "DIGEST_WEEKLY_AUTHORITY_REVOKED",
+        deliveryId,
+      };
+    }
+    authorityConfirmed = true;
+
+    if (!enabled) {
+      const rolloutWrite = await DigestDeliveryModel.updateOne(claimFilter, {
         $set: {
           status: "PARTIAL",
           "email.state": "ROLLOUT_BLOCKED",
           "email.lastError": "Feature rollout disabled before email delivery",
-          "inApp.state": "AVAILABLE",
-          "inApp.availableAt": new Date(),
+          "email.claimToken": null,
+          "email.claimedAt": null,
+          ...inAppAvailabilityFields(delivery, currentTime()),
         },
+      });
+      if (!updateProvesMatch(rolloutWrite)) {
+        return digestClaimLostResult(deliveryId);
       }
-    );
-    return { outcome: "DIGEST_ROLLOUT_BLOCKED", deliveryId };
-  }
+      return { outcome: "DIGEST_ROLLOUT_BLOCKED", deliveryId };
+    }
 
-  const recipient = await User.findOne({
-    _id: delivery.recipientUserId,
-    firmId: delivery.firmId,
-    isActive: true,
-  })
-    .select("email digestPreferences")
-    .lean();
-  if (!recipient) {
-    await DigestDelivery.updateOne(
-      { _id: delivery._id, "email.state": { $ne: "SENT" } },
-      {
-        $set: {
-          status: "FAILED",
-          "email.state": "FAILED",
-          "email.lastError": "Recipient is inactive or unavailable",
+    // Re-check the recipient's CURRENT preferences at send time, not just the
+    // ones captured when the delivery was queued. A recipient who switches the
+    // daily cadence to OFF, unsubscribes from the weekly summary, or turns off
+    // email copies must not receive an email from a job queued earlier.
+    const suppression = digestEmailSuppressionReason(delivery.kind, recipient);
+    if (suppression) {
+      const subscribedToKind = suppression === "EMAIL_DISABLED";
+      const suppressionWrite = await DigestDeliveryModel.updateOne(
+        claimFilter,
+        {
+          $set: {
+            status: "DELIVERED",
+            "email.state": "DISABLED",
+            "email.lastError": "",
+            "email.claimToken": null,
+            "email.claimedAt": null,
+            ...inAppAvailabilityFields(delivery, currentTime()),
+          },
         },
+      );
+      if (!updateProvesMatch(suppressionWrite)) {
+        return digestClaimLostResult(deliveryId);
       }
-    );
-    return { outcome: "DIGEST_RECIPIENT_UNAVAILABLE", deliveryId };
-  }
-  // Re-check the recipient's CURRENT preferences at send time, not just the
-  // ones captured when the delivery was queued. A recipient who switches the
-  // daily cadence to OFF, unsubscribes from the weekly summary, or turns off
-  // email copies must not receive an email from a job queued earlier.
-  const suppression = digestEmailSuppressionReason(delivery.kind, recipient);
-  if (suppression) {
-    const subscribedToKind = suppression === "EMAIL_DISABLED";
-    await DigestDelivery.updateOne(
-      { _id: delivery._id, "email.state": { $ne: "SENT" } },
-      {
-        $set: {
-          status: "DELIVERED",
-          "email.state": "DISABLED",
-          "email.lastError": "",
-          "inApp.state": "AVAILABLE",
-          "inApp.availableAt": new Date(),
-        },
-      }
-    );
-    return {
-      outcome: subscribedToKind
-        ? "DIGEST_EMAIL_DISABLED_IN_APP_AVAILABLE"
-        : "DIGEST_UNSUBSCRIBED_IN_APP_AVAILABLE",
-      deliveryId,
-    };
-  }
+      return {
+        outcome: subscribedToKind
+          ? "DIGEST_EMAIL_DISABLED_IN_APP_AVAILABLE"
+          : "DIGEST_UNSUBSCRIBED_IN_APP_AVAILABLE",
+        deliveryId,
+      };
+    }
 
-  const copy = digestCopy(delivery.kind, delivery.periodKey);
-  try {
     if (assertLease) await assertLease();
-    const response = await sendDigestEmail({
-      toEmail: recipient.email,
+    if (typeof beforeProviderAuthorityReload === "function") {
+      await beforeProviderAuthorityReload({ delivery, job });
+    }
+    const [finalFirmResult, finalRecipientResult, finalMembershipResult] =
+      await Promise.allSettled([
+        FirmModel.findOne(
+          combineQueryFilters(strictObjectIdFilter({ _id: delivery.firmId }), {
+            isActive: true,
+          }),
+        )
+          .select("_id kind ownerUserId")
+          .lean(),
+        UserModel.findOne(
+          combineQueryFilters(
+            strictObjectIdFilter({ _id: delivery.recipientUserId }),
+            { isActive: true },
+          ),
+        )
+          .select("email role digestPreferences")
+          .lean(),
+        FirmMembershipModel.findOne(
+          combineQueryFilters(
+            strictObjectIdFilter({
+              firmId: delivery.firmId,
+              userId: delivery.recipientUserId,
+            }),
+            { status: "ACTIVE" },
+          ),
+        )
+          .select("role status")
+          .lean(),
+      ]);
+    const finalFirm =
+      finalFirmResult.status === "fulfilled"
+        ? finalFirmResult.value
+        : undefined;
+    const finalRecipient =
+      finalRecipientResult.status === "fulfilled"
+        ? finalRecipientResult.value
+        : undefined;
+    const finalMembership =
+      finalMembershipResult.status === "fulfilled"
+        ? finalMembershipResult.value
+        : undefined;
+    const finalAuthorityFailure = digestAuthorityFailure({
+      delivery,
+      firm: finalFirm,
+      recipient: finalRecipient,
+      membership: finalMembership,
+      resolved: {
+        firm: finalFirmResult.status === "fulfilled",
+        recipient: finalRecipientResult.status === "fulfilled",
+        membership: finalMembershipResult.status === "fulfilled",
+      },
+    });
+    if (finalAuthorityFailure) {
+      const finalAuthorityWrite = await DigestDeliveryModel.updateOne(
+        claimFilter,
+        { $set: finalAuthorityFailure.fields },
+      );
+      if (!updateProvesMatch(finalAuthorityWrite)) {
+        return digestClaimLostResult(deliveryId);
+      }
+      return { outcome: finalAuthorityFailure.outcome, deliveryId };
+    }
+    const finalLookupFailure = [
+      finalFirmResult,
+      finalRecipientResult,
+      finalMembershipResult,
+    ].find((result) => result.status === "rejected");
+    if (finalLookupFailure) throw finalLookupFailure.reason;
+
+    const finalSuppression = digestEmailSuppressionReason(
+      delivery.kind,
+      finalRecipient,
+    );
+    if (finalSuppression) {
+      const subscribedToKind = finalSuppression === "EMAIL_DISABLED";
+      const finalSuppressionWrite = await DigestDeliveryModel.updateOne(
+        claimFilter,
+        {
+          $set: {
+            status: "DELIVERED",
+            "email.state": "DISABLED",
+            "email.lastError": "",
+            "email.claimToken": null,
+            "email.claimedAt": null,
+            ...inAppAvailabilityFields(delivery, currentTime()),
+          },
+        },
+      );
+      if (!updateProvesMatch(finalSuppressionWrite)) {
+        return digestClaimLostResult(deliveryId);
+      }
+      return {
+        outcome: subscribedToKind
+          ? "DIGEST_EMAIL_DISABLED_IN_APP_AVAILABLE"
+          : "DIGEST_UNSUBSCRIBED_IN_APP_AVAILABLE",
+        deliveryId,
+      };
+    }
+
+    const copy = digestCopy(delivery.kind, delivery.periodKey);
+    const finalRolloutEnabled = await AppConfigModel.isFeatureEnabled(
+      featureFlag,
+      { fresh: true },
+    );
+    if (!finalRolloutEnabled) {
+      const rolloutWrite = await DigestDeliveryModel.updateOne(claimFilter, {
+        $set: {
+          status: "PARTIAL",
+          "email.state": "ROLLOUT_BLOCKED",
+          "email.lastError": "Feature rollout disabled before email delivery",
+          "email.claimToken": null,
+          "email.claimedAt": null,
+          ...inAppAvailabilityFields(delivery, currentTime()),
+        },
+      });
+      if (!updateProvesMatch(rolloutWrite)) {
+        return digestClaimLostResult(deliveryId);
+      }
+      return { outcome: "DIGEST_ROLLOUT_BLOCKED", deliveryId };
+    }
+
+    sendAttemptStarted = true;
+    const response = await sendDigestEmailProvider({
+      toEmail: finalRecipient.email,
       subject: delivery.subject,
       heading: copy.heading,
       periodLabel: copy.periodLabel,
       lines: summaryLines(delivery.summary),
-      idempotencyKey: `digest-delivery:${delivery._id}`,
+      idempotencyKey:
+        delivery.email?.idempotencyKey || `digest-delivery:${delivery._id}`,
     });
-    if (assertLease) await assertLease();
-    const updated = await DigestDelivery.findOneAndUpdate(
-      { _id: delivery._id, "email.state": { $ne: "SENT" } },
-      {
-        $set: {
-          status: "DELIVERED",
-          "email.state": "SENT",
-          "email.providerMessageId": String(
-            response?.data?.id || response?.id || ""
-          ).slice(0, 240),
-          "email.lastError": "",
-          "email.sentAt": new Date(),
-        },
-        $inc: { "email.attempts": 1 },
+    providerAccepted = true;
+    const updated = await DigestDeliveryModel.updateOne(claimFilter, {
+      $set: {
+        status: "DELIVERED",
+        "email.state": "SENT",
+        "email.providerMessageId": String(
+          response?.data?.id || response?.id || "",
+        ).slice(0, 240),
+        "email.lastError": "",
+        "email.sentAt": currentTime(),
+        "email.claimToken": null,
+        "email.claimedAt": null,
+        "email.attempts": attempts + 1,
       },
-      { new: true }
-    );
-    await safeRecordActivity({
+    });
+    if (!updateProvesMatch(updated)) {
+      const persisted = await DigestDeliveryModel.findOne(
+        strictObjectIdFilter({ _id: deliveryId, firmId }),
+      )
+        .select("email.state")
+        .lean();
+      if (persisted?.email?.state === "SENT") {
+        return { outcome: "DIGEST_ALREADY_SENT", deliveryId };
+      }
+      return digestClaimLostResult(deliveryId);
+    }
+
+    await recordActivity({
       firmId: delivery.firmId,
       actorUserId: delivery.recipientUserId,
       source: "AUTOMATION",
@@ -680,49 +3302,81 @@ export async function processDigestDeliveryJob(job, { assertLease } = {}) {
       metadata: { kind: delivery.kind, periodKey: delivery.periodKey },
     });
     return {
-      outcome: updated ? "DIGEST_EMAIL_SENT" : "DIGEST_ALREADY_SENT",
+      outcome: "DIGEST_EMAIL_SENT",
       deliveryId,
     };
   } catch (error) {
-    await DigestDelivery.updateOne(
-      { _id: delivery._id, "email.state": { $ne: "SENT" } },
-      {
-        $set: {
-          status: "PARTIAL",
-          "email.state": "FAILED",
-          "email.lastError": safeError(error),
-          "inApp.state": "AVAILABLE",
-          "inApp.availableAt": new Date(),
-        },
-        $inc: { "email.attempts": 1 },
-      }
+    if (providerAccepted) {
+      // Provider acceptance is irreversible. Reclassifying a later persistence
+      // error as an ordinary send failure could trigger a duplicate email.
+      throw error;
+    }
+    const failureFields = {
+      status: "PARTIAL",
+      "email.state": "FAILED",
+      "email.lastError": safeError(error),
+      "email.claimToken": null,
+      "email.claimedAt": null,
+    };
+    if (authorityConfirmed) {
+      Object.assign(
+        failureFields,
+        inAppAvailabilityFields(delivery, currentTime()),
+      );
+    }
+    if (sendAttemptStarted) {
+      failureFields["email.attempts"] = attempts + 1;
+    }
+    const failureUpdate = { $set: failureFields };
+    const failed = await DigestDeliveryModel.updateOne(
+      claimFilter,
+      failureUpdate,
     );
-    await safeRecordActivity({
-      firmId: delivery.firmId,
-      actorUserId: delivery.recipientUserId,
-      source: "AUTOMATION",
-      action: "DIGEST_EMAIL_FAILED_IN_APP_AVAILABLE",
-      entityType: "DigestDelivery",
-      entityId: delivery._id,
-      requestId: job.requestId,
-      metadata: { kind: delivery.kind, periodKey: delivery.periodKey },
-    });
+    if (!updateProvesMatch(failed)) {
+      return digestClaimLostResult(deliveryId);
+    }
+    if (authorityConfirmed) {
+      await recordActivity({
+        firmId: delivery.firmId,
+        actorUserId: delivery.recipientUserId,
+        source: "AUTOMATION",
+        action: "DIGEST_EMAIL_FAILED_IN_APP_AVAILABLE",
+        entityType: "DigestDelivery",
+        entityId: delivery._id,
+        requestId: job.requestId,
+        metadata: { kind: delivery.kind, periodKey: delivery.periodKey },
+      });
+    }
     throw error;
   }
 }
 
-export async function getDigestPreferences({ userId, firmId }) {
-  const [user, firm, flags] = await Promise.all([
-    User.findOne({ _id: userId, firmId, isActive: true })
-      .select("role digestPreferences")
-      .lean(),
-    Firm.findOne({ _id: firmId, isActive: true })
-      .select("timezone digestSettings")
-      .lean(),
-    AppConfig.getFeatureFlags(),
-  ]);
-  if (!user || !firm) {
-    throw new DigestError("User or firm is unavailable", 404, "DIGEST_SCOPE_NOT_FOUND");
+export async function getDigestPreferences(
+  { userId, firmId },
+  {
+    AppConfig: AppConfigModel = AppConfig,
+    Firm: FirmModel = Firm,
+    FirmMembership: FirmMembershipModel = FirmMembership,
+    User: UserModel = User,
+    requireActiveDigestAccess:
+      requireActiveDigestAccessProvider = requireActiveDigestAccess,
+  } = {},
+) {
+  const { firm, user } = await requireActiveDigestAccessProvider(
+    { userId, firmId },
+    {
+      Firm: FirmModel,
+      FirmMembership: FirmMembershipModel,
+      User: UserModel,
+    },
+  );
+  const flags = await AppConfigModel.getFeatureFlags();
+  if (!firm) {
+    throw new DigestError(
+      "User or firm is unavailable",
+      404,
+      "DIGEST_SCOPE_NOT_FOUND",
+    );
   }
   return {
     preferences: effectivePreferences(user),
@@ -741,19 +3395,31 @@ export async function getDigestPreferences({ userId, firmId }) {
   };
 }
 
-export async function updateDigestPreferences({
-  userId,
-  firmId,
-  input,
-  requestId = "",
-}) {
+export async function updateDigestPreferences(
+  { userId, firmId, input, requestId = "" },
+  {
+    Firm: FirmModel = Firm,
+    FirmMembership: FirmMembershipModel = FirmMembership,
+    User: UserModel = User,
+    requireActiveDigestAccess:
+      requireActiveDigestAccessProvider = requireActiveDigestAccess,
+    safeRecordActivity: recordActivity = safeRecordActivity,
+  } = {},
+) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new DigestError("Digest preferences object is required");
   }
-  const allowed = ["dailyFrequency", "dailyEnabled", "weeklyEnabled", "emailEnabled"];
+  const allowed = [
+    "dailyFrequency",
+    "dailyEnabled",
+    "weeklyEnabled",
+    "emailEnabled",
+  ];
   const unknown = Object.keys(input).filter((key) => !allowed.includes(key));
   if (unknown.length) {
-    throw new DigestError(`Unsupported digest preferences: ${unknown.join(", ")}`);
+    throw new DigestError(
+      `Unsupported digest preferences: ${unknown.join(", ")}`,
+    );
   }
   const update = {};
   // Daily cadence: dailyFrequency is authoritative. Keep the legacy
@@ -762,7 +3428,7 @@ export async function updateDigestPreferences({
     const freq = String(input.dailyFrequency || "");
     if (!DAILY_FREQUENCIES.has(freq)) {
       throw new DigestError(
-        "dailyFrequency must be one of DAILY, EVERY_3_DAYS, WEEKLY, OFF"
+        "dailyFrequency must be one of DAILY, EVERY_3_DAYS, WEEKLY, OFF",
       );
     }
     update["digestPreferences.dailyFrequency"] = freq;
@@ -786,20 +3452,27 @@ export async function updateDigestPreferences({
   if (!Object.keys(update).length) {
     throw new DigestError("No digest preferences to update");
   }
-  const before = await User.findOne({ _id: userId, firmId, isActive: true })
-    .select("digestPreferences")
-    .lean();
-  if (!before) {
-    throw new DigestError("User is unavailable", 404, "DIGEST_USER_NOT_FOUND");
-  }
-  const user = await User.findOneAndUpdate(
-    { _id: userId, firmId, isActive: true },
+  const { user: before } = await requireActiveDigestAccessProvider(
+    { userId, firmId },
+    {
+      Firm: FirmModel,
+      FirmMembership: FirmMembershipModel,
+      User: UserModel,
+    },
+  );
+  const user = await UserModel.findOneAndUpdate(
+    combineQueryFilters(strictObjectIdFilter({ _id: userId }), {
+      isActive: true,
+    }),
     { $set: update },
-    { new: true, runValidators: true }
+    { new: true, runValidators: true },
   )
     .select("digestPreferences")
     .lean();
-  await safeRecordActivity({
+  if (!user) {
+    throw new DigestError("User is unavailable", 404, "DIGEST_USER_NOT_FOUND");
+  }
+  await recordActivity({
     firmId,
     actorUserId: userId,
     source: "USER",
@@ -813,19 +3486,27 @@ export async function updateDigestPreferences({
   return effectivePreferences(user);
 }
 
-export async function updateFirmDigestSettings({
-  userId,
-  firmId,
-  input,
-  requestId = "",
-}) {
+export async function updateFirmDigestSettings(
+  { userId, firmId, input, requestId = "" },
+  {
+    Firm: FirmModel = Firm,
+    FirmMembership: FirmMembershipModel = FirmMembership,
+    User: UserModel = User,
+    safeRecordActivity: recordActivity = safeRecordActivity,
+    runSettingsTransaction:
+      runSettingsTransactionProvider = defaultRunSettingsTransaction,
+    beforeSettingsWrite = null,
+  } = {},
+) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new DigestError("Firm digest settings object is required");
   }
   const allowed = ["timezone", "dailyHour", "weeklyDay", "weeklyHour"];
   const unknown = Object.keys(input).filter((key) => !allowed.includes(key));
   if (unknown.length) {
-    throw new DigestError(`Unsupported firm digest settings: ${unknown.join(", ")}`);
+    throw new DigestError(
+      `Unsupported firm digest settings: ${unknown.join(", ")}`,
+    );
   }
   const update = {};
   if (Object.prototype.hasOwnProperty.call(input, "timezone")) {
@@ -849,61 +3530,249 @@ export async function updateFirmDigestSettings({
   if (!Object.keys(update).length) {
     throw new DigestError("No firm digest settings to update");
   }
-  const before = await Firm.findOne({ _id: firmId, isActive: true })
-    .select("timezone digestSettings")
-    .lean();
-  if (!before) {
-    throw new DigestError("Firm is unavailable", 404, "DIGEST_FIRM_NOT_FOUND");
-  }
-  const firm = await Firm.findOneAndUpdate(
-    { _id: firmId, isActive: true },
-    { $set: update },
-    { new: true, runValidators: true }
-  )
-    .select("timezone digestSettings")
-    .lean();
-  await safeRecordActivity({
+
+  const canonicalUserId = requireCanonicalObjectId(userId, "userId");
+  const canonicalFirmId = requireCanonicalObjectId(firmId, "firmId");
+  const transactionResult = await runSettingsTransactionProvider(
+    async (session) => {
+      if (!session) {
+        throw new TypeError("Digest settings transaction requires a session");
+      }
+      const currentUser = await withDigestRecoverySession(
+        UserModel.findOne(
+          combineQueryFilters(strictObjectIdFilter({ _id: canonicalUserId }), {
+            isActive: true,
+          }),
+        ),
+        session,
+      )
+        .select("_id isActive __v")
+        .lean();
+      const membership = await withDigestRecoverySession(
+        FirmMembershipModel.findOne(
+          combineQueryFilters(
+            strictObjectIdFilter({
+              firmId: canonicalFirmId,
+              userId: canonicalUserId,
+            }),
+            { status: "ACTIVE" },
+          ),
+        ),
+        session,
+      )
+        .select("role status __v")
+        .lean();
+      const before = await withDigestRecoverySession(
+        FirmModel.findOne(
+          combineQueryFilters(strictObjectIdFilter({ _id: canonicalFirmId }), {
+            isActive: true,
+          }),
+        ),
+        session,
+      )
+        .select("timezone digestSettings kind ownerUserId __v")
+        .lean();
+
+      const activeAdminMembership =
+        membership?.status === "ACTIVE" &&
+        ["OWNER", "ADMIN"].includes(membership.role);
+      if (!currentUser || !activeAdminMembership) {
+        throw new DigestError(
+          "Firm digest settings are firm-admin only",
+          403,
+          "FIRM_ADMIN_ONLY",
+        );
+      }
+      if (!before) {
+        throw new DigestError(
+          "Firm is unavailable",
+          404,
+          "DIGEST_FIRM_NOT_FOUND",
+        );
+      }
+      const businessAuthority = before.kind !== "PERSONAL";
+      const personalAuthority =
+        before.kind === "PERSONAL" &&
+        sameObjectId(before.ownerUserId, canonicalUserId) &&
+        membership.role === "OWNER";
+      if (!businessAuthority && !personalAuthority) {
+        throw new DigestError(
+          "Firm digest settings are firm-admin only",
+          403,
+          "FIRM_ADMIN_ONLY",
+        );
+      }
+
+      const userVersion = nonnegativeSafeInteger(currentUser.__v);
+      const membershipVersion = nonnegativeSafeInteger(membership.__v);
+      const firmVersion = nonnegativeSafeInteger(before.__v);
+      if (
+        [userVersion, membershipVersion, firmVersion].some(
+          (version) => version === null || version === Number.MAX_SAFE_INTEGER,
+        )
+      ) {
+        throw new DigestError(
+          "Digest settings changed before the update could be applied",
+          409,
+          "DIGEST_SETTINGS_CONFLICT",
+        );
+      }
+
+      if (typeof beforeSettingsWrite === "function") {
+        await beforeSettingsWrite({
+          session,
+          user: currentUser,
+          membership,
+          firm: before,
+          update,
+        });
+      }
+
+      const userFence = await UserModel.updateOne(
+        combineQueryFilters(
+          strictObjectIdFilter({ _id: canonicalUserId }),
+          { isActive: true },
+          snapshotFilter({ __v: userVersion }),
+        ),
+        { $inc: { __v: 1 } },
+        { session, timestamps: false },
+      );
+      if (!updateProvesMatch(userFence)) {
+        throw new DigestError(
+          "Digest settings changed before the update could be applied",
+          409,
+          "DIGEST_SETTINGS_CONFLICT",
+        );
+      }
+
+      const membershipFence = await FirmMembershipModel.updateOne(
+        combineQueryFilters(
+          strictObjectIdFilter({
+            firmId: canonicalFirmId,
+            userId: canonicalUserId,
+          }),
+          snapshotFilter({
+            status: "ACTIVE",
+            role: membership.role,
+            __v: membershipVersion,
+          }),
+          personalAuthority
+            ? { role: "OWNER" }
+            : { role: { $in: ["OWNER", "ADMIN"] } },
+        ),
+        { $inc: { __v: 1 } },
+        { session, timestamps: false },
+      );
+      if (!updateProvesMatch(membershipFence)) {
+        throw new DigestError(
+          "Digest settings changed before the update could be applied",
+          409,
+          "DIGEST_SETTINGS_CONFLICT",
+        );
+      }
+
+      const firmFence = [
+        strictObjectIdFilter({ _id: canonicalFirmId }),
+        { isActive: true },
+        snapshotFilter({ kind: before.kind, __v: firmVersion }),
+      ];
+      if (personalAuthority) {
+        firmFence.push(strictObjectIdFilter({ ownerUserId: canonicalUserId }));
+      }
+      const firm = await FirmModel.findOneAndUpdate(
+        combineQueryFilters(...firmFence),
+        { $set: update, $inc: { __v: 1 } },
+        { new: true, runValidators: true, session },
+      )
+        .select("timezone digestSettings")
+        .lean();
+      if (!firm) {
+        throw new DigestError(
+          "Digest settings changed before the update could be applied",
+          409,
+          "DIGEST_SETTINGS_CONFLICT",
+        );
+      }
+      const beforeSummary = {
+        _id: before._id,
+        timezone: before.timezone,
+        digestSettings: before.digestSettings,
+      };
+      return { before: beforeSummary, firm };
+    },
+  );
+
+  await recordActivity({
     firmId,
     actorUserId: userId,
     source: "USER",
     action: "FIRM_DIGEST_SETTINGS_UPDATED",
     entityType: "Firm",
     entityId: firmId,
-    beforeSummary: before,
-    afterSummary: firm,
+    beforeSummary: transactionResult.before,
+    afterSummary: transactionResult.firm,
     requestId,
   });
-  return firm;
+  return transactionResult.firm;
 }
 
-export async function previewDigest({
-  userId,
-  firmId,
-  role,
-  kind,
-  dailyEnabled,
-  weeklyEnabled,
-  noticeCasesEnabled,
-  now = new Date(),
-}) {
+export async function previewDigest(
+  {
+    userId,
+    firmId,
+    role,
+    kind,
+    dailyEnabled,
+    weeklyEnabled,
+    noticeCasesEnabled,
+    now = new Date(),
+  },
+  {
+    Firm: FirmModel = Firm,
+    FirmMembership: FirmMembershipModel = FirmMembership,
+    User: UserModel = User,
+    requireActiveDigestAccess:
+      requireActiveDigestAccessProvider = requireActiveDigestAccess,
+    buildDigestSummary: buildDigestSummaryProvider = buildDigestSummary,
+  } = {},
+) {
   if (!DIGEST_KINDS.has(kind)) throw new DigestError("Digest kind is invalid");
+  const { firm, weeklyAuthorized } = await requireActiveDigestAccessProvider(
+    { userId, firmId },
+    {
+      Firm: FirmModel,
+      FirmMembership: FirmMembershipModel,
+      User: UserModel,
+    },
+  );
   if (kind === DAILY_KIND && !dailyEnabled) {
-    throw new DigestError("Daily digest is unavailable", 404, "DAILY_DIGEST_DISABLED");
+    throw new DigestError(
+      "Daily digest is unavailable",
+      404,
+      "DAILY_DIGEST_DISABLED",
+    );
   }
   if (kind === WEEKLY_KIND && !weeklyEnabled) {
-    throw new DigestError("Weekly summary is unavailable", 404, "WEEKLY_SUMMARY_DISABLED");
+    throw new DigestError(
+      "Weekly summary is unavailable",
+      404,
+      "WEEKLY_SUMMARY_DISABLED",
+    );
   }
-  if (kind === WEEKLY_KIND && !isFirmAdminRole(role)) {
-    throw new DigestError("Weekly firm summary is firm-admin only", 403, "FIRM_ADMIN_ONLY");
+  if (kind === WEEKLY_KIND && !weeklyAuthorized) {
+    throw new DigestError(
+      "Weekly firm summary is firm-admin only",
+      403,
+      "FIRM_ADMIN_ONLY",
+    );
   }
-  const firm = await Firm.findOne({ _id: firmId, isActive: true })
-    .select("timezone")
-    .lean();
   if (!firm) throw new DigestError("Firm is unavailable", 404);
-  const timezone = validTimezone(firm.timezone) ? firm.timezone : "Asia/Kolkata";
+  const timezone = validTimezone(firm.timezone)
+    ? firm.timezone
+    : "Asia/Kolkata";
   const parts = zonedParts(now, timezone);
   const periodKey = kind === DAILY_KIND ? parts.dateKey : weekStartKey(parts);
-  return buildDigestSummary({
+  return buildDigestSummaryProvider({
     firmId,
     userId,
     kind,
@@ -918,52 +3787,146 @@ export async function previewDigest({
 // the requester, WITHOUT creating/altering any DigestDelivery (so it never
 // interferes with the real per-week dedup). Used to verify digest email
 // delivery on demand. Feature flags are read fresh here.
-export async function sendTestDigestNow({
-  userId,
-  firmId,
-  role,
-  toEmail,
-  kind = WEEKLY_KIND,
-  now = new Date(),
-}) {
+export async function sendTestDigestNow(
+  { userId, firmId, role, toEmail, kind = WEEKLY_KIND, now = new Date() },
+  {
+    AppConfig: AppConfigModel = AppConfig,
+    Firm: FirmModel = Firm,
+    FirmMembership: FirmMembershipModel = FirmMembership,
+    User: UserModel = User,
+    previewDigest: previewDigestProvider = previewDigest,
+    requireActiveDigestAccess:
+      requireActiveDigestAccessProvider = requireActiveDigestAccess,
+    sendDigestEmail: sendDigestEmailProvider = sendDigestEmail,
+    beforeProviderAuthorityReload = null,
+  } = {},
+) {
+  if (role !== "SUPER_ADMIN") {
+    throw new DigestError("Super admin only", 403, "SUPER_ADMIN_ONLY");
+  }
   if (!toEmail) throw new DigestError("A recipient email is required", 400);
-  const flags = await AppConfig.getFeatureFlags();
-  const summary = await previewDigest({
-    userId,
-    firmId,
-    role,
-    kind,
-    dailyEnabled: flags.dailyDigest === true,
-    weeklyEnabled: flags.weeklySummary === true,
-    noticeCasesEnabled: flags.noticeCases === true,
-    now,
-  });
+  const flags = await AppConfigModel.getFeatureFlags();
+  const summary = await previewDigestProvider(
+    {
+      userId,
+      firmId,
+      role,
+      kind,
+      dailyEnabled: flags.dailyDigest === true,
+      weeklyEnabled: flags.weeklySummary === true,
+      noticeCasesEnabled: flags.noticeCases === true,
+      now,
+    },
+    {
+      Firm: FirmModel,
+      FirmMembership: FirmMembershipModel,
+      User: UserModel,
+      requireActiveDigestAccess: requireActiveDigestAccessProvider,
+    },
+  );
   const copy = digestCopy(summary.kind, summary.periodKey);
-  const response = await sendDigestEmail({
-    toEmail,
+  if (typeof beforeProviderAuthorityReload === "function") {
+    await beforeProviderAuthorityReload({ summary, userId, firmId });
+  }
+  const { user, weeklyAuthorized } = await requireActiveDigestAccessProvider(
+    { userId, firmId },
+    {
+      Firm: FirmModel,
+      FirmMembership: FirmMembershipModel,
+      User: UserModel,
+    },
+  );
+  if (user.role !== "SUPER_ADMIN") {
+    throw new DigestError("Super admin only", 403, "SUPER_ADMIN_ONLY");
+  }
+  if (summary.kind === WEEKLY_KIND && !weeklyAuthorized) {
+    throw new DigestError(
+      "Weekly firm summary is firm-admin only",
+      403,
+      "FIRM_ADMIN_ONLY",
+    );
+  }
+  const suppression = digestEmailSuppressionReason(summary.kind, user);
+  if (suppression) {
+    throw new DigestError(
+      suppression === "EMAIL_DISABLED"
+        ? "Digest email is disabled in current preferences"
+        : "Digest is disabled in current preferences",
+      409,
+      suppression === "EMAIL_DISABLED"
+        ? "DIGEST_EMAIL_DISABLED"
+        : "DIGEST_UNSUBSCRIBED",
+    );
+  }
+
+  const normalizedEmail = normalizeDigestEmail(user.email);
+  if (!normalizedEmail) {
+    throw new DigestError(
+      "Current user email is invalid",
+      400,
+      "DIGEST_EMAIL_INVALID",
+    );
+  }
+  const canonicalFirmId = requireCanonicalObjectId(firmId, "firmId");
+  const featureFlag =
+    summary.kind === DAILY_KIND ? "dailyDigest" : "weeklySummary";
+  const featureEnabled = await AppConfigModel.isFeatureEnabled(featureFlag, {
+    fresh: true,
+  });
+  if (!featureEnabled) {
+    if (summary.kind === DAILY_KIND) {
+      throw new DigestError(
+        "Daily digest is unavailable",
+        404,
+        "DAILY_DIGEST_DISABLED",
+      );
+    }
+    throw new DigestError(
+      "Weekly summary is unavailable",
+      404,
+      "WEEKLY_SUMMARY_DISABLED",
+    );
+  }
+
+  const response = await sendDigestEmailProvider({
+    toEmail: normalizedEmail,
     subject: `[Test] ${copy.subject}`,
     heading: copy.heading,
     periodLabel: copy.periodLabel,
     lines: summaryLines(summary),
-    idempotencyKey: `test-digest:${String(firmId)}:${summary.kind}:${summary.periodKey}:${now.getTime()}`,
+    idempotencyKey: `test-digest:${canonicalFirmId}:${summary.kind}:${summary.periodKey}:${now.getTime()}`,
   });
   return {
     summary,
-    providerMessageId: String(response?.data?.id || response?.id || "").slice(0, 240),
+    providerMessageId: String(response?.data?.id || response?.id || "").slice(
+      0,
+      240,
+    ),
   };
 }
 
 export async function listDigestInbox({ userId, firmId, query = {} }) {
   const { page, limit, skip } = pagination(query);
-  const filter = {
+  const { weeklyAuthorized } = await requireActiveDigestAccess({
+    userId,
     firmId,
-    recipientUserId: userId,
-    "inApp.state": { $in: ["AVAILABLE", "READ"] },
-  };
+  });
+  const filter = combineQueryFilters(
+    strictObjectIdFilter({
+      firmId,
+      recipientUserId: userId,
+    }),
+    {
+      "inApp.state": { $in: ["AVAILABLE", "READ"] },
+      ...(weeklyAuthorized ? {} : { kind: DAILY_KIND }),
+    },
+  );
   const [total, items] = await Promise.all([
     DigestDelivery.countDocuments(filter),
     DigestDelivery.find(filter)
-      .select("kind periodKey timezone subject summary status email inApp createdAt")
+      .select(
+        "kind periodKey timezone subject summary status email inApp createdAt",
+      )
       .sort({ createdAt: -1, _id: -1 })
       .skip(skip)
       .limit(limit)
@@ -990,20 +3953,29 @@ export async function listDigestInbox({ userId, firmId, query = {} }) {
 
 export async function markDigestRead({ deliveryId, userId, firmId }) {
   if (!validObjectId(deliveryId)) throw new DigestError("Digest id is invalid");
+  const { weeklyAuthorized } = await requireActiveDigestAccess({
+    userId,
+    firmId,
+  });
   const delivery = await DigestDelivery.findOneAndUpdate(
-    {
-      _id: deliveryId,
-      firmId,
-      recipientUserId: userId,
-      "inApp.state": { $in: ["AVAILABLE", "READ"] },
-    },
+    combineQueryFilters(
+      strictObjectIdFilter({
+        _id: deliveryId,
+        firmId,
+        recipientUserId: userId,
+      }),
+      {
+        "inApp.state": { $in: ["AVAILABLE", "READ"] },
+        ...(weeklyAuthorized ? {} : { kind: DAILY_KIND }),
+      },
+    ),
     {
       $set: {
         "inApp.state": "READ",
         "inApp.readAt": new Date(),
       },
     },
-    { new: true }
+    { new: true },
   ).lean();
   if (!delivery) {
     throw new DigestError("Digest not found", 404, "DIGEST_NOT_FOUND");
@@ -1013,15 +3985,27 @@ export async function markDigestRead({ deliveryId, userId, firmId }) {
 
 export {
   DAILY_KIND,
+  DIGEST_AUTHORITY_DEFER_MS,
   DIGEST_JOB_KIND,
+  DIGEST_JOB_RECOVERY_LEASE_MS,
+  DIGEST_RECOVERY_BATCH_SIZE,
+  DIGEST_RECOVERY_CURSOR_LEASE_MS,
+  DIGEST_RECOVERY_MAX_BATCHES,
   DigestError,
   FIRM_SCAN_BATCH,
+  SEND_CLAIM_STALE_MS,
   WEEKLY_KIND,
   buildDigestSummary,
+  claimDigestDelivery,
   dailyDigestDueForFrequency,
+  digestBusinessIdentity,
   digestEmailSuppressionReason,
+  digestSendingRecoveryReason,
   effectiveDailyFrequency,
   effectivePreferences,
+  enqueueRecipientDigest,
+  hasWeeklyDigestAuthority,
+  requireActiveDigestAccess,
   summaryLines,
   validTimezone,
   zonedParts,

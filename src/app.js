@@ -65,16 +65,34 @@ const PUBLIC_ERROR_CODES = new Set([
 ]);
 
 const PUBLIC_IMPORT_ERROR_MESSAGES = Object.freeze({
-  IMPORT_MAPPING_UNSUPPORTED_FIELDS: "Column mapping contains unsupported fields.",
+  IMPORT_MAPPING_UNSUPPORTED_FIELDS:
+    "Column mapping contains unsupported fields.",
   IMPORT_MAPPING_MISSING_FIELDS: "Required column mappings are missing.",
-  IMPORT_MAPPING_HEADER_NOT_FOUND: "A mapped source heading is not present in this file.",
-  IMPORT_MAPPING_DUPLICATE_SOURCE: "Each source column can map to only one import field.",
-  GST_IMPORT_CLIENT_NOT_FOUND: "Selected client is not available in the active firm.",
-  GST_IMPORT_PREVIEW_STALE: "Import inputs changed after preview. Preview current data again.",
-  RECIPIENT_GSTIN_MISMATCH: "Recipient GSTIN does not match selected registration.",
+  IMPORT_MAPPING_HEADER_NOT_FOUND:
+    "A mapped source heading is not present in this file.",
+  IMPORT_MAPPING_DUPLICATE_SOURCE:
+    "Each source column can map to only one import field.",
+  GST_IMPORT_CLIENT_NOT_FOUND:
+    "Selected client is not available in the active firm.",
+  GST_IMPORT_PREVIEW_STALE:
+    "Import inputs changed after preview. Preview current data again.",
+  RECIPIENT_GSTIN_MISMATCH:
+    "Recipient GSTIN does not match selected registration.",
 });
 
 const app = express();
+
+// Importing app must not fabricate bootstrap success. server.js owns background
+// initialization and marks readiness true only after indexes and schedulers are ready.
+let backgroundInitializationReady = false;
+
+function setBackgroundReadiness(ready) {
+  backgroundInitializationReady = ready === true;
+}
+
+function isHealthReady({ dbOk, backgroundReady }) {
+  return dbOk === true && backgroundReady === true;
+}
 
 // Trust Render's reverse proxy so req.ip + secure cookies work correctly
 app.set("trust proxy", 1);
@@ -108,22 +126,33 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com"],
+        styleSrc: [
+          "'self'",
+          "'unsafe-inline'",
+          "https://cdn.jsdelivr.net",
+          "https://fonts.googleapis.com",
+          "https://cdnjs.cloudflare.com",
+        ],
         scriptSrc: ["'self'", "https://cdn.jsdelivr.net"],
         connectSrc: [
           "'self'",
           "https://cdn.jsdelivr.net",
-          "https://api.caprotoolkit.in"
+          "https://api.caprotoolkit.in",
         ],
         imgSrc: ["'self'", "data:", "https:"],
-        fontSrc: ["'self'", "https://cdn.jsdelivr.net", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
+        fontSrc: [
+          "'self'",
+          "https://cdn.jsdelivr.net",
+          "https://fonts.gstatic.com",
+          "https://cdnjs.cloudflare.com",
+        ],
       },
     },
     crossOriginEmbedderPolicy: false,
     referrerPolicy: { policy: "strict-origin-when-cross-origin" },
     // Force HTTPS for a year (with subdomains + preload eligibility).
     hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
-  })
+  }),
 );
 
 /* ===============================
@@ -155,7 +184,10 @@ app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("X-XSS-Protection", "1; mode=block");
-  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=()",
+  );
   res.setHeader("X-Permitted-Cross-Domain-Policies", "none");
   next();
 });
@@ -191,7 +223,7 @@ app.use(
       return callback(new Error(`CORS blocked for origin: ${origin}`));
     },
     credentials: true,
-  })
+  }),
 );
 
 app.use(morgan(isProd ? "combined" : "dev"));
@@ -247,11 +279,19 @@ app.get("/health", async (req, res) => {
     }
   }
 
-  // Keep the public health payload minimal (no process memory internals).
+  const background = backgroundInitializationReady ? "ready" : "initializing";
+  dbOk = isHealthReady({
+    dbOk,
+    backgroundReady: backgroundInitializationReady,
+  });
+
+  // Keep the public health payload minimal (no process memory internals or
+  // initialization error details).
   res.status(dbOk ? 200 : 503).json({
     status: dbOk ? "ok" : "degraded",
     uptime: Math.round(process.uptime()),
     db: { state: dbStateName, ping_ms: dbPingMs },
+    background,
   });
 });
 
@@ -259,7 +299,7 @@ app.get("/health", async (req, res) => {
    ROOT
 ================================ */
 app.get("/", (req, res) =>
-  res.json({ message: "CA-PRO-TOOLKIT backend running", health: "/health" })
+  res.json({ message: "CA-PRO-TOOLKIT backend running", health: "/health" }),
 );
 
 /* ===============================
@@ -273,12 +313,12 @@ app.use(express.static(publicDir, { index: false }));
 // Admin static files
 app.use(
   "/admin",
-  express.static(path.join(publicDir, "admin"), { index: false })
+  express.static(path.join(publicDir, "admin"), { index: false }),
 );
 
 // Admin entry
 app.get("/admin", (req, res) =>
-  res.sendFile(path.join(publicDir, "admin", "admin.html"))
+  res.sendFile(path.join(publicDir, "admin", "admin.html")),
 );
 
 /* ===============================
@@ -332,18 +372,23 @@ function publicErrorMessage({ err, status, multerStatus, publicCode }) {
   const fixedImportMessage = PUBLIC_IMPORT_ERROR_MESSAGES[err?.code];
   if (fixedImportMessage) return fixedImportMessage;
   if (publicCode && err?.message) return err.message;
-  if (multerStatus === 413) return "The selected file exceeds the permitted size.";
-  if (multerStatus === 400) return "The selected file could not be processed. Review it and try again.";
+  if (multerStatus === 413)
+    return "The selected file exceeds the permitted size.";
+  if (multerStatus === 400)
+    return "The selected file could not be processed. Review it and try again.";
 
   if (status === 400 || status === 422) {
     return "Some submitted information could not be accepted. Review the form and try again.";
   }
   if (status === 401) return "Your session has expired. Sign in again.";
-  if (status === 403) return "You do not have permission to complete this action.";
+  if (status === 403)
+    return "You do not have permission to complete this action.";
   if (status === 404) return "The requested item could not be found.";
-  if (status === 409) return "This information changed while you were working. Refresh and try again.";
+  if (status === 409)
+    return "This information changed while you were working. Refresh and try again.";
   if (status === 413) return "The selected file exceeds the permitted size.";
-  if (status === 429) return "Too many requests were received. Wait briefly and try again.";
+  if (status === 429)
+    return "Too many requests were received. Wait briefly and try again.";
   if (status >= 500) {
     return "We could not complete your request. Try again, or contact support with the request ID if the issue continues.";
   }
@@ -353,16 +398,18 @@ function publicErrorMessage({ err, status, multerStatus, publicCode }) {
 function publicErrorDetails(err) {
   if (err?.code === "RECIPIENT_GSTIN_MISMATCH") {
     const rows = Array.isArray(err?.details?.rows)
-      ? err.details.rows.filter((row) => Number.isInteger(row) && row >= 2 && row <= 501).slice(0, 100)
+      ? err.details.rows
+          .filter((row) => Number.isInteger(row) && row >= 2 && row <= 501)
+          .slice(0, 100)
       : [];
     return rows.length ? { rows } : null;
   }
   if (/^IMPORT_MAPPING_/.test(String(err?.code || ""))) {
     const fields = Array.isArray(err?.details?.fields)
       ? err.details.fields
-        .filter((field) => /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(String(field)))
-        .map(String)
-        .slice(0, 100)
+          .filter((field) => /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(String(field)))
+          .map(String)
+          .slice(0, 100)
       : [];
     return fields.length ? { fields } : null;
   }
@@ -371,17 +418,32 @@ function publicErrorDetails(err) {
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  const multerStatus = err?.name === "MulterError"
-    ? err.code === "LIMIT_FILE_SIZE" ? 413 : 400
-    : null;
-  const candidateStatus = Number(multerStatus || err?.status || err?.statusCode || 500);
-  const status = Number.isInteger(candidateStatus) && candidateStatus >= 400 && candidateStatus <= 599
-    ? candidateStatus
-    : 500;
-  console.error(`[ERROR] ${req.method} ${req.path} →`, err?.message, err?.stack);
+  const multerStatus =
+    err?.name === "MulterError"
+      ? err.code === "LIMIT_FILE_SIZE"
+        ? 413
+        : 400
+      : null;
+  const candidateStatus = Number(
+    multerStatus || err?.status || err?.statusCode || 500,
+  );
+  const status =
+    Number.isInteger(candidateStatus) &&
+    candidateStatus >= 400 &&
+    candidateStatus <= 599
+      ? candidateStatus
+      : 500;
+  console.error(
+    `[ERROR] ${req.method} ${req.path} →`,
+    err?.message,
+    err?.stack,
+  );
   const rolloutChanged =
     err?.code === "FEATURE_ROLLOUT_CHANGED" &&
-    Object.prototype.hasOwnProperty.call(DEFAULT_FEATURE_FLAGS, err?.featureFlag);
+    Object.prototype.hasOwnProperty.call(
+      DEFAULT_FEATURE_FLAGS,
+      err?.featureFlag,
+    );
   const publicCode = rolloutChanged || PUBLIC_ERROR_CODES.has(err?.code);
   const publicDetails = publicCode ? publicErrorDetails(err) : null;
   res.status(status).json({
@@ -396,4 +458,5 @@ app.use((err, req, res, next) => {
   });
 });
 
+export { isHealthReady, setBackgroundReadiness };
 export default app;

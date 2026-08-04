@@ -7,31 +7,58 @@ import AppConfig from "./models/AppConfig.js";
 import Reminder from "./models/Reminder.js";
 import { processReminderForNow } from "./controllers/reminder.controller.js";
 import { assertCaseIndexesReady } from "./services/case-index-readiness.service.js";
+import { assertDigestIndexesReady } from "./services/digest-index-readiness.service.js";
 import { assertEngagementIndexesReady } from "./services/engagement-index-readiness.service.js";
 import { assertAuditWorkingPaperIndexesReady } from "./services/audit-working-paper-index-readiness.service.js";
 import { runAutomationWorkerBatch } from "./services/automation-worker.service.js";
-import { enqueueDueDigests } from "./services/digest.service.js";
-import app from "./app.js";
+import {
+  drainDigestRecovery,
+  enqueueDueDigests,
+} from "./services/digest.service.js";
+import app, { setBackgroundReadiness } from "./app.js";
 
 const PORT = Number(process.env.PORT || 4001);
 const REMINDER_SCHEDULER_INTERVAL_MS = 15 * 60 * 1000;
 const DIGEST_SCHEDULER_INTERVAL_MS = 15 * 60 * 1000;
 const AUTOMATION_WORKER_INTERVAL_MS = 30 * 1000;
+const BOOTSTRAP_RETRY_DELAY_MS = 30 * 1000;
 const AUTOMATION_WORKER_BATCH_SIZE = 5;
 const automationWorkerId = `${hostname()}:${process.pid}`;
 
 let shuttingDown = false;
+let schedulersStarted = false;
+let bootstrapPromise = null;
+let bootstrapRetryTimer = null;
+let databaseConnectionInitialized = false;
 let automationWorkerPromise = null;
 let digestSchedulerPromise = null;
 let reminderSchedulerTimer = null;
 let digestSchedulerTimer = null;
 let automationWorkerTimer = null;
 
+export async function completeDigestStartup({
+  assertIndexes,
+  drainRecovery,
+  startSchedulers,
+  setReady,
+  isShuttingDown,
+}) {
+  await assertIndexes();
+  if (isShuttingDown()) return false;
+  await drainRecovery();
+  if (isShuttingDown()) return false;
+  await startSchedulers();
+  setReady(true);
+  return true;
+}
+
 // Start listening synchronously (no top-level await) so process managers such
 // as Phusion Passenger — which do not reliably support top-level await in the
 // entry module — detect the server immediately. Database connection, rollout
 // readiness checks, and background schedulers are initialized asynchronously in
-// bootstrap() after the server is already accepting connections.
+// bootstrap() after the server is already accepting connections. Health stays
+// degraded until database and background readiness checks both complete.
+setBackgroundReadiness(false);
 const server = app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
@@ -56,7 +83,7 @@ async function runReminderScheduler() {
         console.error(
           "REMINDER Error processing reminder",
           reminder?.id,
-          error
+          error,
         );
       }
     }
@@ -112,17 +139,19 @@ function runAutomationWorker() {
 }
 
 function startSchedulers() {
+  if (shuttingDown || schedulersStarted) return false;
+  schedulersStarted = true;
   reminderSchedulerTimer = setInterval(
     runReminderScheduler,
-    REMINDER_SCHEDULER_INTERVAL_MS
+    REMINDER_SCHEDULER_INTERVAL_MS,
   );
   digestSchedulerTimer = setInterval(
     runDigestScheduler,
-    DIGEST_SCHEDULER_INTERVAL_MS
+    DIGEST_SCHEDULER_INTERVAL_MS,
   );
   automationWorkerTimer = setInterval(
     runAutomationWorker,
-    AUTOMATION_WORKER_INTERVAL_MS
+    AUTOMATION_WORKER_INTERVAL_MS,
   );
   reminderSchedulerTimer.unref();
   digestSchedulerTimer.unref();
@@ -130,10 +159,14 @@ function startSchedulers() {
   runReminderScheduler();
   runDigestScheduler();
   runAutomationWorker();
+  return true;
 }
 
 async function bootstrap() {
-  await connectDB();
+  if (!databaseConnectionInitialized) {
+    await connectDB();
+    databaseConnectionInitialized = true;
+  }
 
   if (process.env.NODE_ENV === "production") {
     const [noticeRollout, engagementRollout, workingPaperRollout] =
@@ -144,7 +177,7 @@ async function bootstrap() {
       ]);
     if (workingPaperRollout.enabled && !engagementRollout.enabled) {
       const error = new Error(
-        "auditWorkingPapers cannot start enabled while assuranceEngagements is disabled"
+        "auditWorkingPapers cannot start enabled while assuranceEngagements is disabled",
       );
       error.code = "INVALID_AUDIT_WORKING_PAPER_ROLLOUT";
       throw error;
@@ -159,19 +192,57 @@ async function bootstrap() {
     await Promise.all(readinessChecks);
   }
 
-  startSchedulers();
+  return completeDigestStartup({
+    assertIndexes: assertDigestIndexesReady,
+    drainRecovery: drainDigestRecovery,
+    startSchedulers,
+    setReady: setBackgroundReadiness,
+    isShuttingDown: () => shuttingDown,
+  });
 }
 
-bootstrap().catch((error) => {
-  // Keep the HTTP server accepting connections so the platform does not
-  // crash-loop and /health can report a degraded state. Mongoose retries the
-  // connection in the background.
-  console.error("[BOOT] Startup initialization error:", error?.message || error);
-});
+function clearBootstrapRetryTimer() {
+  if (!bootstrapRetryTimer) return;
+  clearTimeout(bootstrapRetryTimer);
+  bootstrapRetryTimer = null;
+}
+
+function scheduleBootstrapRetry() {
+  if (shuttingDown || bootstrapRetryTimer) return;
+  bootstrapRetryTimer = setTimeout(() => {
+    bootstrapRetryTimer = null;
+    void runBootstrap();
+  }, BOOTSTRAP_RETRY_DELAY_MS);
+  bootstrapRetryTimer.unref();
+}
+
+function runBootstrap() {
+  if (shuttingDown || bootstrapPromise) return bootstrapPromise;
+  setBackgroundReadiness(false);
+  bootstrapPromise = bootstrap()
+    .catch((error) => {
+      // Keep HTTP accepting connections so /health can report degraded while
+      // fixed-delay retries wait for database/index readiness to recover.
+      console.error(
+        "[BOOT] Startup initialization error:",
+        error?.message || error,
+      );
+      scheduleBootstrapRetry();
+      return false;
+    })
+    .finally(() => {
+      bootstrapPromise = null;
+    });
+  return bootstrapPromise;
+}
+
+void runBootstrap();
 
 async function gracefulShutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
+  setBackgroundReadiness(false);
+  clearBootstrapRetryTimer();
   console.log(`\n[${signal}] Graceful shutdown starting...`);
 
   if (reminderSchedulerTimer) clearInterval(reminderSchedulerTimer);
