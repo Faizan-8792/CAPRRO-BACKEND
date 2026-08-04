@@ -51,6 +51,54 @@ import {
 mongoose.set("bufferCommands", false);
 
 const FIXED_NOW = new Date("2026-03-20T12:00:00.000Z");
+const DIGEST_RECOVERY_LEGACY_FENCE = new Date(8_640_000_000_000_000);
+const DIGEST_RECOVERY_ACTIVE_TOKEN_PATTERN =
+  /^drc1:(0|[1-9]\d*):([0-9a-f]{32}):(0|[1-9a-z][0-9a-z]*)$/;
+
+function assertDigestRecoveryLegacyFence(value, message) {
+  assert.ok(value instanceof Date, message || "recovery fence must be a Date");
+  assert.equal(
+    value.getTime(),
+    DIGEST_RECOVERY_LEGACY_FENCE.getTime(),
+    message || "recovery fence must block legacy workers",
+  );
+}
+
+function digestRecoveryActiveToken({
+  failureCount = 0,
+  owner = "00000000000040008000000000000001",
+  expiresAt,
+}) {
+  return `drc1:${failureCount}:${owner}:${expiresAt.getTime().toString(36)}`;
+}
+
+function assertDigestRecoveryActiveToken(token, { failureCount } = {}) {
+  assert.match(token, DIGEST_RECOVERY_ACTIVE_TOKEN_PATTERN);
+  assert.ok(token.length <= 64);
+  const match = token.match(DIGEST_RECOVERY_ACTIVE_TOKEN_PATTERN);
+  if (failureCount !== undefined) {
+    assert.equal(Number(match[1]), failureCount);
+  }
+  return {
+    failureCount: Number(match[1]),
+    owner: match[2],
+    expiresAt: new Date(Number.parseInt(match[3], 36)),
+  };
+}
+
+function oldDigestRecoveryLeaseIsClaimable(lease, now) {
+  const token = lease?.token;
+  const expiresAt = lease?.expiresAt;
+  return (
+    token === null ||
+    token === undefined ||
+    token === "" ||
+    !(expiresAt instanceof Date) ||
+    !Number.isFinite(expiresAt.getTime()) ||
+    expiresAt.getTime() <= now.getTime()
+  );
+}
+
 const IDS = Object.freeze({
   firm: "111111111111111111111111",
   recipient: "222222222222222222222222",
@@ -904,6 +952,15 @@ function createInMemoryDigestRecoveryCursor(initialDocument = null) {
   let document = initialDocument ? clone(initialDocument) : null;
   const operations = [];
   const model = {
+    findOne(filter) {
+      const operation = {
+        method: "findOne",
+        filter: clone(filter),
+      };
+      operations.push(operation);
+      const matched = document && matchesFilter(document, filter);
+      return makeLeanQuery(matched ? document : null);
+    },
     async findOneAndUpdate(filter, update, options = {}) {
       operations.push({
         method: "findOneAndUpdate",
@@ -921,6 +978,12 @@ function createInMemoryDigestRecoveryCursor(initialDocument = null) {
         };
         applyUpdate(document, { $set: update.$setOnInsert || {} });
       } else if (!matchesFilter(document, filter)) {
+        if (options.upsert) {
+          const error = new Error("duplicate digest recovery cursor singleton");
+          error.code = 11000;
+          error.codeName = "DuplicateKey";
+          throw error;
+        }
         return null;
       }
       applyUpdate(document, update);
@@ -3325,6 +3388,7 @@ await check(
     assert.equal(recoveryCursor.get().afterId, orderedObjectId(500));
     assert.equal(recoveryCursor.get().cycleEndId, orderedObjectId(550));
     assert.equal(recoveryCursor.get().lease.token, null);
+    assert.equal(recoveryCursor.get().lease.expiresAt, null);
 
     const batchFindCountBeforeSecondTick = firstBatchFinds.length;
     await runDisabledDigestRecovery({
@@ -3353,6 +3417,7 @@ await check(
     assert.equal(recoveryCursor.get().afterId, null);
     assert.equal(recoveryCursor.get().cycleEndId, null);
     assert.equal(recoveryCursor.get().lease.token, null);
+    assert.equal(recoveryCursor.get().lease.expiresAt, null);
   },
 );
 
@@ -3485,6 +3550,9 @@ await check(
     ]);
     assert.equal(recoveryCursor.get().afterId, null);
 
+    // A persistent poison row must not freeze the original high-water mark.
+    // The failed retry expands its next finite cycle to include this later row.
+    deliveryStore.insert(makeRecoverableDelivery(4));
     await runDisabledDigestRecovery({
       deliveryModel: deliveryStore.model,
       cursorModel: recoveryCursor.model,
@@ -3499,7 +3567,25 @@ await check(
       "recovery-0002",
       "recovery-0003",
     ]);
+    assert.equal(recoveryCursor.get().cycleEndId, orderedObjectId(4));
+
+    await runDisabledDigestRecovery({
+      deliveryModel: deliveryStore.model,
+      cursorModel: recoveryCursor.model,
+      recover,
+      reportRecoveryError: async (entry) => {
+        reportedErrors.push(clone(entry));
+      },
+    });
+
+    assert.deepEqual(attemptedPeriods.slice(6), [
+      "recovery-0001",
+      "recovery-0002",
+      "recovery-0003",
+      "recovery-0004",
+    ]);
     assert.deepEqual(reportedErrors, [
+      { code: "POISON_RECOVERY_ROW" },
       { code: "POISON_RECOVERY_ROW" },
       { code: "POISON_RECOVERY_ROW" },
     ]);
@@ -3507,7 +3593,7 @@ await check(
 );
 
 await check(
-  "live recovery cursor lease blocks overlap and expired lease is reclaimed",
+  "live legacy recovery lease blocks overlap while expired or implausible leases are reclaimed",
   async () => {
     const deliveryStore = createInMemoryDigestDelivery([
       makeRecoverableDelivery(1),
@@ -3515,10 +3601,11 @@ await check(
     const liveUntil = new Date(
       FIXED_NOW.getTime() + DIGEST_RECOVERY_CURSOR_LEASE_MS,
     );
+    const legacyLeaseToken = "00000000-0000-4000-8000-000000000002";
     const recoveryCursor = createInMemoryDigestRecoveryCursor({
       _id: DIGEST_RECOVERY_CURSOR_ID,
       afterId: null,
-      lease: { token: "other-instance", expiresAt: liveUntil },
+      lease: { token: legacyLeaseToken, expiresAt: liveUntil },
     });
     const recoveredPeriods = [];
 
@@ -3537,7 +3624,7 @@ await check(
       ).length,
       0,
     );
-    assert.equal(recoveryCursor.get().lease.token, "other-instance");
+    assert.equal(recoveryCursor.get().lease.token, legacyLeaseToken);
 
     await runDisabledDigestRecovery({
       deliveryModel: deliveryStore.model,
@@ -3552,6 +3639,333 @@ await check(
     assert.equal(recoveryCursor.get().afterId, null);
     assert.equal(recoveryCursor.get().lease.token, null);
     assert.equal(recoveryCursor.get().lease.expiresAt, null);
+
+    const farFutureDeliveryStore = createInMemoryDigestDelivery([
+      makeRecoverableDelivery(2),
+    ]);
+    const farFutureCursor = createInMemoryDigestRecoveryCursor({
+      _id: DIGEST_RECOVERY_CURSOR_ID,
+      afterId: null,
+      cycleEndId: orderedObjectId(2),
+      lease: {
+        token: "00000000-0000-4000-8000-000000000003",
+        expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+      },
+    });
+    const farFutureRecovered = [];
+    await runDisabledDigestRecovery({
+      deliveryModel: farFutureDeliveryStore.model,
+      cursorModel: farFutureCursor.model,
+      recoveryClock: () => new Date(FIXED_NOW),
+      recover: async ({ periodKey }) => farFutureRecovered.push(periodKey),
+    });
+    assert.deepEqual(farFutureRecovered, ["recovery-0002"]);
+    assert.deepEqual(farFutureCursor.get().lease, {
+      token: null,
+      expiresAt: null,
+    });
+  },
+);
+
+await check(
+  "protected recovery states fence legacy workers while clean leases remain rollback-compatible",
+  async () => {
+    const ordinaryDeliveryStore = createInMemoryDigestDelivery([
+      makeRecoverableDelivery(1),
+    ]);
+    const ordinaryCursor = createInMemoryDigestRecoveryCursor();
+    let ordinaryActiveLease = null;
+    await runDisabledDigestRecovery({
+      deliveryModel: ordinaryDeliveryStore.model,
+      cursorModel: ordinaryCursor.model,
+      recover: async () => {
+        ordinaryActiveLease = clone(ordinaryCursor.get().lease);
+      },
+    });
+    const ordinaryActiveToken = assertDigestRecoveryActiveToken(
+      ordinaryActiveLease.token,
+      { failureCount: 0 },
+    );
+    assert.equal(
+      ordinaryActiveLease.expiresAt.toISOString(),
+      ordinaryActiveToken.expiresAt.toISOString(),
+    );
+    assert.equal(
+      ordinaryActiveLease.expiresAt.toISOString(),
+      new Date(
+        FIXED_NOW.getTime() + DIGEST_RECOVERY_CURSOR_LEASE_MS,
+      ).toISOString(),
+    );
+    assert.equal(
+      oldDigestRecoveryLeaseIsClaimable(ordinaryActiveLease, FIXED_NOW),
+      false,
+    );
+    assert.equal(
+      oldDigestRecoveryLeaseIsClaimable(
+        ordinaryActiveLease,
+        new Date(ordinaryActiveLease.expiresAt.getTime() + 1),
+      ),
+      true,
+    );
+    assert.deepEqual(ordinaryCursor.get().lease, {
+      token: null,
+      expiresAt: null,
+    });
+    assert.equal(
+      oldDigestRecoveryLeaseIsClaimable(ordinaryCursor.get().lease, FIXED_NOW),
+      true,
+    );
+
+    const idleLease = {
+      token: "drc1:0",
+      expiresAt: DIGEST_RECOVERY_LEGACY_FENCE,
+    };
+    assert.equal(
+      oldDigestRecoveryLeaseIsClaimable(idleLease, FIXED_NOW),
+      false,
+    );
+    const idleDeliveryStore = createInMemoryDigestDelivery([
+      makeRecoverableDelivery(2),
+    ]);
+    const idleCursor = createInMemoryDigestRecoveryCursor({
+      _id: DIGEST_RECOVERY_CURSOR_ID,
+      afterId: null,
+      cycleEndId: orderedObjectId(2),
+      lease: idleLease,
+    });
+    let protectedActiveLease = null;
+    await runDisabledDigestRecovery({
+      deliveryModel: idleDeliveryStore.model,
+      cursorModel: idleCursor.model,
+      recover: async () => {
+        protectedActiveLease = clone(idleCursor.get().lease);
+      },
+    });
+    assertDigestRecoveryActiveToken(protectedActiveLease.token, {
+      failureCount: 0,
+    });
+    assertDigestRecoveryLegacyFence(protectedActiveLease.expiresAt);
+    assert.equal(
+      oldDigestRecoveryLeaseIsClaimable(protectedActiveLease, FIXED_NOW),
+      false,
+    );
+    assert.deepEqual(idleCursor.get().lease, {
+      token: null,
+      expiresAt: null,
+    });
+
+    const activeExpiry = new Date(
+      FIXED_NOW.getTime() + DIGEST_RECOVERY_CURSOR_LEASE_MS,
+    );
+    const activeLease = {
+      token: digestRecoveryActiveToken({ expiresAt: activeExpiry }),
+      expiresAt: DIGEST_RECOVERY_LEGACY_FENCE,
+    };
+    assert.equal(
+      oldDigestRecoveryLeaseIsClaimable(activeLease, FIXED_NOW),
+      false,
+    );
+    const activeDeliveryStore = createInMemoryDigestDelivery([
+      makeRecoverableDelivery(3),
+    ]);
+    const activeCursor = createInMemoryDigestRecoveryCursor({
+      _id: DIGEST_RECOVERY_CURSOR_ID,
+      afterId: null,
+      cycleEndId: orderedObjectId(3),
+      lease: activeLease,
+    });
+    const activeRecovered = [];
+    await runDisabledDigestRecovery({
+      deliveryModel: activeDeliveryStore.model,
+      cursorModel: activeCursor.model,
+      recoveryClock: () => new Date(FIXED_NOW),
+      recover: async ({ periodKey }) => activeRecovered.push(periodKey),
+    });
+    assert.deepEqual(activeRecovered, []);
+    assert.deepEqual(activeCursor.get().lease, activeLease);
+
+    await runDisabledDigestRecovery({
+      deliveryModel: activeDeliveryStore.model,
+      cursorModel: activeCursor.model,
+      recoveryClock: () => new Date(activeExpiry.getTime() + 1),
+      recover: async ({ periodKey }) => activeRecovered.push(periodKey),
+    });
+    assert.deepEqual(activeRecovered, ["recovery-0003"]);
+    assert.deepEqual(activeCursor.get().lease, {
+      token: null,
+      expiresAt: null,
+    });
+    assert.equal(
+      oldDigestRecoveryLeaseIsClaimable(activeCursor.get().lease, FIXED_NOW),
+      true,
+    );
+  },
+);
+
+await check(
+  "implausibly future recovery expiry is reclaimed without losing durable failures",
+  async () => {
+    const implausibleExpiry = new Date(
+      FIXED_NOW.getTime() + 24 * 60 * 60 * 1000,
+    );
+    const implausibleToken = digestRecoveryActiveToken({
+      failureCount: 2,
+      expiresAt: implausibleExpiry,
+    });
+    const deliveryStore = createInMemoryDigestDelivery([
+      makeRecoverableDelivery(1),
+    ]);
+    const recoveryCursor = createInMemoryDigestRecoveryCursor({
+      _id: DIGEST_RECOVERY_CURSOR_ID,
+      afterId: null,
+      cycleEndId: orderedObjectId(1),
+      lease: {
+        token: implausibleToken,
+        expiresAt: DIGEST_RECOVERY_LEGACY_FENCE,
+      },
+    });
+    const recovered = [];
+    const recover = async ({ periodKey }) => recovered.push(periodKey);
+
+    await runDisabledDigestRecovery({
+      deliveryModel: deliveryStore.model,
+      cursorModel: recoveryCursor.model,
+      recover,
+    });
+
+    assert.deepEqual(recovered, ["recovery-0001"]);
+    const acquisition = recoveryCursor.operations.find(
+      (operation) => operation.method === "findOneAndUpdate",
+    );
+    assertLiteralEquality(
+      acquisition.filter,
+      "lease.token",
+      implausibleToken,
+      "implausible expiry acquisition snapshot",
+    );
+    assertDigestRecoveryActiveToken(acquisition.update.$set["lease.token"], {
+      failureCount: 2,
+    });
+    assertDigestRecoveryLegacyFence(acquisition.update.$set["lease.expiresAt"]);
+    assert.equal(recoveryCursor.get().afterId, null);
+    assert.equal(recoveryCursor.get().cycleEndId, orderedObjectId(1));
+    assert.equal(recoveryCursor.get().lease.token, "drc1:0");
+    assertDigestRecoveryLegacyFence(recoveryCursor.get().lease.expiresAt);
+
+    await runDisabledDigestRecovery({
+      deliveryModel: deliveryStore.model,
+      cursorModel: recoveryCursor.model,
+      recover,
+    });
+    assert.deepEqual(recovered, ["recovery-0001", "recovery-0001"]);
+    assert.equal(recoveryCursor.get().cycleEndId, null);
+    assert.deepEqual(recoveryCursor.get().lease, {
+      token: null,
+      expiresAt: null,
+    });
+  },
+);
+
+await check(
+  "legacy null and empty recovery tokens remain immediately claimable",
+  async () => {
+    for (const token of [null, ""]) {
+      const liveUntil = new Date(
+        FIXED_NOW.getTime() + DIGEST_RECOVERY_CURSOR_LEASE_MS,
+      );
+      const deliveryStore = createInMemoryDigestDelivery([
+        makeRecoverableDelivery(1),
+      ]);
+      const recoveryCursor = createInMemoryDigestRecoveryCursor({
+        _id: DIGEST_RECOVERY_CURSOR_ID,
+        afterId: null,
+        cycleEndId: orderedObjectId(1),
+        lease: { token, expiresAt: liveUntil },
+      });
+      const recovered = [];
+
+      await runDisabledDigestRecovery({
+        deliveryModel: deliveryStore.model,
+        cursorModel: recoveryCursor.model,
+        recoveryClock: () => new Date(FIXED_NOW),
+        recover: async ({ periodKey }) => recovered.push(periodKey),
+      });
+      assert.deepEqual(recovered, ["recovery-0001"], String(token));
+      assert.equal(recoveryCursor.get().lease.token, null, String(token));
+      assert.equal(recoveryCursor.get().lease.expiresAt, null, String(token));
+    }
+  },
+);
+
+await check(
+  "invalid recovery cursor tokens fail closed without cursor mutation",
+  async () => {
+    const compactOwner = "00000000000040008000000000000001";
+    const validExpiry = FIXED_NOW.getTime().toString(36);
+    const malformedTokens = [
+      7,
+      { unexpected: true },
+      "x".repeat(65),
+      "legacy-short-token",
+      "DRC1:0",
+      "drc1:",
+      "drc1:01",
+      `drc1:${Number.MAX_SAFE_INTEGER}0`,
+      `drc1:0:${compactOwner.slice(1)}:${validExpiry}`,
+      `drc1:0:${compactOwner}:not-valid!`,
+      `drc1:0:${compactOwner}:${(Number.MAX_SAFE_INTEGER + 1).toString(36)}`,
+      `drc1:0:${compactOwner}:${validExpiry}:extra`,
+      "drc1:0:00000000-0000-4000-8000-000000000001",
+    ];
+
+    for (const token of malformedTokens) {
+      const label = `${typeof token}:${JSON.stringify(token)}`;
+      const initial = {
+        _id: DIGEST_RECOVERY_CURSOR_ID,
+        afterId: orderedObjectId(1),
+        cycleEndId: orderedObjectId(2),
+        lease: { token, expiresAt: DIGEST_RECOVERY_LEGACY_FENCE },
+      };
+      const recoveryCursor = createInMemoryDigestRecoveryCursor(initial);
+      await assert.rejects(
+        () =>
+          drainDigestRecovery(
+            { now: new Date(FIXED_NOW) },
+            {
+              AppConfig: {
+                async isFeatureEnabled() {
+                  return false;
+                },
+              },
+              DigestDelivery: {
+                find() {
+                  throw new Error("invalid marker must not scan deliveries");
+                },
+              },
+              DigestRecoveryCursor: recoveryCursor.model,
+              recoveryClock: () => new Date(FIXED_NOW),
+            },
+          ),
+        (error) => {
+          assert.equal(error.code, "DIGEST_RECOVERY_CURSOR_INVALID", label);
+          assert.equal(Object.hasOwn(error, "rowFailureCount"), false, label);
+          assert.equal(
+            Object.hasOwn(error, "rowFailuresComplete"),
+            false,
+            label,
+          );
+          return true;
+        },
+      );
+      assert.deepEqual(recoveryCursor.get(), initial, label);
+      assert.equal(
+        recoveryCursor.operations.some(
+          (operation) => operation.method !== "findOne",
+        ),
+        false,
+        label,
+      );
+    }
   },
 );
 
@@ -6867,6 +7281,14 @@ await check(
       "String",
     );
     assert.equal(
+      DigestRecoveryCursor.schema.path("lease.token").options.maxlength,
+      64,
+    );
+    assert.equal(
+      DigestRecoveryCursor.schema.path("lease.token").options.trim,
+      true,
+    );
+    assert.equal(
       DigestRecoveryCursor.schema.path("lease.expiresAt").instance,
       "Date",
     );
@@ -9904,11 +10326,7 @@ await check(
     const cases = [
       {
         label: "exact active owner",
-        user: makeUser({
-          _id: IDS.owner,
-          isActive: true,
-          role: "SUPER_ADMIN",
-        }),
+        user: makeUser({ _id: IDS.owner, isActive: true }),
         membership: makeMembership({
           userId: IDS.owner,
           status: "ACTIVE",
@@ -10076,6 +10494,13 @@ await check(
               },
             },
             ...models(),
+            User: createLookupModel(
+              () =>
+                currentUser
+                  ? { ...clone(currentUser), role: "SUPER_ADMIN" }
+                  : null,
+              [],
+            ),
             previewDigest: (input, dependencies) =>
               previewDigest(input, {
                 ...dependencies,
@@ -10203,7 +10628,7 @@ await check(
       ["legacy", undefined],
     ]) {
       const firm = makeFirm({ kind });
-      const user = makeUser({ isActive: true, role: "SUPER_ADMIN" });
+      const user = makeUser({ isActive: true });
       const membership = makeMembership({ status: "ACTIVE", role: "MEMBER" });
       const models = () => ({
         Firm: createLookupModel(firm, []),
@@ -10258,6 +10683,7 @@ await check(
             },
           },
           ...models(),
+          User: createLookupModel({ ...clone(user), role: "SUPER_ADMIN" }, []),
           previewDigest: (input, dependencies) =>
             previewDigest(input, {
               ...dependencies,
@@ -10503,28 +10929,26 @@ await check(
         },
       },
       {
-        label: "weekly OWNER downgraded and SUPER_ADMIN demoted",
-        code: "SUPER_ADMIN_ONLY",
+        label: "weekly OWNER membership deactivated",
+        code: "DIGEST_ACCESS_FORBIDDEN",
         weekly: true,
         initialMembershipRole: "OWNER",
         mutate: (state) => {
-          state.membership = makeMembership({ role: "MEMBER" });
-          state.user = makeUser({
-            isActive: true,
-            role: "FIRM_ADMIN",
+          state.membership = makeMembership({
+            status: "REMOVED",
+            role: "OWNER",
           });
         },
       },
       {
-        label: "weekly ADMIN downgraded and SUPER_ADMIN demoted",
-        code: "SUPER_ADMIN_ONLY",
+        label: "weekly ADMIN membership deactivated",
+        code: "DIGEST_ACCESS_FORBIDDEN",
         weekly: true,
         initialMembershipRole: "ADMIN",
         mutate: (state) => {
-          state.membership = makeMembership({ role: "MEMBER" });
-          state.user = makeUser({
-            isActive: true,
-            role: "FIRM_ADMIN",
+          state.membership = makeMembership({
+            status: "REMOVED",
+            role: "ADMIN",
           });
         },
       },
@@ -11051,12 +11475,8 @@ await check("digest entry points accept canonical IDs only", async () => {
           },
           {
             AppConfig: {
-              async getFeatureFlags() {
-                return {
-                  dailyDigest: true,
-                  weeklySummary: true,
-                  noticeCases: false,
-                };
+              async isFeatureEnabled() {
+                return true;
               },
             },
             Firm: untouchedModel,
@@ -11444,7 +11864,155 @@ await check(
 );
 
 await check(
-  "send-test rechecks SUPER_ADMIN role immediately before provider delivery",
+  "send-test reloads revocations after the final selected-feature read",
+  async () => {
+    const cases = [
+      {
+        label: "SUPER_ADMIN role revoked",
+        kind: DAILY_KIND,
+        periodKey: "2026-03-20",
+        code: "SUPER_ADMIN_ONLY",
+        mutate: (state) => {
+          state.user = makeUser({ isActive: true, role: "MEMBER" });
+        },
+      },
+      {
+        label: "active membership revoked",
+        kind: WEEKLY_KIND,
+        periodKey: "2026-03-16",
+        code: "DIGEST_ACCESS_FORBIDDEN",
+        mutate: (state) => {
+          state.membership = null;
+        },
+      },
+      {
+        label: "email preference revoked",
+        kind: DAILY_KIND,
+        periodKey: "2026-03-20",
+        code: "DIGEST_EMAIL_DISABLED",
+        mutate: (state) => {
+          state.user = makeUser({
+            isActive: true,
+            role: "SUPER_ADMIN",
+            digestPreferences: { emailEnabled: false },
+          });
+        },
+      },
+      {
+        label: "daily preference revoked",
+        kind: DAILY_KIND,
+        periodKey: "2026-03-20",
+        code: "DIGEST_UNSUBSCRIBED",
+        mutate: (state) => {
+          state.user = makeUser({
+            isActive: true,
+            role: "SUPER_ADMIN",
+            digestPreferences: { dailyFrequency: "OFF" },
+          });
+        },
+      },
+      {
+        label: "weekly preference revoked",
+        kind: WEEKLY_KIND,
+        periodKey: "2026-03-16",
+        code: "DIGEST_UNSUBSCRIBED",
+        mutate: (state) => {
+          state.user = makeUser({
+            isActive: true,
+            role: "SUPER_ADMIN",
+            digestPreferences: { weeklyEnabled: false },
+          });
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const state = {
+        firm: makeFirm(),
+        user: makeUser({ isActive: true, role: "SUPER_ADMIN" }),
+        membership: makeMembership({ status: "ACTIVE", role: "OWNER" }),
+      };
+      const firmLookups = [];
+      const userLookups = [];
+      const membershipLookups = [];
+      const selectedFlag =
+        testCase.kind === DAILY_KIND ? "dailyDigest" : "weeklySummary";
+      const featureCalls = [];
+      let selectedReads = 0;
+      let providerCalls = 0;
+
+      await assert.rejects(
+        () =>
+          sendTestDigestNow(
+            {
+              userId: IDS.recipient,
+              firmId: IDS.firm,
+              role: "SUPER_ADMIN",
+              toEmail: "stale@example.test",
+              kind: testCase.kind,
+              now: new Date(FIXED_NOW),
+            },
+            {
+              AppConfig: {
+                async isFeatureEnabled(name, options) {
+                  assert.deepEqual(options, { fresh: true }, testCase.label);
+                  featureCalls.push(name);
+                  if (name === selectedFlag) {
+                    selectedReads += 1;
+                    if (selectedReads === 2) testCase.mutate(state);
+                  }
+                  return true;
+                },
+              },
+              Firm: createLookupModel(() => state.firm, firmLookups),
+              FirmMembership: createLookupModel(
+                () => state.membership,
+                membershipLookups,
+              ),
+              User: createLookupModel(() => state.user, userLookups),
+              previewDigest: (input, dependencies) =>
+                previewDigest(input, {
+                  ...dependencies,
+                  buildDigestSummary: async () => ({
+                    kind: testCase.kind,
+                    periodKey: testCase.periodKey,
+                    counts: { open: 1 },
+                  }),
+                }),
+              sendDigestEmail: async () => {
+                providerCalls += 1;
+                return { data: { id: "must-not-send" } };
+              },
+            },
+          ),
+        (error) => {
+          assert.equal(error.code, testCase.code, testCase.label);
+          return true;
+        },
+      );
+
+      assert.equal(selectedReads, 2, testCase.label);
+      assert.deepEqual(
+        featureCalls,
+        [
+          "dailyDigest",
+          "weeklySummary",
+          "noticeCases",
+          selectedFlag,
+          "noticeCases",
+        ],
+        testCase.label,
+      );
+      assert.equal(firmLookups.length, 2, testCase.label);
+      assert.equal(userLookups.length, 2, testCase.label);
+      assert.equal(membershipLookups.length, 2, testCase.label);
+      assert.equal(providerCalls, 0, testCase.label);
+    }
+  },
+);
+
+await check(
+  "send-test reloads SUPER_ADMIN authority after all final feature reads",
   async () => {
     const summary = {
       kind: DAILY_KIND,
@@ -11452,6 +12020,7 @@ await check(
       counts: { open: 1 },
     };
     let currentUser = makeUser({ isActive: true, role: "SUPER_ADMIN" });
+    let noticeReads = 0;
     const providerCalls = [];
 
     await assert.rejects(
@@ -11474,7 +12043,16 @@ await check(
                   noticeCases: false,
                 };
               },
-              async isFeatureEnabled() {
+              async isFeatureEnabled(name) {
+                if (name === "noticeCases") {
+                  noticeReads += 1;
+                  if (noticeReads === 2) {
+                    currentUser = makeUser({
+                      isActive: true,
+                      role: "MEMBER",
+                    });
+                  }
+                }
                 return true;
               },
             },
@@ -11482,9 +12060,6 @@ await check(
             FirmMembership: createLookupModel(makeMembership(), []),
             User: createLookupModel(() => currentUser, []),
             previewDigest: async () => clone(summary),
-            beforeProviderAuthorityReload: async () => {
-              currentUser = makeUser({ isActive: true, role: "MEMBER" });
-            },
             sendDigestEmail: async (input) => {
               providerCalls.push(clone(input));
               return { data: { id: "must-not-send" } };
@@ -11498,6 +12073,7 @@ await check(
       },
     );
 
+    assert.equal(noticeReads, 2);
     assert.equal(providerCalls.length, 0);
   },
 );
@@ -11578,6 +12154,10 @@ await check(
     );
     assert.deepEqual(fresh.featureCalls, [
       { name: "dailyDigest", options: { fresh: true } },
+      { name: "weeklySummary", options: { fresh: true } },
+      { name: "noticeCases", options: { fresh: true } },
+      { name: "dailyDigest", options: { fresh: true } },
+      { name: "noticeCases", options: { fresh: true } },
     ]);
 
     for (const testCase of [
@@ -11591,7 +12171,18 @@ await check(
         return true;
       });
       assert.equal(blocked.providerCalls.length, 0, testCase.label);
-      assert.equal(blocked.featureCalls.length, 0, testCase.label);
+      assert.equal(blocked.featureCalls.length, 5, testCase.label);
+      assert.deepEqual(
+        blocked.featureCalls.map((call) => call.name),
+        [
+          "dailyDigest",
+          "weeklySummary",
+          "noticeCases",
+          "dailyDigest",
+          "noticeCases",
+        ],
+        testCase.label,
+      );
     }
   },
 );
@@ -11854,90 +12445,188 @@ await check(
 await check(
   "background delivery rechecks rollout and terminalizes before provider",
   async () => {
-    const harness = createProcessHarness({ featureEnabled: [true, false] });
+    const cases = [
+      {
+        kind: DAILY_KIND,
+        periodKey: "2026-03-20",
+        subject: "Daily work digest · 2026-03-20",
+        flag: "dailyDigest",
+      },
+      {
+        kind: WEEKLY_KIND,
+        periodKey: "2026-03-16",
+        subject: "Weekly firm summary · 2026-03-16",
+        flag: "weeklySummary",
+      },
+    ];
 
-    const result = await harness.run();
-    const stored = harness.store.get(IDS.deliveryA);
+    for (const testCase of cases) {
+      const delivery = makeDelivery({
+        kind: testCase.kind,
+        periodKey: testCase.periodKey,
+        subject: testCase.subject,
+        summary: { kind: testCase.kind },
+      });
+      const harness = createProcessHarness({
+        delivery,
+        featureEnabled: [true, false],
+      });
 
-    assert.deepEqual(result, {
-      outcome: "DIGEST_ROLLOUT_BLOCKED",
-      deliveryId: IDS.deliveryA,
-    });
-    assert.deepEqual(harness.featureCalls, [
-      { name: "dailyDigest", options: { fresh: true } },
-      { name: "dailyDigest", options: { fresh: true } },
-    ]);
-    assert.equal(harness.providerCalls.length, 0);
-    assert.equal(stored.status, "PARTIAL");
-    assert.equal(stored.email.state, "ROLLOUT_BLOCKED");
-    assert.equal(
-      stored.email.lastError,
-      "Feature rollout disabled before email delivery",
-    );
-    assert.equal(stored.email.claimToken, null);
-    assert.equal(stored.email.claimedAt, null);
-    assert.equal(stored.email.attempts, 0);
-    assert.equal(stored.inApp.state, "AVAILABLE");
-    assert.equal(
-      stored.inApp.availableAt.toISOString(),
-      FIXED_NOW.toISOString(),
-    );
-    assert.equal(stored.inApp.readAt, null);
+      const result = await harness.run();
+      const stored = harness.store.get(IDS.deliveryA);
+      const claimOperation = harness.store.operations.find(
+        (operation) =>
+          operation.method === "findOneAndUpdate" &&
+          operation.update?.$set?.["email.state"] === "SENDING",
+      );
+      const rolloutWrite = harness.store.operations.find(
+        (operation) =>
+          operation.method === "updateOne" &&
+          operation.update?.$set?.["email.state"] === "ROLLOUT_BLOCKED",
+      );
+
+      assert.deepEqual(
+        result,
+        {
+          outcome: "DIGEST_ROLLOUT_BLOCKED",
+          deliveryId: IDS.deliveryA,
+        },
+        testCase.kind,
+      );
+      assert.deepEqual(
+        harness.featureCalls,
+        [
+          { name: testCase.flag, options: { fresh: true } },
+          { name: testCase.flag, options: { fresh: true } },
+        ],
+        testCase.kind,
+      );
+      assert.equal(harness.providerCalls.length, 0, testCase.kind);
+      assert.equal(stored.status, "PARTIAL", testCase.kind);
+      assert.equal(stored.email.state, "ROLLOUT_BLOCKED", testCase.kind);
+      assert.equal(
+        stored.email.lastError,
+        "Feature rollout disabled before email delivery",
+        testCase.kind,
+      );
+      assert.equal(stored.email.claimToken, null, testCase.kind);
+      assert.equal(stored.email.claimedAt, null, testCase.kind);
+      assert.equal(stored.email.attempts, 0, testCase.kind);
+      assert.equal(stored.inApp.state, "AVAILABLE", testCase.kind);
+      assert.equal(
+        stored.inApp.availableAt.toISOString(),
+        FIXED_NOW.toISOString(),
+        testCase.kind,
+      );
+      assert.equal(stored.inApp.readAt, null, testCase.kind);
+      assertFullClaimFence(rolloutWrite.filter, {
+        claimToken: claimOperation.update.$set["email.claimToken"],
+        attempts: 0,
+        label: `${testCase.kind} final rollout fence`,
+      });
+      assert.equal(rolloutWrite.update.$inc, undefined, testCase.kind);
+    }
   },
 );
 
 await check(
   "rollout terminal CAS cannot overwrite a replacement delivery claim",
   async () => {
-    let harness;
-    let replacementWrites = 0;
-    harness = createProcessHarness({
-      featureEnabled: async ({ callCount }) => {
-        if (callCount === 1) return true;
-        const current = harness.store.get(IDS.deliveryA);
-        const replaced = await harness.store.model.updateOne(
-          {
-            _id: current._id,
-            firmId: current.firmId,
-            automationJobId: current.automationJobId,
-            "email.state": "SENDING",
-            "email.claimToken": current.email.claimToken,
-          },
-          { $set: { "email.claimToken": "replacement-rollout-claim" } },
-        );
-        replacementWrites += replaced.matchedCount;
-        return false;
+    const cases = [
+      {
+        kind: DAILY_KIND,
+        periodKey: "2026-03-20",
+        subject: "Daily work digest · 2026-03-20",
+        flag: "dailyDigest",
       },
-    });
+      {
+        kind: WEEKLY_KIND,
+        periodKey: "2026-03-16",
+        subject: "Weekly firm summary · 2026-03-16",
+        flag: "weeklySummary",
+      },
+    ];
 
-    const result = await harness.run();
-    const stored = harness.store.get(IDS.deliveryA);
+    for (const testCase of cases) {
+      let harness;
+      let replacementWrites = 0;
+      const replacementToken = `replacement-${testCase.flag}-claim`;
+      const delivery = makeDelivery({
+        kind: testCase.kind,
+        periodKey: testCase.periodKey,
+        subject: testCase.subject,
+        summary: { kind: testCase.kind },
+      });
+      harness = createProcessHarness({
+        delivery,
+        featureEnabled: async ({ callCount }) => {
+          if (callCount === 1) return true;
+          const current = harness.store.get(IDS.deliveryA);
+          const replaced = await harness.store.model.updateOne(
+            {
+              _id: current._id,
+              firmId: current.firmId,
+              automationJobId: current.automationJobId,
+              "email.state": "SENDING",
+              "email.claimToken": current.email.claimToken,
+            },
+            { $set: { "email.claimToken": replacementToken } },
+          );
+          replacementWrites += replaced.matchedCount;
+          return false;
+        },
+      });
 
-    assert.deepEqual(result, {
-      outcome: "DIGEST_CLAIM_LOST",
-      deliveryId: IDS.deliveryA,
-      defer: true,
-      reason: "Digest send claim changed before completion",
-      retryAfterMs: 30 * 1000,
-    });
-    assert.equal(replacementWrites, 1);
-    assert.equal(harness.featureCalls.length, 2);
-    assert.ok(
-      harness.featureCalls.every(
-        (call) => call.name === "dailyDigest" && call.options?.fresh === true,
-      ),
-    );
-    assert.equal(harness.providerCalls.length, 0);
-    assert.equal(stored.status, "QUEUED");
-    assert.equal(stored.email.state, "SENDING");
-    assert.equal(stored.email.claimToken, "replacement-rollout-claim");
-    assert.equal(stored.email.attempts, 0);
-    assert.equal(stored.inApp.state, "HIDDEN");
+      const result = await harness.run();
+      const stored = harness.store.get(IDS.deliveryA);
+      const claimOperation = harness.store.operations.find(
+        (operation) =>
+          operation.method === "findOneAndUpdate" &&
+          operation.update?.$set?.["email.state"] === "SENDING",
+      );
+      const rolloutWrite = harness.store.operations.find(
+        (operation) =>
+          operation.method === "updateOne" &&
+          operation.update?.$set?.["email.state"] === "ROLLOUT_BLOCKED",
+      );
+
+      assert.deepEqual(
+        result,
+        {
+          outcome: "DIGEST_CLAIM_LOST",
+          deliveryId: IDS.deliveryA,
+          defer: true,
+          reason: "Digest send claim changed before completion",
+          retryAfterMs: 30 * 1000,
+        },
+        testCase.kind,
+      );
+      assert.equal(replacementWrites, 1, testCase.kind);
+      assert.equal(harness.featureCalls.length, 2, testCase.kind);
+      assert.ok(
+        harness.featureCalls.every(
+          (call) => call.name === testCase.flag && call.options?.fresh === true,
+        ),
+        testCase.kind,
+      );
+      assert.equal(harness.providerCalls.length, 0, testCase.kind);
+      assert.equal(stored.status, "QUEUED", testCase.kind);
+      assert.equal(stored.email.state, "SENDING", testCase.kind);
+      assert.equal(stored.email.claimToken, replacementToken, testCase.kind);
+      assert.equal(stored.email.attempts, 0, testCase.kind);
+      assert.equal(stored.inApp.state, "HIDDEN", testCase.kind);
+      assertFullClaimFence(rolloutWrite.filter, {
+        claimToken: claimOperation.update.$set["email.claimToken"],
+        attempts: 0,
+        label: `${testCase.kind} replacement rollout fence`,
+      });
+      assert.equal(rolloutWrite.update.$inc, undefined, testCase.kind);
+    }
   },
 );
 
 await check(
-  "interactive send-test rejects stale daily and weekly rollout flags",
+  "interactive send-test fresh-reads preview flags and closes selected rollout boundary",
   async () => {
     const cases = [
       {
@@ -11946,6 +12635,11 @@ await check(
         flag: "dailyDigest",
         code: "DAILY_DIGEST_DISABLED",
         message: "Daily digest is unavailable",
+        previewFlags: {
+          dailyEnabled: true,
+          weeklyEnabled: false,
+          noticeCasesEnabled: true,
+        },
       },
       {
         kind: WEEKLY_KIND,
@@ -11953,14 +12647,21 @@ await check(
         flag: "weeklySummary",
         code: "WEEKLY_SUMMARY_DISABLED",
         message: "Weekly summary is unavailable",
+        previewFlags: {
+          dailyEnabled: false,
+          weeklyEnabled: true,
+          noticeCasesEnabled: false,
+        },
       },
     ];
 
     for (const testCase of cases) {
-      const cachedFlagCalls = [];
+      let cachedFlagCalls = 0;
+      let selectedFlagReads = 0;
       const actualFlagCalls = [];
       const previewInputs = [];
       const providerCalls = [];
+      const boundaryEvents = [];
       await assert.rejects(
         () =>
           sendTestDigestNow(
@@ -11975,28 +12676,28 @@ await check(
             {
               AppConfig: {
                 async getFeatureFlags() {
-                  cachedFlagCalls.push("cached");
-                  return {
-                    dailyDigest: true,
-                    weeklySummary: true,
-                    noticeCases: false,
-                  };
+                  cachedFlagCalls += 1;
+                  throw new Error("cached feature flags must not be read");
                 },
                 async isFeatureEnabled(name, options) {
                   actualFlagCalls.push({ name, options: clone(options) });
-                  return false;
+                  if (name === testCase.flag) {
+                    selectedFlagReads += 1;
+                    boundaryEvents.push(`flag:${name}:${selectedFlagReads}`);
+                    return selectedFlagReads === 1;
+                  }
+                  boundaryEvents.push(`flag:${name}:1`);
+                  if (name === "dailyDigest") {
+                    return testCase.previewFlags.dailyEnabled;
+                  }
+                  if (name === "weeklySummary") {
+                    return testCase.previewFlags.weeklyEnabled;
+                  }
+                  return testCase.previewFlags.noticeCasesEnabled;
                 },
               },
-              Firm: createLookupModel(makeFirm(), []),
-              FirmMembership: createLookupModel(
-                makeMembership({ role: "OWNER" }),
-                [],
-              ),
-              User: createLookupModel(
-                makeUser({ isActive: true, role: "SUPER_ADMIN" }),
-                [],
-              ),
               previewDigest: async (input) => {
+                boundaryEvents.push("preview");
                 previewInputs.push(clone(input));
                 return {
                   kind: testCase.kind,
@@ -12004,7 +12705,18 @@ await check(
                   counts: { open: 1 },
                 };
               },
+              requireActiveDigestAccess: async () => {
+                boundaryEvents.push("authority");
+                return {
+                  user: makeUser({
+                    isActive: true,
+                    role: "SUPER_ADMIN",
+                  }),
+                  weeklyAuthorized: true,
+                };
+              },
               sendDigestEmail: async (input) => {
+                boundaryEvents.push("provider");
                 providerCalls.push(clone(input));
                 return { data: { id: "must-not-send" } };
               },
@@ -12018,14 +12730,334 @@ await check(
         },
       );
 
-      assert.deepEqual(cachedFlagCalls, ["cached"], testCase.kind);
+      assert.equal(cachedFlagCalls, 0, testCase.kind);
       assert.equal(previewInputs.length, 1, testCase.kind);
-      assert.equal(previewInputs[0].dailyEnabled, true, testCase.kind);
-      assert.equal(previewInputs[0].weeklyEnabled, true, testCase.kind);
-      assert.deepEqual(actualFlagCalls, [
-        { name: testCase.flag, options: { fresh: true } },
-      ]);
+      assert.deepEqual(
+        {
+          dailyEnabled: previewInputs[0].dailyEnabled,
+          weeklyEnabled: previewInputs[0].weeklyEnabled,
+          noticeCasesEnabled: previewInputs[0].noticeCasesEnabled,
+        },
+        testCase.previewFlags,
+        testCase.kind,
+      );
+      assert.deepEqual(
+        actualFlagCalls,
+        [
+          { name: "dailyDigest", options: { fresh: true } },
+          { name: "weeklySummary", options: { fresh: true } },
+          { name: "noticeCases", options: { fresh: true } },
+          { name: testCase.flag, options: { fresh: true } },
+          { name: "noticeCases", options: { fresh: true } },
+        ],
+        testCase.kind,
+      );
+      assert.equal(selectedFlagReads, 2, testCase.kind);
+      assert.deepEqual(
+        boundaryEvents.slice(-3),
+        ["preview", `flag:${testCase.flag}:2`, "flag:noticeCases:1"],
+        testCase.kind,
+      );
+      assert.equal(boundaryEvents.includes("authority"), false, testCase.kind);
       assert.equal(providerCalls.length, 0, testCase.kind);
+    }
+  },
+);
+
+await check(
+  "interactive send-test rejects notice-case changes during the final selected read",
+  async () => {
+    let dailyReads = 0;
+    let noticeReads = 0;
+    let noticeEnabled = true;
+    let providerCalls = 0;
+    const flagCalls = [];
+
+    await assert.rejects(
+      () =>
+        sendTestDigestNow(
+          {
+            userId: IDS.recipient,
+            firmId: IDS.firm,
+            role: "SUPER_ADMIN",
+            toEmail: "diagnostic-caller@example.test",
+            kind: DAILY_KIND,
+            now: new Date(FIXED_NOW),
+          },
+          {
+            AppConfig: {
+              async isFeatureEnabled(name, options) {
+                flagCalls.push({ name, options: clone(options) });
+                if (name === "dailyDigest") {
+                  dailyReads += 1;
+                  if (dailyReads === 2) noticeEnabled = false;
+                  return true;
+                }
+                if (name === "noticeCases") {
+                  noticeReads += 1;
+                  return noticeEnabled;
+                }
+                return false;
+              },
+            },
+            previewDigest: async (input) => {
+              assert.equal(input.noticeCasesEnabled, true);
+              return {
+                kind: DAILY_KIND,
+                periodKey: "2026-03-20",
+                counts: { open: 1 },
+              };
+            },
+            requireActiveDigestAccess: async () => ({
+              user: makeUser({ isActive: true, role: "SUPER_ADMIN" }),
+              weeklyAuthorized: true,
+            }),
+            sendDigestEmail: async () => {
+              providerCalls += 1;
+              return { data: { id: "must-not-send" } };
+            },
+          },
+        ),
+      (error) => {
+        assert.equal(error.status, 409);
+        assert.equal(error.code, "DIGEST_PREVIEW_STALE");
+        assert.equal(
+          error.message,
+          "Digest inputs changed after preview; preview the current digest again",
+        );
+        return true;
+      },
+    );
+
+    assert.equal(dailyReads, 2);
+    assert.equal(noticeReads, 2);
+    assert.equal(providerCalls, 0);
+    assert.deepEqual(flagCalls, [
+      { name: "dailyDigest", options: { fresh: true } },
+      { name: "weeklySummary", options: { fresh: true } },
+      { name: "noticeCases", options: { fresh: true } },
+      { name: "dailyDigest", options: { fresh: true } },
+      { name: "noticeCases", options: { fresh: true } },
+    ]);
+  },
+);
+
+await check(
+  "interactive send-test rejects notice-case version and publication-fence ABA changes",
+  async () => {
+    let noticeReads = 0;
+    let authorityCalls = 0;
+    let providerCalls = 0;
+
+    await assert.rejects(
+      () =>
+        sendTestDigestNow(
+          {
+            userId: IDS.recipient,
+            firmId: IDS.firm,
+            role: "SUPER_ADMIN",
+            toEmail: "diagnostic-caller@example.test",
+            kind: DAILY_KIND,
+            now: new Date(FIXED_NOW),
+          },
+          {
+            AppConfig: {
+              async getFeatureFlagState(name, options) {
+                assert.deepEqual(options, { fresh: true });
+                if (name === "noticeCases") {
+                  noticeReads += 1;
+                  return {
+                    enabled: true,
+                    version: noticeReads,
+                    publicationFence: `notice-fence-${noticeReads}`,
+                  };
+                }
+                return {
+                  enabled: name === "dailyDigest",
+                  version: 0,
+                  publicationFence: "",
+                };
+              },
+              async isFeatureEnabled() {
+                throw new Error("state-aware reads must not use booleans");
+              },
+            },
+            previewDigest: async (input) => {
+              assert.equal(input.noticeCasesEnabled, true);
+              return {
+                kind: DAILY_KIND,
+                periodKey: "2026-03-20",
+                counts: { open: 1 },
+              };
+            },
+            requireActiveDigestAccess: async () => {
+              authorityCalls += 1;
+              return {
+                user: makeUser({ isActive: true, role: "SUPER_ADMIN" }),
+                weeklyAuthorized: true,
+              };
+            },
+            sendDigestEmail: async () => {
+              providerCalls += 1;
+              return { data: { id: "must-not-send" } };
+            },
+          },
+        ),
+      (error) => {
+        assert.equal(error.status, 409);
+        assert.equal(error.code, "DIGEST_PREVIEW_STALE");
+        return true;
+      },
+    );
+
+    assert.equal(noticeReads, 2);
+    assert.equal(authorityCalls, 0);
+    assert.equal(providerCalls, 0);
+  },
+);
+
+await check(
+  "interactive send-test keeps final authority adjacent to provider after same-enabled rollout republish",
+  async () => {
+    const cases = [
+      {
+        kind: DAILY_KIND,
+        periodKey: "2026-03-20",
+        flag: "dailyDigest",
+        previewFlags: {
+          dailyEnabled: true,
+          weeklyEnabled: false,
+          noticeCasesEnabled: true,
+        },
+      },
+      {
+        kind: WEEKLY_KIND,
+        periodKey: "2026-03-16",
+        flag: "weeklySummary",
+        previewFlags: {
+          dailyEnabled: false,
+          weeklyEnabled: true,
+          noticeCasesEnabled: false,
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      let cachedFlagCalls = 0;
+      let selectedFlagReads = 0;
+      let noticeReads = 0;
+      const events = [];
+      const providerCalls = [];
+      const result = await sendTestDigestNow(
+        {
+          userId: IDS.recipient,
+          firmId: IDS.firm,
+          role: "SUPER_ADMIN",
+          toEmail: "diagnostic-caller@example.test",
+          kind: testCase.kind,
+          now: new Date(FIXED_NOW),
+        },
+        {
+          AppConfig: {
+            async getFeatureFlags() {
+              cachedFlagCalls += 1;
+              throw new Error("cached feature flags must not be read");
+            },
+            async getFeatureFlagState(name, options) {
+              assert.deepEqual(options, { fresh: true });
+              if (name === testCase.flag) selectedFlagReads += 1;
+              if (name === "noticeCases") noticeReads += 1;
+              const readNumber =
+                name === testCase.flag
+                  ? selectedFlagReads
+                  : name === "noticeCases"
+                    ? noticeReads
+                    : 1;
+              events.push(`flag:${name}:${readNumber}`);
+              const enabled =
+                name === "dailyDigest"
+                  ? testCase.previewFlags.dailyEnabled
+                  : name === "weeklySummary"
+                    ? testCase.previewFlags.weeklyEnabled
+                    : testCase.previewFlags.noticeCasesEnabled;
+              return {
+                enabled,
+                // dailyDigest/weeklySummary have no schema-backed identity.
+                // A same-enabled republish therefore remains sendable.
+                version: name === testCase.flag ? selectedFlagReads : 7,
+                publicationFence:
+                  name === testCase.flag
+                    ? `selected-publication-${selectedFlagReads}`
+                    : "stable-publication",
+              };
+            },
+            async isFeatureEnabled() {
+              throw new Error("state-aware reads must not use booleans");
+            },
+          },
+          previewDigest: async (input) => {
+            events.push("preview");
+            assert.deepEqual(
+              {
+                dailyEnabled: input.dailyEnabled,
+                weeklyEnabled: input.weeklyEnabled,
+                noticeCasesEnabled: input.noticeCasesEnabled,
+              },
+              testCase.previewFlags,
+            );
+            return {
+              kind: testCase.kind,
+              periodKey: testCase.periodKey,
+              counts: {
+                open: 1,
+                overdue: 0,
+                dueSoon: 0,
+                waitingDocs: 0,
+                case: 0,
+                reconciliationReview: 0,
+              },
+              topTasks: [],
+            };
+          },
+          requireActiveDigestAccess: async () => {
+            events.push("authority");
+            return {
+              user: makeUser({ isActive: true, role: "SUPER_ADMIN" }),
+              weeklyAuthorized: true,
+            };
+          },
+          sendDigestEmail: async (input) => {
+            events.push("provider");
+            providerCalls.push(clone(input));
+            return { data: { id: `provider-${testCase.kind}` } };
+          },
+        },
+      );
+
+      assert.equal(cachedFlagCalls, 0, testCase.kind);
+      assert.equal(selectedFlagReads, 2, testCase.kind);
+      assert.equal(noticeReads, 2, testCase.kind);
+      assert.deepEqual(
+        events.slice(-4),
+        [
+          `flag:${testCase.flag}:2`,
+          "flag:noticeCases:2",
+          "authority",
+          "provider",
+        ],
+        testCase.kind,
+      );
+      assert.deepEqual(
+        events.slice(-2),
+        ["authority", "provider"],
+        testCase.kind,
+      );
+      assert.equal(providerCalls.length, 1, testCase.kind);
+      assert.equal(
+        result.providerMessageId,
+        `provider-${testCase.kind}`,
+        testCase.kind,
+      );
     }
   },
 );
@@ -12046,16 +13078,35 @@ await check(
     )();
 
     const order = [];
-    const completed = await completeDigestStartup({
+    let releaseSchedulers;
+    const schedulerGate = new Promise((resolve) => {
+      releaseSchedulers = resolve;
+    });
+    const completion = completeDigestStartup({
       assertIndexes: async () => order.push("indexes"),
       drainRecovery: async () => order.push("drain"),
-      startSchedulers: async () => order.push("start"),
+      startSchedulers: async () => {
+        order.push("start");
+        await schedulerGate;
+        order.push("start-complete");
+      },
       setReady: (ready) => order.push(`ready:${ready}`),
       isShuttingDown: () => {
         order.push("shutdown-check");
         return false;
       },
     });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(order, [
+      "indexes",
+      "shutdown-check",
+      "drain",
+      "shutdown-check",
+      "start",
+    ]);
+    assert.equal(order.includes("ready:true"), false);
+    releaseSchedulers();
+    const completed = await completion;
     assert.equal(completed, true);
     assert.deepEqual(order, [
       "indexes",
@@ -12063,6 +13114,7 @@ await check(
       "drain",
       "shutdown-check",
       "start",
+      "start-complete",
       "ready:true",
     ]);
 
@@ -12109,6 +13161,33 @@ await check(
       "drain",
     ]);
 
+    const schedulerFailure = new Error("scheduler phase failed");
+    const schedulerFailureEvents = [];
+    await assert.rejects(
+      () =>
+        completeDigestStartup({
+          assertIndexes: async () => schedulerFailureEvents.push("indexes"),
+          drainRecovery: async () => schedulerFailureEvents.push("drain"),
+          startSchedulers: async () => {
+            schedulerFailureEvents.push("start");
+            throw schedulerFailure;
+          },
+          setReady: () => schedulerFailureEvents.push("ready"),
+          isShuttingDown: () => {
+            schedulerFailureEvents.push("shutdown-check");
+            return false;
+          },
+        }),
+      (error) => error === schedulerFailure,
+    );
+    assert.deepEqual(schedulerFailureEvents, [
+      "indexes",
+      "shutdown-check",
+      "drain",
+      "shutdown-check",
+      "start",
+    ]);
+
     for (const stopAfterCheck of [1, 2]) {
       const shutdownEvents = [];
       let shutdownChecks = 0;
@@ -12141,6 +13220,97 @@ await check(
           : ["indexes", "shutdown-1", "drain", "shutdown-2"],
       );
     }
+  },
+);
+
+await check(
+  "completeDigestStartup gates readiness until durable recovery completes a clean retry",
+  async () => {
+    const serverSource = readFileSync(
+      new URL("../src/server.js", import.meta.url),
+      "utf8",
+    );
+    const match = serverSource.match(
+      /export (async function completeDigestStartup\([\s\S]*?\r?\n\})\r?\n\r?\n\/\/ Start listening/,
+    );
+    assert.ok(match, "completeDigestStartup source extraction failed");
+    const completeDigestStartup = Function(
+      `"use strict"; return (${match[1]});`,
+    )();
+    const deliveryId = orderedObjectId(1);
+    const deliveryStore = createInMemoryDigestDelivery([
+      makeRecoverableDelivery(1, {
+        email: { state: "PENDING", claimToken: null, claimedAt: null },
+      }),
+    ]);
+    const recoveryCursor = createInMemoryDigestRecoveryCursor({
+      _id: DIGEST_RECOVERY_CURSOR_ID,
+      afterId: deliveryId,
+      cycleEndId: deliveryId,
+      lease: {
+        token: "drc1:1",
+        expiresAt: DIGEST_RECOVERY_LEGACY_FENCE,
+      },
+    });
+    const recovered = [];
+    const drainRecovery = () =>
+      drainDigestRecovery(
+        { now: new Date(FIXED_NOW) },
+        {
+          AppConfig: {
+            async isFeatureEnabled() {
+              return false;
+            },
+          },
+          DigestDelivery: deliveryStore.model,
+          DigestRecoveryCursor: recoveryCursor.model,
+          enqueueRecipientDigest: async ({ periodKey }) => {
+            recovered.push(periodKey);
+          },
+          recoveryClock: () => new Date(FIXED_NOW),
+          reportRecoveryError: async () => {},
+        },
+      );
+    const events = [];
+    const startupDependencies = {
+      assertIndexes: async () => events.push("indexes"),
+      drainRecovery: async () => {
+        events.push("drain");
+        return drainRecovery();
+      },
+      startSchedulers: async () => events.push("start"),
+      setReady: (ready) => events.push(`ready:${ready}`),
+      isShuttingDown: () => false,
+    };
+
+    await assert.rejects(
+      () => completeDigestStartup(startupDependencies),
+      (error) => {
+        assert.equal(error.code, "DIGEST_RECOVERY_ROWS_FAILED");
+        assert.equal(error.rowFailureCount, 1);
+        assert.equal(error.rowFailuresComplete, false);
+        return true;
+      },
+    );
+    assert.deepEqual(events, ["indexes", "drain"]);
+    assert.deepEqual(recovered, []);
+    assert.equal(recoveryCursor.get().afterId, null);
+    assert.equal(recoveryCursor.get().cycleEndId, deliveryId);
+
+    const completed = await completeDigestStartup(startupDependencies);
+    assert.equal(completed, true);
+    assert.deepEqual(events, [
+      "indexes",
+      "drain",
+      "indexes",
+      "drain",
+      "start",
+      "ready:true",
+    ]);
+    assert.deepEqual(recovered, ["recovery-0001"]);
+    assert.equal(recoveryCursor.get().cycleEndId, null);
+    assert.equal(recoveryCursor.get().lease.token, null);
+    assert.equal(recoveryCursor.get().lease.expiresAt, null);
   },
 );
 
@@ -12211,11 +13381,493 @@ await check(
     assert.equal(recoveryCursor.get().afterId, null);
     assert.equal(recoveryCursor.get().cycleEndId, null);
     assert.equal(recoveryCursor.get().lease.token, null);
+    assert.equal(recoveryCursor.get().lease.expiresAt, null);
   },
 );
 
 await check(
-  "drainDigestRecovery aggregates row failures through finite completion",
+  "recovery lease acquisition cannot overwrite a newer marker snapshot",
+  async () => {
+    const deliveryStore = createInMemoryDigestDelivery([
+      makeRecoverableDelivery(1),
+    ]);
+    const recoveryCursor = createInMemoryDigestRecoveryCursor({
+      _id: DIGEST_RECOVERY_CURSOR_ID,
+      afterId: null,
+      cycleEndId: orderedObjectId(1),
+      lease: {
+        token: "drc1:2",
+        expiresAt: DIGEST_RECOVERY_LEGACY_FENCE,
+      },
+    });
+    let newerMarkerInjected = false;
+    const DigestRecoveryCursorModel = {
+      ...recoveryCursor.model,
+      async findOneAndUpdate(filter, update, options) {
+        if (!newerMarkerInjected) {
+          newerMarkerInjected = true;
+          const changed = await recoveryCursor.model.updateOne(
+            {
+              _id: DIGEST_RECOVERY_CURSOR_ID,
+              "lease.token": "drc1:2",
+            },
+            { $set: { "lease.token": "drc1:3" } },
+          );
+          assert.equal(changed.matchedCount, 1);
+        }
+        return recoveryCursor.model.findOneAndUpdate(filter, update, options);
+      },
+    };
+    const recoveredPeriods = [];
+
+    await runDisabledDigestRecovery({
+      deliveryModel: deliveryStore.model,
+      cursorModel: DigestRecoveryCursorModel,
+      recover: async ({ periodKey }) => {
+        recoveredPeriods.push(periodKey);
+      },
+    });
+
+    const acquisition = recoveryCursor.operations.find(
+      (operation) => operation.method === "findOneAndUpdate",
+    );
+    assert.equal(newerMarkerInjected, true);
+    assert.deepEqual(recoveredPeriods, []);
+    assert.equal(recoveryCursor.get().lease.token, "drc1:3");
+    assertLiteralEquality(
+      acquisition.filter,
+      "lease.token",
+      "drc1:2",
+      "recovery marker acquisition snapshot",
+    );
+    assertLiteralEquality(
+      acquisition.filter,
+      "lease.expiresAt",
+      DIGEST_RECOVERY_LEGACY_FENCE,
+      "recovery expiry acquisition snapshot",
+    );
+    const proposedToken = assertDigestRecoveryActiveToken(
+      acquisition.update.$set["lease.token"],
+      { failureCount: 2 },
+    );
+    assert.equal(
+      proposedToken.expiresAt.toISOString(),
+      new Date(
+        FIXED_NOW.getTime() + DIGEST_RECOVERY_CURSOR_LEASE_MS,
+      ).toISOString(),
+    );
+    assertDigestRecoveryLegacyFence(acquisition.update.$set["lease.expiresAt"]);
+  },
+);
+
+await check(
+  "durable recovery failure survives interruption and expiry until full retry",
+  async () => {
+    const rowsPerPass =
+      DIGEST_RECOVERY_BATCH_SIZE * DIGEST_RECOVERY_MAX_BATCHES;
+    const total = rowsPerPass + 1;
+    const deliveryStore = createInMemoryDigestDelivery(
+      Array.from({ length: total }, (_, index) =>
+        makeRecoverableDelivery(index + 1, {
+          email: { state: "PENDING", claimToken: null, claimedAt: null },
+        }),
+      ),
+    );
+    const recoveryCursor = createInMemoryDigestRecoveryCursor();
+    const attemptedPeriods = [];
+    let rowTwoFails = true;
+    const runDrain = (yieldControl = async () => {}) =>
+      drainDigestRecovery(
+        { now: new Date(FIXED_NOW) },
+        {
+          AppConfig: {
+            async isFeatureEnabled() {
+              return false;
+            },
+          },
+          DigestDelivery: deliveryStore.model,
+          DigestRecoveryCursor: recoveryCursor.model,
+          enqueueRecipientDigest: async ({ periodKey }) => {
+            attemptedPeriods.push(periodKey);
+            if (rowTwoFails && periodKey === "recovery-0002") {
+              const error = new Error("row two failed before interruption");
+              error.code = "ROW_TWO_FAILED";
+              throw error;
+            }
+          },
+          recoveryClock: () => new Date(FIXED_NOW),
+          reportRecoveryError: async () => {},
+          yieldControl,
+        },
+      );
+    const interruption = new Error("stop after first bounded pass");
+    let interruptionYields = 0;
+
+    await assert.rejects(
+      () =>
+        runDrain(async () => {
+          interruptionYields += 1;
+          throw interruption;
+        }),
+      (error) => error === interruption,
+    );
+
+    assert.equal(interruptionYields, 1);
+    assert.equal(attemptedPeriods.length, rowsPerPass);
+    assert.equal(attemptedPeriods.includes("recovery-0002"), true);
+    assert.equal(attemptedPeriods.includes("recovery-0501"), false);
+    assert.equal(recoveryCursor.get().afterId, orderedObjectId(rowsPerPass));
+    assert.equal(recoveryCursor.get().cycleEndId, orderedObjectId(total));
+    assert.equal(recoveryCursor.get().lease.token, "drc1:1");
+    assertDigestRecoveryLegacyFence(recoveryCursor.get().lease.expiresAt);
+
+    const crashedExpiry = new Date(FIXED_NOW.getTime() - 1);
+    const crashedToken = digestRecoveryActiveToken({
+      failureCount: 1,
+      expiresAt: crashedExpiry,
+    });
+    const crashed = await recoveryCursor.model.updateOne(
+      {
+        _id: DIGEST_RECOVERY_CURSOR_ID,
+        "lease.token": "drc1:1",
+      },
+      {
+        $set: {
+          "lease.token": crashedToken,
+          "lease.expiresAt": DIGEST_RECOVERY_LEGACY_FENCE,
+        },
+      },
+    );
+    assert.equal(crashed.matchedCount, 1);
+    const secondOperationStart = recoveryCursor.operations.length;
+
+    await assert.rejects(
+      () => runDrain(),
+      (error) => {
+        assert.equal(error.code, "DIGEST_RECOVERY_ROWS_FAILED");
+        assert.equal(error.passes, 1);
+        assert.equal(error.rowsProcessed, 1);
+        assert.equal(error.rowFailureCount, 1);
+        assert.equal(error.rowFailuresComplete, false);
+        assert.deepEqual(error.rowFailures, []);
+        return true;
+      },
+    );
+
+    assert.deepEqual(attemptedPeriods.slice(rowsPerPass), ["recovery-0501"]);
+    const reclaimedAcquisition = recoveryCursor.operations
+      .slice(secondOperationStart)
+      .find((operation) => operation.method === "findOneAndUpdate");
+    const reclaimedToken = reclaimedAcquisition.update.$set["lease.token"];
+    assertLiteralEquality(
+      reclaimedAcquisition.filter,
+      "lease.token",
+      crashedToken,
+      "expired recovery marker snapshot",
+    );
+    assertLiteralEquality(
+      reclaimedAcquisition.filter,
+      "lease.expiresAt",
+      DIGEST_RECOVERY_LEGACY_FENCE,
+      "expired recovery lease snapshot",
+    );
+    const reclaimed = assertDigestRecoveryActiveToken(reclaimedToken, {
+      failureCount: 1,
+    });
+    assert.equal(
+      reclaimed.expiresAt.toISOString(),
+      new Date(
+        FIXED_NOW.getTime() + DIGEST_RECOVERY_CURSOR_LEASE_MS,
+      ).toISOString(),
+    );
+    assert.notEqual(reclaimedToken, crashedToken);
+    assertDigestRecoveryLegacyFence(
+      reclaimedAcquisition.update.$set["lease.expiresAt"],
+    );
+    assert.equal(recoveryCursor.get().afterId, null);
+    assert.equal(recoveryCursor.get().cycleEndId, orderedObjectId(total));
+    assert.equal(recoveryCursor.get().lease.token, "drc1:0");
+    assertDigestRecoveryLegacyFence(recoveryCursor.get().lease.expiresAt);
+
+    rowTwoFails = false;
+    const retryAttemptStart = attemptedPeriods.length;
+    const retryResult = await runDrain();
+    const retryPeriods = attemptedPeriods.slice(retryAttemptStart);
+
+    assert.deepEqual(retryResult, {
+      completed: true,
+      passes: 2,
+      rowsProcessed: total,
+      rowFailures: [],
+    });
+    assert.equal(retryPeriods.length, total);
+    assert.equal(retryPeriods[0], "recovery-0001");
+    assert.equal(retryPeriods[1], "recovery-0002");
+    assert.equal(retryPeriods.at(-1), "recovery-0501");
+    assert.equal(recoveryCursor.get().afterId, null);
+    assert.equal(recoveryCursor.get().cycleEndId, null);
+    assert.equal(recoveryCursor.get().lease.token, null);
+    assert.equal(recoveryCursor.get().lease.expiresAt, null);
+  },
+);
+
+await check(
+  "applied failure advance survives lost acknowledgement and still forces retry",
+  async () => {
+    const deliveryId = orderedObjectId(1);
+    const deliveryStore = createInMemoryDigestDelivery([
+      makeRecoverableDelivery(1, {
+        email: { state: "PENDING", claimToken: null, claimedAt: null },
+      }),
+    ]);
+    const recoveryCursor = createInMemoryDigestRecoveryCursor();
+    const acknowledgementLost = new Error(
+      "failure advance acknowledgement was lost",
+    );
+    let injectLostAcknowledgement = true;
+    const cursorModel = {
+      ...recoveryCursor.model,
+      async updateOne(filter, update) {
+        const result = await recoveryCursor.model.updateOne(filter, update);
+        const nextToken = update?.$set?.["lease.token"];
+        if (
+          injectLostAcknowledgement &&
+          scalarEquals(update?.$set?.afterId, deliveryId) &&
+          typeof nextToken === "string" &&
+          nextToken.startsWith("drc1:1:")
+        ) {
+          injectLostAcknowledgement = false;
+          throw acknowledgementLost;
+        }
+        return result;
+      },
+    };
+    let recoveryNow = new Date(FIXED_NOW);
+    let rowFails = true;
+    const attempts = [];
+    const runDrain = () =>
+      drainDigestRecovery(
+        { now: new Date(FIXED_NOW) },
+        {
+          AppConfig: {
+            async isFeatureEnabled() {
+              return false;
+            },
+          },
+          DigestDelivery: deliveryStore.model,
+          DigestRecoveryCursor: cursorModel,
+          enqueueRecipientDigest: async ({ periodKey }) => {
+            attempts.push(periodKey);
+            if (rowFails) {
+              const error = new Error("row failed before acknowledgement loss");
+              error.code = "ROW_FAILED_BEFORE_ACK";
+              throw error;
+            }
+          },
+          recoveryClock: () => new Date(recoveryNow),
+          reportRecoveryError: async () => {},
+        },
+      );
+
+    await assert.rejects(
+      () => runDrain(),
+      (error) => error === acknowledgementLost,
+    );
+    assert.equal(injectLostAcknowledgement, false);
+    assert.deepEqual(attempts, ["recovery-0001"]);
+    assert.equal(recoveryCursor.get().afterId, deliveryId);
+    assert.equal(recoveryCursor.get().cycleEndId, deliveryId);
+    const active = assertDigestRecoveryActiveToken(
+      recoveryCursor.get().lease.token,
+      { failureCount: 1 },
+    );
+    assertDigestRecoveryLegacyFence(recoveryCursor.get().lease.expiresAt);
+
+    recoveryNow = new Date(active.expiresAt.getTime() + 1);
+    await assert.rejects(
+      () => runDrain(),
+      (error) => {
+        assert.equal(error.code, "DIGEST_RECOVERY_ROWS_FAILED");
+        assert.equal(error.rowFailureCount, 1);
+        assert.equal(error.rowFailuresComplete, false);
+        assert.deepEqual(error.rowFailures, []);
+        return true;
+      },
+    );
+    assert.deepEqual(attempts, ["recovery-0001"]);
+    assert.equal(recoveryCursor.get().afterId, null);
+    assert.equal(recoveryCursor.get().cycleEndId, deliveryId);
+    assert.equal(recoveryCursor.get().lease.token, "drc1:0");
+    assertDigestRecoveryLegacyFence(recoveryCursor.get().lease.expiresAt);
+
+    rowFails = false;
+    const retry = await runDrain();
+    assert.deepEqual(retry, {
+      completed: true,
+      passes: 1,
+      rowsProcessed: 1,
+      rowFailures: [],
+    });
+    assert.deepEqual(attempts, ["recovery-0001", "recovery-0001"]);
+    assert.equal(recoveryCursor.get().cycleEndId, null);
+    assert.equal(recoveryCursor.get().lease.token, null);
+    assert.equal(recoveryCursor.get().lease.expiresAt, null);
+  },
+);
+
+await check(
+  "applied failed-cycle transition survives lost acknowledgement and requires full scan",
+  async () => {
+    const deliveryId = orderedObjectId(1);
+    const deliveryStore = createInMemoryDigestDelivery([
+      makeRecoverableDelivery(1, {
+        email: { state: "PENDING", claimToken: null, claimedAt: null },
+      }),
+    ]);
+    const recoveryCursor = createInMemoryDigestRecoveryCursor({
+      _id: DIGEST_RECOVERY_CURSOR_ID,
+      afterId: deliveryId,
+      cycleEndId: deliveryId,
+      lease: {
+        token: "drc1:1",
+        expiresAt: DIGEST_RECOVERY_LEGACY_FENCE,
+      },
+    });
+    const acknowledgementLost = new Error(
+      "failed-cycle completion acknowledgement was lost",
+    );
+    let injectLostAcknowledgement = true;
+    const cursorModel = {
+      ...recoveryCursor.model,
+      async updateOne(filter, update) {
+        const result = await recoveryCursor.model.updateOne(filter, update);
+        if (
+          injectLostAcknowledgement &&
+          update?.$set?.afterId === null &&
+          scalarEquals(update?.$set?.cycleEndId, deliveryId) &&
+          update?.$set?.["lease.token"] === "drc1:0"
+        ) {
+          injectLostAcknowledgement = false;
+          throw acknowledgementLost;
+        }
+        return result;
+      },
+    };
+    const attempts = [];
+    const runDrain = () =>
+      drainDigestRecovery(
+        { now: new Date(FIXED_NOW) },
+        {
+          AppConfig: {
+            async isFeatureEnabled() {
+              return false;
+            },
+          },
+          DigestDelivery: deliveryStore.model,
+          DigestRecoveryCursor: cursorModel,
+          enqueueRecipientDigest: async ({ periodKey }) => {
+            attempts.push(periodKey);
+          },
+          recoveryClock: () => new Date(FIXED_NOW),
+          reportRecoveryError: async () => {},
+        },
+      );
+
+    await assert.rejects(
+      () => runDrain(),
+      (error) => error === acknowledgementLost,
+    );
+    assert.equal(injectLostAcknowledgement, false);
+    assert.deepEqual(attempts, []);
+    assert.equal(recoveryCursor.get().afterId, null);
+    assert.equal(recoveryCursor.get().cycleEndId, deliveryId);
+    assert.equal(recoveryCursor.get().lease.token, "drc1:0");
+    assertDigestRecoveryLegacyFence(recoveryCursor.get().lease.expiresAt);
+
+    const retry = await runDrain();
+    assert.deepEqual(retry, {
+      completed: true,
+      passes: 1,
+      rowsProcessed: 1,
+      rowFailures: [],
+    });
+    assert.deepEqual(attempts, ["recovery-0001"]);
+    assert.equal(recoveryCursor.get().afterId, null);
+    assert.equal(recoveryCursor.get().cycleEndId, null);
+    assert.equal(recoveryCursor.get().lease.token, null);
+    assert.equal(recoveryCursor.get().lease.expiresAt, null);
+  },
+);
+
+await check(
+  "durable recovery failure count saturates within safe token bounds",
+  async () => {
+    const maximumCount = Number.MAX_SAFE_INTEGER;
+    const deliveryStore = createInMemoryDigestDelivery([
+      makeRecoverableDelivery(1, {
+        email: { state: "PENDING", claimToken: null, claimedAt: null },
+      }),
+    ]);
+    const recoveryCursor = createInMemoryDigestRecoveryCursor({
+      _id: DIGEST_RECOVERY_CURSOR_ID,
+      afterId: null,
+      cycleEndId: orderedObjectId(1),
+      lease: {
+        token: `drc1:${maximumCount}`,
+        expiresAt: DIGEST_RECOVERY_LEGACY_FENCE,
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        drainDigestRecovery(
+          { now: new Date(FIXED_NOW) },
+          {
+            AppConfig: {
+              async isFeatureEnabled() {
+                return false;
+              },
+            },
+            DigestDelivery: deliveryStore.model,
+            DigestRecoveryCursor: recoveryCursor.model,
+            enqueueRecipientDigest: async () => {
+              const error = new Error("failure count must saturate");
+              error.code = "SATURATED_FAILURE";
+              throw error;
+            },
+            recoveryClock: () => new Date(FIXED_NOW),
+            reportRecoveryError: async () => {},
+          },
+        ),
+      (error) => {
+        assert.equal(error.code, "DIGEST_RECOVERY_ROWS_FAILED");
+        assert.equal(error.rowFailureCount, maximumCount);
+        assert.equal(error.rowFailuresComplete, false);
+        assert.equal(error.rowFailures.length, 1);
+        return true;
+      },
+    );
+
+    const activeTokens = recoveryCursor.operations
+      .map((operation) => operation.update?.$set?.["lease.token"])
+      .filter(
+        (token) =>
+          typeof token === "string" &&
+          token.startsWith(`drc1:${maximumCount}:`),
+      );
+    assert.ok(activeTokens.length >= 2);
+    for (const token of activeTokens) {
+      assertDigestRecoveryActiveToken(token, { failureCount: maximumCount });
+    }
+    assert.equal(recoveryCursor.get().afterId, null);
+    assert.equal(recoveryCursor.get().cycleEndId, orderedObjectId(1));
+    assert.equal(recoveryCursor.get().lease.token, "drc1:0");
+    assertDigestRecoveryLegacyFence(recoveryCursor.get().lease.expiresAt);
+  },
+);
+
+await check(
+  "drainDigestRecovery preserves detailed row failures and prepares full retry",
   async () => {
     const rowsPerPass =
       DIGEST_RECOVERY_BATCH_SIZE * DIGEST_RECOVERY_MAX_BATCHES;
@@ -12270,6 +13922,8 @@ await check(
         assert.equal(error.code, "DIGEST_RECOVERY_ROWS_FAILED");
         assert.equal(error.passes, 2);
         assert.equal(error.rowsProcessed, total);
+        assert.equal(error.rowFailureCount, 2);
+        assert.equal(error.rowFailuresComplete, true);
         assert.deepEqual(error.rowFailures, [
           { deliveryId: orderedObjectId(2), code: "ROW_TWO_FAILED" },
           {
@@ -12288,7 +13942,9 @@ await check(
       { code: "LAST_ROW_FAILED" },
     ]);
     assert.equal(recoveryCursor.get().afterId, null);
-    assert.equal(recoveryCursor.get().cycleEndId, null);
+    assert.equal(recoveryCursor.get().cycleEndId, orderedObjectId(total));
+    assert.equal(recoveryCursor.get().lease.token, "drc1:0");
+    assertDigestRecoveryLegacyFence(recoveryCursor.get().lease.expiresAt);
   },
 );
 
@@ -12341,6 +13997,16 @@ await check(
           assert.equal(error.passes, 1, testCase.state);
           assert.equal(error.rowsProcessed, 7, testCase.state);
           assert.equal(error.completed, undefined, testCase.state);
+          assert.equal(
+            Object.hasOwn(error, "rowFailureCount"),
+            false,
+            testCase.state,
+          );
+          assert.equal(
+            Object.hasOwn(error, "rowFailuresComplete"),
+            false,
+            testCase.state,
+          );
           return true;
         },
       );

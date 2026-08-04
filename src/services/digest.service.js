@@ -2025,40 +2025,235 @@ function digestRecoveryClockNow(clock) {
   return instant;
 }
 
+const DIGEST_RECOVERY_MARKER_VERSION = "drc1";
+const DIGEST_RECOVERY_LEASE_TOKEN_MAX_LENGTH = 64;
+const DIGEST_RECOVERY_OWNER_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DIGEST_RECOVERY_COMPACT_OWNER_PATTERN = /^[0-9a-f]{32}$/i;
+const DIGEST_RECOVERY_LEGACY_FENCE_MS = 8_640_000_000_000_000;
+const DIGEST_RECOVERY_MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
 function digestRecoveryCursorLeaseExpiry(now) {
   return new Date(new Date(now).getTime() + DIGEST_RECOVERY_CURSOR_LEASE_MS);
+}
+
+function digestRecoveryLegacyFenceExpiry() {
+  return new Date(DIGEST_RECOVERY_LEGACY_FENCE_MS);
+}
+
+function digestRecoveryHasLegacyFence(value) {
+  return (
+    value instanceof Date && value.getTime() === DIGEST_RECOVERY_LEGACY_FENCE_MS
+  );
+}
+
+function digestRecoveryStoredLeaseExpiry({
+  failureCount,
+  legacyFenceRequired,
+  leaseExpiry,
+}) {
+  return legacyFenceRequired || failureCount > 0
+    ? digestRecoveryLegacyFenceExpiry()
+    : leaseExpiry;
+}
+
+function digestRecoveryCursorInvalidError() {
+  const error = new Error("Digest recovery cursor marker is invalid");
+  error.code = "DIGEST_RECOVERY_CURSOR_INVALID";
+  return error;
+}
+
+function parseDigestRecoveryFailureCount(value) {
+  if (!/^(0|[1-9]\d*)$/.test(value)) return null;
+  const count = Number(value);
+  return Number.isSafeInteger(count) && count >= 0 ? count : null;
+}
+
+function parseDigestRecoveryLeaseExpiry(value) {
+  if (!/^(0|[1-9a-z][0-9a-z]*)$/.test(value)) return null;
+  const expiryMs = Number.parseInt(value, 36);
+  return Number.isSafeInteger(expiryMs) &&
+    expiryMs >= 0 &&
+    expiryMs.toString(36) === value
+    ? expiryMs
+    : null;
+}
+
+function decodeDigestRecoveryLeaseToken(value) {
+  if (value !== null && value !== undefined && typeof value !== "string") {
+    throw digestRecoveryCursorInvalidError();
+  }
+  const token = typeof value === "string" ? value.trim() : "";
+  if (token.length > DIGEST_RECOVERY_LEASE_TOKEN_MAX_LENGTH) {
+    throw digestRecoveryCursorInvalidError();
+  }
+  if (!token) {
+    // Legacy null and empty tokens were always immediately claimable,
+    // regardless of a stale expiresAt value.
+    return { failureCount: 0, active: false, legacy: true };
+  }
+  if (!token.startsWith(`${DIGEST_RECOVERY_MARKER_VERSION}:`)) {
+    // Deployed legacy owners were UUIDs. Reject other short strings instead of
+    // allowing corrupted or case-shifted markers to wedge recovery forever.
+    if (!DIGEST_RECOVERY_OWNER_PATTERN.test(token)) {
+      throw digestRecoveryCursorInvalidError();
+    }
+    return { failureCount: 0, active: true, legacy: true };
+  }
+
+  const idleMatch = token.match(/^drc1:(0|[1-9]\d*)$/);
+  if (idleMatch) {
+    const failureCount = parseDigestRecoveryFailureCount(idleMatch[1]);
+    if (failureCount !== null) {
+      return { failureCount, active: false, legacy: false };
+    }
+  }
+
+  const activeMatch = token.match(
+    /^drc1:(0|[1-9]\d*):([0-9a-f]{32}):(0|[1-9a-z][0-9a-z]*)$/i,
+  );
+  if (
+    activeMatch &&
+    DIGEST_RECOVERY_COMPACT_OWNER_PATTERN.test(activeMatch[2])
+  ) {
+    const failureCount = parseDigestRecoveryFailureCount(activeMatch[1]);
+    const expiresAtMs = parseDigestRecoveryLeaseExpiry(
+      activeMatch[3].toLowerCase(),
+    );
+    if (failureCount !== null && expiresAtMs !== null) {
+      return {
+        failureCount,
+        active: true,
+        legacy: false,
+        expiresAtMs,
+      };
+    }
+  }
+
+  throw digestRecoveryCursorInvalidError();
+}
+
+function encodeDigestRecoveryLeaseToken(
+  failureCount,
+  ownerToken = null,
+  expiresAt = null,
+) {
+  if (
+    !Number.isSafeInteger(failureCount) ||
+    failureCount < 0 ||
+    failureCount > Number.MAX_SAFE_INTEGER
+  ) {
+    throw new TypeError("Digest recovery failure count is invalid");
+  }
+  if (ownerToken === null) {
+    if (expiresAt !== null) {
+      throw new TypeError("Digest recovery idle marker cannot have an expiry");
+    }
+    return `${DIGEST_RECOVERY_MARKER_VERSION}:${failureCount}`;
+  }
+  if (
+    typeof ownerToken !== "string" ||
+    !DIGEST_RECOVERY_OWNER_PATTERN.test(ownerToken)
+  ) {
+    throw new TypeError("Digest recovery lease owner token is invalid");
+  }
+  const expiresAtMs =
+    expiresAt instanceof Date ? expiresAt.getTime() : Number(expiresAt);
+  if (!Number.isSafeInteger(expiresAtMs) || expiresAtMs < 0) {
+    throw new TypeError("Digest recovery lease expiry is invalid");
+  }
+  const compactOwner = ownerToken.replaceAll("-", "").toLowerCase();
+  const token = `${DIGEST_RECOVERY_MARKER_VERSION}:${failureCount}:${compactOwner}:${expiresAtMs.toString(36)}`;
+  if (token.length > DIGEST_RECOVERY_LEASE_TOKEN_MAX_LENGTH) {
+    throw new TypeError("Digest recovery lease token is too long");
+  }
+  return token;
+}
+
+function digestRecoveryLeaseIsAvailable(decodedToken, expiresAt, now) {
+  if (!decodedToken.active) return true;
+  const latestPlausibleExpiry =
+    now.getTime() +
+    DIGEST_RECOVERY_CURSOR_LEASE_MS +
+    DIGEST_RECOVERY_MAX_CLOCK_SKEW_MS;
+  if (!decodedToken.legacy) {
+    return (
+      decodedToken.expiresAtMs <= now.getTime() ||
+      decodedToken.expiresAtMs > latestPlausibleExpiry
+    );
+  }
+  const expiresAtMs =
+    expiresAt instanceof Date && Number.isFinite(expiresAt.getTime())
+      ? expiresAt.getTime()
+      : null;
+  return (
+    expiresAtMs === null ||
+    expiresAtMs <= now.getTime() ||
+    expiresAtMs > latestPlausibleExpiry
+  );
 }
 
 async function acquireDigestRecoveryCursorLease({
   DigestRecoveryCursorModel,
   clock,
-  token = randomUUID(),
+  ownerToken = randomUUID(),
 }) {
   const now = digestRecoveryClockNow(clock);
+  const snapshot = await DigestRecoveryCursorModel.findOne({
+    _id: DIGEST_RECOVERY_CURSOR_ID,
+  }).lean();
+  const decodedToken = decodeDigestRecoveryLeaseToken(snapshot?.lease?.token);
+  const legacyFenceRequired =
+    !decodedToken.legacy &&
+    (!decodedToken.active ||
+      decodedToken.failureCount > 0 ||
+      digestRecoveryHasLegacyFence(snapshot?.lease?.expiresAt));
+  if (
+    snapshot &&
+    !digestRecoveryLeaseIsAvailable(
+      decodedToken,
+      snapshot?.lease?.expiresAt,
+      now,
+    )
+  ) {
+    return null;
+  }
+
+  const leaseExpiry = digestRecoveryCursorLeaseExpiry(now);
+  const activeToken = encodeDigestRecoveryLeaseToken(
+    decodedToken.failureCount,
+    ownerToken,
+    leaseExpiry,
+  );
+  const snapshotFence = snapshotFilter({
+    "lease.token": snapshot?.lease?.token,
+    "lease.expiresAt": snapshot?.lease?.expiresAt,
+  });
   try {
     const cursor = await DigestRecoveryCursorModel.findOneAndUpdate(
-      {
-        _id: DIGEST_RECOVERY_CURSOR_ID,
-        $or: [
-          { "lease.token": null },
-          { "lease.token": "" },
-          { "lease.token": { $exists: false } },
-          { "lease.expiresAt": { $lte: now } },
-          { "lease.expiresAt": null },
-          { "lease.expiresAt": { $exists: false } },
-          { "lease.expiresAt": { $not: { $type: "date" } } },
-        ],
-      },
+      combineQueryFilters({ _id: DIGEST_RECOVERY_CURSOR_ID }, snapshotFence),
       {
         $set: {
-          "lease.token": token,
-          "lease.expiresAt": digestRecoveryCursorLeaseExpiry(now),
+          "lease.token": activeToken,
+          "lease.expiresAt": digestRecoveryStoredLeaseExpiry({
+            failureCount: decodedToken.failureCount,
+            legacyFenceRequired,
+            leaseExpiry,
+          }),
         },
         $setOnInsert: { afterId: null, cycleEndId: null },
       },
       { new: true, upsert: true, setDefaultsOnInsert: true },
     );
-    return cursor ? { cursor, token } : null;
+    return cursor
+      ? {
+          cursor,
+          token: activeToken,
+          ownerToken,
+          failureCount: decodedToken.failureCount,
+          legacyFenceRequired,
+        }
+      : null;
   } catch (error) {
     // Concurrent first-use upserts race on the singleton _id. The winner owns
     // the lease; the duplicate-key loser behaves exactly like live contention.
@@ -2089,14 +2284,36 @@ async function reportDigestRecoveryError(reporter, error) {
   return code;
 }
 
+function nextDigestRecoveryFailureCount(failureCount, increment) {
+  if (!increment) return failureCount;
+  return failureCount >= Number.MAX_SAFE_INTEGER
+    ? Number.MAX_SAFE_INTEGER
+    : failureCount + 1;
+}
+
 async function updateDigestRecoveryCursor({
   DigestRecoveryCursorModel,
   token,
+  ownerToken,
+  failureCount,
+  legacyFenceRequired,
+  incrementFailure = false,
   afterId,
   cycleEndId,
   clock,
 }) {
   const now = digestRecoveryClockNow(clock);
+  const nextFailureCount = nextDigestRecoveryFailureCount(
+    failureCount,
+    incrementFailure,
+  );
+  const nextLegacyFenceRequired = legacyFenceRequired || nextFailureCount > 0;
+  const leaseExpiry = digestRecoveryCursorLeaseExpiry(now);
+  const nextToken = encodeDigestRecoveryLeaseToken(
+    nextFailureCount,
+    ownerToken,
+    leaseExpiry,
+  );
   const result = await DigestRecoveryCursorModel.updateOne(
     {
       _id: DIGEST_RECOVERY_CURSOR_ID,
@@ -2106,16 +2323,54 @@ async function updateDigestRecoveryCursor({
       $set: {
         afterId,
         cycleEndId,
-        "lease.expiresAt": digestRecoveryCursorLeaseExpiry(now),
+        "lease.token": nextToken,
+        "lease.expiresAt": digestRecoveryStoredLeaseExpiry({
+          failureCount: nextFailureCount,
+          legacyFenceRequired: nextLegacyFenceRequired,
+          leaseExpiry,
+        }),
+      },
+    },
+  );
+  return {
+    matched: updateProvesMatch(result),
+    token: nextToken,
+    failureCount: nextFailureCount,
+    legacyFenceRequired: nextLegacyFenceRequired,
+  };
+}
+
+async function releaseDigestRecoveryCursorLease({
+  DigestRecoveryCursorModel,
+  token,
+  failureCount,
+  legacyFenceRequired,
+}) {
+  const preserveMarker = legacyFenceRequired || failureCount > 0;
+  const result = await DigestRecoveryCursorModel.updateOne(
+    {
+      _id: DIGEST_RECOVERY_CURSOR_ID,
+      "lease.token": token,
+    },
+    {
+      $set: {
+        "lease.token": preserveMarker
+          ? encodeDigestRecoveryLeaseToken(failureCount)
+          : null,
+        "lease.expiresAt": preserveMarker
+          ? digestRecoveryLegacyFenceExpiry()
+          : null,
       },
     },
   );
   return updateProvesMatch(result);
 }
 
-async function releaseDigestRecoveryCursorLease({
+async function completeDigestRecoveryCycle({
   DigestRecoveryCursorModel,
   token,
+  cycleEndId,
+  retryRequired,
 }) {
   const result = await DigestRecoveryCursorModel.updateOne(
     {
@@ -2124,8 +2379,12 @@ async function releaseDigestRecoveryCursorLease({
     },
     {
       $set: {
-        "lease.token": null,
-        "lease.expiresAt": null,
+        afterId: null,
+        cycleEndId: retryRequired ? cycleEndId : null,
+        "lease.token": retryRequired ? encodeDigestRecoveryLeaseToken(0) : null,
+        "lease.expiresAt": retryRequired
+          ? digestRecoveryLegacyFenceExpiry()
+          : null,
       },
     },
   );
@@ -2158,9 +2417,23 @@ async function findDigestRecoveryCycleEndId({ DigestDeliveryModel }) {
   return rows[0]?._id ?? null;
 }
 
+function expandDigestRecoveryCycleEndId(
+  currentCycleEndId,
+  candidateCycleEndId,
+) {
+  if (!candidateCycleEndId) return currentCycleEndId;
+  if (!currentCycleEndId) return candidateCycleEndId;
+  const current = requireCanonicalObjectId(currentCycleEndId, "cycleEndId");
+  const candidate = requireCanonicalObjectId(
+    candidateCycleEndId,
+    "candidateCycleEndId",
+  );
+  return candidate > current ? candidateCycleEndId : currentCycleEndId;
+}
+
 function digestRecoveryPassResult(
   state,
-  { rowsProcessed = 0, rowFailures = [] } = {},
+  { rowsProcessed = 0, rowFailures = [], cycleFailureCount = 0 } = {},
 ) {
   return {
     state,
@@ -2170,6 +2443,7 @@ function digestRecoveryPassResult(
     leaseLost: state === "leaseLost",
     rowsProcessed,
     rowFailures,
+    cycleFailureCount,
   };
 }
 
@@ -2198,6 +2472,10 @@ async function reconcileRecoverableDigestDeliveries({
 
   let afterId = cursorLease.cursor.afterId ?? null;
   let cycleEndId = cursorLease.cursor.cycleEndId ?? null;
+  let leaseToken = cursorLease.token;
+  let failureCount = cursorLease.failureCount;
+  let legacyFenceRequired = cursorLease.legacyFenceRequired;
+  let cycleFailureCount = 0;
   let leaseOwned = true;
   let state = "incomplete";
   const markLeaseLost = async () => {
@@ -2208,37 +2486,72 @@ async function reconcileRecoverableDigestDeliveries({
       code: "DIGEST_RECOVERY_CURSOR_LEASE_LOST",
     });
   };
+  const persistCursor = async ({
+    nextAfterId = afterId,
+    nextCycleEndId = cycleEndId,
+    incrementFailure = false,
+  } = {}) => {
+    const updated = await updateDigestRecoveryCursor({
+      DigestRecoveryCursorModel,
+      token: leaseToken,
+      ownerToken: cursorLease.ownerToken,
+      failureCount,
+      legacyFenceRequired,
+      incrementFailure,
+      afterId: nextAfterId,
+      cycleEndId: nextCycleEndId,
+      clock: recoveryClock,
+    });
+    if (!updated.matched) {
+      await markLeaseLost();
+      return false;
+    }
+    leaseToken = updated.token;
+    failureCount = updated.failureCount;
+    legacyFenceRequired = updated.legacyFenceRequired;
+    afterId = nextAfterId;
+    cycleEndId = nextCycleEndId;
+    return true;
+  };
+  const finishCycle = async () => {
+    const retryRequired = failureCount > 0;
+    let retryCycleEndId = cycleEndId;
+    if (retryRequired) {
+      const latestCycleEndId = await findDigestRecoveryCycleEndId({
+        DigestDeliveryModel,
+      });
+      retryCycleEndId = expandDigestRecoveryCycleEndId(
+        cycleEndId,
+        latestCycleEndId,
+      );
+    }
+    const completed = await completeDigestRecoveryCycle({
+      DigestRecoveryCursorModel,
+      token: leaseToken,
+      cycleEndId: retryCycleEndId,
+      retryRequired,
+    });
+    if (!completed) {
+      await markLeaseLost();
+      return false;
+    }
+    cycleFailureCount = retryRequired ? failureCount : 0;
+    afterId = null;
+    cycleEndId = retryRequired ? retryCycleEndId : null;
+    leaseOwned = false;
+    state = "completed";
+    return true;
+  };
 
   try {
     if (!cycleEndId) {
-      cycleEndId = await findDigestRecoveryCycleEndId({
+      const discoveredCycleEndId = await findDigestRecoveryCycleEndId({
         DigestDeliveryModel,
       });
-      if (cycleEndId) {
-        const initialized = await updateDigestRecoveryCursor({
-          DigestRecoveryCursorModel,
-          token: cursorLease.token,
-          afterId,
-          cycleEndId,
-          clock: recoveryClock,
-        });
-        if (!initialized) await markLeaseLost();
-      } else if (afterId) {
-        const cleared = await updateDigestRecoveryCursor({
-          DigestRecoveryCursorModel,
-          token: cursorLease.token,
-          afterId: null,
-          cycleEndId: null,
-          clock: recoveryClock,
-        });
-        if (!cleared) {
-          await markLeaseLost();
-        } else {
-          afterId = null;
-          state = "completed";
-        }
+      if (discoveredCycleEndId) {
+        await persistCursor({ nextCycleEndId: discoveredCycleEndId });
       } else {
-        state = "completed";
+        await finishCycle();
       }
     }
 
@@ -2258,24 +2571,12 @@ async function reconcileRecoverableDigestDeliveries({
           .limit(DIGEST_RECOVERY_BATCH_SIZE)
           .lean();
         if (!deliveries.length) {
-          const cleared = await updateDigestRecoveryCursor({
-            DigestRecoveryCursorModel,
-            token: cursorLease.token,
-            afterId: null,
-            cycleEndId: null,
-            clock: recoveryClock,
-          });
-          if (!cleared) {
-            await markLeaseLost();
-          } else {
-            afterId = null;
-            cycleEndId = null;
-            state = "completed";
-          }
+          await finishCycle();
           break;
         }
 
         for (const delivery of deliveries) {
+          let rowFailed = false;
           const shouldReconcile =
             delivery.email?.state === "PENDING" ||
             digestSendingRecoveryReason(delivery, now) !== null;
@@ -2301,23 +2602,17 @@ async function reconcileRecoverableDigestDeliveries({
                 deliveryId: String(delivery._id),
                 code,
               });
+              rowFailed = true;
             }
           }
 
-          // Persist after every row, including non-candidates and poison rows,
-          // so one document can never pin the durable keyset cursor.
-          const advanced = await updateDigestRecoveryCursor({
-            DigestRecoveryCursorModel,
-            token: cursorLease.token,
-            afterId: delivery._id,
-            cycleEndId,
-            clock: recoveryClock,
+          // Failure count and keyset advance share one ownership-fenced write,
+          // so poison rows cannot starve later rows or disappear after restart.
+          const advanced = await persistCursor({
+            nextAfterId: delivery._id,
+            incrementFailure: rowFailed,
           });
-          if (!advanced) {
-            await markLeaseLost();
-            break;
-          }
-          afterId = delivery._id;
+          if (!advanced) break;
           rowsProcessed += 1;
         }
 
@@ -2326,20 +2621,7 @@ async function reconcileRecoverableDigestDeliveries({
           deliveries.length < DIGEST_RECOVERY_BATCH_SIZE ||
           sameObjectId(deliveries.at(-1)?._id, cycleEndId);
         if (reachedCycleEnd) {
-          const cleared = await updateDigestRecoveryCursor({
-            DigestRecoveryCursorModel,
-            token: cursorLease.token,
-            afterId: null,
-            cycleEndId: null,
-            clock: recoveryClock,
-          });
-          if (!cleared) {
-            await markLeaseLost();
-          } else {
-            afterId = null;
-            cycleEndId = null;
-            state = "completed";
-          }
+          await finishCycle();
           break;
         }
       }
@@ -2348,13 +2630,19 @@ async function reconcileRecoverableDigestDeliveries({
     if (leaseOwned) {
       const released = await releaseDigestRecoveryCursorLease({
         DigestRecoveryCursorModel,
-        token: cursorLease.token,
+        token: leaseToken,
+        failureCount,
+        legacyFenceRequired,
       });
       if (!released) await markLeaseLost();
     }
   }
 
-  return digestRecoveryPassResult(state, { rowsProcessed, rowFailures });
+  return digestRecoveryPassResult(state, {
+    rowsProcessed,
+    rowFailures,
+    cycleFailureCount,
+  });
 }
 
 function defaultDigestRecoveryYield() {
@@ -2364,13 +2652,23 @@ function defaultDigestRecoveryYield() {
 function digestRecoveryDrainError(
   code,
   message,
-  { passes, rowsProcessed, rowFailures },
+  {
+    passes,
+    rowsProcessed,
+    rowFailures,
+    rowFailureCount = rowFailures.length,
+    rowFailuresComplete = rowFailures.length === rowFailureCount,
+  },
 ) {
   const error = new Error(message);
   error.code = code;
   error.passes = passes;
   error.rowsProcessed = rowsProcessed;
   error.rowFailures = rowFailures;
+  if (code === "DIGEST_RECOVERY_ROWS_FAILED") {
+    error.rowFailureCount = rowFailureCount;
+    error.rowFailuresComplete = rowFailuresComplete;
+  }
   return error;
 }
 
@@ -2442,11 +2740,17 @@ export async function drainDigestRecovery(
     }
     if (pass?.state === "completed" && pass?.completed === true) {
       aggregate.completed = true;
-      if (aggregate.rowFailures.length > 0) {
+      const durableFailureCount =
+        nonnegativeSafeInteger(pass?.cycleFailureCount) ?? 0;
+      const rowFailureCount = Math.max(
+        durableFailureCount,
+        aggregate.rowFailures.length,
+      );
+      if (rowFailureCount > 0) {
         throw digestRecoveryDrainError(
           "DIGEST_RECOVERY_ROWS_FAILED",
-          `Digest recovery completed with ${aggregate.rowFailures.length} row failure(s)`,
-          aggregate,
+          `Digest recovery completed with ${rowFailureCount} row failure(s)`,
+          { ...aggregate, rowFailureCount },
         );
       }
       return aggregate;
@@ -3129,6 +3433,28 @@ export async function processDigestDeliveryJob(
       };
     }
 
+    const copy = digestCopy(delivery.kind, delivery.periodKey);
+    const finalRolloutEnabled = await AppConfigModel.isFeatureEnabled(
+      featureFlag,
+      { fresh: true },
+    );
+    if (!finalRolloutEnabled) {
+      const rolloutWrite = await DigestDeliveryModel.updateOne(claimFilter, {
+        $set: {
+          status: "PARTIAL",
+          "email.state": "ROLLOUT_BLOCKED",
+          "email.lastError": "Feature rollout disabled before email delivery",
+          "email.claimToken": null,
+          "email.claimedAt": null,
+          ...inAppAvailabilityFields(delivery, currentTime()),
+        },
+      });
+      if (!updateProvesMatch(rolloutWrite)) {
+        return digestClaimLostResult(deliveryId);
+      }
+      return { outcome: "DIGEST_ROLLOUT_BLOCKED", deliveryId };
+    }
+
     if (assertLease) await assertLease();
     if (typeof beforeProviderAuthorityReload === "function") {
       await beforeProviderAuthorityReload({ delivery, job });
@@ -3230,28 +3556,6 @@ export async function processDigestDeliveryJob(
           : "DIGEST_UNSUBSCRIBED_IN_APP_AVAILABLE",
         deliveryId,
       };
-    }
-
-    const copy = digestCopy(delivery.kind, delivery.periodKey);
-    const finalRolloutEnabled = await AppConfigModel.isFeatureEnabled(
-      featureFlag,
-      { fresh: true },
-    );
-    if (!finalRolloutEnabled) {
-      const rolloutWrite = await DigestDeliveryModel.updateOne(claimFilter, {
-        $set: {
-          status: "PARTIAL",
-          "email.state": "ROLLOUT_BLOCKED",
-          "email.lastError": "Feature rollout disabled before email delivery",
-          "email.claimToken": null,
-          "email.claimedAt": null,
-          ...inAppAvailabilityFields(delivery, currentTime()),
-        },
-      });
-      if (!updateProvesMatch(rolloutWrite)) {
-        return digestClaimLostResult(deliveryId);
-      }
-      return { outcome: "DIGEST_ROLLOUT_BLOCKED", deliveryId };
     }
 
     sendAttemptStarted = true;
@@ -3783,6 +4087,37 @@ export async function previewDigest(
   });
 }
 
+async function freshDigestFeatureState(AppConfigModel, flagName) {
+  if (typeof AppConfigModel.getFeatureFlagState === "function") {
+    const state = await AppConfigModel.getFeatureFlagState(flagName, {
+      fresh: true,
+    });
+    return {
+      enabled: state?.enabled === true,
+      version: Number.isSafeInteger(state?.version) ? state.version : 0,
+      publicationFence:
+        typeof state?.publicationFence === "string"
+          ? state.publicationFence
+          : "",
+    };
+  }
+  return {
+    enabled:
+      (await AppConfigModel.isFeatureEnabled(flagName, { fresh: true })) ===
+      true,
+    version: null,
+    publicationFence: null,
+  };
+}
+
+function sameDigestFeatureState(left, right) {
+  return (
+    left.enabled === right.enabled &&
+    left.version === right.version &&
+    left.publicationFence === right.publicationFence
+  );
+}
+
 // Super-admin diagnostic: compute the current digest live and email it once to
 // the requester, WITHOUT creating/altering any DigestDelivery (so it never
 // interferes with the real per-week dedup). Used to verify digest email
@@ -3805,16 +4140,20 @@ export async function sendTestDigestNow(
     throw new DigestError("Super admin only", 403, "SUPER_ADMIN_ONLY");
   }
   if (!toEmail) throw new DigestError("A recipient email is required", 400);
-  const flags = await AppConfigModel.getFeatureFlags();
+  const [dailyState, weeklyState, noticeCasesState] = await Promise.all([
+    freshDigestFeatureState(AppConfigModel, "dailyDigest"),
+    freshDigestFeatureState(AppConfigModel, "weeklySummary"),
+    freshDigestFeatureState(AppConfigModel, "noticeCases"),
+  ]);
   const summary = await previewDigestProvider(
     {
       userId,
       firmId,
       role,
       kind,
-      dailyEnabled: flags.dailyDigest === true,
-      weeklyEnabled: flags.weeklySummary === true,
-      noticeCasesEnabled: flags.noticeCases === true,
+      dailyEnabled: dailyState.enabled,
+      weeklyEnabled: weeklyState.enabled,
+      noticeCasesEnabled: noticeCasesState.enabled,
       now,
     },
     {
@@ -3828,6 +4167,42 @@ export async function sendTestDigestNow(
   if (typeof beforeProviderAuthorityReload === "function") {
     await beforeProviderAuthorityReload({ summary, userId, firmId });
   }
+  const featureFlag =
+    summary.kind === DAILY_KIND ? "dailyDigest" : "weeklySummary";
+  const featureState = await freshDigestFeatureState(
+    AppConfigModel,
+    featureFlag,
+  );
+  const finalNoticeCasesState = await freshDigestFeatureState(
+    AppConfigModel,
+    "noticeCases",
+  );
+  if (!sameDigestFeatureState(finalNoticeCasesState, noticeCasesState)) {
+    throw new DigestError(
+      "Digest inputs changed after preview; preview the current digest again",
+      409,
+      "DIGEST_PREVIEW_STALE",
+    );
+  }
+  // These rollout gates are boolean-only in AppConfig. The final enabled value
+  // is authoritative; same-enabled republishes intentionally remain sendable.
+  if (!featureState.enabled) {
+    if (summary.kind === DAILY_KIND) {
+      throw new DigestError(
+        "Daily digest is unavailable",
+        404,
+        "DAILY_DIGEST_DISABLED",
+      );
+    }
+    throw new DigestError(
+      "Weekly summary is unavailable",
+      404,
+      "WEEKLY_SUMMARY_DISABLED",
+    );
+  }
+
+  // Keep authority, preferences, and destination as the final awaited boundary
+  // so a revocation during either feature read cannot reach the provider.
   const { user, weeklyAuthorized } = await requireActiveDigestAccessProvider(
     { userId, firmId },
     {
@@ -3868,26 +4243,6 @@ export async function sendTestDigestNow(
     );
   }
   const canonicalFirmId = requireCanonicalObjectId(firmId, "firmId");
-  const featureFlag =
-    summary.kind === DAILY_KIND ? "dailyDigest" : "weeklySummary";
-  const featureEnabled = await AppConfigModel.isFeatureEnabled(featureFlag, {
-    fresh: true,
-  });
-  if (!featureEnabled) {
-    if (summary.kind === DAILY_KIND) {
-      throw new DigestError(
-        "Daily digest is unavailable",
-        404,
-        "DAILY_DIGEST_DISABLED",
-      );
-    }
-    throw new DigestError(
-      "Weekly summary is unavailable",
-      404,
-      "WEEKLY_SUMMARY_DISABLED",
-    );
-  }
-
   const response = await sendDigestEmailProvider({
     toEmail: normalizedEmail,
     subject: `[Test] ${copy.subject}`,
