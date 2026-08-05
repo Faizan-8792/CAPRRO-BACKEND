@@ -4,6 +4,9 @@
   "description": "Backend API for CA PRO Toolkit (auth + OTP + firms + stats)",
   "main": "src/server.js",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js"
@@ -23,5 +26,8 @@
     "morgan": "^1.10.0",
     "multer": "2.2.0",
     "resend": "^6.6.0"
+  },
+  "devDependencies": {
+    "acorn": "8.18.0"
   }
 }
