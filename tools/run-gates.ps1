@@ -20,6 +20,14 @@ $archiveValidationSkipped = [bool]$SkipDeployArchiveValidation
 $processTimeoutMs = 300000
 $digestTimeoutMs = 600000
 $archiveTimeoutMs = 600000
+# Measured 336,956ms for the boundary suite on this machine with roughly twenty
+# background node processes competing, and 648,000-896,000ms earlier in the same
+# session under heavier contention. 1,800,000ms was set to clear that worst case
+# but is loose enough to hide a real slowdown, while the 600,000ms a review
+# suggested would have failed those loaded runs and produced a flaky gate. 900,000
+# sits above the worst observed run and still halves the bound, so a regression
+# that doubles the suite's cost is caught.
+$boundaryTimeoutMs = 900000
 
 function ConvertTo-NativeArgument {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Argument)
@@ -474,7 +482,11 @@ try {
             continue
         }
         try {
-            $timeout = if ($suite -eq "digest-delivery-correctness") { $digestTimeoutMs } else { $processTimeoutMs }
+            $timeout = switch ($suite) {
+                "digest-delivery-correctness" { $digestTimeoutMs }
+                "deploy-archive-boundary" { $boundaryTimeoutMs }
+                default { $processTimeoutMs }
+            }
             $result = Invoke-CapturedProcess `
                 -FilePath $nodeExecutable `
                 -Arguments @($path) `

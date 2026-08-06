@@ -45,9 +45,10 @@ $secretVariableNames = @(
 )
 $forbiddenPathSegmentPattern = '(?i)^(?:[^/]*\.env(?:\..*)?|\.npmrc(?:\..*)?|\.?netrc(?:\..*)?|\.git-credentials(?:\..*)?|[^/]*\.(?:pem|pfx|p12|key)|(?:credentials?|secrets?)(?:\..*)?)$'
 $allowedRuntimeFilePattern = '(?i)(?:^package(?:-lock)?\.json$|\.(?:cjs|conf|config|css|gif|html|ico|ini|jpeg|jpg|js|json|md|mjs|otf|png|properties|svg|toml|ttf|txt|webp|woff2?|xml|yaml|yml)$)'
-$nestedArchiveFilePattern = '(?i)\.(?:7z|bz2|gz|gzip|rar|tar|tgz|xz|zip)$'
+$nestedArchiveFilePattern = '(?i)\.(?:7z|bz2|gz|gzip|rar|tar|tgz|txz|tzst|xz|zip|zst)$'
 $textFilePattern = '(?i)\.(?:cjs|conf|config|css|html|ini|js|json|md|mjs|properties|svg|toml|txt|xml|yaml|yml)$'
 $javaScriptFilePattern = '(?i)\.(?:cjs|js|mjs)$'
+$inlineJavaScriptContainerPattern = '(?i)\.(?:html?|svg)$'
 $strictConfigFilePattern = '(?i)(?:^package(?:-lock)?\.json$|\.(?:conf|config|env|ini|json|properties|toml|xml|yaml|yml)$)'
 $regexTimeout = [TimeSpan]::FromSeconds(1)
 $regexOptions = [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
@@ -67,6 +68,22 @@ foreach ($pattern in @(
 )) {
     $providerSecretPatterns.Add([regex]::new($pattern, $regexOptions, $regexTimeout))
 }
+# The provider patterns above match a credential's shape, and documentation of
+# that shape has the same shape. `mongodb+srv://<user>:<password>@host` satisfies
+# the MongoDB pattern because [^/\s:]+ and [^@\s]+ accept the bracketed
+# placeholders, so writing down the connection-string format in a comment or a
+# README refused the whole archive.
+#
+# This exemption mirrors the one the JavaScript scanner already applies in
+# providerFindingForValue, so the two layers agree on what a placeholder is, plus
+# the angle-bracket form that neither covered. The bracketed token must be a whole
+# component: a real credential containing "<abc>" as a complete token is not
+# credible, whereas one containing a stray angle bracket is.
+$providerPlaceholderRegex = [regex]::new(
+    '(?i)REPLACE_ME|YOUR_|CHANGEME|EXAMPLE|PLACEHOLDER|<[A-Za-z0-9_. -]{1,40}>',
+    $regexOptions,
+    $regexTimeout
+)
 $escapedSecretNames = @($secretVariableNames | ForEach-Object { [regex]::Escape($_) })
 $strictSecretIdentifierRegex = [regex]::new(
     '(?i)\b(?:' + ($escapedSecretNames -join '|') + ')\b',
@@ -74,16 +91,51 @@ $strictSecretIdentifierRegex = [regex]::new(
     $regexTimeout
 )
 $quoteCharacterPattern = '["' + [char]39 + ']'
+$secretNamePattern = '(?:' + ($escapedSecretNames -join '|') + ')'
 $genericSecretAssignmentRegex = [regex]::new(
-    '(?im)(?:^|[;,{(<>\r\n])\s*(?:(?:const|let|var)\s+)?' +
-        $quoteCharacterPattern + '?(?:' + ($escapedSecretNames -join '|') + ')' +
-        $quoteCharacterPattern + '?\s*(?:=|:)\s*' +
-        '(?<quote>' + $quoteCharacterPattern + ')(?<value>[^"' + [char]39 + '\r\n]{1,4096})\k<quote>',
+    '(?im)(?<![A-Za-z0-9_$-])(?:' +
+        '(?:' +
+            '(?:[A-Za-z_$][A-Za-z0-9_$]*\s*\.\s*)*' +
+            '(?:(?<keyQuote>' + $quoteCharacterPattern + ')' + $secretNamePattern +
+                '\k<keyQuote>|' + $secretNamePattern + ')' +
+            '|' +
+            '[A-Za-z_$][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*' +
+                '\s*\[\s*(?<bracketQuote>' + $quoteCharacterPattern + ')' +
+                $secretNamePattern + '\k<bracketQuote>\s*\]' +
+        ')\s*(?:=|:)\s*(?:' +
+            '(?<quote>' + $quoteCharacterPattern + ')' +
+                '(?<value>[^"' + [char]39 + '\r\n]{1,4096})\k<quote>' +
+            '|' + [char]96 + '(?<value>[^' + [char]96 + '\r\n]{1,4096})' + [char]96 +
+            '|(?<value>[A-Za-z0-9+/_=.:@-]{16,4096})(?![^\s;,)\]}<>"' + [char]39 + '])' +
+        ')' +
+        '|' +
+        '--' + $secretNamePattern + '\s*:\s*(?:' +
+            '(?<cssQuote>' + $quoteCharacterPattern + ')' +
+                '(?<value>[^"' + [char]39 + '\r\n]{1,4096})\k<cssQuote>' +
+            '|(?<value>[^;}\r\n]{1,4096})' +
+        ')' +
+    ')',
     $regexOptions,
     $regexTimeout
 )
 $genericSecretPlaceholderRegex = [regex]::new(
-    '(?i)^\s*(?:REPLACE_ME|YOUR_[A-Z0-9_]*|CHANGEME|\$\{[A-Z][A-Z0-9_]*\})\s*$',
+    '(?i)^\s*(?:' +
+        'REPLACE_ME|YOUR_[A-Z0-9_]*|CHANGEME|\$\{[A-Z][A-Z0-9_]*\}|' +
+        'var\(\s*--[A-Z0-9_-]+\s*(?:,[^)\r\n]*)?\)|' +
+        'env\(\s*[A-Z0-9_-]+\s*(?:,[^)\r\n]*)?\)' +
+    ')\s*$',
+    $regexOptions,
+    $regexTimeout
+)
+$genericSecretDynamicValueRegex = [regex]::new(
+    '(?i)^\s*(?:' +
+        '(?:[A-Za-z_$][A-Za-z0-9_$]*\s*\.\s*)*process\s*\.\s*env\s*' +
+            '(?:\.\s*[A-Za-z_$][A-Za-z0-9_$]*|\[\s*' + $quoteCharacterPattern + '?' +
+            '[A-Za-z0-9_$]+' + $quoteCharacterPattern + '?\s*\])' +
+        '|import\s*\.\s*meta\s*\.\s*env\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*' +
+        '|\$\{[^}\r\n]{0,512}\}' +
+        '|String\s*\([^)\r\n]{0,512}\)' +
+    ')\s*$',
     $regexOptions,
     $regexTimeout
 )
@@ -92,10 +144,81 @@ $encodedConfigEscapeRegex = [regex]::new(
     $regexOptions,
     $regexTimeout
 )
+# The attribute run admits any character other than '>' as its fallback, so a
+# stray apostrophe or double quote in an unquoted attribute value does not stop
+# the match. An earlier form excluded both quote characters from the fallback,
+# which meant <script data-x=a'b> matched nothing at all and its body was never
+# handed to the scanner.
+#
+# Allowing quotes in the fallback makes the alternation ambiguous, because a
+# quote can be consumed either by its quoted arm or by the fallback. On input
+# where the match ultimately fails -- a '<script' with no '>' anywhere after it
+# -- that ambiguity is explored exponentially, so the run is wrapped in an
+# atomic group to hold the engine to a single greedy path.
+$inlineScriptAttributeRun = '(?<attributes>(?>(?:"[^"]*"|' + [char]39 +
+    '[^' + [char]39 + ']*' + [char]39 + '|[^>])*))'
+$inlineScriptBlockRegex = [regex]::new(
+    '(?is)<script\b' + $inlineScriptAttributeRun +
+        '>(?<source>.*?)</script(?=[\s/>])[^>]*>',
+    $regexOptions,
+    $regexTimeout
+)
+$inlineScriptUnterminatedRegex = [regex]::new(
+    '(?is)<script\b' + $inlineScriptAttributeRun +
+        '>(?<source>(?:(?!</script[\s/>]).)*)$',
+    $regexOptions,
+    $regexTimeout
+)
+$inlineScriptAttributeRegex = [regex]::new(
+    '(?is)(?<name>[^\s/>=]+)(?:\s*=\s*(?:"(?<double>[^"]*)"|' + [char]39 +
+        '(?<single>[^' + [char]39 + ']*)' + [char]39 + '|(?<bare>[^\s>]*)))?',
+    $regexOptions,
+    $regexTimeout
+)
+$inlineScriptCdataRegex = [regex]::new(
+    '(?is)^\s*(?://\s*)?<!\[CDATA\[(?<source>.*?)\]\]>\s*(?://.*)?\s*$',
+    $regexOptions,
+    $regexTimeout
+)
+$inlineScriptTypeRegex = [regex]::new(
+    '(?is)(?:^|\s)type\s*=\s*(?:"(?<double>[^"]*)"|''(?<single>[^'']*)''|(?<bare>[^\s>"'']+))',
+    $regexOptions,
+    $regexTimeout
+)
+# A browser executes a <script> only when its type is absent, empty, "module", or
+# a JavaScript MIME type; every other type is inert data. So the executable set is
+# the closed one and is listed here, rather than enumerating the inert types.
+#
+# This was first written the other way round, as an allowlist of 20 known-inert
+# types, which inverted the rule: any type outside that list -- text/x-tmpl,
+# application/x-handlebars-template, text/x-vue-template -- was handed to the
+# JavaScript parser and refused the archive when it failed to parse. Nothing in
+# public/ uses an inline typed block today, so the gate was green by luck rather
+# than by design, and the next inline template would have broken the build.
+$executableInlineScriptTypes = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::OrdinalIgnoreCase
+)
+foreach ($scriptType in @(
+    'module',
+    'text/javascript',
+    'text/ecmascript',
+    'text/jscript',
+    'text/livescript',
+    'text/x-javascript',
+    'text/x-ecmascript',
+    'application/javascript',
+    'application/ecmascript',
+    'application/x-javascript',
+    'application/x-ecmascript'
+)) {
+    [void]$executableInlineScriptTypes.Add($scriptType)
+}
 $utf8Decoder = [System.Text.UTF8Encoding]::new($false, $true)
 $utf8Encoder = [System.Text.UTF8Encoding]::new($false)
 $utf16LittleEndianDecoder = [System.Text.UnicodeEncoding]::new($false, $true, $true)
 $utf16BigEndianDecoder = [System.Text.UnicodeEncoding]::new($true, $true, $true)
+$utf32LittleEndianDecoder = [System.Text.UTF32Encoding]::new($false, $true, $true)
+$utf32BigEndianDecoder = [System.Text.UTF32Encoding]::new($true, $true, $true)
 $bytePreservingDecoder = [System.Text.Encoding]::GetEncoding(28591)
 $dangerousGitEnvironmentNames = @(
     "GIT_DIR",
@@ -409,11 +532,14 @@ function Invoke-BoundedProcess {
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Arguments,
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
         [Parameter(Mandatory = $true)][int]$TimeoutMs,
-        [AllowNull()][byte[]]$StandardInput = $null,
+        [AllowNull()]$StandardInput = $null,
         [switch]$CaptureBinaryOutput,
         [hashtable]$EnvironmentOverrides = @{}
     )
 
+    if ($null -ne $StandardInput -and $StandardInput -isnot [byte[]]) {
+        throw "contained process standard input requires a byte array"
+    }
     $targetArguments = (@($Arguments | ForEach-Object { ConvertTo-NativeArgument -Argument $_ }) -join ' ')
     $configuration = [ordered]@{
         filePath = $FilePath
@@ -558,10 +684,13 @@ function Invoke-GitCommand {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Arguments,
         [Parameter(Mandatory = $true)][string]$RepositoryPath,
-        [byte[]]$StandardInput = $null,
+        [AllowNull()]$StandardInput = $null,
         [switch]$CaptureBinaryOutput
     )
 
+    if ($null -ne $StandardInput -and $StandardInput -isnot [byte[]]) {
+        throw "git standard input requires a byte array"
+    }
     $result = Invoke-BoundedProcess `
         -FilePath $script:gitExecutable `
         -Arguments $Arguments `
@@ -577,15 +706,17 @@ function Invoke-GitCommand {
         }
         throw $detail
     }
+    if ($CaptureBinaryOutput) { return ,$result.StandardOutputBytes }
     return $result.StandardOutput
 }
 
 function Get-GitBlobObjectId {
     param(
-        [Parameter(Mandatory = $true)][AllowEmptyCollection()][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes,
         [Parameter(Mandatory = $true)][string]$RepositoryPath
     )
 
+    if ($Bytes -isnot [byte[]]) { throw "Git blob hashing requires a byte array" }
     $output = Invoke-GitCommand `
         -Arguments @("hash-object", "--stdin") `
         -RepositoryPath $RepositoryPath `
@@ -613,8 +744,9 @@ function Get-GitBlobBytes {
 }
 
 function Get-Sha256Hex {
-    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][byte[]]$Bytes)
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes)
 
+    if ($Bytes -isnot [byte[]]) { throw "SHA-256 hashing requires a byte array" }
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
     try {
         return ([BitConverter]::ToString($sha256.ComputeHash($Bytes)) -replace '-', '')
@@ -655,7 +787,7 @@ function Remove-StaleOwnedArtifacts {
             $item.Name -cmatch '^\.capro-build-[0-9a-f]{32}$'
         $isOwnedPartialArchive =
             -not $item.PSIsContainer -and
-            $item.Name -cmatch '^\.capro-backend_[0-9]{8}_[0-9]{6}\.zip\.partial-[0-9a-f]{32}$'
+            $item.Name -cmatch '^\.capro-backend_(?:[0-9a-f]{40,64}_)?[0-9]{8}_[0-9]{6}\.zip\.partial-[0-9a-f]{32}$'
         if (-not $isOwnedBuildDirectory -and -not $isOwnedPartialArchive) { continue }
         if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
         if ($item.LastWriteTimeUtc -gt $cutoff) { continue }
@@ -701,9 +833,10 @@ function New-PrivateDirectory {
 function New-LockedFile {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][AllowEmptyCollection()][byte[]]$Bytes
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes
     )
 
+    if ($Bytes -isnot [byte[]]) { throw "locked file creation requires a byte array" }
     $stream = [System.IO.File]::Open(
         $Path,
         [System.IO.FileMode]::CreateNew,
@@ -721,9 +854,737 @@ function New-LockedFile {
     }
 }
 
+function Set-ZipEntryUnixModes {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][System.Collections.Generic.Dictionary[string, uint32]]$ExpectedModes
+    )
+
+    $stream = [System.IO.File]::Open(
+        $Path,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::ReadWrite,
+        [System.IO.FileShare]::None
+    )
+    $archive = $null
+    try {
+        $archive = [System.IO.Compression.ZipArchive]::new(
+            $stream,
+            [System.IO.Compression.ZipArchiveMode]::Update,
+            $true
+        )
+        foreach ($entry in $archive.Entries) {
+            if (
+                [string]::IsNullOrEmpty($entry.Name) -or
+                -not $ExpectedModes.ContainsKey($entry.FullName)
+            ) {
+                continue
+            }
+            [uint32]$expectedMode = $ExpectedModes[$entry.FullName]
+            [uint32]$rawAttributes = [BitConverter]::ToUInt32(
+                [BitConverter]::GetBytes([int]$entry.ExternalAttributes),
+                0
+            )
+            [uint64]$upperAttributes = [uint64]$expectedMode * 65536
+            [uint32]$lowerAttributes = [uint32]($rawAttributes -band 65535)
+            [uint32]$normalizedAttributes = [Convert]::ToUInt32(
+                $upperAttributes + [uint64]$lowerAttributes
+            )
+            $entry.ExternalAttributes = [BitConverter]::ToInt32(
+                [BitConverter]::GetBytes($normalizedAttributes),
+                0
+            )
+        }
+    }
+    finally {
+        if ($null -ne $archive) { $archive.Dispose() }
+        $stream.Dispose()
+    }
+}
+
+function Get-Crc32 {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes,
+        [Parameter(Mandatory = $true)][int]$Offset,
+        [Parameter(Mandatory = $true)][int]$Count
+    )
+
+    if ($Bytes -isnot [byte[]]) { throw "CRC32 requires a byte array" }
+    if (
+        $Offset -lt 0 -or
+        $Count -lt 0 -or
+        $Offset -gt $Bytes.Length -or
+        $Count -gt $Bytes.Length - $Offset
+    ) {
+        throw "CRC32 range is outside the supplied bytes"
+    }
+    if ($null -eq $script:crc32Table -or $script:crc32Table.Length -ne 256) {
+        [uint32[]]$table = New-Object 'uint32[]' 256
+        for ($tableIndex = 0; $tableIndex -lt $table.Length; $tableIndex++) {
+            [uint32]$tableValue = $tableIndex
+            for ($bitIndex = 0; $bitIndex -lt 8; $bitIndex++) {
+                if (($tableValue -band 1) -ne 0) {
+                    $tableValue = [uint32](3988292384 -bxor ($tableValue -shr 1))
+                }
+                else {
+                    $tableValue = [uint32]($tableValue -shr 1)
+                }
+            }
+            $table[$tableIndex] = $tableValue
+        }
+        $script:crc32Table = $table
+    }
+
+    [uint32]$value = [uint32]::MaxValue
+    $endOffset = $Offset + $Count
+    for ($byteOffset = $Offset; $byteOffset -lt $endOffset; $byteOffset++) {
+        $tableIndex = [int](($value -bxor $Bytes[$byteOffset]) -band 0xFF)
+        $value = [uint32](
+            $script:crc32Table[$tableIndex] -bxor ($value -shr 8)
+        )
+    }
+    return [uint32]($value -bxor [uint32]::MaxValue)
+}
+
+function Read-Rar5VariableUInt {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes,
+        [Parameter(Mandatory = $true)][int]$Offset,
+        [Parameter(Mandatory = $true)][int]$Limit
+    )
+
+    if ($Bytes -isnot [byte[]]) { throw "RAR5 variable integer read requires a byte array" }
+    if ($Offset -lt 0 -or $Limit -lt $Offset -or $Limit -gt $Bytes.Length) {
+        return $null
+    }
+    [uint64]$value = 0
+    for ($byteIndex = 0; $byteIndex -lt 10 -and $Offset + $byteIndex -lt $Limit; $byteIndex++) {
+        $currentByte = $Bytes[$Offset + $byteIndex]
+        [uint64]$payload = $currentByte -band 0x7F
+        if ($byteIndex -eq 9 -and $payload -gt 1) { return $null }
+        $value = [uint64]($value -bor ($payload -shl (7 * $byteIndex)))
+        if (($currentByte -band 0x80) -eq 0) {
+            return [pscustomobject]@{
+                Value = $value
+                NextOffset = $Offset + $byteIndex + 1
+            }
+        }
+    }
+    return $null
+}
+
+function Read-XzVariableUInt {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes,
+        [Parameter(Mandatory = $true)][int]$Offset,
+        [Parameter(Mandatory = $true)][int]$Limit
+    )
+
+    if ($Bytes -isnot [byte[]]) { throw "XZ variable integer read requires a byte array" }
+    if ($Offset -lt 0 -or $Limit -lt $Offset -or $Limit -gt $Bytes.Length) {
+        return $null
+    }
+    [uint64]$value = 0
+    for ($byteIndex = 0; $byteIndex -lt 9 -and $Offset + $byteIndex -lt $Limit; $byteIndex++) {
+        $currentByte = $Bytes[$Offset + $byteIndex]
+        [uint64]$payload = $currentByte -band 0x7F
+        $value = [uint64]($value -bor ($payload -shl (7 * $byteIndex)))
+        if (($currentByte -band 0x80) -eq 0) {
+            if ($byteIndex -gt 0 -and $payload -eq 0) { return $null }
+            return [pscustomobject]@{
+                Value = $value
+                NextOffset = $Offset + $byteIndex + 1
+            }
+        }
+    }
+    return $null
+}
+
+function Test-ZeroByteRange {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes,
+        [Parameter(Mandatory = $true)][int]$Offset,
+        [Parameter(Mandatory = $true)][int]$Count
+    )
+
+    if ($Bytes -isnot [byte[]]) { throw "zero-byte range check requires a byte array" }
+    if (
+        $Offset -lt 0 -or
+        $Count -lt 0 -or
+        $Offset -gt $Bytes.Length -or
+        $Count -gt $Bytes.Length - $Offset
+    ) {
+        return $false
+    }
+    for ($byteOffset = $Offset; $byteOffset -lt $Offset + $Count; $byteOffset++) {
+        if ($Bytes[$byteOffset] -ne 0) { return $false }
+    }
+    return $true
+}
+
+function Get-TarHeader {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes,
+        [Parameter(Mandatory = $true)][int]$Offset
+    )
+
+    if ($Bytes -isnot [byte[]]) { throw "TAR header read requires a byte array" }
+    if ($Offset -lt 0 -or $Offset + 512 -gt $Bytes.Length) { return $null }
+    $hasName = $false
+    for ($nameOffset = 0; $nameOffset -lt 100; $nameOffset++) {
+        if ($Bytes[$Offset + $nameOffset] -ne 0) {
+            $hasName = $true
+            break
+        }
+    }
+    if (-not $hasName) { return $null }
+
+    $ascii = [System.Text.Encoding]::ASCII
+    foreach ($field in @(
+        [pscustomobject]@{ Offset = 100; Length = 8 },
+        [pscustomobject]@{ Offset = 108; Length = 8 },
+        [pscustomobject]@{ Offset = 116; Length = 8 },
+        [pscustomobject]@{ Offset = 136; Length = 12 }
+    )) {
+        $fieldText = $ascii.GetString($Bytes, $Offset + $field.Offset, $field.Length).
+            Trim([char[]]@(0, 32))
+        if ($fieldText.Length -gt 0 -and $fieldText -notmatch '^[0-7]+$') {
+            return $null
+        }
+    }
+
+    $sizeText = $ascii.GetString($Bytes, $Offset + 124, 12).Trim([char[]]@(0, 32))
+    if ($sizeText.Length -gt 0 -and $sizeText -notmatch '^[0-7]+$') { return $null }
+    $checksumText = $ascii.GetString($Bytes, $Offset + 148, 8).Trim([char[]]@(0, 32))
+    if ($checksumText -notmatch '^[0-7]{1,7}$') { return $null }
+    $magicText = $ascii.GetString($Bytes, $Offset + 257, 6).Trim([char[]]@(0, 32))
+    if ($magicText.Length -gt 0 -and $magicText -ne 'ustar') { return $null }
+
+    try {
+        [uint64]$size = if ($sizeText.Length -eq 0) {
+            0
+        }
+        else {
+            [Convert]::ToUInt64($sizeText, 8)
+        }
+        [long]$expectedChecksum = [Convert]::ToInt64($checksumText, 8)
+    }
+    catch [System.FormatException] { return $null }
+    catch [System.OverflowException] { return $null }
+    if ($expectedChecksum -lt 256 -or $expectedChecksum -gt 130560) {
+        return $null
+    }
+
+    [long]$actualChecksum = 0
+    for ($headerOffset = 0; $headerOffset -lt 512; $headerOffset++) {
+        if ($headerOffset -ge 148 -and $headerOffset -lt 156) {
+            $actualChecksum += 32
+        }
+        else {
+            $actualChecksum += $Bytes[$Offset + $headerOffset]
+        }
+    }
+    if ($actualChecksum -ne $expectedChecksum) { return $null }
+    return [pscustomobject]@{ Size = $size }
+}
+
+function Test-CoherentZstdArchive {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes)
+
+    if ($Bytes -isnot [byte[]]) { throw "zstd coherence check requires a byte array" }
+    if ($Bytes.Length -lt 6) { return $false }
+    $content = $bytePreservingDecoder.GetString($Bytes)
+    $signature = $bytePreservingDecoder.GetString(
+        [byte[]]@(0x28, 0xB5, 0x2F, 0xFD)
+    )
+    $searchOffset = 0
+    while ($searchOffset -le $content.Length - $signature.Length) {
+        $archiveOffset = $content.IndexOf($signature, $searchOffset, [StringComparison]::Ordinal)
+        if ($archiveOffset -lt 0) { break }
+        $searchOffset = $archiveOffset + 1
+        if ($archiveOffset + 5 -gt $Bytes.Length) { continue }
+
+        $descriptor = $Bytes[$archiveOffset + 4]
+        if (($descriptor -band 0x18) -ne 0) { continue }
+        [int]$headerCursor = $archiveOffset + 5
+        if (($descriptor -band 0x20) -eq 0) {
+            $windowDescriptor = $headerCursor
+            if ($windowDescriptor -ge $Bytes.Length) { continue }
+            $headerCursor++
+        }
+        $dictionaryIdSize = @(0, 1, 2, 4)[$descriptor -band 0x03]
+        $headerCursor += $dictionaryIdSize
+        $contentSizeFlag = ($descriptor -shr 6) -band 0x03
+        $contentSizeBytes = if ($contentSizeFlag -eq 0) {
+            if (($descriptor -band 0x20) -ne 0) { 1 } else { 0 }
+        }
+        else {
+            @(1, 2, 4, 8)[$contentSizeFlag]
+        }
+        $headerCursor += $contentSizeBytes
+        if ($headerCursor + 3 -gt $Bytes.Length) { continue }
+        return $true
+    }
+    return $false
+}
+
+function Test-CoherentTarArchive {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes)
+
+    if ($Bytes -isnot [byte[]]) { throw "TAR coherence check requires a byte array" }
+    if ($Bytes.Length -lt 512) { return $false }
+    $content = $bytePreservingDecoder.GetString($Bytes)
+    $candidateOffsets = New-Object 'System.Collections.Generic.List[long]'
+
+    $ustarMagic = $bytePreservingDecoder.GetString(
+        [byte[]]@(0x75, 0x73, 0x74, 0x61, 0x72)
+    )
+    $magicSearchOffset = 0
+    while ($magicSearchOffset -le $content.Length - $ustarMagic.Length) {
+        $magicIndex = $content.IndexOf(
+            $ustarMagic,
+            $magicSearchOffset,
+            [StringComparison]::Ordinal
+        )
+        if ($magicIndex -lt 0) { break }
+        $magicSearchOffset = $magicIndex + 1
+        $candidateOffsets.Add([long]$magicIndex - 257)
+    }
+
+    # Anchor on the checksum field at 148..155, with the pattern derived from what
+    # Get-TarHeader accepts rather than from how tar writers are believed to pad.
+    # The reader trims NUL and space from that field and requires the remainder to
+    # match ^[0-7]{1,7}$. Three necessary facts follow: every one of the eight
+    # bytes is an octal digit, a NUL or a space; at least one is a digit; and since
+    # eight digits would exceed the seven-digit limit, the field always holds at
+    # least one NUL or space. So a digit run adjacent to a NUL or space is present
+    # in every acceptable header, and anchoring on it cannot miss one.
+    #
+    # Two earlier anchors asserted invariants about writers instead, and both were
+    # wrong. One required every numeric field to end in NUL or space, which a field
+    # packed with digits violates. The other required the mode field's first byte
+    # not to be NUL -- but GNU tar's own from_header tolerates exactly that, its
+    # `where += !*where` carrying the comment "Accommodate buggy tar of unknown
+    # vintage, which outputs leading NUL if the previous field overflows".
+    #
+    # This anchor also removes the pathological cost case instead of hiding it: a
+    # file of nothing but octal digits contains no NUL or space, so it produces no
+    # candidates, which is sound because a checksum field of eight digits is
+    # rejected by the reader at every offset in such a file.
+    #
+    # Because the field must hold both a digit and a NUL-or-space, it must straddle
+    # a boundary between the two, so every acceptable header contains such a
+    # boundary inside 148..155. The anchor is therefore that boundary, matched as a
+    # zero-width lookahead so that the engine reports every one of them: a
+    # consuming match would swallow one boundary and skip the adjacent one, which
+    # is how a field whose digits run on from the preceding mtime field was missed.
+    # A boundary at index i can sit anywhere in the field, so the field may begin at
+    # any of i-6 .. i.
+    $checksumAnchorPattern = '(?-i)(?=[0-7][\x00 ]|[\x00 ][0-7])'
+    # Headers of an archive written from its own start are 512-byte aligned, so
+    # add that lattice as a second, structural source.
+    for ([long]$aligned = 0; $aligned + 512 -le $Bytes.Length; $aligned += 512) {
+        $candidateOffsets.Add($aligned)
+    }
+    try {
+        $checksumAnchorRegex = [regex]::new(
+            $checksumAnchorPattern,
+            [System.Text.RegularExpressions.RegexOptions]::CultureInvariant,
+            [TimeSpan]::FromSeconds(5)
+        )
+        # Boundaries arrive in increasing order and their seven-wide windows
+        # overlap, so only the offsets a previous boundary did not already cover
+        # are added. On densely alternating input this is the difference between
+        # fourteen million appends and two million.
+        [long]$lastCoveredOffset = [long]::MinValue
+        foreach ($anchorMatch in $checksumAnchorRegex.Matches($content)) {
+            [long]$windowEnd = [long]$anchorMatch.Index - 148
+            [long]$windowStart = $windowEnd - 6
+            if ($windowStart -le $lastCoveredOffset) {
+                $windowStart = $lastCoveredOffset + 1
+            }
+            for ([long]$offset = $windowStart; $offset -le $windowEnd; $offset++) {
+                $candidateOffsets.Add($offset)
+            }
+            if ($windowEnd -gt $lastCoveredOffset) { $lastCoveredOffset = $windowEnd }
+        }
+    }
+    catch [System.Text.RegularExpressions.RegexMatchTimeoutException] {
+        throw "TAR archive candidate scan timed out"
+    }
+
+    $seenOffsets = [System.Collections.Generic.HashSet[long]]::new()
+    $candidateBudget = 262144
+    $budgetStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    foreach ($headerOffset in $candidateOffsets) {
+        if ($headerOffset -lt 0 -or -not $seenOffsets.Add($headerOffset)) { continue }
+        if ($headerOffset + 512 -gt $Bytes.Length) { continue }
+        # Every prefilter below must be a strict superset of Get-TarHeader's
+        # acceptance, or it is a detection hole by construction. Each condition
+        # here is therefore read directly off that function.
+        #
+        # Two earlier prefilters were not supersets and were removed. One required
+        # byte 0 of the name to be printable non-space ASCII, but the reader asks
+        # only that *some* byte in the 100-byte name field is non-zero, so a name
+        # beginning with a NUL or a non-ASCII byte was rejected here and accepted
+        # there. The other required byte 154 or 155 of the checksum field to be NUL
+        # or space, which a field holding a NUL followed by seven digits violates
+        # while the reader accepts it.
+
+        # Get-TarHeader: at least one non-zero byte in the name field.
+        $hasNameByte = $false
+        for ([int]$nameOffset = 0; $nameOffset -lt 100; $nameOffset++) {
+            if ($Bytes[$headerOffset + $nameOffset] -ne 0) {
+                $hasNameByte = $true
+                break
+            }
+        }
+        if (-not $hasNameByte) { continue }
+
+        # Get-TarHeader trims NUL and space from the checksum field and requires
+        # ^[0-7]{1,7}$, so the eight bytes must read as padding, then one to seven
+        # octal digits, then padding -- a single contiguous digit run. Checking that
+        # whole structure rather than merely "digits, NULs and spaces in some order"
+        # matters for both soundness and cost: an interior NUL is rejected by the
+        # reader, and admitting it here left 2MB of alternating digit and NUL bytes
+        # -- which is what UTF-16LE-encoded digits look like -- reaching the full
+        # 512-byte checksum at nearly every offset, taking 21s and tripping the work
+        # budget, so a legitimate UTF-16 numeric file was refused.
+        [int]$checksumDigits = 0
+        $checksumTrailingPad = $false
+        $checksumWellFormed = $true
+        for ([int]$checksumOffset = 148; $checksumOffset -lt 156; $checksumOffset++) {
+            $checksumByte = $Bytes[$headerOffset + $checksumOffset]
+            if ($checksumByte -ge 0x30 -and $checksumByte -le 0x37) {
+                # A digit after the run already ended means a second run.
+                if ($checksumTrailingPad) { $checksumWellFormed = $false; break }
+                $checksumDigits++
+                continue
+            }
+            if ($checksumByte -ne 0x00 -and $checksumByte -ne 0x20) {
+                $checksumWellFormed = $false
+                break
+            }
+            if ($checksumDigits -gt 0) { $checksumTrailingPad = $true }
+        }
+        if (
+            -not $checksumWellFormed -or
+            $checksumDigits -lt 1 -or
+            $checksumDigits -gt 7
+        ) {
+            continue
+        }
+        $candidateBudget--
+        if ($candidateBudget -le 0) {
+            throw "TAR archive candidate scan exceeded its work budget"
+        }
+        if (
+            ($candidateBudget -band 1023) -eq 0 -and
+            $budgetStopwatch.ElapsedMilliseconds -gt 15000
+        ) {
+            throw "TAR archive candidate scan exceeded its work budget"
+        }
+        $header = Get-TarHeader -Bytes $Bytes -Offset ([int]$headerOffset)
+        if ($null -eq $header) { continue }
+        if ($header.Size -gt [uint64]([long]::MaxValue - 1023)) { continue }
+        [uint64]$paddedSize = [uint64](
+            ($header.Size + 511) -band ([uint64]::MaxValue - 511)
+        )
+        if ($paddedSize -le [uint64]($Bytes.Length - $headerOffset - 512)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Test-CoherentRar4Archive {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes)
+
+    if ($Bytes -isnot [byte[]]) { throw "RAR4 coherence check requires a byte array" }
+    if ($Bytes.Length -lt 27) { return $false }
+    $content = $bytePreservingDecoder.GetString($Bytes)
+    $signature = $bytePreservingDecoder.GetString(
+        [byte[]]@(0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00)
+    )
+    $searchOffset = 0
+    while ($searchOffset -le $content.Length - $signature.Length) {
+        $archiveOffset = $content.IndexOf($signature, $searchOffset, [StringComparison]::Ordinal)
+        if ($archiveOffset -lt 0) { break }
+        $searchOffset = $archiveOffset + 1
+
+        [long]$cursor = $archiveOffset + $signature.Length
+        $seenMainHeader = $false
+        while ($cursor + 7 -le $Bytes.Length) {
+            $storedCrc = [BitConverter]::ToUInt16($Bytes, [int]$cursor)
+            $headerType = $Bytes[$cursor + 2]
+            $headerFlags = [BitConverter]::ToUInt16($Bytes, [int]$cursor + 3)
+            $headerSize = [BitConverter]::ToUInt16($Bytes, [int]$cursor + 5)
+            if ($headerSize -lt 7 -or $cursor + $headerSize -gt $Bytes.Length) { break }
+            if (-not $seenMainHeader -and ($headerType -ne 0x73 -or $headerSize -lt 13)) {
+                break
+            }
+            $actualCrc = Get-Crc32 -Bytes $Bytes -Offset ([int]$cursor + 2) -Count ($headerSize - 2)
+            if ([uint16]($actualCrc -band 0xFFFF) -ne $storedCrc) { break }
+            if (-not $seenMainHeader) {
+                $seenMainHeader = $true
+            }
+            if ($headerType -eq 0x7B) { return $seenMainHeader }
+
+            [uint64]$dataSize = 0
+            if (($headerFlags -band 0x8000) -ne 0) {
+                if ($headerSize -lt 11) { break }
+                $dataSize = [BitConverter]::ToUInt32($Bytes, [int]$cursor + 7)
+            }
+            [long]$headerEnd = $cursor + $headerSize
+            if ($dataSize -gt [uint64]($Bytes.Length - $headerEnd)) { break }
+            $cursor = $headerEnd + [long]$dataSize
+        }
+    }
+    return $false
+}
+
+function Test-CoherentRar5Archive {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes)
+
+    if ($Bytes -isnot [byte[]]) { throw "RAR5 coherence check requires a byte array" }
+    if ($Bytes.Length -lt 24) { return $false }
+    $content = $bytePreservingDecoder.GetString($Bytes)
+    $signature = $bytePreservingDecoder.GetString(
+        [byte[]]@(0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00)
+    )
+    $searchOffset = 0
+    while ($searchOffset -le $content.Length - $signature.Length) {
+        $archiveOffset = $content.IndexOf($signature, $searchOffset, [StringComparison]::Ordinal)
+        if ($archiveOffset -lt 0) { break }
+        $searchOffset = $archiveOffset + 1
+
+        [long]$cursor = $archiveOffset + $signature.Length
+        $seenMainHeader = $false
+        while ($cursor + 7 -le $Bytes.Length) {
+            $storedCrc = [BitConverter]::ToUInt32($Bytes, [int]$cursor)
+            $sizeInfo = Read-Rar5VariableUInt `
+                -Bytes $Bytes `
+                -Offset ([int]$cursor + 4) `
+                -Limit $Bytes.Length
+            if ($null -eq $sizeInfo -or $sizeInfo.Value -gt 2MB) { break }
+            [long]$headerStart = $sizeInfo.NextOffset
+            if ($sizeInfo.Value -gt [uint64]($Bytes.Length - $headerStart)) { break }
+            [long]$headerEnd = $headerStart + [long]$sizeInfo.Value
+            $actualCrc = Get-Crc32 `
+                -Bytes $Bytes `
+                -Offset ([int]$cursor + 4) `
+                -Count ([int]($headerEnd - $cursor - 4))
+            if ($actualCrc -ne $storedCrc) { break }
+
+            $typeInfo = Read-Rar5VariableUInt -Bytes $Bytes -Offset ([int]$headerStart) -Limit ([int]$headerEnd)
+            if ($null -eq $typeInfo) { break }
+            $flagsInfo = Read-Rar5VariableUInt -Bytes $Bytes -Offset $typeInfo.NextOffset -Limit ([int]$headerEnd)
+            if ($null -eq $flagsInfo) { break }
+            [long]$headerCursor = $flagsInfo.NextOffset
+            [uint64]$extraSize = 0
+            [uint64]$dataSize = 0
+            if (($flagsInfo.Value -band 0x0001) -ne 0) {
+                $extraInfo = Read-Rar5VariableUInt -Bytes $Bytes -Offset ([int]$headerCursor) -Limit ([int]$headerEnd)
+                if ($null -eq $extraInfo) { break }
+                $extraSize = $extraInfo.Value
+                $headerCursor = $extraInfo.NextOffset
+            }
+            if (($flagsInfo.Value -band 0x0002) -ne 0) {
+                $dataInfo = Read-Rar5VariableUInt -Bytes $Bytes -Offset ([int]$headerCursor) -Limit ([int]$headerEnd)
+                if ($null -eq $dataInfo) { break }
+                $dataSize = $dataInfo.Value
+                $headerCursor = $dataInfo.NextOffset
+            }
+            if ($extraSize -gt [uint64]($headerEnd - $headerCursor)) { break }
+            [long]$typeSpecificEnd = $headerEnd - [long]$extraSize
+            if ($typeInfo.Value -eq 1 -or $typeInfo.Value -eq 5) {
+                $specificInfo = Read-Rar5VariableUInt `
+                    -Bytes $Bytes `
+                    -Offset ([int]$headerCursor) `
+                    -Limit ([int]$typeSpecificEnd)
+                if ($null -eq $specificInfo) { break }
+            }
+            if (-not $seenMainHeader) {
+                if ($typeInfo.Value -ne 1) { break }
+                $seenMainHeader = $true
+            }
+            if ($typeInfo.Value -eq 5) { return $seenMainHeader }
+            if ($dataSize -gt [uint64]($Bytes.Length - $headerEnd)) { break }
+            $cursor = $headerEnd + [long]$dataSize
+        }
+    }
+    return $false
+}
+
+function Test-CoherentSevenZipArchive {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes)
+
+    if ($Bytes -isnot [byte[]]) { throw "7z coherence check requires a byte array" }
+    if ($Bytes.Length -lt 33) { return $false }
+    $content = $bytePreservingDecoder.GetString($Bytes)
+    $signature = $bytePreservingDecoder.GetString(
+        [byte[]]@(0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C)
+    )
+    $searchOffset = 0
+    while ($searchOffset -le $content.Length - $signature.Length) {
+        $archiveOffset = $content.IndexOf($signature, $searchOffset, [StringComparison]::Ordinal)
+        if ($archiveOffset -lt 0) { break }
+        $searchOffset = $archiveOffset + 1
+        if ($archiveOffset + 32 -gt $Bytes.Length -or $Bytes[$archiveOffset + 6] -ne 0) {
+            continue
+        }
+        $storedStartHeaderCrc = [BitConverter]::ToUInt32($Bytes, $archiveOffset + 8)
+        $actualStartHeaderCrc = Get-Crc32 -Bytes $Bytes -Offset ($archiveOffset + 12) -Count 20
+        if ($storedStartHeaderCrc -ne $actualStartHeaderCrc) { continue }
+
+        [uint64]$nextHeaderOffset = [BitConverter]::ToUInt64($Bytes, $archiveOffset + 12)
+        [uint64]$nextHeaderSize = [BitConverter]::ToUInt64($Bytes, $archiveOffset + 20)
+        if (
+            $nextHeaderSize -eq 0 -or
+            $nextHeaderOffset -gt [uint64]([long]::MaxValue - 32) -or
+            $nextHeaderSize -gt [uint64][long]::MaxValue
+        ) {
+            continue
+        }
+        [long]$nextHeaderStart = $archiveOffset + 32 + [long]$nextHeaderOffset
+        if (
+            $nextHeaderStart -lt $archiveOffset + 32 -or
+            $nextHeaderSize -gt [uint64]($Bytes.Length - $nextHeaderStart)
+        ) {
+            continue
+        }
+        $nextHeaderType = $Bytes[$nextHeaderStart]
+        if ($nextHeaderType -notin @(0x01, 0x17)) { continue }
+        $storedNextHeaderCrc = [BitConverter]::ToUInt32($Bytes, $archiveOffset + 28)
+        $actualNextHeaderCrc = Get-Crc32 `
+            -Bytes $Bytes `
+            -Offset ([int]$nextHeaderStart) `
+            -Count ([int]$nextHeaderSize)
+        if ($storedNextHeaderCrc -eq $actualNextHeaderCrc) { return $true }
+    }
+    return $false
+}
+
+function Test-CoherentXzArchive {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes)
+
+    if ($Bytes -isnot [byte[]]) { throw "XZ coherence check requires a byte array" }
+    if ($Bytes.Length -lt 32) { return $false }
+    $content = $bytePreservingDecoder.GetString($Bytes)
+    $signature = $bytePreservingDecoder.GetString(
+        [byte[]]@(0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00)
+    )
+    $searchOffset = 0
+    while ($searchOffset -le $content.Length - $signature.Length) {
+        $archiveOffset = $content.IndexOf($signature, $searchOffset, [StringComparison]::Ordinal)
+        if ($archiveOffset -lt 0) { break }
+        $searchOffset = $archiveOffset + 1
+        if (
+            $archiveOffset + 12 -gt $Bytes.Length -or
+            $Bytes[$archiveOffset + 6] -ne 0 -or
+            ($Bytes[$archiveOffset + 7] -band 0xF0) -ne 0
+        ) {
+            continue
+        }
+        $storedHeaderCrc = [BitConverter]::ToUInt32($Bytes, $archiveOffset + 8)
+        if ((Get-Crc32 -Bytes $Bytes -Offset ($archiveOffset + 6) -Count 2) -ne $storedHeaderCrc) {
+            continue
+        }
+
+        $footerSearchOffset = $archiveOffset + 12
+        while ($footerSearchOffset -le $content.Length - 2) {
+            $footerMagicOffset = $content.IndexOf('YZ', $footerSearchOffset, [StringComparison]::Ordinal)
+            if ($footerMagicOffset -lt 0) { break }
+            $footerSearchOffset = $footerMagicOffset + 1
+            [long]$footerOffset = $footerMagicOffset - 10
+            if ($footerOffset -lt $archiveOffset + 20 -or $footerOffset + 12 -gt $Bytes.Length) {
+                continue
+            }
+            if (
+                $Bytes[$footerOffset + 8] -ne $Bytes[$archiveOffset + 6] -or
+                $Bytes[$footerOffset + 9] -ne $Bytes[$archiveOffset + 7]
+            ) {
+                continue
+            }
+            $storedFooterCrc = [BitConverter]::ToUInt32($Bytes, [int]$footerOffset)
+            if ((Get-Crc32 -Bytes $Bytes -Offset ([int]$footerOffset + 4) -Count 6) -ne $storedFooterCrc) {
+                continue
+            }
+
+            [uint64]$backwardSize = [BitConverter]::ToUInt32($Bytes, [int]$footerOffset + 4)
+            [uint64]$indexSize = ($backwardSize + 1) * 4
+            if ($indexSize -lt 8 -or $indexSize -gt [uint64]($footerOffset - $archiveOffset - 12)) {
+                continue
+            }
+            [long]$indexStart = $footerOffset - [long]$indexSize
+            [int]$indexDataLength = [int]$indexSize - 4
+            [long]$indexDataEnd = $indexStart + $indexDataLength
+            if ($Bytes[$indexStart] -ne 0) { continue }
+            $storedIndexCrc = [BitConverter]::ToUInt32($Bytes, [int]$indexDataEnd)
+            if ((Get-Crc32 -Bytes $Bytes -Offset ([int]$indexStart) -Count $indexDataLength) -ne $storedIndexCrc) {
+                continue
+            }
+
+            $recordCountInfo = Read-XzVariableUInt `
+                -Bytes $Bytes `
+                -Offset ([int]$indexStart + 1) `
+                -Limit ([int]$indexDataEnd)
+            if ($null -eq $recordCountInfo) { continue }
+            [long]$indexCursor = $recordCountInfo.NextOffset
+            if ($recordCountInfo.Value -gt [uint64](($indexDataEnd - $indexCursor) / 2)) {
+                continue
+            }
+            [uint64]$paddedBlockTotal = 0
+            $validIndex = $true
+            for ([uint64]$recordIndex = 0; $recordIndex -lt $recordCountInfo.Value; $recordIndex++) {
+                $unpaddedInfo = Read-XzVariableUInt `
+                    -Bytes $Bytes `
+                    -Offset ([int]$indexCursor) `
+                    -Limit ([int]$indexDataEnd)
+                if ($null -eq $unpaddedInfo -or $unpaddedInfo.Value -lt 5) {
+                    $validIndex = $false
+                    break
+                }
+                $uncompressedInfo = Read-XzVariableUInt `
+                    -Bytes $Bytes `
+                    -Offset $unpaddedInfo.NextOffset `
+                    -Limit ([int]$indexDataEnd)
+                if ($null -eq $uncompressedInfo -or $unpaddedInfo.Value -gt [uint64]::MaxValue - 3) {
+                    $validIndex = $false
+                    break
+                }
+                [uint64]$paddedBlockSize = [uint64](
+                    ($unpaddedInfo.Value + 3) -band ([uint64]::MaxValue - 3)
+                )
+                if ($paddedBlockTotal -gt [uint64]::MaxValue - $paddedBlockSize) {
+                    $validIndex = $false
+                    break
+                }
+                $paddedBlockTotal += $paddedBlockSize
+                $indexCursor = $uncompressedInfo.NextOffset
+            }
+            if (-not $validIndex) { continue }
+            while ($indexCursor -lt $indexDataEnd) {
+                if ($Bytes[$indexCursor] -ne 0) {
+                    $validIndex = $false
+                    break
+                }
+                $indexCursor++
+            }
+            if (
+                $validIndex -and
+                $paddedBlockTotal -eq [uint64]($indexStart - $archiveOffset - 12)
+            ) {
+                return $true
+            }
+        }
+    }
+    return $false
+}
+
 function Get-Zip64CentralValues {
     param(
-        [Parameter(Mandatory = $true)][AllowEmptyCollection()][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes,
         [Parameter(Mandatory = $true)][long]$ExtraOffset,
         [Parameter(Mandatory = $true)][int]$ExtraLength,
         [Parameter(Mandatory = $true)][bool]$NeedUncompressedSize,
@@ -732,6 +1593,7 @@ function Get-Zip64CentralValues {
         [Parameter(Mandatory = $true)][bool]$NeedDiskStart
     )
 
+    if ($Bytes -isnot [byte[]]) { throw "ZIP64 central value read requires a byte array" }
     [long]$extraEnd = $ExtraOffset + $ExtraLength
     if (
         $ExtraOffset -lt 0 -or
@@ -787,13 +1649,14 @@ function Get-Zip64CentralValues {
 
 function Test-ZipCentralDirectoryRecords {
     param(
-        [Parameter(Mandatory = $true)][AllowEmptyCollection()][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes,
         [Parameter(Mandatory = $true)][long]$ArchiveStart,
         [Parameter(Mandatory = $true)][long]$CentralStart,
         [Parameter(Mandatory = $true)][long]$CentralEnd,
         [Parameter(Mandatory = $true)][uint64]$EntriesTotal
     )
 
+    if ($Bytes -isnot [byte[]]) { throw "ZIP central directory scan requires a byte array" }
     if (
         $ArchiveStart -lt 0 -or
         $CentralStart -lt $ArchiveStart -or
@@ -910,15 +1773,15 @@ function Test-ZipCentralDirectoryRecords {
 }
 
 function Test-CoherentZipArchive {
-    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][byte[]]$Bytes)
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes)
 
+    if ($Bytes -isnot [byte[]]) { throw "ZIP coherence check requires a byte array" }
     if ($Bytes.Length -lt 22) { return $false }
     $content = $bytePreservingDecoder.GetString($Bytes)
     $endSignature = $bytePreservingDecoder.GetString([byte[]]@(0x50, 0x4B, 0x05, 0x06))
     $zip64EndSignature = $bytePreservingDecoder.GetString([byte[]]@(0x50, 0x4B, 0x06, 0x06))
     $zip64LocatorSignature = [byte[]]@(0x50, 0x4B, 0x06, 0x07)
     $searchOffset = 0
-    $candidateCount = 0
 
     while ($searchOffset -le $content.Length - 4) {
         $endOffset = $content.IndexOf(
@@ -928,8 +1791,6 @@ function Test-CoherentZipArchive {
         )
         if ($endOffset -lt 0) { break }
         $searchOffset = $endOffset + 1
-        $candidateCount++
-        if ($candidateCount -gt 4096) { return $true }
         if ($endOffset + 22 -gt $Bytes.Length) { continue }
 
         $commentLength = [BitConverter]::ToUInt16($Bytes, $endOffset + 20)
@@ -1047,23 +1908,18 @@ function Test-CoherentZipArchive {
 }
 
 function Test-NestedArchiveMagic {
-    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][byte[]]$Bytes)
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes)
 
+    if ($Bytes -isnot [byte[]]) { throw "nested archive detection requires a byte array" }
     if ($Bytes.Length -lt 2) { return $false }
     if (Test-CoherentZipArchive -Bytes $Bytes) { return $true }
+    if (Test-CoherentTarArchive -Bytes $Bytes) { return $true }
+    if (Test-CoherentRar4Archive -Bytes $Bytes) { return $true }
+    if (Test-CoherentRar5Archive -Bytes $Bytes) { return $true }
+    if (Test-CoherentSevenZipArchive -Bytes $Bytes) { return $true }
+    if (Test-CoherentXzArchive -Bytes $Bytes) { return $true }
+    if (Test-CoherentZstdArchive -Bytes $Bytes) { return $true }
     $content = $bytePreservingDecoder.GetString($Bytes)
-    $strongSignatures = @(
-        [byte[]]@(0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00),
-        [byte[]]@(0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00),
-        [byte[]]@(0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C),
-        [byte[]]@(0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00)
-    )
-    foreach ($signatureBytes in $strongSignatures) {
-        $signature = $bytePreservingDecoder.GetString($signatureBytes)
-        if ($content.IndexOf($signature, [System.StringComparison]::Ordinal) -ge 0) {
-            return $true
-        }
-    }
 
     $gzipSignature = $bytePreservingDecoder.GetString([byte[]]@(0x1F, 0x8B, 0x08))
     $gzipIndex = $content.IndexOf($gzipSignature, [System.StringComparison]::Ordinal)
@@ -1127,52 +1983,13 @@ function Test-NestedArchiveMagic {
         )
     }
 
-    $tarIndex = $content.IndexOf("ustar", [System.StringComparison]::Ordinal)
-    while ($tarIndex -ge 0) {
-        $headerOffset = $tarIndex - 257
-        if ($headerOffset -ge 0 -and $headerOffset + 512 -le $Bytes.Length) {
-            $hasName = $false
-            for ($nameIndex = 0; $nameIndex -lt 100; $nameIndex++) {
-                if ($Bytes[$headerOffset + $nameIndex] -ne 0) {
-                    $hasName = $true
-                    break
-                }
-            }
-            $checksumText = [System.Text.Encoding]::ASCII.GetString(
-                $Bytes,
-                $headerOffset + 148,
-                8
-            ).Trim([char[]]@(0, 32))
-            if ($hasName -and $checksumText -match '^[0-7]{1,6}$') {
-                try {
-                    $expectedChecksum = [Convert]::ToInt64($checksumText, 8)
-                    [long]$actualChecksum = 0
-                    for ($headerIndex = 0; $headerIndex -lt 512; $headerIndex++) {
-                        if ($headerIndex -ge 148 -and $headerIndex -lt 156) {
-                            $actualChecksum += 32
-                        }
-                        else {
-                            $actualChecksum += $Bytes[$headerOffset + $headerIndex]
-                        }
-                    }
-                    if ($actualChecksum -eq $expectedChecksum) { return $true }
-                }
-                catch [System.FormatException] { }
-                catch [System.OverflowException] { }
-            }
-        }
-        $tarIndex = $content.IndexOf(
-            "ustar",
-            $tarIndex + 1,
-            [System.StringComparison]::Ordinal
-        )
-    }
     return $false
 }
 
 function Get-SecretScanTextViews {
-    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][byte[]]$Bytes)
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()]$Bytes)
 
+    if ($Bytes -isnot [byte[]]) { throw "secret scan text views require a byte array" }
     $views = New-Object 'System.Collections.Generic.List[string]'
     $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     $latin = $bytePreservingDecoder.GetString($Bytes)
@@ -1183,23 +2000,105 @@ function Get-SecretScanTextViews {
     }
     catch [System.Text.DecoderFallbackException] { }
 
-    $nullBytes = 0
-    foreach ($value in $Bytes) { if ($value -eq 0) { $nullBytes++ } }
-    $looksUtf16 = $Bytes.Length -ge 2 -and (
-        ($Bytes[0] -eq 0xFF -and $Bytes[1] -eq 0xFE) -or
-        ($Bytes[0] -eq 0xFE -and $Bytes[1] -eq 0xFF) -or
-        ($nullBytes * 5 -ge $Bytes.Length)
-    )
-    if ($looksUtf16) {
-        foreach ($decoder in @($utf16LittleEndianDecoder, $utf16BigEndianDecoder)) {
+    $hasNullByte = [System.Array]::IndexOf($Bytes, [byte]0) -ge 0
+    if ($hasNullByte -and $Bytes.Length -ge 2) {
+        foreach ($decoder in @(
+            $utf16LittleEndianDecoder,
+            $utf16BigEndianDecoder,
+            $utf32LittleEndianDecoder,
+            $utf32BigEndianDecoder
+        )) {
             try {
                 $decoded = $decoder.GetString($Bytes)
                 if ($seen.Add($decoded)) { $views.Add($decoded) }
             }
             catch [System.Text.DecoderFallbackException] { }
+            catch [System.ArgumentException] { }
+        }
+        $stripped = $latin.Replace([string][char]0, '')
+        if ($stripped.Length -gt 0 -and $seen.Add($stripped)) {
+            $views.Add($stripped)
         }
     }
     return $views.ToArray()
+}
+
+function Get-InlineJavaScriptSources {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Content,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $sources = New-Object 'System.Collections.Generic.List[object]'
+    $scriptIndex = 0
+    $scriptMatches = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($scriptMatch in $inlineScriptBlockRegex.Matches($Content)) {
+        $scriptMatches.Add($scriptMatch)
+    }
+    $lastTerminatedEnd = 0
+    if ($scriptMatches.Count -gt 0) {
+        $lastMatch = $scriptMatches[$scriptMatches.Count - 1]
+        $lastTerminatedEnd = $lastMatch.Index + $lastMatch.Length
+    }
+    $unterminatedMatch = $inlineScriptUnterminatedRegex.Match(
+        $Content,
+        $lastTerminatedEnd
+    )
+    if ($unterminatedMatch.Success) { $scriptMatches.Add($unterminatedMatch) }
+
+    foreach ($scriptMatch in $scriptMatches) {
+        $scriptIndex++
+        $attributes = $scriptMatch.Groups['attributes'].Value
+        $hasExternalSource = $false
+        foreach ($attributeMatch in $inlineScriptAttributeRegex.Matches($attributes)) {
+            if ($attributeMatch.Groups['name'].Value -ieq 'src') {
+                $hasExternalSource = $true
+                break
+            }
+        }
+        if ($hasExternalSource) { continue }
+        $scriptType = $null
+        $sawTypeAttribute = $false
+        foreach ($attributeMatch in $inlineScriptAttributeRegex.Matches($attributes)) {
+            if ($attributeMatch.Groups['name'].Value -ine 'type') { continue }
+            if ($sawTypeAttribute) { continue }
+            $sawTypeAttribute = $true
+            foreach ($groupName in @('double', 'single', 'bare')) {
+                if ($attributeMatch.Groups[$groupName].Success) {
+                    $scriptType = $attributeMatch.Groups[$groupName].Value.Trim()
+                    break
+                }
+            }
+        }
+        if ($null -ne $scriptType) {
+            $scriptType = ($scriptType -split ';', 2)[0].Trim()
+        }
+        if ([string]::IsNullOrWhiteSpace($scriptType)) { $scriptType = $null }
+        # A block the browser will not execute is still shipped in the file and
+        # still readable by anyone who fetches it, so its body is scanned rather
+        # than skipped. Because such a block legitimately holds a template or
+        # other non-JavaScript payload, it is marked so the scanner treats a
+        # parse failure as nothing to scan instead of refusing the archive.
+        #
+        # An absent or empty type executes, so it is required to parse; any type
+        # outside the executable set is inert data and is not.
+        $parseOptional = (
+            $null -ne $scriptType -and
+            -not $executableInlineScriptTypes.Contains($scriptType)
+        )
+        $source = $scriptMatch.Groups['source'].Value
+        $cdataMatch = $inlineScriptCdataRegex.Match($source)
+        if ($cdataMatch.Success) {
+            $source = $cdataMatch.Groups['source'].Value
+        }
+        if ([string]::IsNullOrWhiteSpace($source)) { continue }
+        $sources.Add([pscustomobject]@{
+            path = "$Path#inline-script-$scriptIndex.js"
+            source = $source
+            parseOptional = $parseOptional
+        })
+    }
+    return $sources.ToArray()
 }
 
 function Invoke-ArchiveContentScan {
@@ -1257,6 +2156,7 @@ $commit = $null
 $fileCount = 0
 $validatedArchiveHash = $null
 $validatedArchiveLength = 0
+$artifactRecordJson = $null
 $javaScriptScanSummary = $null
 $gitVersion = $null
 $nodeVersion = $null
@@ -1384,6 +2284,7 @@ try {
     $treeRecords = @($treeText -split "`0" | Where-Object { $_.Length -gt 0 })
     $expectedEntryNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     $expectedObjectIds = [System.Collections.Generic.Dictionary[string, string]]::new([System.StringComparer]::Ordinal)
+    $expectedModes = [System.Collections.Generic.Dictionary[string, uint32]]::new([System.StringComparer]::Ordinal)
     [long]$selectedExpandedBytes = 0
     foreach ($record in $treeRecords) {
         $modeSeparator = $record.IndexOf("`t")
@@ -1432,6 +2333,7 @@ try {
             throw "runtime tree contains a duplicate path: $entryPath"
         }
         $expectedObjectIds.Add($entryPath, $objectId)
+        $expectedModes.Add($entryPath, [Convert]::ToUInt32($mode, 8))
     }
     if ($expectedEntryNames.Count -eq 0 -or $expectedEntryNames.Count -gt $maxFileCount) {
         throw "selected runtime tree has an invalid file count"
@@ -1463,6 +2365,11 @@ try {
     $candidateLength = (Get-Item -LiteralPath $candidateArchivePath).Length
     if ($candidateLength -le 0 -or $candidateLength -gt $maxArchiveBytes) {
         throw "candidate archive exceeds the compressed-size limit"
+    }
+    Set-ZipEntryUnixModes -Path $candidateArchivePath -ExpectedModes $expectedModes
+    $candidateLength = (Get-Item -LiteralPath $candidateArchivePath).Length
+    if ($candidateLength -le 0 -or $candidateLength -gt $maxArchiveBytes) {
+        throw "normalized candidate archive exceeds the compressed-size limit"
     }
 
     $archiveSourceStream = [System.IO.File]::Open(
@@ -1523,7 +2430,11 @@ try {
             }
         }
 
-        $unixMode = (([uint32]$entry.ExternalAttributes -shr 16) -band 0xFFFF)
+        [uint32]$rawExternalAttributes = [BitConverter]::ToUInt32(
+            [BitConverter]::GetBytes([int]$entry.ExternalAttributes),
+            0
+        )
+        $unixMode = (($rawExternalAttributes -shr 16) -band 0xFFFF)
         $fileType = $unixMode -band 0xF000
         $isDirectory = [string]::IsNullOrEmpty($entry.Name)
         if (
@@ -1533,6 +2444,13 @@ try {
             throw "archive contains non-regular extraction metadata: $entryPath"
         }
         if ($isDirectory) { continue }
+        if (-not $expectedModes.ContainsKey($entryPath)) {
+            throw "archive contains a file outside the selected commit tree: $entryPath"
+        }
+        [uint32]$expectedUnixMode = $expectedModes[$entryPath]
+        if ([uint32]$unixMode -ne $expectedUnixMode) {
+            throw "archive mode differs from committed mode: $entryPath"
+        }
         if ($entryPath -notmatch $allowedRuntimeFilePattern) {
             throw "archive contains an unapproved runtime file type: $entryPath"
         }
@@ -1601,10 +2519,17 @@ try {
             throw "archive bytes differ from committed blob: $($entry.FullName)"
         }
 
+        $scanTextViews = @(Get-SecretScanTextViews -Bytes $entryBytes)
         try {
-            foreach ($scanContent in @(Get-SecretScanTextViews -Bytes $entryBytes)) {
+            foreach ($scanContent in $scanTextViews) {
                 foreach ($pattern in $providerSecretPatterns) {
-                    if ($pattern.IsMatch($scanContent)) {
+                    foreach ($providerMatch in $pattern.Matches($scanContent)) {
+                        # Documentation of a credential's format has the credential's
+                        # shape, so a placeholder inside the matched span means this is
+                        # the format and not a value.
+                        if ($providerPlaceholderRegex.IsMatch($providerMatch.Value)) {
+                            continue
+                        }
                         throw "archive content matched a provider secret pattern: $($entry.FullName)"
                     }
                 }
@@ -1612,6 +2537,25 @@ try {
         }
         catch [System.Text.RegularExpressions.RegexMatchTimeoutException] {
             throw "archive provider secret scan timed out: $($entry.FullName)"
+        }
+
+        if ($entry.FullName -notmatch $javaScriptFilePattern) {
+            try {
+                foreach ($scanContent in $scanTextViews) {
+                    foreach ($match in $genericSecretAssignmentRegex.Matches($scanContent)) {
+                        $assignedValue = $match.Groups['value'].Value
+                        if (
+                            -not $genericSecretPlaceholderRegex.IsMatch($assignedValue) -and
+                            -not $genericSecretDynamicValueRegex.IsMatch($assignedValue)
+                        ) {
+                            throw "archive text contains a hardcoded secret assignment: $($entry.FullName)"
+                        }
+                    }
+                }
+            }
+            catch [System.Text.RegularExpressions.RegexMatchTimeoutException] {
+                throw "archive generic secret-assignment scan timed out: $($entry.FullName)"
+            }
         }
 
         if ($entry.FullName -notmatch $textFilePattern) { continue }
@@ -1623,11 +2567,13 @@ try {
         }
         if ($entry.FullName -match $strictConfigFilePattern) {
             try {
-                if ($encodedConfigEscapeRegex.IsMatch($content)) {
-                    throw "structured runtime config must not contain encoded escapes: $($entry.FullName)"
-                }
-                if ($strictSecretIdentifierRegex.IsMatch($content)) {
-                    throw "structured runtime config must not contain secret identifiers: $($entry.FullName)"
+                foreach ($scanContent in $scanTextViews) {
+                    if ($encodedConfigEscapeRegex.IsMatch($scanContent)) {
+                        throw "structured runtime config must not contain encoded escapes: $($entry.FullName)"
+                    }
+                    if ($strictSecretIdentifierRegex.IsMatch($scanContent)) {
+                        throw "structured runtime config must not contain secret identifiers: $($entry.FullName)"
+                    }
                 }
             }
             catch [System.Text.RegularExpressions.RegexMatchTimeoutException] {
@@ -1636,15 +2582,24 @@ try {
         }
 
         if ($entry.FullName -notmatch $javaScriptFilePattern) {
-            try {
-                foreach ($match in $genericSecretAssignmentRegex.Matches($content)) {
-                    if (-not $genericSecretPlaceholderRegex.IsMatch($match.Groups['value'].Value)) {
-                        throw "archive text contains a hardcoded secret assignment: $($entry.FullName)"
-                    }
+            if ($entry.FullName -match $inlineJavaScriptContainerPattern) {
+                try {
+                    $inlineScripts = @(
+                        Get-InlineJavaScriptSources `
+                            -Content $content `
+                            -Path $entry.FullName
+                    )
                 }
-            }
-            catch [System.Text.RegularExpressions.RegexMatchTimeoutException] {
-                throw "archive generic secret-assignment scan timed out: $($entry.FullName)"
+                catch [System.Text.RegularExpressions.RegexMatchTimeoutException] {
+                    throw "archive inline JavaScript extraction timed out: $($entry.FullName)"
+                }
+                foreach ($inlineScript in $inlineScripts) {
+                    $javaScriptBytes += $utf8Encoder.GetByteCount($inlineScript.source)
+                    if ($javaScriptBytes -gt $maxJavaScriptBytes) {
+                        throw "archive JavaScript exceeds the aggregate scan limit"
+                    }
+                    $javaScriptFiles.Add($inlineScript)
+                }
             }
         }
 
@@ -1689,7 +2644,7 @@ try {
 
     if (-not $ValidateOnly) {
         $stamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
-        $archiveName = "capro-backend_$stamp.zip"
+        $archiveName = "capro-backend_${commit}_$stamp.zip"
         $archivePath = Join-Path $resolvedOutputDirectory $archiveName
         $partialArchivePath = Join-Path $resolvedOutputDirectory (
             ".$archiveName.partial-" + [Guid]::NewGuid().ToString("N")
@@ -1722,6 +2677,17 @@ try {
         if ($finalHash -ne $validatedArchiveHash) {
             throw "published archive differs from the validated archive"
         }
+        $publishedLength = (Get-Item -LiteralPath $archivePath).Length
+        if ($publishedLength -ne $validatedArchiveLength) {
+            throw "published archive length differs from the validated archive"
+        }
+        $artifactRecordJson = [ordered]@{
+            format = "ca-pro-deploy-artifact/v1"
+            path = $archivePath
+            commit = $commit
+            sha256 = $validatedArchiveHash
+            byteLength = $validatedArchiveLength
+        } | ConvertTo-Json -Compress
     }
 
     $buildSucceeded = $true
@@ -1761,6 +2727,7 @@ if ($ValidateOnly) {
 }
 else {
     Write-Output ("archive       : " + $archivePath)
+    Write-Output ("CAPRO_DEPLOY_ARTIFACT=" + $artifactRecordJson)
 }
 Write-Output ("size          : " + [math]::Round($validatedArchiveLength / 1MB, 2) + " MB")
 Write-Output ("sha256        : " + $validatedArchiveHash)
