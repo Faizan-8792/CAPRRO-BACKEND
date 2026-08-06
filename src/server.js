@@ -11,11 +11,15 @@ import { assertDigestIndexesReady } from "./services/digest-index-readiness.serv
 import { assertEngagementIndexesReady } from "./services/engagement-index-readiness.service.js";
 import { assertAuditWorkingPaperIndexesReady } from "./services/audit-working-paper-index-readiness.service.js";
 import { runAutomationWorkerBatch } from "./services/automation-worker.service.js";
+import { ensureRequiredIndexes } from "./services/index-provisioning.service.js";
 import {
   drainDigestRecovery,
   enqueueDueDigests,
 } from "./services/digest.service.js";
-import app, { setBackgroundReadiness } from "./app.js";
+import app, {
+  setBackgroundInitializationError,
+  setBackgroundReadiness,
+} from "./app.js";
 
 const PORT = Number(process.env.PORT || 4001);
 const REMINDER_SCHEDULER_INTERVAL_MS = 15 * 60 * 1000;
@@ -168,6 +172,31 @@ async function bootstrap() {
     databaseConnectionInitialized = true;
   }
 
+  // Create the indexes the assertions below require. connectDB() disables
+  // autoIndex in production, and nothing else created them, so a release that
+  // declared a new index could never reach readiness: the assertion threw, boot
+  // retried every 30 seconds indefinitely, and the schedulers below never
+  // started. This never fails the boot -- the assertions remain the authority on
+  // readiness and report precisely what is missing.
+  try {
+    const provisioning = await ensureRequiredIndexes();
+    if (provisioning.created.length > 0) {
+      console.log(
+        "[BOOT] Created indexes:",
+        provisioning.created
+          .map((entry) => `${entry.collection}.${entry.name}`)
+          .join(", "),
+      );
+    }
+    for (const failure of provisioning.failures) {
+      console.error(
+        `[BOOT] Index provisioning failed for ${failure.collection}: ${failure.reason}`,
+      );
+    }
+  } catch (error) {
+    console.error("[BOOT] Index provisioning error:", error?.message || error);
+  }
+
   if (process.env.NODE_ENV === "production") {
     const [noticeRollout, engagementRollout, workingPaperRollout] =
       await Promise.all([
@@ -227,6 +256,7 @@ function runBootstrap() {
         "[BOOT] Startup initialization error:",
         error?.message || error,
       );
+      setBackgroundInitializationError(error);
       scheduleBootstrapRetry();
       return false;
     })

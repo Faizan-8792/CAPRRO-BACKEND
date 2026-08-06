@@ -85,9 +85,23 @@ const app = express();
 // Importing app must not fabricate bootstrap success. server.js owns background
 // initialization and marks readiness true only after indexes and schedulers are ready.
 let backgroundInitializationReady = false;
+let backgroundInitializationErrorCode = null;
 
 function setBackgroundReadiness(ready) {
   backgroundInitializationReady = ready === true;
+  if (backgroundInitializationReady) backgroundInitializationErrorCode = null;
+}
+
+// Records why background initialization is not finishing, as a stable code only.
+// Diagnosing a stuck readiness state previously required server filesystem
+// access, because /health reported "initializing" and nothing else: an instance
+// could retry a failing index assertion indefinitely and the only external signal
+// was a 503 that never resolved. A code such as DIGEST_INDEXES_NOT_READY names
+// the cause without disclosing a message, a stack, or any connection detail.
+function setBackgroundInitializationError(error) {
+  const code = typeof error?.code === "string" ? error.code : null;
+  backgroundInitializationErrorCode =
+    code && /^[A-Z][A-Z0-9_]{2,63}$/.test(code) ? code : "INITIALIZATION_ERROR";
 }
 
 function isHealthReady({ dbOk, backgroundReady }) {
@@ -285,14 +299,20 @@ app.get("/health", async (req, res) => {
     backgroundReady: backgroundInitializationReady,
   });
 
-  // Keep the public health payload minimal (no process memory internals or
-  // initialization error details).
-  res.status(dbOk ? 200 : 503).json({
+  // Keep the public health payload minimal: no process memory internals, and no
+  // initialization error message, stack or connection detail. The error *code* is
+  // included when degraded because without it a stuck readiness state is not
+  // diagnosable without server filesystem access.
+  const payload = {
     status: dbOk ? "ok" : "degraded",
     uptime: Math.round(process.uptime()),
     db: { state: dbStateName, ping_ms: dbPingMs },
     background,
-  });
+  };
+  if (!dbOk && backgroundInitializationErrorCode) {
+    payload.backgroundError = backgroundInitializationErrorCode;
+  }
+  res.status(dbOk ? 200 : 503).json(payload);
 });
 
 /* ===============================
@@ -458,5 +478,9 @@ app.use((err, req, res, next) => {
   });
 });
 
-export { isHealthReady, setBackgroundReadiness };
+export {
+  isHealthReady,
+  setBackgroundInitializationError,
+  setBackgroundReadiness,
+};
 export default app;

@@ -2140,11 +2140,11 @@ if (listed.status !== 0 || listed.error) {
     60_000,
   );
   // The count is pinned so a new runtime file cannot appear unscanned and
-  // unnoticed. Raised from 148 to 149 for src/maintenance/ensure-indexes.mjs,
-  // added deliberately as the production index-management step.
+  // unnoticed. Raised from 148 to 150 for the index provisioning service and its
+  // command-line wrapper, added as the production index-management step.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 149 && result.status === 0,
+    files.length === 150 && result.status === 0,
     result,
   );
 }
