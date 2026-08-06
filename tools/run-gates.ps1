@@ -469,6 +469,7 @@ try {
         "task-flow-checklist",
         "taxworker-flow-checklist",
         "digest-delivery-correctness",
+        "notice-case-contract",
         "deploy-archive-security",
         "deploy-archive-boundary"
     )

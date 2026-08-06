@@ -55,6 +55,42 @@ const PUBLIC_ERROR_CODES = new Set([
   "AUDIT_PROPOSAL_ALREADY_DECIDED",
   "AUDIT_SOURCE_ROW_CHANGED",
   "AUDIT_AI_CONSENT_REQUIRED",
+  // OCR intake. Without these, production replaced every OCR failure with a
+  // generic message. A missing consent read "Some submitted information could not
+  // be accepted. Review the form and try again." -- misleading, because there is
+  // no form field to correct: the requirement is consent to send a client's notice
+  // to a third-party OCR provider. OCR_TYPE_UNSUPPORTED fell through to the
+  // catch-all default and so never told the user that only PDF, PNG and JPEG are
+  // accepted, and OCR_NO_TEXT blamed the form for a file that could not be read.
+  //
+  // AUDIT_AI_CONSENT_REQUIRED directly above is the same class of consent gate and
+  // was already public, which is what makes this an oversight rather than a choice.
+  //
+  // OCR_PROVIDER_ERROR is deliberately absent: its message embeds
+  // `HTTP ${response.status}`, and no user-facing string may contain "HTTP". It
+  // stays generic until that message is rewritten.
+  //
+  // CASE_AI_CONSENT_REQUIRED is the third member of the same family and was
+  // missing for the same reason. Its message names the provider, exactly as
+  // AUDIT_AI_CONSENT_REQUIRED does ("...sent to DeepSeek",
+  // audit-working-paper.service.js:1092), so the two consent gates now read
+  // consistently instead of one naming the provider and the other blaming the
+  // form. The remaining CASE_* codes -- CASE_NOT_FOUND, INVALID_CASE_CURSOR,
+  // INVALID_CASE_SNAPSHOT, CASE_REPLAY_TARGET_MISSING -- are still absent
+  // deliberately: their messages are engineer-facing ("case-list-v1 cursor is
+  // invalid") and making them public would put that wording in front of a
+  // chartered accountant. They need new copy first, which is a product decision,
+  // not a code change. See docs/notices-cases-contract.md.
+  "CASE_AI_CONSENT_REQUIRED",
+  "OCR_CONSENT_REQUIRED",
+  "OCR_FILE_REQUIRED",
+  "OCR_FILE_TOO_LARGE",
+  "OCR_TYPE_UNSUPPORTED",
+  "OCR_NO_TEXT",
+  "OCR_TEXT_TOO_LARGE",
+  "OCR_PROCESSING_FAILED",
+  "OCR_PROVIDER_UNAVAILABLE",
+  "OCR_TIMEOUT",
   "IMPORT_MAPPING_UNSUPPORTED_FIELDS",
   "IMPORT_MAPPING_MISSING_FIELDS",
   "IMPORT_MAPPING_HEADER_NOT_FOUND",

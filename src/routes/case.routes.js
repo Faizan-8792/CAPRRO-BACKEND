@@ -27,7 +27,10 @@ import {
   requireFirmWriteAccess,
 } from "../middleware/authorization.middleware.js";
 import { requireFeatureFlag } from "../middleware/rollout.middleware.js";
-import { OCR_MAX_BYTES, OCR_MIME_TYPES } from "../services/ocr-space.service.js";
+import {
+  OCR_MAX_BYTES,
+  OCR_MIME_TYPES,
+} from "../services/ocr-space.service.js";
 
 const router = Router();
 const upload = multer({
@@ -37,6 +40,14 @@ const upload = multer({
     if (!OCR_MIME_TYPES.has(file.mimetype)) {
       const error = new Error("OCR accepts PDF, PNG, or JPEG files only");
       error.statusCode = 415;
+      // multer passes a fileFilter error through unwrapped (make-middleware.js
+      // abortWithError -> next(err)), so this is a plain Error with no `code`.
+      // Without a code the global handler cannot treat the message as public and
+      // production answered the catch-all "The request could not be completed."
+      // -- which never tells the user that only PDF, PNG and JPEG are accepted.
+      // The same rejection inside ocr-space.service.js is unreachable over HTTP
+      // because this filter runs first, so the code has to be set here.
+      error.code = "OCR_TYPE_UNSUPPORTED";
       return callback(error);
     }
     return callback(null, true);
@@ -49,14 +60,14 @@ router.post(
   requireFirmMember,
   requireFeatureFlag("noticeCases"),
   upload.single("file"),
-  previewCaseOcr
+  previewCaseOcr,
 );
 
 router.use(
   authRequired,
   requireFirmMember,
   requireFirmWriteAccess,
-  requireFeatureFlag("noticeCases")
+  requireFeatureFlag("noticeCases"),
 );
 router.post("/", createCase);
 router.get("/", listCases);
