@@ -470,6 +470,7 @@ try {
         "taxworker-flow-checklist",
         "digest-delivery-correctness",
         "notice-case-contract",
+        "error-contract-invariants",
         "deploy-archive-security",
         "deploy-archive-boundary"
     )
