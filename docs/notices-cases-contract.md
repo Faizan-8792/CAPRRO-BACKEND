@@ -64,7 +64,23 @@ Two deliberate differences, both of which the client must know about:
 
 ## 2. Feature flag, and the second freshness check
 
-Every route is behind `requireFeatureFlag("noticeCases")`. A firm without the flag gets `403`.
+Every route is behind `requireFeatureFlag("noticeCases")`.
+
+> **Corrected 2026-08-06.** This line previously said a firm without the flag gets `403`. **It is a
+> `404`**, and the body names the flag:
+> `{ ok: false, error: "Feature unavailable", featureFlag: "noticeCases", requestId }`
+> (`src/middleware/rollout.middleware.js:41`). Executed and confirmed by
+> `tests/case-ocr-route-behaviour.mjs`.
+>
+> This is embarrassing rather than subtle: `docs/tds-health-contract.md` already recorded the same
+> correction under T24, and T24 also corrected `docs/gst-reconciliation-contract.md` for it. I then
+> reintroduced the error here and in `docs/engagements-contract.md`. Line-number verification cannot
+> catch a wrong status code, which is the argument for executing a contract rather than reviewing it.
+>
+> **It matters for the client.** A `403` reads as a permission problem the user might resolve; this is
+> a module that is not switched on for the firm, and there is nothing the user can do. And because the
+> flag refusal is a `404`, a client that words every `404` as "that item no longer exists" will tell a
+> whole firm their data is gone — the exact defect the desktop found and fixed under T25a.
 
 Four handlers additionally re-assert the flag **version** mid-request through
 `assertNoticeRequestCurrent` (`src/controllers/case.controller.js:33`), which calls
@@ -272,9 +288,17 @@ enumerated**, so a `415` reads REQUEST_ERROR and a `504` reads SERVICE_ERROR.
 
 The client needs different wording per cause, so these are listed separately.
 
-**`403`** — one cause on this surface: the `noticeCases` flag is off for the firm, or the member
-lacks write access on the fifteen guarded routes. Word it as the server's decision, and for the
-flag case as "not switched on for this firm".
+**`403`** — firm authorization only, never the feature flag. Two distinct causes, both from
+`src/middleware/authorization.middleware.js`: the caller is not an `ACTIVE` member
+(`"Firm membership required"`), or their membership is `REMOVED`
+(`"You are no longer a member of this workspace"`). The removed-member wording is confirmed by
+execution in `tests/case-ocr-route-behaviour.mjs`. On the fifteen guarded routes a read-only member
+is also refused here; on `POST /ocr` they are not — see §1.1.
+
+**`404` also means "not switched on for this firm"**, which is the correction described in §2.
+`requireFeatureFlag` answers `404` with `featureFlag: "noticeCases"` in the body. A client must read
+that field to tell a disabled module apart from a genuinely missing case, and must not word this one
+as a deleted record.
 
 **`404`** — `CASE_NOT_FOUND` only (`src/services/case-record.service.js:554`, `:1102`). Scoped by
 `firmId`, so a case in another firm is indistinguishable from a case that never existed. That is

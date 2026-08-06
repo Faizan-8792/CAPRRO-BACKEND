@@ -472,6 +472,7 @@ try {
         "notice-case-contract",
         "shared-backend-contract",
         "production-error-envelope",
+        "case-ocr-route-behaviour",
         "error-contract-invariants",
         "gst-owner-authorization-contract",
         "deploy-archive-security",

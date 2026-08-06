@@ -87,18 +87,41 @@ Two consequences the client must handle:
    assurance engagements are not switched on for this firm, the other says AI working papers are
    not. `WORKING_PAPER_FLAGS` names both (`src/services/audit-working-paper.service.js:29`).
 
-### 2.1 `403` has four distinct causes
+### 2.1 A disabled flag is `404`, not `403`
+
+> **Corrected 2026-08-06.** This section previously listed both feature flags among the causes of
+> `403`. **A disabled flag is a `404`**, and the body names which flag:
+> `{ ok: false, error: "Feature unavailable", featureFlag: "<flag>", requestId }`
+> (`src/middleware/rollout.middleware.js:41`). Executed and confirmed for the shared middleware by
+> `tests/case-ocr-route-behaviour.mjs`.
+>
+> `docs/tds-health-contract.md` already recorded this correction under T24, which also corrected
+> `docs/gst-reconciliation-contract.md`. I reintroduced the error here and in
+> `docs/notices-cases-contract.md`. Citation checking verifies line numbers, not status codes, which
+> is why this needed executing rather than reviewing.
+
+**So this surface returns `404` for two different reasons**, and a client must tell them apart from
+the body rather than the status: a disabled module (`featureFlag` present) versus a genuinely missing
+record (`featureFlag` absent). Wording a disabled module as "no longer exists" tells a whole firm
+their data is gone.
+
+Because the working-paper routes carry **both** flags, a `404` there can mean either module is off —
+read `featureFlag` to know which, and word it accordingly.
+
+### 2.2 `403` has two distinct causes
 
 | Cause                              | Where                                    |
 | ---------------------------------- | ---------------------------------------- |
-| `assuranceEngagements` flag off    | `src/routes/engagement.routes.js:36`     |
-| `auditWorkingPapers` flag off      | `src/routes/engagement.routes.js:30`     |
 | Member lacks firm write access     | `src/routes/engagement.routes.js:35`     |
 | Actor is not the assigned reviewer | `src/services/engagement.service.js:348` |
 
-That last one is the only `403` thrown from a service rather than middleware, and it **is** public
-(`ENGAGEMENT_REVIEWER_REQUIRED`), so the server's own sentence reaches the user. The other three are
-generic. Do not collapse them into one message.
+The second is the only `403` thrown from a service rather than middleware, and it **is** public
+(`ENGAGEMENT_REVIEWER_REQUIRED`), so the server's own sentence reaches the user. The write-access
+refusal is generic. Do not collapse them into one message.
+
+Underneath the write-access check, `src/middleware/authorization.middleware.js` distinguishes a
+non-member (`"Firm membership required"`) from a removed member
+(`"You are no longer a member of this workspace"`), so in practice a client may see either string.
 
 Note the neighbouring `ENGAGEMENT_REVIEWER_ROLE_REQUIRED` is a **`400`, not a `403`**
 (`src/services/engagement.service.js:335`) — naming a reviewer who is not a `FIRM_ADMIN` is a bad
