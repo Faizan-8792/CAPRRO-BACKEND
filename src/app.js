@@ -87,12 +87,14 @@ const app = express();
 let backgroundInitializationReady = false;
 let backgroundInitializationErrorCode = null;
 let backgroundInitializationStage = null;
+let backgroundInitializationDetail = null;
 
 function setBackgroundReadiness(ready) {
   backgroundInitializationReady = ready === true;
   if (backgroundInitializationReady) {
     backgroundInitializationErrorCode = null;
     backgroundInitializationStage = null;
+    backgroundInitializationDetail = null;
   }
 }
 
@@ -127,6 +129,22 @@ function setBackgroundInitializationError(error, stage = null) {
     typeof stage === "string" && /^[a-z][a-z0-9-]{1,63}$/.test(stage)
       ? stage
       : null;
+  backgroundInitializationDetail = redactInitializationDetail(error?.message);
+}
+
+// A server-side error message is the one place a connection string can appear,
+// which is why the health payload carried no error information at all
+// originally. But a code alone was not enough to act on: MONGO_224 is
+// QueryFeatureNotAllowed, and only the message names *which* feature the server
+// refused. So the message is admitted with every credential-bearing shape removed
+// and a hard length cap.
+function redactInitializationDetail(message) {
+  if (typeof message !== "string" || message.length === 0) return null;
+  return message
+    .replace(/mongodb(?:\+srv)?:\/\/\S*/gi, "[uri]")
+    .replace(/\/\/[^\s/@]*:[^\s/@]*@/g, "//[credentials]@")
+    .replace(/\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/g, "[address]")
+    .slice(0, 240);
 }
 
 function isHealthReady({ dbOk, backgroundReady }) {
@@ -338,6 +356,9 @@ app.get("/health", async (req, res) => {
     payload.backgroundError = backgroundInitializationErrorCode;
     if (backgroundInitializationStage) {
       payload.backgroundStage = backgroundInitializationStage;
+    }
+    if (backgroundInitializationDetail) {
+      payload.backgroundDetail = backgroundInitializationDetail;
     }
   }
   res.status(dbOk ? 200 : 503).json(payload);
