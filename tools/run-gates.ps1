@@ -470,6 +470,7 @@ try {
         "taxworker-flow-checklist",
         "digest-delivery-correctness",
         "notice-case-contract",
+        "shared-backend-contract",
         "error-contract-invariants",
         "gst-owner-authorization-contract",
         "deploy-archive-security",
