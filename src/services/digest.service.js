@@ -100,6 +100,53 @@ function expressionFilter(clauses) {
   return { $expr: { $and: clauses } };
 }
 
+// MongoDB refuses "$expr is not allowed in the query predicate for an upsert",
+// so any filter reaching an upsert has to be built from ordinary operators. The
+// $expr forms above are still used everywhere else, including on the read that
+// precedes each upsert, because they are what make a comparison exact.
+//
+// $exists:false distinguishes an absent field from a stored null, exactly as the
+// $type "missing" clause does.
+//
+// A defined value is compared with a bare value rather than {$eq: value}, and is
+// asserted to be a scalar first. The reason $literal appears in the $expr clauses
+// is to stop an object value being reinterpreted as query operators; asserting the
+// value is a scalar rules that out at the source, and keeps the filter to
+// operators MongoDB accepts in an upsert predicate.
+function assertUpsertComparableValue(fieldPath, value) {
+  if (value === null) return value;
+  const type = typeof value;
+  if (type === "string" || type === "number" || type === "boolean")
+    return value;
+  if (value instanceof Date) return value;
+  if (value instanceof mongoose.Types.ObjectId) return value;
+  throw new TypeError(
+    `${fieldPath} must be a scalar to be compared in an upsert predicate`,
+  );
+}
+
+function upsertEqualityFilter(entries) {
+  return Object.fromEntries(
+    Object.entries(entries).map(([fieldPath, value]) => [
+      fieldPath,
+      value === undefined
+        ? { $exists: false }
+        : assertUpsertComparableValue(fieldPath, value),
+    ]),
+  );
+}
+
+function upsertObjectIdEqualityFilter(entries) {
+  return upsertEqualityFilter(
+    Object.fromEntries(
+      Object.entries(entries).map(([fieldPath, value]) => [
+        fieldPath,
+        new mongoose.Types.ObjectId(requireCanonicalObjectId(value, fieldPath)),
+      ]),
+    ),
+  );
+}
+
 function strictObjectIdFilter(entries) {
   const canonicalEntries = Object.fromEntries(
     Object.entries(entries).map(([fieldPath, value]) => [
@@ -1967,7 +2014,17 @@ async function enqueueRecipientDigest(
     const preferences = effectivePreferences(recipient);
     const emailEnabled = preferences.emailEnabled;
     delivery = await DigestDeliveryModel.findOneAndUpdate(
-      deliveryIdentityFilter,
+      // deliveryIdentityFilter carries $expr type assertions and cannot be used
+      // here. The strict read above already ran with it; this filter matches the
+      // same identity, and the unique index on
+      // {firmId, kind, periodKey, recipientUserId} is what guarantees it.
+      combineQueryFilters(
+        upsertObjectIdEqualityFilter({
+          firmId: firm._id,
+          recipientUserId: recipient._id,
+        }),
+        upsertEqualityFilter({ kind, periodKey }),
+      ),
       {
         $setOnInsert: {
           firmId: firm._id,
@@ -2225,7 +2282,11 @@ async function acquireDigestRecoveryCursorLease({
     ownerToken,
     leaseExpiry,
   );
-  const snapshotFence = snapshotFilter({
+  // This fence guards an upsert, so it cannot use the $expr form. On first use
+  // both values are undefined and the fence becomes "these fields are absent",
+  // which is what allows the insert; afterwards it pins the exact lease that was
+  // read, and a loser of that race is handled by the duplicate-key branch below.
+  const snapshotFence = upsertEqualityFilter({
     "lease.token": snapshot?.lease?.token,
     "lease.expiresAt": snapshot?.lease?.expiresAt,
   });

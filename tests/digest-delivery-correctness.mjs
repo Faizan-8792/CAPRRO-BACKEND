@@ -580,6 +580,44 @@ function assertLiteralEquality(query, fieldPath, expected, label = fieldPath) {
   );
 }
 
+// The recovery cursor acquisition is an upsert, and MongoDB rejects it outright:
+// "$expr is not allowed in the query predicate for an upsert". So that one filter
+// cannot be held to the $expr/$literal form, and asserting that it was is what let
+// the defect ship -- the in-memory model accepted the shape and only the real
+// server refused it.
+//
+// It is asserted separately rather than by relaxing assertLiteralEquality, so every
+// filter that is not an upsert predicate is still held to the stricter form. The
+// property that $literal provided -- a value cannot be reinterpreted as query
+// operators -- is preserved in the service, which rejects a non-scalar before
+// building the filter.
+function assertUpsertScalarEquality(
+  query,
+  fieldPath,
+  expected,
+  label = fieldPath,
+) {
+  assert.equal(
+    queryHasDirectCondition(query, fieldPath, (condition) =>
+      expected instanceof Date
+        ? condition instanceof Date &&
+          condition.getTime() === expected.getTime()
+        : condition === expected,
+    ),
+    true,
+    `${label} must use direct scalar equality, because an upsert predicate cannot use $expr`,
+  );
+  // The absence of $expr is asserted here, at every upsert call site, because its
+  // presence is what the server rejects and nothing previously checked for it.
+  assert.equal(
+    queryContains(query, (node) =>
+      Object.prototype.hasOwnProperty.call(node, "$expr"),
+    ),
+    false,
+    `${label} must not contain $expr anywhere: MongoDB rejects "$expr is not allowed in the query predicate for an upsert"`,
+  );
+}
+
 function assertStrictObjectIdEquality(
   query,
   fieldPath,
@@ -3837,7 +3875,7 @@ await check(
     const acquisition = recoveryCursor.operations.find(
       (operation) => operation.method === "findOneAndUpdate",
     );
-    assertLiteralEquality(
+    assertUpsertScalarEquality(
       acquisition.filter,
       "lease.token",
       implausibleToken,
@@ -13434,13 +13472,13 @@ await check(
     assert.equal(newerMarkerInjected, true);
     assert.deepEqual(recoveredPeriods, []);
     assert.equal(recoveryCursor.get().lease.token, "drc1:3");
-    assertLiteralEquality(
+    assertUpsertScalarEquality(
       acquisition.filter,
       "lease.token",
       "drc1:2",
       "recovery marker acquisition snapshot",
     );
-    assertLiteralEquality(
+    assertUpsertScalarEquality(
       acquisition.filter,
       "lease.expiresAt",
       DIGEST_RECOVERY_LEGACY_FENCE,
@@ -13559,13 +13597,13 @@ await check(
       .slice(secondOperationStart)
       .find((operation) => operation.method === "findOneAndUpdate");
     const reclaimedToken = reclaimedAcquisition.update.$set["lease.token"];
-    assertLiteralEquality(
+    assertUpsertScalarEquality(
       reclaimedAcquisition.filter,
       "lease.token",
       crashedToken,
       "expired recovery marker snapshot",
     );
-    assertLiteralEquality(
+    assertUpsertScalarEquality(
       reclaimedAcquisition.filter,
       "lease.expiresAt",
       DIGEST_RECOVERY_LEGACY_FENCE,
