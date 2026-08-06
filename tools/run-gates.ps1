@@ -471,6 +471,7 @@ try {
         "digest-delivery-correctness",
         "notice-case-contract",
         "error-contract-invariants",
+        "gst-owner-authorization-contract",
         "deploy-archive-security",
         "deploy-archive-boundary"
     )
