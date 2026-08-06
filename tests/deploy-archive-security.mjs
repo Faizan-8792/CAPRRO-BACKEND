@@ -2139,9 +2139,12 @@ if (listed.status !== 0 || listed.error) {
     { mode: "javascript-fixtures", files, secretNames },
     60_000,
   );
+  // The count is pinned so a new runtime file cannot appear unscanned and
+  // unnoticed. Raised from 148 to 149 for src/maintenance/ensure-indexes.mjs,
+  // added deliberately as the production index-management step.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 148 && result.status === 0,
+    files.length === 149 && result.status === 0,
     result,
   );
 }
