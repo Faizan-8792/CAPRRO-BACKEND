@@ -33,6 +33,10 @@ let shuttingDown = false;
 let schedulersStarted = false;
 let bootstrapPromise = null;
 let bootstrapRetryTimer = null;
+// Names the phase boot is currently in, so a failure reports where it happened
+// and not only what the error code was. Several phases can raise the same driver
+// error code, and without the phase the code does not identify the cause.
+let bootstrapStage = null;
 let databaseConnectionInitialized = false;
 let automationWorkerPromise = null;
 let digestSchedulerPromise = null;
@@ -47,6 +51,13 @@ export async function completeDigestStartup({
   setReady,
   isShuttingDown,
 }) {
+  // This body deliberately touches nothing but its injected parameters. A test
+  // extracts this function's source and evaluates it in isolation, so a reference
+  // to any module-level binding here is a crash rather than a test failure. That
+  // is also why bootstrap() names the stage before calling this rather than the
+  // phases naming themselves: within digest startup the error code distinguishes
+  // them -- DIGEST_INDEXES_NOT_READY for the index phase, DIGEST_RECOVERY_* for
+  // the drain.
   await assertIndexes();
   if (isShuttingDown()) return false;
   await drainRecovery();
@@ -166,7 +177,12 @@ function startSchedulers() {
   return true;
 }
 
+function currentBootstrapStage() {
+  return bootstrapStage;
+}
+
 async function bootstrap() {
+  bootstrapStage = "connect";
   if (!databaseConnectionInitialized) {
     await connectDB();
     databaseConnectionInitialized = true;
@@ -178,6 +194,7 @@ async function bootstrap() {
   // retried every 30 seconds indefinitely, and the schedulers below never
   // started. This never fails the boot -- the assertions remain the authority on
   // readiness and report precisely what is missing.
+  bootstrapStage = "provision-indexes";
   try {
     const provisioning = await ensureRequiredIndexes();
     if (provisioning.created.length > 0) {
@@ -198,6 +215,7 @@ async function bootstrap() {
   }
 
   if (process.env.NODE_ENV === "production") {
+    bootstrapStage = "rollout-flags";
     const [noticeRollout, engagementRollout, workingPaperRollout] =
       await Promise.all([
         AppConfig.getFeatureFlagState("noticeCases", { fresh: true }),
@@ -211,6 +229,7 @@ async function bootstrap() {
       error.code = "INVALID_AUDIT_WORKING_PAPER_ROLLOUT";
       throw error;
     }
+    bootstrapStage = "feature-index-readiness";
     const readinessChecks = [];
     if (noticeRollout.enabled) readinessChecks.push(assertCaseIndexesReady());
     if (engagementRollout.enabled)
@@ -221,6 +240,7 @@ async function bootstrap() {
     await Promise.all(readinessChecks);
   }
 
+  bootstrapStage = "digest-startup";
   return completeDigestStartup({
     assertIndexes: assertDigestIndexesReady,
     drainRecovery: drainDigestRecovery,
@@ -256,7 +276,7 @@ function runBootstrap() {
         "[BOOT] Startup initialization error:",
         error?.message || error,
       );
-      setBackgroundInitializationError(error);
+      setBackgroundInitializationError(error, currentBootstrapStage());
       scheduleBootstrapRetry();
       return false;
     })

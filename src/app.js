@@ -86,22 +86,47 @@ const app = express();
 // initialization and marks readiness true only after indexes and schedulers are ready.
 let backgroundInitializationReady = false;
 let backgroundInitializationErrorCode = null;
+let backgroundInitializationStage = null;
 
 function setBackgroundReadiness(ready) {
   backgroundInitializationReady = ready === true;
-  if (backgroundInitializationReady) backgroundInitializationErrorCode = null;
+  if (backgroundInitializationReady) {
+    backgroundInitializationErrorCode = null;
+    backgroundInitializationStage = null;
+  }
 }
 
-// Records why background initialization is not finishing, as a stable code only.
+// Records why background initialization is not finishing, as a stable code and
+// the stage it failed in. Never a message, a stack, or any connection detail --
+// a driver error can carry the connection string, which is why the payload
+// excluded error information entirely before.
+//
 // Diagnosing a stuck readiness state previously required server filesystem
-// access, because /health reported "initializing" and nothing else: an instance
-// could retry a failing index assertion indefinitely and the only external signal
-// was a 503 that never resolved. A code such as DIGEST_INDEXES_NOT_READY names
-// the cause without disclosing a message, a stack, or any connection detail.
-function setBackgroundInitializationError(error) {
-  const code = typeof error?.code === "string" ? error.code : null;
-  backgroundInitializationErrorCode =
-    code && /^[A-Z][A-Z0-9_]{2,63}$/.test(code) ? code : "INITIALIZATION_ERROR";
+// access: /health said "initializing" and nothing more, so an instance could
+// retry a failing step indefinitely with no external signal beyond a 503 that
+// never resolved. The first version of this reported only a string `code`, which
+// was not enough -- a MongoDB error carries a *numeric* code, so every driver
+// failure collapsed into one indistinguishable value.
+function setBackgroundInitializationError(error, stage = null) {
+  const rawCode = error?.code;
+  if (typeof rawCode === "string" && /^[A-Z][A-Z0-9_]{2,63}$/.test(rawCode)) {
+    backgroundInitializationErrorCode = rawCode;
+  } else if (Number.isInteger(rawCode)) {
+    // MongoDB server error codes are numeric: 11000 duplicate key, 85 and 86
+    // index conflicts. The number alone identifies the failure class.
+    backgroundInitializationErrorCode = `MONGO_${rawCode}`;
+  } else if (
+    typeof error?.name === "string" &&
+    /^[A-Za-z][A-Za-z0-9]{2,63}$/.test(error.name)
+  ) {
+    backgroundInitializationErrorCode = `ERR_${error.name.toUpperCase()}`;
+  } else {
+    backgroundInitializationErrorCode = "INITIALIZATION_ERROR";
+  }
+  backgroundInitializationStage =
+    typeof stage === "string" && /^[a-z][a-z0-9-]{1,63}$/.test(stage)
+      ? stage
+      : null;
 }
 
 function isHealthReady({ dbOk, backgroundReady }) {
@@ -311,6 +336,9 @@ app.get("/health", async (req, res) => {
   };
   if (!dbOk && backgroundInitializationErrorCode) {
     payload.backgroundError = backgroundInitializationErrorCode;
+    if (backgroundInitializationStage) {
+      payload.backgroundStage = backgroundInitializationStage;
+    }
   }
   res.status(dbOk ? 200 : 503).json(payload);
 });
