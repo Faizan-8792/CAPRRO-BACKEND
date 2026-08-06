@@ -471,6 +471,7 @@ try {
         "digest-delivery-correctness",
         "notice-case-contract",
         "shared-backend-contract",
+        "production-error-envelope",
         "error-contract-invariants",
         "gst-owner-authorization-contract",
         "deploy-archive-security",
