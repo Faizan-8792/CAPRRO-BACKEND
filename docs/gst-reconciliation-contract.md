@@ -4,14 +4,14 @@ Ledger task **T13**. Verified by reading the server source, not inferred from fi
 
 Sources read:
 
-| File | What it settles |
-|---|---|
-| `src/app.js:23,307` | mount path |
-| `src/routes/gst-reconciliation.routes.js` | route table, middleware chain, route ordering |
-| `src/controllers/gst-reconciliation.controller.js` | request field allow-lists, status codes |
-| `src/services/gst-reconciliation.service.js` | serializer shapes, pagination, export, CSV escaping |
-| `src/models/ReconciliationRun.js` | run statuses, money fields, tolerances, lock/lease fields |
-| `src/models/ReconciliationItem.js` | item statuses, disposition actions, match rules |
+| File                                               | What it settles                                           |
+| -------------------------------------------------- | --------------------------------------------------------- |
+| `src/app.js:23,307`                                | mount path                                                |
+| `src/routes/gst-reconciliation.routes.js`          | route table, middleware chain, route ordering             |
+| `src/controllers/gst-reconciliation.controller.js` | request field allow-lists, status codes                   |
+| `src/services/gst-reconciliation.service.js`       | serializer shapes, pagination, export, CSV escaping       |
+| `src/models/ReconciliationRun.js`                  | run statuses, money fields, tolerances, lock/lease fields |
+| `src/models/ReconciliationItem.js`                 | item statuses, disposition actions, match rules           |
 
 Mounted at `/api/gst-reconciliation` (`app.js:307`).
 
@@ -32,15 +32,24 @@ Two consequences the desktop must handle and must not paper over.
 
 **`requireFirmWriteAccess` guards the GETs too.** A read-only firm member cannot list runs, open a run, or read items. The entire surface is unavailable to them, not just the mutations. The desktop must not offer a read-only member a GST navigation entry that only ever produces an error.
 
-**A `403` here carries three distinct meanings** and the wording must distinguish them, because the remedies differ:
+**These refusals carry distinct meanings** and the wording must distinguish them, because the remedies differ:
 
-| Cause | Honest wording | Remedy |
-|---|---|---|
-| `requireFirmMember` fails | not a member of this firm | be added to the firm |
-| `requireFirmWriteAccess` fails | your access is read-only | an administrator changes your role |
-| `requireFeatureFlag` fails | not switched on for this firm | rollout, nothing the user can fix |
+| Cause                          | Status  | Honest wording                | Remedy                             |
+| ------------------------------ | ------- | ----------------------------- | ---------------------------------- |
+| `requireFirmMember` fails      | 403     | not a member of this firm     | be added to the firm               |
+| `requireFirmWriteAccess` fails | 403     | your access is read-only      | an administrator changes your role |
+| `requireFeatureFlag` fails     | **404** | not switched on for this firm | rollout, nothing the user can fix  |
 
-The flag is a rollout gate, never an authorization control. Read `GET /api/app-config` for `gstReconciliation` and hide the surface when it is off, rather than letting the user walk into a `403`.
+> **Corrected 2026-08-06 (T24).** This table previously listed all three as `403`. The flag case is
+> actually a **`404`**: `requireFeatureFlag` responds
+> `{ ok: false, error: "Feature unavailable", featureFlag: "<flag>", requestId }`
+> (`src/middleware/rollout.middleware.js:41`). The error was found while reading the same middleware
+> for the TDS Health contract. It matters because on `GET /runs/:id` a `404` then means _either_ the
+> run does not exist _or_ the feature is off, and the two are distinguishable only by the
+> `featureFlag` field being present. A client that reads every `404` as "run not found" will tell a
+> chartered accountant their run was deleted when the feature was merely switched off.
+
+The flag is a rollout gate, never an authorization control. Read `GET /api/app-config` for `gstReconciliation` and hide the surface when it is off, rather than letting the user walk into a refusal.
 
 ---
 
@@ -48,20 +57,20 @@ The flag is a rollout gate, never an authorization control. Read `GET /api/app-c
 
 Twelve routes. `GET /runs/:id` is declared **last**, after the more specific `/runs/:id/...` paths; preserve that order if the file is ever edited.
 
-| Method | Path | Handler | Success |
-|---|---|---|---|
-| POST | `/runs` | `createRun` | **202**, or **200** when replayed |
-| GET | `/runs` | `listRuns` | 200 |
-| GET | `/runs/:id/items` | `listItems` | 200 |
-| PATCH | `/runs/:id/items/:itemId` | `updateItemDisposition` | 200 |
-| POST | `/runs/:id/bulk` | `updateItemsBulk` | 200 |
-| GET | `/runs/:id/3b-control` | `showGstr3bControl` | 200 |
-| GET | `/runs/:id/supplier-chase` | `showSupplierChase` | 200 |
-| GET | `/runs/:id/activity` | `listActivity` | 200 |
-| POST | `/runs/:id/recover-review` | `recoverRunReview` | 200 |
-| POST | `/runs/:id/lock` | `lockRun` | 200 |
-| GET | `/runs/:id/export` | `exportRun` | 200, **`text/csv` not JSON** |
-| GET | `/runs/:id` | `showRun` | 200 |
+| Method | Path                       | Handler                 | Success                           |
+| ------ | -------------------------- | ----------------------- | --------------------------------- |
+| POST   | `/runs`                    | `createRun`             | **202**, or **200** when replayed |
+| GET    | `/runs`                    | `listRuns`              | 200                               |
+| GET    | `/runs/:id/items`          | `listItems`             | 200                               |
+| PATCH  | `/runs/:id/items/:itemId`  | `updateItemDisposition` | 200                               |
+| POST   | `/runs/:id/bulk`           | `updateItemsBulk`       | 200                               |
+| GET    | `/runs/:id/3b-control`     | `showGstr3bControl`     | 200                               |
+| GET    | `/runs/:id/supplier-chase` | `showSupplierChase`     | 200                               |
+| GET    | `/runs/:id/activity`       | `listActivity`          | 200                               |
+| POST   | `/runs/:id/recover-review` | `recoverRunReview`      | 200                               |
+| POST   | `/runs/:id/lock`           | `lockRun`               | 200                               |
+| GET    | `/runs/:id/export`         | `exportRun`             | 200, **`text/csv` not JSON**      |
+| GET    | `/runs/:id`                | `showRun`               | 200                               |
 
 ---
 
@@ -71,13 +80,13 @@ Twelve routes. `GET /runs/:id` is declared **last**, after the more specific `/r
 
 It also rejects a non-object body, and an empty body unless `allowEmpty` is set.
 
-| Body | Allowed fields |
-|---|---|
-| `POST /runs` | `clientId` `gstin` `period` `booksBatchId` `portalBatchId` `gstr3bBatchId` `revisionOf` `roundingToleranceMinor` `dateToleranceDays` `priorPeriodAdjustment` `assignedTo` |
-| `PATCH .../items/:itemId` | `action` `candidatePortalRowId` `reason` `note` `ownerUserId` `chaseState` `taskId` `expectedDecisionVersion` |
-| `POST .../bulk` | `mode` `itemIds` `action` `payload` `previewToken` — and `payload` is itself validated against the disposition fields **minus `action`** |
-| `POST .../recover-review` | `operationId`, empty body allowed |
-| `POST .../lock` | none; empty body required |
+| Body                      | Allowed fields                                                                                                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /runs`              | `clientId` `gstin` `period` `booksBatchId` `portalBatchId` `gstr3bBatchId` `revisionOf` `roundingToleranceMinor` `dateToleranceDays` `priorPeriodAdjustment` `assignedTo` |
+| `PATCH .../items/:itemId` | `action` `candidatePortalRowId` `reason` `note` `ownerUserId` `chaseState` `taskId` `expectedDecisionVersion`                                                             |
+| `POST .../bulk`           | `mode` `itemIds` `action` `payload` `previewToken` — and `payload` is itself validated against the disposition fields **minus `action`**                                  |
+| `POST .../recover-review` | `operationId`, empty body allowed                                                                                                                                         |
+| `POST .../lock`           | none; empty body required                                                                                                                                                 |
 
 `period` must be `YYYY-MM`.
 
@@ -107,7 +116,7 @@ The embedded `userDisposition.action` on the run model narrows to `ACCEPT_MATCH`
 
 ## 5. Money is integer minor units everywhere
 
-`moneyField()` is `{ type: Number, default: 0, validate: Number.isSafeInteger }`, message *"must be a safe integer in the smallest currency unit"*.
+`moneyField()` is `{ type: Number, default: 0, validate: Number.isSafeInteger }`, message _"must be a safe integer in the smallest currency unit"_.
 
 Every amount ends in `Minor` and is paise: `igstMinor` `cgstMinor` `sgstMinor` `cessMinor` `totalTaxMinor` `taxableValueMinor` `reviewValueMinor`.
 
@@ -178,10 +187,10 @@ All ids are strings. `gstr3bBatchId`, `rootRunId`, `parentRunId`, `jobId`, `assi
 
 ## 8. Pagination, and the absence of a truncation flag
 
-| List | `page` | `limit` default | `limit` max |
-|---|---|---|---|
-| `GET /runs` | 1, range 1..100000 | **25** | **50** |
-| `GET /runs/:id/items` | 1 | **50** | see service |
+| List                  | `page`             | `limit` default | `limit` max |
+| --------------------- | ------------------ | --------------- | ----------- |
+| `GET /runs`           | 1, range 1..100000 | **25**          | **50**      |
+| `GET /runs/:id/items` | 1                  | **50**          | see service |
 
 Runs sort by `updatedAt: -1, _id: -1`.
 
@@ -195,7 +204,7 @@ An unknown `status` value on either list is rejected with a domain error, so val
 
 ## 9. Concurrency, leases and locking
 
-**Optimistic concurrency on items.** Each item carries `decisionVersion`. A disposition may send `expectedDecisionVersion`. A mismatch is a conflict and must be reported to the user as *someone else changed this row*, then the row refetched. Never retry silently and never overwrite.
+**Optimistic concurrency on items.** Each item carries `decisionVersion`. A disposition may send `expectedDecisionVersion`. A mismatch is a conflict and must be reported to the user as _someone else changed this row_, then the row refetched. Never retry silently and never overwrite.
 
 **Run-level mutation lease.** `reviewMutationActive` and `reviewMutationExpiresAt` mark a run as being mutated. `pendingReviewTransition` and `bulkReviewOperation` hold the in-flight operation, keyed by a 64-hex `operationId`.
 
@@ -219,7 +228,7 @@ if (run.status !== "LOCKED") {
 }
 ```
 
-So a `409` here is expected and must be worded as *lock the run first*, not as a failure.
+So a `409` here is expected and must be worded as _lock the run first_, not as a failure.
 
 The response is **not JSON**: `Content-Type: text/csv; charset=utf-8`, `Content-Disposition: attachment; filename="<name>"`, and a header `X-Reconciliation-Item-Count` carrying the row count. The desktop HTTP layer must therefore treat this route as a byte/stream response, and should cross-check the written row count against that header.
 
