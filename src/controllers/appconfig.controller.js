@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import AppConfig, { DEFAULT_FEATURE_FLAGS } from "../models/AppConfig.js";
 import { assertCaseIndexesReady } from "../services/case-index-readiness.service.js";
 import { assertEngagementIndexesReady } from "../services/engagement-index-readiness.service.js";
+import { describeRetentionPolicy } from "../services/data-retention.service.js";
 import User from "../models/User.js";
 
 const SUPER_EMAIL = "saifullahfaizan786@gmail.com";
@@ -31,6 +32,12 @@ export const getAppConfig = async (req, res, next) => {
         maintenanceMessage: cfg.maintenanceMessage || "",
         welcomeAnnouncement: cfg.welcomeAnnouncement || null,
         featureFlags,
+        // Additive, and deliberately served from here rather than hardcoded in each
+        // client. Both the desktop and the extension must state the same retention
+        // rule, and two hardcoded copies drift; one source cannot. This route is
+        // public and already fetched by both, so neither needs a new call.
+        // Existing consumers read named keys, so an extra key is inert for them.
+        dataRetention: describeRetentionPolicy(),
         updatedAt: cfg.updatedAt,
       },
     });
@@ -50,7 +57,7 @@ export const dismissWelcome = async (req, res, next) => {
 
     await User.updateOne(
       { _id: req.user.id },
-      { $set: { welcomeSeenVersion: version } }
+      { $set: { welcomeSeenVersion: version } },
     );
 
     return res.json({ ok: true, welcomeSeenVersion: version });
@@ -65,12 +72,19 @@ export const updateFeatureFlags = async (req, res, next) => {
     assertSuper(req.user);
     const { featureFlags } = req.body || {};
 
-    if (!featureFlags || typeof featureFlags !== "object" || Array.isArray(featureFlags)) {
-      return res.status(400).json({ ok: false, error: "featureFlags object is required" });
+    if (
+      !featureFlags ||
+      typeof featureFlags !== "object" ||
+      Array.isArray(featureFlags)
+    ) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "featureFlags object is required" });
     }
 
     const unknownKeys = Object.keys(featureFlags).filter(
-      (key) => !Object.prototype.hasOwnProperty.call(DEFAULT_FEATURE_FLAGS, key)
+      (key) =>
+        !Object.prototype.hasOwnProperty.call(DEFAULT_FEATURE_FLAGS, key),
     );
     if (unknownKeys.length) {
       return res.status(400).json({
@@ -93,7 +107,9 @@ export const updateFeatureFlags = async (req, res, next) => {
     }
 
     if (!Object.keys(update).length) {
-      return res.status(400).json({ ok: false, error: "No feature flags to update" });
+      return res
+        .status(400)
+        .json({ ok: false, error: "No feature flags to update" });
     }
 
     if (featureFlags.noticeCases === true) {
@@ -103,9 +119,8 @@ export const updateFeatureFlags = async (req, res, next) => {
       await assertEngagementIndexesReady();
     }
     if (featureFlags.auditWorkingPapers === true) {
-      const { assertAuditWorkingPaperIndexesReady } = await import(
-        "../services/audit-working-paper-index-readiness.service.js"
-      );
+      const { assertAuditWorkingPaperIndexesReady } =
+        await import("../services/audit-working-paper-index-readiness.service.js");
       await assertAuditWorkingPaperIndexesReady();
     }
 
@@ -117,11 +132,16 @@ export const updateFeatureFlags = async (req, res, next) => {
       versionIncrements["featureFlagVersions.noticeCases"] = 1;
       update["featureFlagPublicationFences.noticeCases"] = randomUUID();
     }
-    if (Object.prototype.hasOwnProperty.call(featureFlags, "assuranceEngagements")) {
+    if (
+      Object.prototype.hasOwnProperty.call(featureFlags, "assuranceEngagements")
+    ) {
       versionIncrements["featureFlagVersions.assuranceEngagements"] = 1;
-      update["featureFlagPublicationFences.assuranceEngagements"] = randomUUID();
+      update["featureFlagPublicationFences.assuranceEngagements"] =
+        randomUUID();
     }
-    if (Object.prototype.hasOwnProperty.call(featureFlags, "auditWorkingPapers")) {
+    if (
+      Object.prototype.hasOwnProperty.call(featureFlags, "auditWorkingPapers")
+    ) {
       versionIncrements["featureFlagVersions.auditWorkingPapers"] = 1;
       update["featureFlagPublicationFences.auditWorkingPapers"] = randomUUID();
     }
@@ -134,7 +154,7 @@ export const updateFeatureFlags = async (req, res, next) => {
           ? { $inc: versionIncrements }
           : {}),
       },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
     AppConfig.invalidateCache();
 
@@ -154,7 +174,8 @@ export const updateMaintenance = async (req, res, next) => {
     const { maintenanceMode, maintenanceMessage } = req.body || {};
 
     const update = {};
-    if (typeof maintenanceMode === "boolean") update.maintenanceMode = maintenanceMode;
+    if (typeof maintenanceMode === "boolean")
+      update.maintenanceMode = maintenanceMode;
     if (typeof maintenanceMessage === "string") {
       update.maintenanceMessage = maintenanceMessage.slice(0, 500).trim();
     }
@@ -166,7 +187,7 @@ export const updateMaintenance = async (req, res, next) => {
     await AppConfig.findByIdAndUpdate(
       "singleton",
       { $set: update },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
     AppConfig.invalidateCache();
 
@@ -191,9 +212,12 @@ export const updateWelcomeAnnouncement = async (req, res, next) => {
     if (typeof version === "string" && version.trim()) {
       update["welcomeAnnouncement.version"] = version.trim().slice(0, 80);
     }
-    if (typeof title === "string") update["welcomeAnnouncement.title"] = title.trim().slice(0, 200);
-    if (typeof body === "string") update["welcomeAnnouncement.body"] = body.trim().slice(0, 1500);
-    if (typeof enabled === "boolean") update["welcomeAnnouncement.enabled"] = enabled;
+    if (typeof title === "string")
+      update["welcomeAnnouncement.title"] = title.trim().slice(0, 200);
+    if (typeof body === "string")
+      update["welcomeAnnouncement.body"] = body.trim().slice(0, 1500);
+    if (typeof enabled === "boolean")
+      update["welcomeAnnouncement.enabled"] = enabled;
     update["welcomeAnnouncement.updatedAt"] = new Date();
     update.updatedBy = req.user.id;
 
@@ -204,12 +228,15 @@ export const updateWelcomeAnnouncement = async (req, res, next) => {
     await AppConfig.findByIdAndUpdate(
       "singleton",
       { $set: update },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
     AppConfig.invalidateCache();
 
     const fresh = await AppConfig.getInstance();
-    return res.json({ ok: true, welcomeAnnouncement: fresh.welcomeAnnouncement });
+    return res.json({
+      ok: true,
+      welcomeAnnouncement: fresh.welcomeAnnouncement,
+    });
   } catch (err) {
     next(err);
   }

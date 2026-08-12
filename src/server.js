@@ -12,6 +12,10 @@ import { assertEngagementIndexesReady } from "./services/engagement-index-readin
 import { assertAuditWorkingPaperIndexesReady } from "./services/audit-working-paper-index-readiness.service.js";
 import { runAutomationWorkerBatch } from "./services/automation-worker.service.js";
 import { ensureRequiredIndexes } from "./services/index-provisioning.service.js";
+import CaseMatter from "./models/CaseMatter.js";
+import AuditWorkingPaperAnalysis from "./models/AuditWorkingPaperAnalysis.js";
+import EngagementFinding from "./models/EngagementFinding.js";
+import { runRetentionPurge } from "./services/data-retention.service.js";
 import {
   drainDigestRecovery,
   enqueueDueDigests,
@@ -25,6 +29,10 @@ const PORT = Number(process.env.PORT || 4001);
 const REMINDER_SCHEDULER_INTERVAL_MS = 15 * 60 * 1000;
 const DIGEST_SCHEDULER_INTERVAL_MS = 15 * 60 * 1000;
 const AUTOMATION_WORKER_INTERVAL_MS = 30 * 1000;
+// The retention window is 30 days, so this does not need fine granularity. Six
+// hours keeps the purge well inside its own day without adding steady load, and
+// still gives four chances a day for a tick to land if the process restarts.
+const RETENTION_SCHEDULER_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const BOOTSTRAP_RETRY_DELAY_MS = 30 * 1000;
 const AUTOMATION_WORKER_BATCH_SIZE = 5;
 const automationWorkerId = `${hostname()}:${process.pid}`;
@@ -43,6 +51,8 @@ let digestSchedulerPromise = null;
 let reminderSchedulerTimer = null;
 let digestSchedulerTimer = null;
 let automationWorkerTimer = null;
+let retentionSchedulerPromise = null;
+let retentionSchedulerTimer = null;
 
 export async function completeDigestStartup({
   assertIndexes,
@@ -153,6 +163,38 @@ function runAutomationWorker() {
   return automationWorkerPromise;
 }
 
+// Enforces the 30-day retention decided in PLAN.md section 33. Logs every tick
+// that changed anything, and logs failures per step: the purge reports partial
+// failure rather than aborting, so a step that could not run must be visible.
+function runRetentionScheduler() {
+  if (shuttingDown || retentionSchedulerPromise)
+    return retentionSchedulerPromise;
+  retentionSchedulerPromise = runRetentionPurge({
+    models: { CaseMatter, AuditWorkingPaperAnalysis, EngagementFinding },
+  })
+    .then((summary) => {
+      if (summary.changed > 0) {
+        console.log("[RETENTION] Purge tick complete", {
+          cutoff: summary.cutoff.toISOString(),
+          changed: summary.changed,
+          steps: summary.steps,
+        });
+      }
+      for (const failure of summary.failures) {
+        console.error("[RETENTION] Purge step failed", failure);
+      }
+      return summary;
+    })
+    .catch((error) => {
+      console.error("[RETENTION] Purge tick failed", error);
+      return null;
+    })
+    .finally(() => {
+      retentionSchedulerPromise = null;
+    });
+  return retentionSchedulerPromise;
+}
+
 function startSchedulers() {
   if (shuttingDown || schedulersStarted) return false;
   schedulersStarted = true;
@@ -168,12 +210,18 @@ function startSchedulers() {
     runAutomationWorker,
     AUTOMATION_WORKER_INTERVAL_MS,
   );
+  retentionSchedulerTimer = setInterval(
+    runRetentionScheduler,
+    RETENTION_SCHEDULER_INTERVAL_MS,
+  );
   reminderSchedulerTimer.unref();
   digestSchedulerTimer.unref();
   automationWorkerTimer.unref();
+  retentionSchedulerTimer.unref();
   runReminderScheduler();
   runDigestScheduler();
   runAutomationWorker();
+  runRetentionScheduler();
   return true;
 }
 
@@ -298,6 +346,7 @@ async function gracefulShutdown(signal) {
   if (reminderSchedulerTimer) clearInterval(reminderSchedulerTimer);
   if (digestSchedulerTimer) clearInterval(digestSchedulerTimer);
   if (automationWorkerTimer) clearInterval(automationWorkerTimer);
+  if (retentionSchedulerTimer) clearInterval(retentionSchedulerTimer);
 
   server.close((error) => {
     if (error) console.error("HTTP server close error:", error);
@@ -322,6 +371,12 @@ async function gracefulShutdown(signal) {
     if (activeDigestScheduler) await activeDigestScheduler;
   } catch (error) {
     console.error("Digest scheduler shutdown error:", error.message);
+  }
+  try {
+    const activeRetentionScheduler = retentionSchedulerPromise;
+    if (activeRetentionScheduler) await activeRetentionScheduler;
+  } catch (error) {
+    console.error("Retention scheduler shutdown error:", error.message);
   }
 
   try {

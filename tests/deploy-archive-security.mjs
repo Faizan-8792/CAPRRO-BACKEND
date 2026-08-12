@@ -2141,10 +2141,16 @@ if (listed.status !== 0 || listed.error) {
   );
   // The count is pinned so a new runtime file cannot appear unscanned and
   // unnoticed. Raised from 148 to 150 for the index provisioning service and its
-  // command-line wrapper, added as the production index-management step.
+  // command-line wrapper, added as the production index-management step. Raised
+  // from 150 to 151 for src/data/audit-topic-reference.js, added by commit
+  // c195087 alongside the redesigned insights prompt; that commit updated
+  // tools/run-gates.ps1 with its two new suites but missed this pin, so the gate
+  // ran green locally (git ls-files legitimately reported 151) while this
+  // assertion silently compared against the stale 150 until a full run-gates.ps1
+  // pass caught the mismatch.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 150 && result.status === 0,
+    files.length === 151 && result.status === 0,
     result,
   );
 }

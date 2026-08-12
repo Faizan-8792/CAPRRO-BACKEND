@@ -477,6 +477,7 @@ try {
         "gst-owner-authorization-contract",
         "audit-insights-grounding",
         "audit-redaction-references",
+        "data-retention-contract",
         "deploy-archive-security",
         "deploy-archive-boundary"
     )
