@@ -475,6 +475,8 @@ try {
         "case-ocr-route-behaviour",
         "error-contract-invariants",
         "gst-owner-authorization-contract",
+        "audit-insights-grounding",
+        "audit-redaction-references",
         "deploy-archive-security",
         "deploy-archive-boundary"
     )
