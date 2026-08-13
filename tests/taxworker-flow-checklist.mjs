@@ -259,6 +259,15 @@ check(
   "Solo mode supported at schema level",
 );
 
+// 20. T102/B10: duplicate-archiving in listClients is recorded on the audit trail
+check(
+  "listClients records CLIENT_DUPLICATES_ARCHIVED when it auto-archives duplicates",
+  /safeRecordActivity/.test(ctrl) &&
+    /CLIENT_DUPLICATES_ARCHIVED/.test(ctrl) &&
+    /if\s*\(\s*scope\.firmId\s*\)/.test(ctrl),
+  "A firm's audit trail now shows when a duplicate sweep, not a person, archived a client; solo users (no firmId) are skipped because recordActivity requires a tenant firmId",
+);
+
 // ─── Print report ────────────────────────────────────────────────
 console.log("\n=== TAX WORK TRACKER STATIC VERIFICATION ===\n");
 

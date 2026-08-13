@@ -17,7 +17,7 @@ Mounted at `/api/gst-reconciliation` (`app.js:307`).
 
 ---
 
-## 1. Middleware applies to every route, including reads
+## 1. Middleware applies to every route, but reads bypass the write gate
 
 `routes/gst-reconciliation.routes.js` applies one `router.use` to all twelve routes:
 
@@ -30,7 +30,17 @@ requireFeatureFlag("gstReconciliation")
 
 Two consequences the desktop must handle and must not paper over.
 
-**`requireFirmWriteAccess` guards the GETs too.** A read-only firm member cannot list runs, open a run, or read items. The entire surface is unavailable to them, not just the mutations. The desktop must not offer a read-only member a GST navigation entry that only ever produces an error.
+**Corrected 2026-08-13. This line previously claimed `requireFirmWriteAccess` guards the GETs too,
+and that claim was copied into `docs/tds-health-contract.md` and `docs/engagements-contract.md`,
+which have now also been corrected.** `requireFirmWriteAccess`
+(`src/middleware/authorization.middleware.js:86`) opens with
+`if (!MUTATING_METHODS.has(req.method)) return next();`, so every `GET` on this router bypasses the
+function entirely and reaches the handler regardless of the caller's `memberAccess`. **A read-only
+firm member can list runs, open a run, and read items.** Only the mutating verbs
+(`POST`/`PUT`/`PATCH`/`DELETE`) reach the `READ_ONLY` check. This wrong claim already produced a real
+defect: the desktop's navigation had hidden the GST module from read-only members entirely, when the
+server would happily serve them the reads — fixed under ledger task T96. Offer a read-only member the
+GST navigation entry and the read surfaces; withhold only the write controls.
 
 **These refusals carry distinct meanings** and the wording must distinguish them, because the remedies differ:
 

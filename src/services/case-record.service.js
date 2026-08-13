@@ -35,9 +35,7 @@ import {
   sourceText,
   stableJson,
 } from "./case-validation.service.js";
-import {
-  beginNoticePublicationWrite,
-} from "./notice-publication.service.js";
+import { beginNoticePublicationWrite } from "./notice-publication.service.js";
 
 const CASE_TYPE_SET = new Set(CASE_TYPES);
 const CASE_STATUS_SET = new Set(CASE_STATUSES);
@@ -57,19 +55,85 @@ const CASE_EXPORT_MAX_RECORDS_PER_COLLECTION = 2000;
 const CASE_EXPORT_MAX_BYTES = 25 * 1024 * 1024;
 const CASE_MUTATION_RECEIPT_LIMIT = 1000;
 const CASE_STATUS_TRANSITIONS = new Map([
-  ["INTAKE", new Set(["EXTRACTION_NEEDS_REVIEW", "OPEN", "DOCUMENTS_PENDING", "ANALYSIS", "RESPONSE_DRAFT", "CLOSED", "ARCHIVED"])],
-  ["EXTRACTION_NEEDS_REVIEW", new Set(["OPEN", "DOCUMENTS_PENDING", "ANALYSIS", "RESPONSE_DRAFT", "CLOSED", "ARCHIVED"])],
-  ["OPEN", new Set(["DOCUMENTS_PENDING", "ANALYSIS", "RESPONSE_DRAFT", "CLOSED", "ARCHIVED"])],
-  ["DOCUMENTS_PENDING", new Set(["OPEN", "ANALYSIS", "RESPONSE_DRAFT", "CLOSED", "ARCHIVED"])],
-  ["ANALYSIS", new Set(["DOCUMENTS_PENDING", "RESPONSE_DRAFT", "CLOSED", "ARCHIVED"])],
-  ["RESPONSE_DRAFT", new Set(["DOCUMENTS_PENDING", "INTERNAL_REVIEW", "CLOSED", "ARCHIVED"])],
-  ["INTERNAL_REVIEW", new Set(["RESPONSE_DRAFT", "CLIENT_APPROVAL", "CLOSED", "ARCHIVED"])],
-  ["CLIENT_APPROVAL", new Set(["RESPONSE_DRAFT", "INTERNAL_REVIEW", "READY_TO_SUBMIT", "CLOSED", "ARCHIVED"])],
+  [
+    "INTAKE",
+    new Set([
+      "EXTRACTION_NEEDS_REVIEW",
+      "OPEN",
+      "DOCUMENTS_PENDING",
+      "ANALYSIS",
+      "RESPONSE_DRAFT",
+      "CLOSED",
+      "ARCHIVED",
+    ]),
+  ],
+  [
+    "EXTRACTION_NEEDS_REVIEW",
+    new Set([
+      "OPEN",
+      "DOCUMENTS_PENDING",
+      "ANALYSIS",
+      "RESPONSE_DRAFT",
+      "CLOSED",
+      "ARCHIVED",
+    ]),
+  ],
+  [
+    "OPEN",
+    new Set([
+      "DOCUMENTS_PENDING",
+      "ANALYSIS",
+      "RESPONSE_DRAFT",
+      "CLOSED",
+      "ARCHIVED",
+    ]),
+  ],
+  [
+    "DOCUMENTS_PENDING",
+    new Set(["OPEN", "ANALYSIS", "RESPONSE_DRAFT", "CLOSED", "ARCHIVED"]),
+  ],
+  [
+    "ANALYSIS",
+    new Set(["DOCUMENTS_PENDING", "RESPONSE_DRAFT", "CLOSED", "ARCHIVED"]),
+  ],
+  [
+    "RESPONSE_DRAFT",
+    new Set(["DOCUMENTS_PENDING", "INTERNAL_REVIEW", "CLOSED", "ARCHIVED"]),
+  ],
+  [
+    "INTERNAL_REVIEW",
+    new Set(["RESPONSE_DRAFT", "CLIENT_APPROVAL", "CLOSED", "ARCHIVED"]),
+  ],
+  [
+    "CLIENT_APPROVAL",
+    new Set([
+      "RESPONSE_DRAFT",
+      "INTERNAL_REVIEW",
+      "READY_TO_SUBMIT",
+      "CLOSED",
+      "ARCHIVED",
+    ]),
+  ],
   ["READY_TO_SUBMIT", new Set(["SUBMITTED", "CLOSED", "ARCHIVED"])],
-  ["SUBMITTED", new Set(["HEARING_SCHEDULED", "ORDER_RECEIVED", "APPEAL_REVIEW", "CLOSED", "ARCHIVED"])],
-  ["HEARING_SCHEDULED", new Set(["ORDER_RECEIVED", "APPEAL_REVIEW", "CLOSED", "ARCHIVED"])],
+  [
+    "SUBMITTED",
+    new Set([
+      "HEARING_SCHEDULED",
+      "ORDER_RECEIVED",
+      "APPEAL_REVIEW",
+      "CLOSED",
+      "ARCHIVED",
+    ]),
+  ],
+  [
+    "HEARING_SCHEDULED",
+    new Set(["ORDER_RECEIVED", "APPEAL_REVIEW", "CLOSED", "ARCHIVED"]),
+  ],
   ["ORDER_RECEIVED", new Set(["APPEAL_REVIEW", "CLOSED", "ARCHIVED"])],
-  ["APPEAL_REVIEW", new Set(["HEARING_SCHEDULED", "ORDER_RECEIVED", "CLOSED", "ARCHIVED"])],
+  [
+    "APPEAL_REVIEW",
+    new Set(["HEARING_SCHEDULED", "ORDER_RECEIVED", "CLOSED", "ARCHIVED"]),
+  ],
   ["CLOSED", new Set(["ARCHIVED"])],
   ["ARCHIVED", new Set()],
 ]);
@@ -81,7 +145,7 @@ async function recordPublishedCaseEvent(noticePublication, event) {
 
 async function syncPublishedCaseDeadlineArtifacts(
   noticePublication,
-  parameters
+  parameters,
 ) {
   await beginNoticePublicationWrite(noticePublication);
   return syncCaseDeadlineArtifacts(parameters);
@@ -93,7 +157,7 @@ function assertCaseStatusTransition(currentStatus, targetStatus) {
     throw httpError(
       409,
       `Case status cannot move from ${currentStatus} to ${targetStatus} through generic tracking`,
-      "CASE_STATUS_TRANSITION_NOT_ALLOWED"
+      "CASE_STATUS_TRANSITION_NOT_ALLOWED",
     );
   }
 }
@@ -108,7 +172,7 @@ function assertCaseDocumentWritable(caseMatter) {
   throw httpError(
     409,
     "A Case content transition is in progress; retry after it completes",
-    "CASE_CONTENT_TRANSITION_IN_PROGRESS"
+    "CASE_CONTENT_TRANSITION_IN_PROGRESS",
   );
 }
 
@@ -124,22 +188,28 @@ function caseMutation(input, action) {
 
 function mutationReceipt(caseMatter, mutation) {
   const receipt = caseMatter.mutationReceipts?.find(
-    (item) => item.key === mutation.key
+    (item) => item.key === mutation.key,
   );
   if (!receipt) return null;
   assertMutationRequestHash(receipt.requestHash, mutation.requestHash);
   if (receipt.action !== mutation.action && receipt.action !== undefined) {
-    throw httpError(409, "mutationKey was already used for another Case action", "MUTATION_KEY_REUSED");
+    throw httpError(
+      409,
+      "mutationKey was already used for another Case action",
+      "MUTATION_KEY_REUSED",
+    );
   }
   return receipt;
 }
 
 function appendMutationReceipt(caseMatter, mutation, resultId = "") {
-  if ((caseMatter.mutationReceipts?.length || 0) >= CASE_MUTATION_RECEIPT_LIMIT) {
+  if (
+    (caseMatter.mutationReceipts?.length || 0) >= CASE_MUTATION_RECEIPT_LIMIT
+  ) {
     throw httpError(
       409,
       "Case mutation receipt limit reached; archive this case before more writes",
-      "CASE_MUTATION_LIMIT_REACHED"
+      "CASE_MUTATION_LIMIT_REACHED",
     );
   }
   caseMatter.mutationReceipts.push({
@@ -170,16 +240,25 @@ function decodeCaseCursor(value, expectedKind) {
   const encoded = boundedText(value, 1000, { label: `${expectedKind} cursor` });
   if (!encoded) return null;
   try {
-    const parsed = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
-    if (!parsed || parsed.kind !== expectedKind) throw new Error("kind mismatch");
+    const parsed = JSON.parse(
+      Buffer.from(encoded, "base64url").toString("utf8"),
+    );
+    if (!parsed || parsed.kind !== expectedKind)
+      throw new Error("kind mismatch");
     return parsed;
   } catch {
-    throw httpError(400, `${expectedKind} cursor is invalid`, "INVALID_CASE_CURSOR");
+    throw httpError(
+      400,
+      `${expectedKind} cursor is invalid`,
+      "INVALID_CASE_CURSOR",
+    );
   }
 }
 
 function combineCaseFilters(...filters) {
-  const active = filters.filter((filter) => filter && Object.keys(filter).length);
+  const active = filters.filter(
+    (filter) => filter && Object.keys(filter).length,
+  );
   if (!active.length) return {};
   if (active.length === 1) return active[0];
   return { $and: active };
@@ -189,7 +268,11 @@ function caseSnapshot(value) {
   if (!value) return new Date();
   const snapshot = new Date(value);
   if (Number.isNaN(snapshot.getTime())) {
-    throw httpError(400, "snapshotAt must be a valid date", "INVALID_CASE_SNAPSHOT");
+    throw httpError(
+      400,
+      "snapshotAt must be a valid date",
+      "INVALID_CASE_SNAPSHOT",
+    );
   }
   const now = new Date();
   return snapshot > now ? now : snapshot;
@@ -200,7 +283,7 @@ function historyLimit(query) {
   if (!Number.isInteger(limit) || limit < 1 || limit > CASE_HISTORY_MAX_LIMIT) {
     throw httpError(
       400,
-      `historyLimit must be between 1 and ${CASE_HISTORY_MAX_LIMIT}`
+      `historyLimit must be between 1 and ${CASE_HISTORY_MAX_LIMIT}`,
     );
   }
   return limit;
@@ -212,7 +295,11 @@ async function loadTimelinePage(filter, cursorValue, limit) {
   if (cursor) {
     const occurredAt = new Date(cursor.occurredAt);
     if (Number.isNaN(occurredAt.getTime())) {
-      throw httpError(400, "case-timeline-v1 cursor is invalid", "INVALID_CASE_CURSOR");
+      throw httpError(
+        400,
+        "case-timeline-v1 cursor is invalid",
+        "INVALID_CASE_CURSOR",
+      );
     }
     const id = objectId(cursor.id, "timeline cursor ID");
     cursorFilter = {
@@ -223,7 +310,7 @@ async function loadTimelinePage(filter, cursorValue, limit) {
     };
   }
   const documents = await CaseTimelineEvent.find(
-    combineCaseFilters(filter, cursorFilter)
+    combineCaseFilters(filter, cursorFilter),
   )
     .sort({ occurredAt: -1, _id: -1 })
     .limit(limit + 1)
@@ -251,7 +338,11 @@ async function loadVersionPage(Model, filter, cursorValue, cursorKind, limit) {
   if (cursor) {
     const version = Number(cursor.version);
     if (!Number.isInteger(version) || version < 1) {
-      throw httpError(400, `${cursorKind} cursor is invalid`, "INVALID_CASE_CURSOR");
+      throw httpError(
+        400,
+        `${cursorKind} cursor is invalid`,
+        "INVALID_CASE_CURSOR",
+      );
     }
     cursorFilter = { version: { $lt: version } };
   }
@@ -282,7 +373,7 @@ async function loadCompleteCaseHistory(Model, filter, sort, label, session) {
     throw httpError(
       413,
       `Case export exceeds ${CASE_EXPORT_MAX_RECORDS_PER_COLLECTION} ${label} records; narrow or archive history before exporting`,
-      "CASE_EXPORT_TOO_LARGE"
+      "CASE_EXPORT_TOO_LARGE",
     );
   }
   return documents;
@@ -305,7 +396,9 @@ async function requireFirmClient(clientId, firmId) {
 }
 
 async function validateFirmUsers(ids, firmId) {
-  const requested = [...new Set(ids.filter(Boolean).map((id) => objectId(id, "userId")))];
+  const requested = [
+    ...new Set(ids.filter(Boolean).map((id) => objectId(id, "userId"))),
+  ];
   if (!requested.length) return new Map();
   const users = await User.find({
     _id: { $in: requested },
@@ -315,7 +408,10 @@ async function validateFirmUsers(ids, firmId) {
     .select("_id name email role")
     .lean();
   if (users.length !== requested.length) {
-    throw httpError(400, "Every assigned user must be active in the current firm");
+    throw httpError(
+      400,
+      "Every assigned user must be active in the current firm",
+    );
   }
   return new Map(users.map((user) => [String(user._id), user]));
 }
@@ -339,22 +435,37 @@ async function createCaseMatter({
     intakeMutationKey: mutation.key,
   });
   if (caseMatter) {
-    assertMutationRequestHash(caseMatter.intakeRequestHash, mutation.requestHash);
+    assertMutationRequestHash(
+      caseMatter.intakeRequestHash,
+      mutation.requestHash,
+    );
   } else {
     const client = await requireFirmClient(input.clientId, firmId);
-    const caseType = String(input.caseType || "").trim().toUpperCase();
-    if (!CASE_TYPE_SET.has(caseType)) throw httpError(400, "Unsupported caseType");
-    const method = String(input.sourceMethod || "MANUAL").trim().toUpperCase();
-    if (!SOURCE_METHODS.has(method)) throw httpError(400, "Unsupported sourceMethod");
+    const caseType = String(input.caseType || "")
+      .trim()
+      .toUpperCase();
+    if (!CASE_TYPE_SET.has(caseType))
+      throw httpError(400, "Unsupported caseType");
+    const method = String(input.sourceMethod || "MANUAL")
+      .trim()
+      .toUpperCase();
+    if (!SOURCE_METHODS.has(method))
+      throw httpError(400, "Unsupported sourceMethod");
     const isExternalOcr = method === "OCR_SPACE" || method === "SCREENSHOT_OCR";
     if (isExternalOcr && input.externalProcessingConsent !== true) {
-      throw httpError(400, "Explicit OCR processing consent is required for this source method");
+      throw httpError(
+        400,
+        "Explicit OCR processing consent is required for this source method",
+      );
     }
     const text = sourceText(input.sourceText || "");
     if (method !== "MANUAL" && !text) {
       throw httpError(400, "sourceText is required for this intake method");
     }
-    const title = boundedText(input.title, 500, { required: true, label: "title" });
+    const title = boundedText(input.title, 500, {
+      required: true,
+      label: "title",
+    });
     const assignmentIds = [
       input.ownerUserId || actorUserId,
       input.reviewerUserId,
@@ -386,13 +497,15 @@ async function createCaseMatter({
         escalationOwnerUserId: input.escalationOwnerUserId || null,
         source: {
           method,
-          sourceName: boundedText(input.sourceName, 240, { label: "sourceName" }),
+          sourceName: boundedText(input.sourceName, 240, {
+            label: "sourceName",
+          }),
           mimeType: boundedText(input.mimeType || "text/plain", 120, {
             label: "mimeType",
           }),
           sizeBytes: Math.max(
             0,
-            Math.min(25 * 1024 * 1024, Number(input.sizeBytes) || 0)
+            Math.min(25 * 1024 * 1024, Number(input.sizeBytes) || 0),
           ),
           extractedText: text,
           textHash: hashText(text),
@@ -413,7 +526,10 @@ async function createCaseMatter({
         intakeMutationKey: mutation.key,
       });
       if (!caseMatter) throw error;
-      assertMutationRequestHash(caseMatter.intakeRequestHash, mutation.requestHash);
+      assertMutationRequestHash(
+        caseMatter.intakeRequestHash,
+        mutation.requestHash,
+      );
     }
   }
 
@@ -444,25 +560,41 @@ async function listCaseMatters({ firmId, query }) {
     cursor?.snapshotAt &&
     new Date(cursor.snapshotAt).toISOString() !== snapshotAt.toISOString()
   ) {
-    throw httpError(400, "Case list cursor does not match snapshotAt", "INVALID_CASE_CURSOR");
+    throw httpError(
+      400,
+      "Case list cursor does not match snapshotAt",
+      "INVALID_CASE_CURSOR",
+    );
   }
   const filter = { firmId };
-  const status = String(query?.status || "").trim().toUpperCase();
-  const caseType = String(query?.caseType || "").trim().toUpperCase();
-  const clientId = String(query?.clientId || "").trim().toLowerCase();
+  const status = String(query?.status || "")
+    .trim()
+    .toUpperCase();
+  const caseType = String(query?.caseType || "")
+    .trim()
+    .toUpperCase();
+  const clientId = String(query?.clientId || "")
+    .trim()
+    .toLowerCase();
   if (status) {
-    if (!CASE_STATUS_SET.has(status)) throw httpError(400, "Unsupported status filter");
+    if (!CASE_STATUS_SET.has(status))
+      throw httpError(400, "Unsupported status filter");
     filter.status = status;
   }
   if (caseType) {
-    if (!CASE_TYPE_SET.has(caseType)) throw httpError(400, "Unsupported caseType filter");
+    if (!CASE_TYPE_SET.has(caseType))
+      throw httpError(400, "Unsupported caseType filter");
     filter.caseType = caseType;
   }
   if (clientId) filter.clientId = objectId(clientId, "clientId");
   const search = boundedText(query?.search, 120, { label: "search" });
   if (search) {
     const expression = new RegExp(escapeRegex(search), "i");
-    const clientIds = await Client.find({ firmId, isActive: true, name: expression })
+    const clientIds = await Client.find({
+      firmId,
+      isActive: true,
+      name: expression,
+    })
       .select("_id")
       .limit(100)
       .lean();
@@ -475,20 +607,20 @@ async function listCaseMatters({ firmId, query }) {
   }
 
   const filterHash = hashText(
-    stableJson({ status, caseType, clientId, search: search.toLowerCase() })
+    stableJson({ status, caseType, clientId, search: search.toLowerCase() }),
   );
   if (cursor?.filterHash !== undefined && cursor.filterHash !== filterHash) {
     throw httpError(
       400,
       "Case list cursor does not match the active filters",
-      "INVALID_CASE_CURSOR"
+      "INVALID_CASE_CURSOR",
     );
   }
   if (cursor && !cursor.filterHash) {
     throw httpError(
       400,
       "Legacy Case list cursor is no longer valid; restart pagination",
-      "INVALID_CASE_CURSOR"
+      "INVALID_CASE_CURSOR",
     );
   }
 
@@ -496,14 +628,15 @@ async function listCaseMatters({ firmId, query }) {
   if (cursor) {
     const createdAt = new Date(cursor.createdAt);
     if (Number.isNaN(createdAt.getTime())) {
-      throw httpError(400, "case-list-v1 cursor is invalid", "INVALID_CASE_CURSOR");
+      throw httpError(
+        400,
+        "case-list-v1 cursor is invalid",
+        "INVALID_CASE_CURSOR",
+      );
     }
     const id = objectId(cursor.id, "case cursor ID");
     cursorFilter = {
-      $or: [
-        { createdAt: { $lt: createdAt } },
-        { createdAt, _id: { $lt: id } },
-      ],
+      $or: [{ createdAt: { $lt: createdAt } }, { createdAt, _id: { $lt: id } }],
     };
   }
   const snapshotFilter = { createdAt: { $lte: snapshotAt } };
@@ -511,9 +644,14 @@ async function listCaseMatters({ firmId, query }) {
   const totalFilter = combineCaseFilters(filter, snapshotFilter);
   const [documents, total] = await Promise.all([
     CaseMatter.find(stableFilter)
-      .select("-source.extractedText -extractionProposals -confirmationEvidence")
+      .select(
+        "-source.extractedText -extractionProposals -confirmationEvidence -verifiedReferences",
+      )
       .populate("clientId", "name pan gstin")
-      .populate("ownerUserId reviewerUserId escalationOwnerUserId", "name email role")
+      .populate(
+        "ownerUserId reviewerUserId escalationOwnerUserId",
+        "name email role",
+      )
       .sort({ createdAt: -1, _id: -1 })
       .limit(limit + 1)
       .lean(),
@@ -547,37 +685,44 @@ async function listCaseMatters({ firmId, query }) {
 }
 
 async function getCaseDetail({ caseId, firmId, query = {} }) {
-  const caseMatter = await CaseMatter.findOne({ _id: objectId(caseId, "caseId"), firmId })
+  const caseMatter = await CaseMatter.findOne({
+    _id: objectId(caseId, "caseId"),
+    firmId,
+  })
     .populate("clientId", "name pan gstin email phone")
-    .populate("ownerUserId reviewerUserId escalationOwnerUserId", "name email role")
+    .populate(
+      "ownerUserId reviewerUserId escalationOwnerUserId",
+      "name email role",
+    )
     .lean();
   if (!caseMatter) throw httpError(404, "Case not found", "CASE_NOT_FOUND");
   const filter = { firmId, caseId: caseMatter._id };
   const limit = historyLimit(query);
-  const [timelinePage, analysisPage, draftPage, submissionPage] = await Promise.all([
-    loadTimelinePage(filter, query.timelineCursor, limit),
-    loadVersionPage(
-      CaseAnalysis,
-      filter,
-      query.analysisCursor,
-      "case-analysis-v1",
-      limit
-    ),
-    loadVersionPage(
-      CaseDraft,
-      filter,
-      query.draftCursor,
-      "case-draft-v1",
-      limit
-    ),
-    loadVersionPage(
-      CaseSubmission,
-      filter,
-      query.submissionCursor,
-      "case-submission-v1",
-      limit
-    ),
-  ]);
+  const [timelinePage, analysisPage, draftPage, submissionPage] =
+    await Promise.all([
+      loadTimelinePage(filter, query.timelineCursor, limit),
+      loadVersionPage(
+        CaseAnalysis,
+        filter,
+        query.analysisCursor,
+        "case-analysis-v1",
+        limit,
+      ),
+      loadVersionPage(
+        CaseDraft,
+        filter,
+        query.draftCursor,
+        "case-draft-v1",
+        limit,
+      ),
+      loadVersionPage(
+        CaseSubmission,
+        filter,
+        query.submissionCursor,
+        "case-submission-v1",
+        limit,
+      ),
+    ]);
   return {
     case: caseMatter,
     timeline: timelinePage.items,
@@ -621,7 +766,11 @@ async function runCaseExtraction({
   noticePublication,
 }) {
   if (input?.consent !== true) {
-    throw httpError(400, "Explicit DeepSeek processing consent is required", "CASE_AI_CONSENT_REQUIRED");
+    throw httpError(
+      400,
+      "Explicit DeepSeek processing consent is required",
+      "CASE_AI_CONSENT_REQUIRED",
+    );
   }
   const mutation = caseMutation(input, "case-extraction");
   let caseMatter = await findFirmCase(caseId, firmId);
@@ -642,7 +791,7 @@ async function runCaseExtraction({
         throw httpError(
           409,
           "Completed extraction reservation has no Case result",
-          "CASE_PROVIDER_RESULT_MISSING"
+          "CASE_PROVIDER_RESULT_MISSING",
         );
       }
     } else {
@@ -655,19 +804,23 @@ async function runCaseExtraction({
             ...reservation,
             operation: await stageCaseProviderOperationResult(
               reservation.operation,
-              result
+              result,
             ),
           };
         }
         await beginNoticePublicationWrite(noticePublication);
         caseMatter.extractionProposals = result.proposals;
         caseMatter.extractionStatus = "EXTRACTION_NEEDS_REVIEW";
-        if (caseMatter.status === "INTAKE") caseMatter.status = "EXTRACTION_NEEDS_REVIEW";
+        if (caseMatter.status === "INTAKE")
+          caseMatter.status = "EXTRACTION_NEEDS_REVIEW";
         caseMatter.updatedBy = actorUserId;
         appendMutationReceipt(caseMatter, mutation);
         caseMatter.revision += 1;
         await saveCaseMatterOrConflict(caseMatter, noticePublication);
-        await completeCaseProviderOperation(reservation.operation, caseMatter._id);
+        await completeCaseProviderOperation(
+          reservation.operation,
+          caseMatter._id,
+        );
         await beginNoticePublicationWrite(noticePublication);
         await recordPublishedCaseEvent(noticePublication, {
           caseMatter,
@@ -701,7 +854,10 @@ async function runCaseExtraction({
       type: "EXTRACTION_PROPOSED",
       title: "Source-linked extraction proposed",
       detail: `${caseMatter.extractionProposals.length} field proposal(s) require confirmation.`,
-      metadata: { proposalCount: caseMatter.extractionProposals.length, replayRecovered: true },
+      metadata: {
+        proposalCount: caseMatter.extractionProposals.length,
+        replayRecovered: true,
+      },
       mutationKey: mutation.eventKey,
       requestHash: mutation.requestHash,
       requestId,
@@ -715,7 +871,10 @@ function proposalForConfirmation(caseMatter, confirmation) {
   if (!confirmation.proposalId) return null;
   const proposal = caseMatter.extractionProposals.id(confirmation.proposalId);
   if (!proposal || proposal.field !== confirmation.field) {
-    throw httpError(400, `No matching extraction proposal exists for ${confirmation.field}`);
+    throw httpError(
+      400,
+      `No matching extraction proposal exists for ${confirmation.field}`,
+    );
   }
   return proposal;
 }
@@ -730,7 +889,7 @@ async function saveCaseMatterOrConflict(caseMatter, noticePublication) {
       throw httpError(
         409,
         "Case changed in another request; reload and retry",
-        "CASE_REVISION_CONFLICT"
+        "CASE_REVISION_CONFLICT",
       );
     }
     throw error;
@@ -749,7 +908,10 @@ async function confirmCaseFields({
   const caseMatter = await findFirmCase(caseId, firmId);
   const replay = mutationReceipt(caseMatter, mutation);
   if (replay) {
-    const deadlineArtifacts = await syncPublishedCaseDeadlineArtifacts(noticePublication, { caseMatter, actorUserId });
+    const deadlineArtifacts = await syncPublishedCaseDeadlineArtifacts(
+      noticePublication,
+      { caseMatter, actorUserId },
+    );
     if (!(await findEventReplay(caseMatter, mutation))) {
       await recordPublishedCaseEvent(noticePublication, {
         caseMatter,
@@ -765,31 +927,44 @@ async function confirmCaseFields({
     }
     return { caseMatter, deadlineArtifacts };
   }
-  const confirmations = Array.isArray(input.confirmations) ? input.confirmations : [];
+  const confirmations = Array.isArray(input.confirmations)
+    ? input.confirmations
+    : [];
   if (!confirmations.length || confirmations.length > CASE_FIELD_NAMES.length) {
     throw httpError(400, "confirmations must contain 1-17 case fields");
   }
   const seen = new Set();
   const confirmedFields = [];
   if (caseMatter.confirmationEvidence.length + confirmations.length > 500) {
-    throw httpError(409, "Case confirmation history has reached its 500-entry limit");
+    throw httpError(
+      409,
+      "Case confirmation history has reached its 500-entry limit",
+    );
   }
   for (const confirmation of confirmations) {
     const field = String(confirmation?.field || "").trim();
     if (!CASE_FIELD_SET.has(field) || seen.has(field)) {
-      throw httpError(400, `Invalid or duplicate confirmation field: ${field || "unknown"}`);
+      throw httpError(
+        400,
+        `Invalid or duplicate confirmation field: ${field || "unknown"}`,
+      );
     }
     seen.add(field);
     const proposal = proposalForConfirmation(caseMatter, confirmation);
-    const value = normalizeConfirmedValue(field, confirmation.value ?? proposal?.value);
-    const source = proposal ? "AI_PROPOSAL" : String(confirmation.source || "MANUAL").toUpperCase();
+    const value = normalizeConfirmedValue(
+      field,
+      confirmation.value ?? proposal?.value,
+    );
+    const source = proposal
+      ? "AI_PROPOSAL"
+      : String(confirmation.source || "MANUAL").toUpperCase();
     if (!new Set(["AI_PROPOSAL", "SOURCE_TEXT", "MANUAL"]).has(source)) {
       throw httpError(400, `Invalid confirmation source for ${field}`);
     }
     const sourceExcerpt = boundedText(
       confirmation.sourceText ?? proposal?.sourceText,
       1200,
-      { label: `${field} sourceText` }
+      { label: `${field} sourceText` },
     );
     caseMatter.set(`confirmedFacts.${field}`, value);
     caseMatter.confirmationEvidence.push({
@@ -807,13 +982,17 @@ async function confirmCaseFields({
     caseMatter.reminderOffsets = normalizeOffsets(input.reminderOffsets);
   }
   caseMatter.extractionStatus = "CONFIRMED";
-  if (["INTAKE", "EXTRACTION_NEEDS_REVIEW"].includes(caseMatter.status)) caseMatter.status = "OPEN";
+  if (["INTAKE", "EXTRACTION_NEEDS_REVIEW"].includes(caseMatter.status))
+    caseMatter.status = "OPEN";
   caseMatter.updatedBy = actorUserId;
   appendMutationReceipt(caseMatter, mutation);
   caseMatter.revision += 1;
   await saveCaseMatterOrConflict(caseMatter, noticePublication);
 
-  const deadlineArtifacts = await syncPublishedCaseDeadlineArtifacts(noticePublication, { caseMatter, actorUserId });
+  const deadlineArtifacts = await syncPublishedCaseDeadlineArtifacts(
+    noticePublication,
+    { caseMatter, actorUserId },
+  );
   await recordPublishedCaseEvent(noticePublication, {
     caseMatter,
     actorUserId,
@@ -844,7 +1023,9 @@ async function confirmCaseFields({
         ? "Case task and reminder use the confirmed response due date."
         : "Case task and reminder are inactive for the current case state.",
       metadata: {
-        taskId: deadlineArtifacts.task?._id ? String(deadlineArtifacts.task._id) : null,
+        taskId: deadlineArtifacts.task?._id
+          ? String(deadlineArtifacts.task._id)
+          : null,
         reminderId: deadlineArtifacts.reminder?._id
           ? String(deadlineArtifacts.reminder._id)
           : null,
@@ -871,20 +1052,34 @@ async function updateCaseMatter({
   const caseMatter = await findFirmCase(caseId, firmId);
   const replay = mutationReceipt(caseMatter, mutation);
   if (replay) {
-    await syncPublishedCaseDeadlineArtifacts(noticePublication, { caseMatter, actorUserId });
+    await syncPublishedCaseDeadlineArtifacts(noticePublication, {
+      caseMatter,
+      actorUserId,
+    });
     return caseMatter;
   }
   const beforeStatus = caseMatter.status;
-  const assignmentKeys = ["ownerUserId", "reviewerUserId", "escalationOwnerUserId"];
+  const assignmentKeys = [
+    "ownerUserId",
+    "reviewerUserId",
+    "escalationOwnerUserId",
+  ];
   await validateFirmUsers(
-    assignmentKeys.map((key) => input[key]).filter((value) => value !== undefined && value !== null && value !== ""),
-    firmId
+    assignmentKeys
+      .map((key) => input[key])
+      .filter((value) => value !== undefined && value !== null && value !== ""),
+    firmId,
   );
   if (input.title !== undefined) {
-    caseMatter.title = boundedText(input.title, 500, { required: true, label: "title" });
+    caseMatter.title = boundedText(input.title, 500, {
+      required: true,
+      label: "title",
+    });
   }
   if (input.internalReference !== undefined) {
-    caseMatter.internalReference = boundedText(input.internalReference, 160, { label: "internalReference" });
+    caseMatter.internalReference = boundedText(input.internalReference, 160, {
+      label: "internalReference",
+    });
   }
   if (input.priority !== undefined) {
     const priority = String(input.priority).toUpperCase();
@@ -897,14 +1092,16 @@ async function updateCaseMatter({
     caseMatter.risk = risk;
   }
   for (const key of assignmentKeys) {
-    if (input[key] !== undefined) caseMatter[key] = input[key] ? objectId(input[key], key) : null;
+    if (input[key] !== undefined)
+      caseMatter[key] = input[key] ? objectId(input[key], key) : null;
   }
   if (input.outcome !== undefined) {
     caseMatter.outcome = boundedText(input.outcome, 5000, { label: "outcome" });
   }
   if (input.status !== undefined) {
     const status = String(input.status).toUpperCase();
-    if (!CASE_STATUS_SET.has(status)) throw httpError(400, "Unsupported case status");
+    if (!CASE_STATUS_SET.has(status))
+      throw httpError(400, "Unsupported case status");
     assertCaseStatusTransition(beforeStatus, status);
     if (status === "INTERNAL_REVIEW") {
       const reviewDraft = await CaseDraft.exists({
@@ -912,7 +1109,11 @@ async function updateCaseMatter({
         caseId: caseMatter._id,
         status: "IN_REVIEW",
       });
-      if (!reviewDraft) throw httpError(409, "An in-review draft is required before Internal Review");
+      if (!reviewDraft)
+        throw httpError(
+          409,
+          "An in-review draft is required before Internal Review",
+        );
     }
     if (status === "CLIENT_APPROVAL") {
       const approvedDraft = await CaseDraft.exists({
@@ -920,15 +1121,34 @@ async function updateCaseMatter({
         caseId: caseMatter._id,
         status: { $in: ["APPROVED", "FINAL"] },
       });
-      if (!approvedDraft) throw httpError(409, "An approved draft is required before Client Approval");
+      if (!approvedDraft)
+        throw httpError(
+          409,
+          "An approved draft is required before Client Approval",
+        );
     }
     if (status === "READY_TO_SUBMIT") {
-      const finalDraft = await CaseDraft.exists({ firmId, caseId: caseMatter._id, status: "FINAL" });
-      if (!finalDraft) throw httpError(409, "A reviewer-approved final draft is required before Ready to Submit");
+      const finalDraft = await CaseDraft.exists({
+        firmId,
+        caseId: caseMatter._id,
+        status: "FINAL",
+      });
+      if (!finalDraft)
+        throw httpError(
+          409,
+          "A reviewer-approved final draft is required before Ready to Submit",
+        );
     }
     if (status === "SUBMITTED") {
-      const submission = await CaseSubmission.exists({ firmId, caseId: caseMatter._id });
-      if (!submission) throw httpError(409, "Record a submission before setting the case to Submitted");
+      const submission = await CaseSubmission.exists({
+        firmId,
+        caseId: caseMatter._id,
+      });
+      if (!submission)
+        throw httpError(
+          409,
+          "Record a submission before setting the case to Submitted",
+        );
     }
     caseMatter.status = status;
     caseMatter.archivedAt = status === "ARCHIVED" ? new Date() : null;
@@ -937,13 +1157,22 @@ async function updateCaseMatter({
   appendMutationReceipt(caseMatter, mutation);
   caseMatter.revision += 1;
   await saveCaseMatterOrConflict(caseMatter, noticePublication);
-  const deadlineArtifacts = await syncPublishedCaseDeadlineArtifacts(noticePublication, { caseMatter, actorUserId });
+  const deadlineArtifacts = await syncPublishedCaseDeadlineArtifacts(
+    noticePublication,
+    { caseMatter, actorUserId },
+  );
   await recordPublishedCaseEvent(noticePublication, {
     caseMatter,
     actorUserId,
     type: beforeStatus === caseMatter.status ? "NOTE_ADDED" : "STATUS_CHANGED",
-    title: beforeStatus === caseMatter.status ? "Case details updated" : "Case status changed",
-    detail: beforeStatus === caseMatter.status ? "Case assignment or tracking details changed." : `${beforeStatus} to ${caseMatter.status}`,
+    title:
+      beforeStatus === caseMatter.status
+        ? "Case details updated"
+        : "Case status changed",
+    detail:
+      beforeStatus === caseMatter.status
+        ? "Case assignment or tracking details changed."
+        : `${beforeStatus} to ${caseMatter.status}`,
     metadata: {
       beforeStatus,
       afterStatus: caseMatter.status,
@@ -975,10 +1204,18 @@ async function addCaseTimelineEntry({
   if (existingEvent) return existingEvent;
 
   const kind = String(input.type || "NOTE_ADDED").toUpperCase();
-  if (!new Set(["NOTE_ADDED", "HEARING_RECORDED", "OUTCOME_RECORDED"]).has(kind)) {
-    throw httpError(400, "Timeline type must be NOTE_ADDED, HEARING_RECORDED, or OUTCOME_RECORDED");
+  if (
+    !new Set(["NOTE_ADDED", "HEARING_RECORDED", "OUTCOME_RECORDED"]).has(kind)
+  ) {
+    throw httpError(
+      400,
+      "Timeline type must be NOTE_ADDED, HEARING_RECORDED, or OUTCOME_RECORDED",
+    );
   }
-  const title = boundedText(input.title, 500, { required: true, label: "title" });
+  const title = boundedText(input.title, 500, {
+    required: true,
+    label: "title",
+  });
   const detail = boundedText(input.detail, 5000, { label: "detail" });
   const metadata = {};
   if (kind === "HEARING_RECORDED") {
@@ -1022,17 +1259,32 @@ async function addVerifiedReference({
   if (replay) {
     const reference = caseMatter.verifiedReferences.id(replay.resultId);
     if (!reference) {
-      throw httpError(409, "Reference replay target is unavailable", "CASE_REPLAY_TARGET_MISSING");
+      throw httpError(
+        409,
+        "Reference replay target is unavailable",
+        "CASE_REPLAY_TARGET_MISSING",
+      );
     }
     return reference;
   }
   if (caseMatter.verifiedReferences.length >= 100) {
-    throw httpError(409, "Case already has the maximum 100 verified references");
+    throw httpError(
+      409,
+      "Case already has the maximum 100 verified references",
+    );
   }
-  const title = boundedText(input.title, 500, { required: true, label: "reference title" });
-  const locator = boundedText(input.locator, 1000, { label: "reference locator" });
-  const excerpt = boundedText(input.excerpt, 5000, { label: "reference excerpt" });
-  if (!locator && !excerpt) throw httpError(400, "Reference locator or excerpt is required");
+  const title = boundedText(input.title, 500, {
+    required: true,
+    label: "reference title",
+  });
+  const locator = boundedText(input.locator, 1000, {
+    label: "reference locator",
+  });
+  const excerpt = boundedText(input.excerpt, 5000, {
+    label: "reference excerpt",
+  });
+  if (!locator && !excerpt)
+    throw httpError(400, "Reference locator or excerpt is required");
   caseMatter.verifiedReferences.push({
     sourceType: "USER_VERIFIED",
     title,
@@ -1052,7 +1304,10 @@ async function addVerifiedReference({
     type: "REFERENCE_VERIFIED",
     title: "User-verified reference added",
     detail: title,
-    metadata: { referenceId: String(reference._id), sourceType: "USER_VERIFIED" },
+    metadata: {
+      referenceId: String(reference._id),
+      sourceType: "USER_VERIFIED",
+    },
     mutationKey: mutation.eventKey,
     requestHash: mutation.requestHash,
     requestId,
@@ -1070,7 +1325,7 @@ function serializeCaseExport(payload) {
         throw httpError(
           413,
           `Complete case export is ${buffer.byteLength} bytes and exceeds the ${CASE_EXPORT_MAX_BYTES}-byte safety limit`,
-          "CASE_EXPORT_TOO_LARGE"
+          "CASE_EXPORT_TOO_LARGE",
         );
       }
       return buffer;
@@ -1080,7 +1335,7 @@ function serializeCaseExport(payload) {
   throw httpError(
     500,
     "Case export byte measurement did not converge",
-    "CASE_EXPORT_SERIALIZATION_FAILED"
+    "CASE_EXPORT_SERIALIZATION_FAILED",
   );
 }
 
@@ -1097,7 +1352,10 @@ async function buildCaseExport({ caseId, firmId }) {
     })
       .session(session)
       .populate("clientId", "name pan gstin email phone")
-      .populate("ownerUserId reviewerUserId escalationOwnerUserId", "name email role")
+      .populate(
+        "ownerUserId reviewerUserId escalationOwnerUserId",
+        "name email role",
+      )
       .lean();
     if (!caseMatter) throw httpError(404, "Case not found", "CASE_NOT_FOUND");
     const historyFilter = {
@@ -1111,28 +1369,28 @@ async function buildCaseExport({ caseId, firmId }) {
       historyFilter,
       { occurredAt: -1, _id: -1 },
       "timeline",
-      session
+      session,
     );
     const analyses = await loadCompleteCaseHistory(
       CaseAnalysis,
       historyFilter,
       { version: -1, _id: -1 },
       "analysis",
-      session
+      session,
     );
     const drafts = await loadCompleteCaseHistory(
       CaseDraft,
       historyFilter,
       { version: -1, _id: -1 },
       "draft",
-      session
+      session,
     );
     const submissions = await loadCompleteCaseHistory(
       CaseSubmission,
       historyFilter,
       { version: -1, _id: -1 },
       "submission",
-      session
+      session,
     );
     const payload = {
       schemaVersion: "case-export-v4",
@@ -1169,11 +1427,20 @@ async function buildCaseExport({ caseId, firmId }) {
     throw httpError(
       503,
       "A coherent MongoDB snapshot is unavailable; Case export was not produced",
-      "CASE_EXPORT_SNAPSHOT_UNAVAILABLE"
+      "CASE_EXPORT_SNAPSHOT_UNAVAILABLE",
     );
   } finally {
     await session.endSession();
   }
+}
+
+// T103/B11: addVerifiedReference's response was the only copy of a reference's id that would ever
+// exist - no route listed them back. Dedicated rather than folded into getCaseDetail so a caller
+// building a draft's referenceIds picker can fetch just this list without the rest of the detail
+// payload (timeline, drafts, analyses, submissions history pages).
+async function listVerifiedReferences({ caseId, firmId }) {
+  const caseMatter = await findFirmCase(caseId, firmId, { lean: true });
+  return caseMatter.verifiedReferences || [];
 }
 
 export {
@@ -1184,6 +1451,7 @@ export {
   createCaseMatter,
   getCaseDetail,
   listCaseMatters,
+  listVerifiedReferences,
   requireFirmClient,
   runCaseExtraction,
   updateCaseMatter,

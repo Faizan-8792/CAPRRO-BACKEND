@@ -478,6 +478,10 @@ try {
         "audit-insights-grounding",
         "audit-redaction-references",
         "data-retention-contract",
+        "audit-topic-catalogue-parity",
+        "task-version-guard-contract",
+        "taxworker-duplicate-audit-contract",
+        "case-verified-references-contract",
         "deploy-archive-security",
         "deploy-archive-boundary"
     )

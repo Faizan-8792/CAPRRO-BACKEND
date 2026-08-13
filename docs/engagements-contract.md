@@ -81,8 +81,15 @@ The seven working-paper routes carry **an additional** `requireFeatureFlag("audi
 
 Two consequences the client must handle:
 
-1. **`requireFirmWriteAccess` guards the GETs too.** A read-only firm member cannot even list
-   engagements. Unlike the cases surface, there is no read-only escape hatch anywhere here.
+1. **Corrected 2026-08-13.** This line previously claimed `requireFirmWriteAccess` guards the GETs
+   too. **It does not.** `requireFirmWriteAccess` (`src/middleware/authorization.middleware.js:86`)
+   opens with `if (!MUTATING_METHODS.has(req.method)) return next();`, so every `GET` on this router
+   bypasses the function entirely and reaches the handler regardless of the caller's
+   `memberAccess`. A read-only firm member **can** list and read engagements and working papers; the
+   `READ_ONLY` refusal applies only to the four mutating verbs. The original wrong claim already cost
+   the desktop a real defect — its navigation had gated the engagements entry on write access, hiding
+   the module from read-only members the server would happily serve, fixed under ledger task T96.
+   Do not offer a write control to a read-only member; do offer the read surface.
 2. **A working-paper route needs both flags.** The two rejections must read differently: one says
    assurance engagements are not switched on for this firm, the other says AI working papers are
    not. `WORKING_PAPER_FLAGS` names both (`src/services/audit-working-paper.service.js:29`).
@@ -139,7 +146,7 @@ Every write body is a **strict allow-list**. An unknown field is **rejected**, n
 | `POST /`                         | 14             | `src/services/engagement.service.js:46`          |
 | `PATCH /:id`                     | 23             | `src/services/engagement.service.js:62`          |
 | `POST /:id/findings`             | 6              | `src/services/engagement.service.js:87`          |
-| `PATCH /:id/findings/:findingId` | 19             | `src/services/engagement.service.js:95`          |
+| `PATCH /:id/findings/:findingId` | 18             | `src/services/engagement.service.js:95`          |
 | `POST /:id/review`               | 7              | `src/services/engagement.service.js:115`         |
 | `POST /working-papers`           | 6              | `src/services/audit-working-paper.service.js:43` |
 | `POST .../rows`                  | 9              | `src/services/audit-working-paper.service.js:51` |
@@ -219,6 +226,16 @@ Working papers: `INVALID_AUDIT_WORKING_PAPER_INPUT` `400` (`:85`),
 **`INVALID_ENGAGEMENT_CURSOR` has the same functional problem as `INVALID_CASE_CURSOR`.** It is the
 signal to drop the cursor and restart pagination, and without the code on the wire the client cannot
 distinguish it from user input error. That is now the same gap on two surfaces; §15.
+
+**Corrected 2026-08-13.** This section previously claimed `INVALID_MUTATION_KEY` and
+`MUTATION_KEY_REUSED` are public codes omitted from §4.1 and "reachable on all four engagement write
+routes." **Neither code is thrown anywhere in `engagement.service.js`.** Both belong to the Cases
+surface (`case-validation.service.js`, `case-record.service.js`, `case-content.service.js`,
+`case-provider-operation.service.js`) and to no other. They are correctly listed public in
+`PUBLIC_ERROR_CODES` (`src/app.js:37-38`) for that surface; they simply do not apply here. Engagement
+mutation-key validation errors surface under this surface's own codes in §4.1/§4.2 instead
+(`INVALID_ENGAGEMENT_INPUT` for a malformed key, `MUTATION_RECEIPT_LIMIT` for the receipt cap) — do
+not expect the Cases-surface codes to appear on any engagement or working-paper response.
 
 ### 4.3 One code, two statuses
 

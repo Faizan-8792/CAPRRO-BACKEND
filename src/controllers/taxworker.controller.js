@@ -1,7 +1,11 @@
 // src/controllers/taxworker.controller.js
 import mongoose from "mongoose";
 import Client from "../models/Client.js";
-import TaxWorkSession, { TAX_TYPES, STATUSES } from "../models/TaxWorkSession.js";
+import TaxWorkSession, {
+  TAX_TYPES,
+  STATUSES,
+} from "../models/TaxWorkSession.js";
+import { safeRecordActivity } from "../services/activity.service.js";
 import {
   TAX_TEMPLATES,
   listTaxTypes,
@@ -55,8 +59,8 @@ function legacyClientView(client) {
   const source = client?.toObject ? client.toObject() : client || {};
   return Object.fromEntries(
     LEGACY_CLIENT_FIELDS.filter((field) =>
-      Object.prototype.hasOwnProperty.call(source, field)
-    ).map((field) => [field, source[field]])
+      Object.prototype.hasOwnProperty.call(source, field),
+    ).map((field) => [field, source[field]]),
   );
 }
 
@@ -107,7 +111,9 @@ export const listClients = async (req, res, next) => {
     const seen = new Map();
     const dedupedIds = [];
     for (const c of all) {
-      const key = String(c.name || "").trim().toLowerCase();
+      const key = String(c.name || "")
+        .trim()
+        .toLowerCase();
       if (!seen.has(key)) {
         seen.set(key, c);
       } else {
@@ -117,10 +123,43 @@ export const listClients = async (req, res, next) => {
 
     // Auto-archive duplicates so future lists are clean
     if (dedupedIds.length) {
-      await Client.updateMany({ _id: { $in: dedupedIds } }, { $set: { isActive: false } });
+      await Client.updateMany(
+        { _id: { $in: dedupedIds } },
+        { $set: { isActive: false } },
+      );
+
+      // T102/B10: this silently deactivated records outside the read the caller asked for, with
+      // nothing beyond removedDupes to show it happened. A firm member reading the audit trail for
+      // one of these clients would otherwise never learn it was archived by a duplicate sweep rather
+      // than a person's decision. Solo users (scope.firmId is null) are skipped: recordActivity
+      // requires a tenant firmId for a USER/AUTOMATION-sourced event, and there is no firm audit
+      // trail for a single owner's own data to appear on.
+      if (scope.firmId) {
+        await safeRecordActivity({
+          firmId: scope.firmId,
+          actorUserId: req.user.id,
+          source: "AUTOMATION",
+          action: "CLIENT_DUPLICATES_ARCHIVED",
+          entityType: "Client",
+          entityId: `dedupe:${scope.firmId}`,
+          beforeSummary: { activeCount: all.length },
+          afterSummary: {
+            archivedCount: dedupedIds.length,
+            archivedClientIds: dedupedIds.map(String),
+          },
+          metadata: {
+            reason: "case-insensitive name collision",
+            triggeredBy: "listClients",
+          },
+        });
+      }
     }
 
-    return res.json({ ok: true, clients: Array.from(seen.values()), removedDupes: dedupedIds.length });
+    return res.json({
+      ok: true,
+      clients: Array.from(seen.values()),
+      removedDupes: dedupedIds.length,
+    });
   } catch (err) {
     next(err);
   }
@@ -130,7 +169,8 @@ export const createClient = async (req, res, next) => {
   try {
     const own = getOwnership(req.user);
     const scope = getScope(req.user);
-    const { name, gstin, pan, contactPerson, phone, email, notes } = req.body || {};
+    const { name, gstin, pan, contactPerson, phone, email, notes } =
+      req.body || {};
 
     if (!name || typeof name !== "string" || !name.trim()) {
       return res.status(400).json({ ok: false, error: "name required" });
@@ -142,7 +182,10 @@ export const createClient = async (req, res, next) => {
     const existing = await Client.findOne({
       ...scope,
       isActive: true,
-      name: { $regex: `^${cleanName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" },
+      name: {
+        $regex: `^${cleanName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+        $options: "i",
+      },
     });
 
     if (existing) {
@@ -198,9 +241,18 @@ export const updateClient = async (req, res, next) => {
     }
 
     const client = await Client.findOne({ _id: id, ...scope });
-    if (!client) return res.status(404).json({ ok: false, error: "Client not found" });
+    if (!client)
+      return res.status(404).json({ ok: false, error: "Client not found" });
 
-    const editable = ["name", "gstin", "pan", "contactPerson", "phone", "email", "notes"];
+    const editable = [
+      "name",
+      "gstin",
+      "pan",
+      "contactPerson",
+      "phone",
+      "email",
+      "notes",
+    ];
     for (const key of editable) {
       if (key in req.body) {
         let v = req.body[key];
@@ -226,7 +278,8 @@ export const deleteClient = async (req, res, next) => {
       return res.status(400).json({ ok: false, error: "Invalid client id" });
     }
     const client = await Client.findOne({ _id: id, ...scope });
-    if (!client) return res.status(404).json({ ok: false, error: "Client not found" });
+    if (!client)
+      return res.status(404).json({ ok: false, error: "Client not found" });
     client.isActive = false;
     await client.save();
     return res.json({ ok: true });
@@ -245,7 +298,8 @@ export const listSessions = async (req, res, next) => {
     if (clientId && isValidObjectId(clientId)) filter.clientId = clientId;
     if (taxType && TAX_TYPES.includes(taxType)) filter.taxType = taxType;
     if (status && STATUSES.includes(status)) filter.status = status;
-    if (assignedTo && isValidObjectId(assignedTo)) filter.assignedTo = assignedTo;
+    if (assignedTo && isValidObjectId(assignedTo))
+      filter.assignedTo = assignedTo;
     if (mine === "1" || mine === "true") filter.assignedTo = req.user.id;
 
     const sessions = await TaxWorkSession.find(filter)
@@ -260,7 +314,7 @@ export const listSessions = async (req, res, next) => {
       const required = (s.documents || []).filter((d) => d.required).length;
       const received = (s.documents || []).filter((d) => d.received).length;
       const requiredReceived = (s.documents || []).filter(
-        (d) => d.required && d.received
+        (d) => d.required && d.received,
       ).length;
       const pct = total ? Math.round((received / total) * 100) : 0;
       return {
@@ -287,7 +341,8 @@ export const getSession = async (req, res, next) => {
       .populate("assignedTo", "name email")
       .populate("createdBy", "name email")
       .lean();
-    if (!session) return res.status(404).json({ ok: false, error: "Session not found" });
+    if (!session)
+      return res.status(404).json({ ok: false, error: "Session not found" });
     return res.json({ ok: true, session });
   } catch (err) {
     next(err);
@@ -298,18 +353,27 @@ export const createSession = async (req, res, next) => {
   try {
     const scope = getScope(req.user);
     const own = getOwnership(req.user);
-    const { clientId, taxType, period, dueDate, assignedTo, notes } = req.body || {};
+    const { clientId, taxType, period, dueDate, assignedTo, notes } =
+      req.body || {};
 
     if (!isValidObjectId(clientId)) {
-      return res.status(400).json({ ok: false, error: "Valid clientId required" });
+      return res
+        .status(400)
+        .json({ ok: false, error: "Valid clientId required" });
     }
     if (!TAX_TYPES.includes(taxType)) {
       return res.status(400).json({ ok: false, error: "Invalid taxType" });
     }
 
-    const client = await Client.findOne({ _id: clientId, ...scope, isActive: true });
+    const client = await Client.findOne({
+      _id: clientId,
+      ...scope,
+      isActive: true,
+    });
     if (!client) {
-      return res.status(404).json({ ok: false, error: "Client not found in your scope" });
+      return res
+        .status(404)
+        .json({ ok: false, error: "Client not found in your scope" });
     }
 
     const docs = getTemplateDocuments(taxType).map((d) => ({
@@ -360,7 +424,8 @@ export const updateSession = async (req, res, next) => {
       return res.status(400).json({ ok: false, error: "Invalid session id" });
     }
     const session = await TaxWorkSession.findOne({ _id: id, ...scope });
-    if (!session) return res.status(404).json({ ok: false, error: "Session not found" });
+    if (!session)
+      return res.status(404).json({ ok: false, error: "Session not found" });
 
     const { period, dueDate, status, assignedTo, notes } = req.body || {};
 
@@ -375,7 +440,8 @@ export const updateSession = async (req, res, next) => {
       if (status !== "COMPLETE") session.completedAt = null;
     }
     if (assignedTo === null) session.assignedTo = null;
-    else if (assignedTo && isValidObjectId(assignedTo)) session.assignedTo = assignedTo;
+    else if (assignedTo && isValidObjectId(assignedTo))
+      session.assignedTo = assignedTo;
     if (typeof notes === "string") session.notes = notes;
 
     await session.save();
@@ -394,10 +460,12 @@ export const updateDocument = async (req, res, next) => {
     }
 
     const session = await TaxWorkSession.findOne({ _id: id, ...scope });
-    if (!session) return res.status(404).json({ ok: false, error: "Session not found" });
+    if (!session)
+      return res.status(404).json({ ok: false, error: "Session not found" });
 
     const doc = session.documents.find((d) => d.docKey === docKey);
-    if (!doc) return res.status(404).json({ ok: false, error: "Document not found" });
+    if (!doc)
+      return res.status(404).json({ ok: false, error: "Document not found" });
 
     const { received, notes, required, name } = req.body || {};
 
@@ -413,7 +481,10 @@ export const updateDocument = async (req, res, next) => {
     const allRequiredReceived =
       session.documents.length > 0 &&
       session.documents.filter((d) => d.required).every((d) => d.received);
-    if (session.status === "DRAFT" && session.documents.some((d) => d.received)) {
+    if (
+      session.status === "DRAFT" &&
+      session.documents.some((d) => d.received)
+    ) {
       session.status = "IN_PROGRESS";
     }
 
@@ -438,7 +509,8 @@ export const addCustomDocument = async (req, res, next) => {
     }
 
     const session = await TaxWorkSession.findOne({ _id: id, ...scope });
-    if (!session) return res.status(404).json({ ok: false, error: "Session not found" });
+    if (!session)
+      return res.status(404).json({ ok: false, error: "Session not found" });
 
     // Bulk mode: items = [{name, docKey?, required, isCustom?}, ...]
     if (Array.isArray(items) && items.length) {
@@ -455,7 +527,9 @@ export const addCustomDocument = async (req, res, next) => {
 
         const isCustom = it.isCustom !== false; // default true unless explicitly false (i.e. from template)
         const prefix = isCustom ? "custom_" : "tpl_";
-        let docKey = it.docKey ? String(it.docKey).slice(0, 80) : `${prefix}${slug}`;
+        let docKey = it.docKey
+          ? String(it.docKey).slice(0, 80)
+          : `${prefix}${slug}`;
         let suffix = 1;
         while (session.documents.find((d) => d.docKey === docKey)) {
           docKey = `${prefix}${slug}_${suffix++}`;
@@ -521,7 +595,8 @@ export const removeCustomDocument = async (req, res, next) => {
     }
 
     const session = await TaxWorkSession.findOne({ _id: id, ...scope });
-    if (!session) return res.status(404).json({ ok: false, error: "Session not found" });
+    if (!session)
+      return res.status(404).json({ ok: false, error: "Session not found" });
 
     const before = session.documents.length;
     session.documents = session.documents.filter((d) => d.docKey !== docKey);
@@ -544,7 +619,8 @@ export const deleteSession = async (req, res, next) => {
       return res.status(400).json({ ok: false, error: "Invalid session id" });
     }
     const session = await TaxWorkSession.findOne({ _id: id, ...scope });
-    if (!session) return res.status(404).json({ ok: false, error: "Session not found" });
+    if (!session)
+      return res.status(404).json({ ok: false, error: "Session not found" });
     session.status = "ARCHIVED";
     await session.save();
     return res.json({ ok: true });
@@ -560,13 +636,19 @@ export const getStats = async (req, res, next) => {
 
     const [totalSessions, draftSessions, inProgressSessions, completeSessions] =
       await Promise.all([
-        TaxWorkSession.countDocuments({ ...scope, status: { $ne: "ARCHIVED" } }),
+        TaxWorkSession.countDocuments({
+          ...scope,
+          status: { $ne: "ARCHIVED" },
+        }),
         TaxWorkSession.countDocuments({ ...scope, status: "DRAFT" }),
         TaxWorkSession.countDocuments({ ...scope, status: "IN_PROGRESS" }),
         TaxWorkSession.countDocuments({ ...scope, status: "COMPLETE" }),
       ]);
 
-    const totalClients = await Client.countDocuments({ ...scope, isActive: true });
+    const totalClients = await Client.countDocuments({
+      ...scope,
+      isActive: true,
+    });
 
     // Build aggregation match - convert ObjectIds where present
     const aggMatch = { status: { $in: ["DRAFT", "IN_PROGRESS"] } };

@@ -21,6 +21,11 @@ function safeStr(v, max = 4000) {
 const ALLOWED_LLM_MODELS = new Set(["deepseek-v4-pro", "deepseek-v4-flash"]);
 const CLASSIFIER_MODEL =
   process.env.DEEPSEEK_CLASSIFIER_MODEL || "deepseek-v4-pro";
+// Raised from 3500 in lockstep with the desktop client's single-call cap
+// (CaProApiClient.MaxAuditTextChars). Classification is not chunked client-side - a topic
+// verdict does not decompose into several calls and merge the way a list of insights does -
+// so this is the true ceiling on what /refine ever reads, not just a per-call slice.
+const REFINE_TEXT_CAP = 12000;
 // Insights use the fast model by default: it is reliable and low-latency for
 // this longer generation, and the strengthened prompt (mandatory coverage +
 // imperative framing) drives the quality. The higher-accuracy model is slower
@@ -33,27 +38,40 @@ const INSIGHTS_MODEL =
 // Used so the LLM can classify against ALL areas even when the local keyword
 // engine returns weak or no candidates (broken/OCR/garbled text). If a caller
 // sends its own catalog, that is used instead (keeps ids single-sourced).
-const AUDIT_TOPICS = [
-  { id: "Inventory", name: "Inventory & Stock" },
+// Kept in sync with audit-nlp-extension/data/topics.json's `id`/`display_name` pairs -
+// this is the desktop and every other caller's only source for the catalogue, since
+// neither client sends its own (see PLAN.md/mandatorycompletion.md T113). A topic added
+// to that file without a matching entry here silently narrows what a desktop caller is
+// offered relative to what the extension shows, which is exactly the drift this list
+// exists to prevent.
+export const AUDIT_TOPICS = [
+  { id: "Inventory", name: "Inventory & Stock Audit" },
   { id: "Revenue", name: "Revenue Recognition" },
-  { id: "Receivables", name: "Accounts Receivable / Debtors" },
-  { id: "Payables", name: "Accounts Payable / Creditors & Provisions" },
-  { id: "FixedAssets", name: "Property, Plant & Equipment / Fixed Assets" },
+  { id: "Receivables", name: "Accounts Receivable" },
+  { id: "Payables", name: "Accounts Payable & Provisions" },
+  { id: "FixedAssets", name: "Property, Plant & Equipment" },
+  { id: "CashBank", name: "Cash & Bank Balances" },
   { id: "IntangibleAssets", name: "Intangible Assets & Goodwill" },
-  { id: "CashBank", name: "Cash & Bank" },
-  { id: "Borrowings", name: "Borrowings & Loans" },
-  { id: "Equity", name: "Share Capital & Equity / Reserves" },
-  { id: "Tax", name: "Taxation (Income Tax, GST, TDS, Deferred Tax)" },
+  { id: "Borrowings", name: "Borrowings & Finance Costs" },
+  { id: "Equity", name: "Equity & Reserves" },
+  { id: "Tax", name: "Direct & Indirect Taxes" },
   { id: "Payroll", name: "Payroll & Employee Benefits" },
   { id: "RelatedParty", name: "Related Party Transactions" },
-  { id: "GoingConcern", name: "Going Concern" },
-  { id: "EventsAfter", name: "Events After the Reporting Period" },
-  { id: "Contingencies", name: "Contingencies, Provisions & Litigation" },
+  { id: "GoingConcern", name: "Going Concern Assessment" },
+  { id: "EventsAfter", name: "Events After Reporting Period" },
+  { id: "Contingencies", name: "Contingent Liabilities & Commitments" },
   { id: "Segment", name: "Segment Reporting" },
-  { id: "Consolidation", name: "Consolidation & Group Accounts" },
-  { id: "Fraud", name: "Fraud Risk (SA 240)" },
-  { id: "InternalControls", name: "Internal Controls / ICFR" },
-  { id: "CSR", name: "Corporate Social Responsibility (CSR)" },
+  { id: "Consolidation", name: "Consolidation & Group Audit" },
+  { id: "Fraud", name: "Fraud & Management Override" },
+  { id: "InternalControls", name: "Internal Financial Controls" },
+  { id: "CSR", name: "Corporate Social Responsibility" },
+  { id: "Investments", name: "Investments" },
+  { id: "Derivatives", name: "Financial Instruments & Derivatives" },
+  { id: "GovtGrants", name: "Government Grants & Subsidies" },
+  { id: "Forex", name: "Foreign Exchange Transactions" },
+  { id: "CashFlow", name: "Cash Flow Statement" },
+  { id: "IndAS101", name: "First-time Adoption of Ind AS" },
+  { id: "GeneralAudit", name: "General Audit Methodology" },
 ];
 
 function catalogFromRequest(reqCatalog) {
@@ -100,7 +118,7 @@ Respond with ONLY this compact JSON on a single line (no markdown, no commentary
 
 TEXT:
 """
-${safeStr(rawText, 3500)}
+${safeStr(rawText, REFINE_TEXT_CAP)}
 """`;
 }
 
@@ -220,7 +238,14 @@ export async function refineAuditClassification(req, res, next) {
 const MODEL_INSIGHT_TARGET = "4 to 6";
 const MAX_MODEL_INSIGHTS = 6;
 const MAX_TOTAL_INSIGHTS = 9; // 3 deterministic + up to 6 model-derived
-const INSIGHTS_TEXT_CAP = 3500;
+// Raised from 3500 (2026-08-13, agent-testing feature request) to shrink how much of a long
+// document went unseen and unexamined by a single call. Desktop-side chunking (see
+// CaPro.Desktop.Core.Audit.AuditAssistanceService.GetInsightsForTextAsync) is what now carries
+// text longer than this over several sequential calls rather than truncating or refusing it -
+// this constant is still what any ONE of those calls, or a single short document, is capped at.
+// The extension's REVIEWED_TEXT_DISPLAY_CAP (audit-render.js) must be kept equal to this value;
+// tests/audit-render-text-cap.focused.mjs in the extension asserts that.
+const INSIGHTS_TEXT_CAP = 12000;
 const MIN_EVIDENCE_LENGTH = 6;
 const MAX_EVIDENCE_LENGTH = 400;
 

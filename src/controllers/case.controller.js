@@ -15,6 +15,7 @@ import {
   createCaseMatter,
   getCaseDetail,
   listCaseMatters,
+  listVerifiedReferences,
   runCaseExtraction,
   updateCaseMatter,
 } from "../services/case-record.service.js";
@@ -34,7 +35,7 @@ async function assertNoticeRequestCurrent(req) {
   return AppConfig.assertFeatureFlagVersion(
     "noticeCases",
     req.featureFlagVersions?.noticeCases,
-    req.featureFlagPublicationFences?.noticeCases ?? null
+    req.featureFlagPublicationFences?.noticeCases ?? null,
   );
 }
 
@@ -67,7 +68,10 @@ export async function createCase(req, res, next) {
 
 export async function listCases(req, res, next) {
   try {
-    const result = await listCaseMatters({ firmId: req.user.firmId, query: req.query || {} });
+    const result = await listCaseMatters({
+      firmId: req.user.firmId,
+      query: req.query || {},
+    });
     return res.json({ ok: true, ...result });
   } catch (error) {
     return next(error);
@@ -162,6 +166,18 @@ export async function verifyReference(req, res, next) {
       input: req.body || {},
     });
     return res.status(201).json({ ok: true, reference });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function listReferences(req, res, next) {
+  try {
+    const references = await listVerifiedReferences({
+      caseId: req.params.id,
+      firmId: req.user.firmId,
+    });
+    return res.json({ ok: true, references });
   } catch (error) {
     return next(error);
   }
@@ -271,7 +287,7 @@ export async function exportCase(req, res, next) {
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="case-${String(req.params.id).replace(/[^a-zA-Z0-9_-]/g, "")}.json"`
+      `attachment; filename="case-${String(req.params.id).replace(/[^a-zA-Z0-9_-]/g, "")}.json"`,
     );
     return res.status(200).send(buffer);
   } catch (error) {

@@ -18,7 +18,7 @@ function taskPagination(query = {}) {
   }
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_TASK_PAGE_SIZE) {
     const error = new Error(
-      `limit must be an integer between 1 and ${MAX_TASK_PAGE_SIZE}`
+      `limit must be an integer between 1 and ${MAX_TASK_PAGE_SIZE}`,
     );
     error.statusCode = 400;
     throw error;
@@ -227,7 +227,7 @@ export const getTaskBoard = async (req, res) => {
         status: task.status,
         documentReadiness: task.documentReadiness || "UNKNOWN",
         reconciliationExceptionCount: Number(
-          task.reconciliationExceptionCount || 0
+          task.reconciliationExceptionCount || 0,
         ),
         reviewStatus: task.reviewStatus || "NOT_REQUIRED",
         filedAt: task.filedAt || null,
@@ -262,7 +262,8 @@ export const updateTask = async (req, res) => {
     const user = req.user;
     const firmId = user.firmId;
     const { id } = req.params;
-    const { status, assignedTo, title, dueDateISO, meta } = req.body || {};
+    const { status, assignedTo, title, dueDateISO, meta, expectedVersion } =
+      req.body || {};
 
     if (!firmId) {
       return res
@@ -275,6 +276,30 @@ export const updateTask = async (req, res) => {
       return res.status(404).json({ ok: false, error: "Task not found" });
     }
     if (await rejectCaseProjectionMutation(task, res)) return;
+
+    // Optional so an existing caller that never read mutationVersion keeps
+    // working unchanged; a caller that did read it (the board response has
+    // always returned it) can now use it to catch the case two people edit the
+    // same task at once, where the second save previously overwrote the first
+    // with no signal to either party. Checked before any field is touched so a
+    // stale write changes nothing, not even a partial field.
+    if (expectedVersion !== undefined) {
+      const expected = Number(expectedVersion);
+      if (!Number.isSafeInteger(expected) || expected < 0) {
+        return res.status(400).json({
+          ok: false,
+          error: "expectedVersion must be a nonnegative integer",
+        });
+      }
+      if (expected !== Number(task.mutationVersion || 0)) {
+        return res.status(409).json({
+          ok: false,
+          error: "This task changed since it was read. Reload and try again.",
+          code: "TASK_VERSION_CONFLICT",
+          currentVersion: Number(task.mutationVersion || 0),
+        });
+      }
+    }
 
     if (status) {
       const wasComplete = ["FILED", "CLOSED"].includes(task.status);
@@ -396,7 +421,7 @@ export const getTaskSource = async (req, res) => {
 
     const task = await Task.findOne(filter)
       .select(
-        "clientName serviceType title dueDateISO status assignedTo completedAt createdAt updatedAt"
+        "clientName serviceType title dueDateISO status assignedTo completedAt createdAt updatedAt",
       )
       .lean();
     if (!task) {
@@ -454,7 +479,7 @@ export const getMyOpenTasks = async (req, res) => {
         .skip(skip)
         .limit(limit)
         .select(
-          "clientName serviceType title dueDateISO status documentReadiness reconciliationExceptionCount reviewStatus mutationVersion createdAt updatedAt"
+          "clientName serviceType title dueDateISO status documentReadiness reconciliationExceptionCount reviewStatus mutationVersion createdAt updatedAt",
         )
         .lean(),
     ]);
@@ -491,7 +516,7 @@ export const completeTaskFromUser = async (req, res) => {
       _id: id,
       firmId,
       isActive: true,
-      assignedTo: user.id,  // ✅ FIXED: user._id → user.id
+      assignedTo: user.id, // ✅ FIXED: user._id → user.id
     });
 
     if (!task) {

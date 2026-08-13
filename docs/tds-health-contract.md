@@ -65,8 +65,17 @@ requireFirmWriteAccess
 requireFeatureFlag("tdsHealth")
 ```
 
-**`requireFirmWriteAccess` guards the GETs too**, exactly as in GST. A read-only firm member cannot
-list runs or open one. Do not offer them a TDS navigation entry.
+**Corrected 2026-08-13. This line previously claimed `requireFirmWriteAccess` guards the GETs too,
+exactly as in GST. It does not, on either surface.** `requireFirmWriteAccess`
+(`src/middleware/authorization.middleware.js:86`) opens with
+`if (!MUTATING_METHODS.has(req.method)) return next();`, so every `GET` on this router bypasses the
+function entirely regardless of the caller's `memberAccess`. A read-only firm member **can** list
+runs and open one; the `READ_ONLY` refusal applies only to the four mutating verbs
+(`POST`/`PUT`/`PATCH`/`DELETE`). The original wrong claim already produced a real defect on the
+desktop client, which had hidden the TDS Health navigation entry from read-only members the server
+would happily serve reads to — fixed under ledger task T96. **Do offer a TDS navigation entry to a
+read-only member; do not offer them the write, lock or export controls**, which remain genuinely
+gated as this section otherwise describes.
 
 **Two routes carry an additional gate that GST has no equivalent of:**
 

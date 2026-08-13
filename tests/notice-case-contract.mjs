@@ -358,10 +358,14 @@ const routeCount = [
   ...routes.matchAll(/router\.(post|get|patch|put|delete)\(/g),
 ].length;
 
+// T103/B11 added GET /:id/references (17th), on top of an already-stale 16 this
+// check had drifted to before that. Recounted directly from case.routes.js
+// rather than carried forward from the ledger or coordination board, which this
+// check's own failure message shows had drifted first.
 check(
-  "the case router exposes 16 handlers",
-  routeCount === 16,
-  `counted ${routeCount}; the ledger and the coordination board both said 12`,
+  "the case router exposes 17 handlers",
+  routeCount === 17,
+  `counted ${routeCount}`,
 );
 
 // ─── Never claim an automatic filing ──────────────────────────────

@@ -11,6 +11,7 @@ import {
   finalizeResponseDraft,
   generateAnalysis,
   listCases,
+  listReferences,
   patchCase,
   previewCaseOcr,
   proposeCaseFields,
@@ -77,6 +78,7 @@ router.patch("/:id", patchCase);
 router.post("/:id/extraction", proposeCaseFields);
 router.patch("/:id/confirmations", confirmFields);
 router.post("/:id/timeline", createTimelineEntry);
+router.get("/:id/references", listReferences);
 router.post("/:id/references", verifyReference);
 router.post("/:id/analyses", generateAnalysis);
 router.post("/:id/drafts", createResponseDraft);

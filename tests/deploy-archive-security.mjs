@@ -2147,10 +2147,14 @@ if (listed.status !== 0 || listed.error) {
   // tools/run-gates.ps1 with its two new suites but missed this pin, so the gate
   // ran green locally (git ls-files legitimately reported 151) while this
   // assertion silently compared against the stale 150 until a full run-gates.ps1
-  // pass caught the mismatch.
+  // pass caught the mismatch. Raised from 151 to 152 for
+  // src/services/data-retention.service.js, added in commit 716f559 without this
+  // pin being updated alongside it - the same class of drift as the 150-to-151
+  // case above, caught the same way: a full run-gates.ps1 pass, not the file's
+  // own commit.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 151 && result.status === 0,
+    files.length === 152 && result.status === 0,
     result,
   );
 }
