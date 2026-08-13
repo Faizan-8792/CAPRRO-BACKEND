@@ -96,6 +96,24 @@ async function attemptDeepSeek({
       ],
       temperature: Math.max(0, Math.min(1, Number(temperature) || 0)),
       max_tokens: Math.max(1, Math.min(8000, Number(maxTokens) || 600)),
+      // DeepSeek V4 models run in "thinking" mode by default (effort "high"),
+      // which emits chain-of-thought into reasoning_content BEFORE the actual
+      // answer, and those reasoning tokens are billed against and count
+      // toward the same max_tokens ceiling as the answer itself. Every route
+      // here (insights, classifier, reminder, standard-guidance) was written
+      // assuming max_tokens bounds only the answer, so on a moderately
+      // complex prompt the model could spend its entire budget "thinking"
+      // and return finish_reason: "length" with content: "" - which is
+      // exactly the "LLM returned no content" failure this comment sits
+      // beside. Measured on the insights prompt at the production
+      // max_tokens: 3000: thinking enabled spent all 3000 tokens reasoning
+      // and returned empty content; thinking disabled returned a complete,
+      // evidence-grounded answer in ~870 tokens (~430ms). Disabling it also
+      // makes `temperature` actually take effect - the API docs state
+      // thinking mode ignores temperature/top_p/presence_penalty/
+      // frequency_penalty entirely, so the classifier's temperature: 0 was a
+      // silent no-op the whole time thinking was implicitly on.
+      thinking: { type: "disabled" },
     };
     if (jsonResponse) body.response_format = { type: "json_object" };
 
