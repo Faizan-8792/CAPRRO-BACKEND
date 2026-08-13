@@ -140,8 +140,15 @@ async function attemptDeepSeek({
 }
 
 // Resilient DeepSeek call: retries transient failures (network/timeout/429/5xx)
-// up to twice per model, and falls back to a second model on a hard 400 (e.g.
-// a retired/invalid model name) so provider changes degrade gracefully.
+// up to twice per model (default), and falls back to a second model on a hard
+// 400 (e.g. a retired/invalid model name) so provider changes degrade gracefully.
+//
+// maxAttemptsPerModel defaults to 2 for every existing caller (classifier,
+// reminder, standard-guidance), preserving their behaviour exactly. Insights
+// passes 1: a same-model retry at the same timeout mostly doubles the worst
+// case for a call whose failure mode is usually "the model is being slow on
+// this document", which a same-model retry does not fix, whereas the
+// fallback-model step already provides a genuinely different attempt.
 async function callDeepSeek({
   system,
   prompt,
@@ -150,11 +157,13 @@ async function callDeepSeek({
   timeoutMs = 25000,
   temperature = 0.3,
   model,
+  maxAttemptsPerModel = 2,
 }) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) {
     return { ok: false, reason: "DEEPSEEK_API_KEY not configured" };
   }
+  const attemptsPerModel = Math.max(1, Number(maxAttemptsPerModel) || 1);
   const primary = model || DEEPSEEK_MODEL;
   const models = [primary];
   if (DEEPSEEK_MODEL_FALLBACK && DEEPSEEK_MODEL_FALLBACK !== primary) {
@@ -162,7 +171,7 @@ async function callDeepSeek({
   }
   let last = { ok: false, reason: "LLM not attempted", status: 0 };
   for (const model of models) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < attemptsPerModel; attempt++) {
       const r = await attemptDeepSeek({
         apiKey,
         model,

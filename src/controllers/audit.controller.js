@@ -414,11 +414,24 @@ function evidenceIsGrounded(evidence, sentTextNormalized) {
   return sentTextNormalized.includes(normalized.toLowerCase());
 }
 
+// A narrow, closed set of subject-plus-modal openings that name the auditor/team as the
+// one acting and say they should/must/shall/need to/are to do something - "The auditor
+// should verify X" is exactly as actionable as "Verify X", and rejecting it purely for
+// phrasing loses a correct, professionally sound procedure over grammar rather than
+// substance (W22 in agenttesting.md's weak-area register). Deliberately does not widen
+// the gate to accept passive/descriptive prose: "Verification of X should be performed"
+// and "This shows management pressure" still fail, because there is no verb to recover
+// after stripping this specific opening shape, which is the actual signal of substance.
+const IMPERATIVE_SUBJECT_MODAL_PREFIX =
+  /^(?:the\s+)?(?:auditors?|engagement\s+teams?|audit\s+teams?|teams?|reviewers?)\s+(?:should|must|shall|needs?\s+to|are?\s+to|has\s+to|have\s+to)\s+/i;
+
 function isImperativeDetail(detail) {
-  const firstWord =
-    String(detail || "")
-      .trim()
-      .split(/\s+/, 1)[0] || "";
+  const trimmed = String(detail || "").trim();
+  const withoutModalPrefix = trimmed.replace(
+    IMPERATIVE_SUBJECT_MODAL_PREFIX,
+    "",
+  );
+  const firstWord = withoutModalPrefix.split(/\s+/, 1)[0] || "";
   return IMPERATIVE_VERBS.has(
     firstWord.replace(/[^A-Za-z]/g, "").toUpperCase(),
   );
@@ -489,13 +502,29 @@ export async function generateInsights(req, res, next) {
     // Fix for M3: raised from 1600. The deterministic block no longer competes
     // for tokens, but each remaining item now also carries an evidence quote,
     // so headroom is kept generous rather than tuned to a single fixture.
+    //
+    // timeoutMs lowered from 40000 and maxAttemptsPerModel from the default 2
+    // to 1 (2026-08-13, accuracy/speed pass). The old combination allowed a
+    // documented worst case of 162.4s for this one route - by far the longest
+    // of the four model-backed routes here - which a shared-hosting reverse
+    // proxy in front of this server can plausibly kill before it finishes,
+    // turning a merely-slow-but-working call into a hard failure with no
+    // model-side signal at all. 25s matches the default this service already
+    // uses for every other route (refine, reminder), and a same-model retry
+    // rarely rescues a slow-response failure the way a genuinely different
+    // fallback model can, so that retry is dropped rather than the fallback.
+    // New worst case: 2 models x (25s + backoff) = ~50.8s - see
+    // AuditAssistanceTests.ModelCallsAreGivenLongerThanTheServersRetryAndFallbackStructure
+    // on the desktop side, which pins this arithmetic against the client's
+    // deadline.
     const r = await callDeepSeek({
       system,
       prompt,
       jsonResponse: true,
       maxTokens: 3000,
       temperature: 0.2,
-      timeoutMs: 40000,
+      timeoutMs: 25000,
+      maxAttemptsPerModel: 1,
       model: INSIGHTS_MODEL,
     });
 
