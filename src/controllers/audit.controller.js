@@ -13,6 +13,52 @@ function safeStr(v, max = 4000) {
   return String(v ?? "").slice(0, max);
 }
 
+// Fix for W02 (agenttesting.md §24.1): deepseek-provider.service.js composes
+// callDeepSeek's `reason` for an engineer reading server logs - "LLM HTTP 429:
+// <raw upstream body>", "DEEPSEEK_API_KEY not configured", "LLM timeout" - and
+// four routes here (refine, insights, reminder-message, standard-guidance)
+// were returning that string verbatim as the client-facing `reason` field.
+// Both clients then render it: the desktop's AuditAssistPolicy.ReasonMessage
+// appends it after "Reason reported by the server: " with no filtering on
+// this domain-level (200 + generated:false) path, which is a different code
+// path from the transport-level AuditAssistPolicy.DescribeAssistFailure that
+// already had a dedicated leak test. A status code or a provider name next to
+// a chartered accountant's statutory working paper is exactly the class of
+// string A-12.01 forbids everywhere else; `OCR_PROVIDER_ERROR` was already
+// generalised for the same reason and this channel was missed.
+//
+// Recognises the same causes AuditAssistPolicy.Recognise already does on the
+// desktop, so a server-side fix and a client-side fallback describe a given
+// failure the same way rather than drifting. The raw reason is logged via
+// console.error at each call site (already the case before this change) so
+// the actual detail is never lost, only kept off the wire.
+function publicLlmFailureReason(rawReason) {
+  const message = String(rawReason ?? "");
+
+  if (/not configured/i.test(message) || /API_KEY/i.test(message)) {
+    return "The assistant has not been switched on for this server yet.";
+  }
+  if (/timeout|timed out/i.test(message)) {
+    return "The assistant took too long to answer.";
+  }
+  if (/no content|could not be read|parse/i.test(message)) {
+    return "The assistant replied with nothing usable.";
+  }
+  if (/rate|too many/i.test(message) || /HTTP 429/i.test(message)) {
+    return "The assistant is handling too many requests just now.";
+  }
+  if (/balance|quota|insufficient/i.test(message)) {
+    return "The assistant's account on this server needs attention.";
+  }
+  if (/HTTP 5\d\d/i.test(message)) {
+    return "The assistant's provider is temporarily unavailable.";
+  }
+
+  // Falls through honestly rather than guessing at an unrecognised cause -
+  // matching AuditAssistPolicy.Recognise's own "General" fallback exactly.
+  return "The server answered but could not produce a result.";
+}
+
 // Classification runs on the most accurate model by default. The classify call
 // is short, so using the "pro" model keeps accuracy high at low cost, while
 // insights and other longer calls use the cheaper general model. Both are
@@ -163,7 +209,7 @@ export async function refineAuditClassification(req, res, next) {
       return res.json({
         ok: true,
         refined: false,
-        reason: r.reason,
+        reason: publicLlmFailureReason(r.reason),
         model: classifierModel,
       });
     }
@@ -302,6 +348,10 @@ function buildMandatoryProcedures() {
       risk: "medium",
       standard: "SA 320, SA 530",
       evidence: "",
+      why: "Materiality sets the threshold for what counts as a significant misstatement, so every other procedure in this area is scoped against it.",
+      nextAction:
+        "Record the materiality figure and sample basis in the working paper before testing individual items.",
+      amountMinor: null,
     },
     {
       title: "Obtain external third-party confirmations",
@@ -310,6 +360,10 @@ function buildMandatoryProcedures() {
       risk: "medium",
       standard: "SA 505",
       evidence: "",
+      why: "A confirmation received directly from the third party is stronger evidence than internal correspondence, because it cannot be influenced by company management.",
+      nextAction:
+        "If a confirmation cannot be obtained, perform alternative procedures and document why the confirmation was unavailable.",
+      amountMinor: null,
     },
     {
       title: "Obtain written representations from management",
@@ -318,6 +372,10 @@ function buildMandatoryProcedures() {
       risk: "medium",
       standard: "SA 580",
       evidence: "",
+      why: "A written representation records management's acknowledgement of responsibility and does not replace other audit evidence.",
+      nextAction:
+        "File the signed representation with the working papers before forming a conclusion on this area.",
+      amountMinor: null,
     },
   ];
 }
@@ -374,22 +432,63 @@ For the audit area "${topicLabel}", decide which of the KNOWN PROCEDURES below a
 ${contextBlock}
 Hard rules:
 - Each "detail" MUST be an audit procedure phrased as an imperative action, starting with a verb such as Obtain, Inspect, Confirm, Recompute, Trace, Vouch, Perform, Reconcile, Assess, Evaluate, Test, Determine, Select, Verify, Review, Examine or Request. Never write business or management advice.
+- SURFACE THE EXACT FIGURE, NOT A VAGUE REFERENCE: when the text states a specific amount, party name, day count or date, the "title" and "detail" MUST quote that figure directly instead of a vague phrase. Write "Evaluate adequacy of provision for the Rs 62,00,000 receivable from Vantage Garments LLC, overdue 400+ days" — never "Evaluate adequacy of provision for the receivable". A reviewer scanning the list must see the stakes without re-opening the source text.
+- STATE AN ALREADY-REACHED CONCLUSION AS A FACT, NOT AN OPEN QUESTION: if the text itself already states a finding, determination or conclusion (for example "credit control confirmed no recovery plan exists", "management decided X"), the "detail" MUST state that finding as an established fact (wording such as "has confirmed", "appears inadequate", "was already determined") and then name the next verification or escalation step. Do not phrase an already-reached conclusion as something that still needs open-ended "assessment" from zero — that understates what the source material already established.
+- STANDARD SELECTION — cite the standard that actually governs the activity described, not merely one that sounds plausible:
+  - Testing an existing accounting estimate or provision already made (doubtful-debt provision, warranty provision, impairment) → SA 540, not SA 315 (SA 315 is risk identification during planning, not testing an estimate that already exists).
+  - External third-party confirmations (banks, customers, suppliers, lenders) → SA 505.
+  - Related party transactions → SA 550. Fraud risk or management-override indicators → SA 240.
+  - Subsequent events after the reporting date → SA 560 (with Ind AS 10 if disclosure is relevant). Going concern doubts → SA 570.
+  - Reliance on a management expert or specialist → SA 620. Opening balances on a first engagement → SA 510.
+  Cite a specific clause number ONLY when certain; otherwise cite the standard/Act without a number rather than guessing one.
 - Each procedure MUST include "evidence": an exact, verbatim quotation of the specific amount, date, party, or transaction detail from the text below that makes this procedure apply. Quote the text exactly; do not paraphrase, translate, or invent a quotation. A procedure with no specific document evidence to quote must not be included here — the three universal procedures (materiality, confirmations, representations) are already handled separately and must NOT be repeated in your response.
 - Do NOT invent facts. Only cite something that is actually written in the text below.
 - Where relevant to what the text says, cover: a roll-forward/roll-back reconciliation if a count or verification date differs from the reporting date; the effect on going concern [SA 570]; a subsequent events review [SA 560 / Ind AS 10]; export or cross-border control-transfer timing; a formal cut-off test; and any indicator of fraud or management pressure on the numbers [SA 240].
-- Reference the precise standard or section (e.g. SA 501, SA 505, SA 240, SA 315, Ind AS 115, Schedule II/III, Companies Act 2013, CARO 2020, Form 3CD, CGST Act). Cite a specific clause number ONLY when certain; otherwise cite the standard/Act without a number rather than guessing one.
 - No generic filler, no repeated points, no two procedures citing the same evidence for the same purpose.
+- "why": ONE short plain-language sentence with no jargon, explaining to a junior team member why this procedure or standard matters here — for example "A written confirmation direct from the customer is stronger evidence than internal correspondence, because it cannot be influenced by company management." Explain the REASON, do not repeat the detail text.
+- "nextAction": ONE short sentence naming what the reviewer does depending on the outcome of this procedure — for example "If the provision is found inadequate, propose an adjusting entry and record it as an unadjusted misstatement for review."
 - If the text genuinely does not contain enough specific detail to support ANY document-specific procedure (e.g. it is too short, too vague, or not really audit-relevant), set "result" to "INSUFFICIENT_EVIDENCE", give a one-sentence "insufficientEvidenceReason", and return an empty "insights" array. Do not force procedures onto text that does not support them.
 
 Respond ONLY with JSON of this exact shape:
-{"result": "SUPPORTED or INSUFFICIENT_EVIDENCE", "insufficientEvidenceReason": "required when result is INSUFFICIENT_EVIDENCE, empty string otherwise", "insights": [{"title": "short imperative procedure title", "detail": "1-3 sentence executable audit procedure tied to the text, citing the standard", "risk": "high|medium|low", "standard": "precise standard/section or empty string", "evidence": "exact quotation from the text below"}]}
+{"result": "SUPPORTED or INSUFFICIENT_EVIDENCE", "insufficientEvidenceReason": "required when result is INSUFFICIENT_EVIDENCE, empty string otherwise", "insights": [{"title": "short imperative procedure title with the specific figure included", "detail": "1-3 sentence executable audit procedure tied to the text, citing the standard, with specific figures and any already-reached conclusion stated as fact", "risk": "high|medium|low", "standard": "precise standard/section or empty string", "evidence": "exact quotation from the text below", "why": "one plain-language sentence explaining why this matters", "nextAction": "one sentence on what to do depending on the outcome"}]}
 
-Keep title under 80 characters, detail under 300 characters, and evidence under ${MAX_EVIDENCE_LENGTH} characters.
+Keep title under 100 characters, detail under 320 characters, why under 220 characters, nextAction under 220 characters, and evidence under ${MAX_EVIDENCE_LENGTH} characters.
 
 TEXT:
 """
 ${safeStr(rawText, INSIGHTS_TEXT_CAP)}
 """`;
+}
+
+// Deterministic (non-LLM) extraction of a stated rupee figure from a GROUNDED
+// evidence quote, so a materiality ratio never depends on model arithmetic -
+// a language model asked to compute "2.8x materiality" is exactly the kind of
+// arithmetic an LLM gets wrong silently. Handles "Rs./₹/INR" prefixed figures
+// with optional lakh/crore words and Indian digit grouping. Returns null when
+// no confident figure is found rather than guessing: a missing amount is
+// honest, a wrong one is not.
+const RUPEE_AMOUNT_PATTERN =
+  /(?:rs\.?|inr|₹)\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(lakh|lakhs|crore|crores)?/i;
+
+function extractRupeeMinorFromEvidence(evidence) {
+  const text = String(evidence || "");
+  const match = RUPEE_AMOUNT_PATTERN.exec(text);
+  if (!match) return null;
+
+  const numeral = Number(match[1].replace(/,/g, ""));
+  if (!Number.isFinite(numeral) || numeral <= 0) return null;
+
+  const unit = match[2] ? match[2].toLowerCase() : null;
+  const scale = unit && unit.startsWith("crore") ? 10000000 : unit ? 100000 : 1;
+  const rupees = numeral * scale;
+
+  // Reject an implausible figure (over ₹1,000 crore) rather than propagate
+  // it - a match this large from free text is more likely a parsing
+  // artefact (e.g. a phone number or id run into the pattern) than a real
+  // amount on a single working paper line.
+  if (!Number.isFinite(rupees) || rupees > 10000000000) return null;
+
+  return Math.round(rupees * 100);
 }
 
 function normalizeWhitespace(value) {
@@ -459,6 +558,11 @@ function validateAndFilterInsights(rawItems, sentTextNormalized) {
     if (!isImperativeDetail(detail)) continue;
     if (!evidenceIsGrounded(evidence, sentTextNormalized)) continue;
 
+    const groundedEvidence = normalizeWhitespace(evidence).slice(
+      0,
+      MAX_EVIDENCE_LENGTH,
+    );
+
     seenTitles.add(normalizedTitle);
     accepted.push({
       title,
@@ -467,7 +571,18 @@ function validateAndFilterInsights(rawItems, sentTextNormalized) {
         ? String(item.risk).toLowerCase()
         : "medium",
       standard: safeStr(item.standard, 60).trim(),
-      evidence: normalizeWhitespace(evidence).slice(0, MAX_EVIDENCE_LENGTH),
+      evidence: groundedEvidence,
+      // Model-written, but bounded and optional: an absent or blank value
+      // is dropped rather than defaulted to an empty string reaching the
+      // client as if it were a deliberate "nothing to add" answer.
+      why: safeStr(item.why, 220).trim() || null,
+      nextAction: safeStr(item.nextAction, 220).trim() || null,
+      // Extracted deterministically from the GROUNDED evidence text with a
+      // regex, never trusted from the model's own arithmetic. Grounded
+      // evidence is a verbatim quotation already checked against the source
+      // document above, so a figure found inside it is the actual stated
+      // amount, not a model computation that could silently be wrong.
+      amountMinor: extractRupeeMinorFromEvidence(groundedEvidence),
     });
   }
 
@@ -529,10 +644,11 @@ export async function generateInsights(req, res, next) {
     });
 
     if (!r.ok) {
+      console.error("DeepSeek insights error:", r.reason);
       return res.json({
         ok: true,
         generated: false,
-        reason: r.reason,
+        reason: publicLlmFailureReason(r.reason),
         insights: [],
       });
     }
@@ -611,6 +727,37 @@ export async function generateInsights(req, res, next) {
   }
 }
 
+// A calendar day, optionally with a time component, in a form
+// `new Date()` parses unambiguously across Node/V8 locales - ISO 8601 date
+// or date-time. Rejects free text like "10th Aug" that `new Date()` would
+// otherwise silently turn into the literal string "Invalid Date" reaching a
+// message a firm sends to a paying client (W01, agenttesting.md §24.1).
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}(?:[T ].*)?$/;
+
+// A plausible number of pending/delay days for a client-facing reminder. Not
+// validating this let `Number("1e9")` reach the prompt as "pending for
+// 1000000000 days" (W16, agenttesting.md §24.1) - a bound this generous still
+// covers any realistic compliance delay while rejecting scientific notation,
+// negatives, and non-numeric input outright.
+const MAX_PLAUSIBLE_DAYS = 3650;
+
+function safeDueDate(dueDate) {
+  if (typeof dueDate !== "string" || !ISO_DATE_PATTERN.test(dueDate.trim())) {
+    return null;
+  }
+  const parsed = new Date(dueDate.trim());
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function safeDayCount(value, fallback) {
+  const numeral = Number(value);
+  return Number.isInteger(numeral) &&
+    numeral >= 0 &&
+    numeral <= MAX_PLAUSIBLE_DAYS
+    ? numeral
+    : fallback;
+}
+
 // ─── Reminder message generation ────────────────────────────────────
 // Generate a personalized client follow-up message in Hinglish.
 export async function generateReminderMessage(req, res, next) {
@@ -619,9 +766,9 @@ export async function generateReminderMessage(req, res, next) {
       clientName,
       serviceType,
       type, // "pending" | "risk"
-      daysPending,
-      lastDelayDays,
-      dueDate,
+      daysPending: rawDaysPending,
+      lastDelayDays: rawLastDelayDays,
+      dueDate: rawDueDate,
       tone, // "polite" | "firm" | "casual"
     } = req.body || {};
 
@@ -629,12 +776,19 @@ export async function generateReminderMessage(req, res, next) {
       return res.status(400).json({ ok: false, error: "clientName required" });
     }
 
+    // Validated once, up front, so neither the template fallback nor the
+    // model prompt below can carry an unparseable date or an implausible day
+    // count - both previously reached user-facing text unbounded.
+    const parsedDueDate = safeDueDate(rawDueDate);
+    const daysPending = safeDayCount(rawDaysPending, 3);
+    const lastDelayDays = safeDayCount(rawLastDelayDays, 0);
+
     const fallbackMessage = (() => {
-      const dueText = dueDate
-        ? new Date(dueDate).toLocaleDateString("en-IN")
+      const dueText = parsedDueDate
+        ? parsedDueDate.toLocaleDateString("en-IN")
         : "upcoming due date";
       if (type === "pending") {
-        return `Hi ${clientName},\n\nHum aapke ${serviceType || "compliance"} ke documents ka wait kar rahe hain. ${daysPending || 3}+ din se documents pending hain.\nDue: ${dueText}.\n\nKripya documents jaldi share karein.\n\n- CA PRO Toolkit`;
+        return `Hi ${clientName},\n\nHum aapke ${serviceType || "compliance"} ke documents ka wait kar rahe hain. ${daysPending}+ din se documents pending hain.\nDue: ${dueText}.\n\nKripya documents jaldi share karein.\n\n- CA PRO Toolkit`;
       }
       return `Hi ${clientName},\n\nPichle 2 periods me aapke ${serviceType || "compliance"} filings due date ke baad submit hue the. Is baar time se complete karne ke liye documents thoda pehle bhejne ka request hai.\nCurrent due: ${dueText}.\n\nThanks.\n\n- CA PRO Toolkit`;
     })();
@@ -648,8 +802,8 @@ export async function generateReminderMessage(req, res, next) {
       });
     }
 
-    const dueText = dueDate
-      ? new Date(dueDate).toLocaleDateString("en-IN")
+    const dueText = parsedDueDate
+      ? parsedDueDate.toLocaleDateString("en-IN")
       : "upcoming";
 
     const system =
@@ -661,7 +815,7 @@ export async function generateReminderMessage(req, res, next) {
 
 Client name: ${safeStr(clientName, 80)}
 Service: ${safeStr(serviceType || "compliance", 30)}
-Last period delay: ${Number(lastDelayDays || 0)} days late
+Last period delay: ${lastDelayDays} days late
 Current due date: ${dueText}
 Tone: ${tone === "firm" ? "firm but respectful" : "polite and supportive"}
 
@@ -670,11 +824,11 @@ Goal: gently remind them that last 2 filings were late and request they share do
 
 Client name: ${safeStr(clientName, 80)}
 Service: ${safeStr(serviceType || "compliance", 30)}
-Days pending: ${Number(daysPending || 3)}
+Days pending: ${daysPending}
 Due date: ${dueText}
 Tone: ${tone === "firm" ? "firm but respectful" : "polite and warm"}
 
-Goal: remind them documents have been pending for ${Number(daysPending || 3)}+ days and request they send them today. Keep it short. Hinglish.`;
+Goal: remind them documents have been pending for ${daysPending}+ days and request they send them today. Keep it short. Hinglish.`;
 
     const r = await callDeepSeek({
       system,
@@ -685,11 +839,12 @@ Goal: remind them documents have been pending for ${Number(daysPending || 3)}+ d
     });
 
     if (!r.ok || !r.content?.trim()) {
+      console.error("DeepSeek reminder-message error:", r.reason);
       return res.json({
         ok: true,
         generated: false,
         message: fallbackMessage,
-        reason: r.reason || "LLM returned empty",
+        reason: publicLlmFailureReason(r.reason || "LLM returned empty"),
       });
     }
 
@@ -771,12 +926,13 @@ Keep it 120-200 words, professional and specific to Indian practice. If "${code}
     });
 
     if (!r.ok || !r.content?.trim()) {
+      console.error("DeepSeek standard-guidance error:", r.reason);
       return res.json({
         ok: true,
         generated: false,
         code,
         guidance: "",
-        reason: r.reason || "LLM returned empty",
+        reason: publicLlmFailureReason(r.reason || "LLM returned empty"),
       });
     }
 

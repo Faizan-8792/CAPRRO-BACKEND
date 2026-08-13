@@ -477,6 +477,8 @@ try {
         "gst-owner-authorization-contract",
         "audit-insights-grounding",
         "audit-redaction-references",
+        "reminder-message-validation",
+        "audit-llm-failure-wording",
         "data-retention-contract",
         "audit-topic-catalogue-parity",
         "task-version-guard-contract",
