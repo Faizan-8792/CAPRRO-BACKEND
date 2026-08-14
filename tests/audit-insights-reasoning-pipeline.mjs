@@ -297,10 +297,12 @@ const PAYROLL_VENDOR_RESPONSE = JSON.stringify({
       ),
   );
   check(
-    "framework guard: the prompt restricts SA 560 to genuinely after-year-end events, not a same-period cut-off timing issue",
-    /genuinely AFTER the reporting date, not a same-period cut-off timing issue/i.test(
-      prompt,
-    ),
+    "framework guard: the prompt restricts SA 560 to events between the reporting date and the report date, not a same-period cut-off timing issue",
+    /an event before the reporting date is a cut-off issue/i.test(prompt) &&
+      /is only a "subsequent event" if it falls between them/i.test(prompt),
+    prompt.length > 0
+      ? "(prompt captured, pattern not found)"
+      : "(no prompt captured)",
   );
 }
 
