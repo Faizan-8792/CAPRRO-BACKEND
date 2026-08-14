@@ -400,14 +400,117 @@ function formatRupeesForSentence(rupees) {
   return rupees.toLocaleString("en-IN");
 }
 
-// The three procedures every statutory audit response needs regardless of what
-// the text says (SA 320/530 materiality, SA 505 confirmations, SA 580 written
-// representations). Static and topic-independent, exactly as the previous
-// prompt's own "ALWAYS include... in every response" rule already said they
-// were - so nothing is lost by no longer asking a model to reproduce them.
-// evidence is deliberately empty: these are standard-mandated, not derived from
-// this document, and an empty evidence field says that honestly rather than
-// inventing a quotation to satisfy the schema.
+// Root fix for a human reviewer's own critique, measured across several real
+// audits: "the tool repeatedly adds SA 320/530 materiality, SA 505
+// confirmations, and SA 580 management representations even when they are
+// not specifically required for that audit area." Forcing all three into
+// EVERY response regardless of subject matter is boilerplate precisely
+// because real audit practice does not treat them as interchangeable
+// universals:
+//
+//   - SA 320/530 (materiality and sample basis) genuinely IS universal: SA
+//     320 requires a materiality determination for every audit, and it
+//     scopes every substantive procedure regardless of area. This one stays
+//     unconditional - that is a considered decision, not an oversight, and
+//     is why only the other two gained a relevance check below.
+//   - SA 505 (external confirmations) only applies when the finding
+//     actually involves an outside party - a bank, customer, supplier,
+//     lender, subsidiary, or similar. A payroll ghost-employee test, a
+//     depreciation recompute, or a CSR spend check has no third party to
+//     confirm anything with.
+//   - SA 580 (written representations) is the residual evidence source for
+//     something the auditor cannot independently verify - a management
+//     estimate, a completeness assertion, a going-concern judgment, a
+//     related-party disclosure. A purely mechanical vouch-and-recompute
+//     finding does not need a fresh representation asked of management.
+//
+// Relevance for both conditional items is decided on TWO independent
+// signals, either of which is enough: (1) the resolved topic is one where
+// this procedure is standard practice for that whole audit area, or (2) the
+// findings THIS run actually produced mention a third party / cite an
+// estimate-flavoured standard - a real, content-driven signal from what was
+// actually found, not just a static guess from the topic label alone. A
+// topic not on either list still gets the item if its own evidence justifies
+// it, and a listed topic still gets it even when no document-specific
+// insight survived (the topic-level signal does not require content).
+const THIRD_PARTY_CONFIRMATION_TOPICS = new Set([
+  "Revenue", // customer confirmations for terms - explicitly in this topic's own reference procedures
+  "Receivables", // customer balance confirmations
+  "Payables", // vendor balance confirmations
+  "CashBank", // bank balance confirmations
+  "Borrowings", // bank/lender confirmations for loans
+  "RelatedParty", // outstanding balance confirmation with the related party
+  "Investments", // registrar/broker/depository confirmations
+  "Derivatives", // counterparty confirmations
+  "Consolidation", // subsidiary/associate auditor confirmations
+  "GoingConcern", // lender/facility confirmation of renewal terms or a covenant waiver
+  "Inventory", // third-party-held stock confirmations
+  "GeneralAudit", // catch-all bucket; stays inclusive rather than silently narrowing an unresolved topic
+]);
+
+const THIRD_PARTY_EVIDENCE_PATTERN =
+  /\b(banks?|customers?|suppliers?|vendors?|lenders?|creditors?|debtors?|borrowers?|subsidiar(?:y|ies)|associates?|related[- ]part(?:y|ies)|depositors?|guarantors?|job[- ]?workers?|counterpart(?:y|ies)|dealers?)\b/i;
+
+const SA_505_CITATION_PATTERN = /\bSA\s*505\b/i;
+
+// Measured live against a real fixture (a payroll finding naming a specific
+// outsourced vendor, "Meridian HR Services", by name only - no generic
+// noun like "vendor" or "supplier" anywhere near it): the prose-keyword
+// signal above missed it entirely, because a proper noun carries no generic
+// third-party word for the pattern to match. The MODEL ITSELF had already
+// recognised this as a confirmation-worthy finding and cited SA 505 on its
+// own model-derived insight - a far more precise, low-false-positive signal
+// than re-scanning free text for nouns, since it is the same standard-
+// citation discipline insightsHardRulesBlock already holds the model to.
+// Checked FIRST, before the prose fallback, for exactly that reason.
+function isConfirmationRelevant(topicId, evidencedInsights) {
+  if (THIRD_PARTY_CONFIRMATION_TOPICS.has(topicId)) return true;
+  if (
+    evidencedInsights.some((item) =>
+      SA_505_CITATION_PATTERN.test(item.standard || ""),
+    )
+  )
+    return true;
+  return evidencedInsights.some(
+    (item) =>
+      THIRD_PARTY_EVIDENCE_PATTERN.test(item.evidence || "") ||
+      THIRD_PARTY_EVIDENCE_PATTERN.test(item.detail || ""),
+  );
+}
+
+const MANAGEMENT_ESTIMATE_OR_COMPLETENESS_TOPICS = new Set([
+  "Revenue", // variable-consideration estimates, completeness of side agreements
+  "Payables", // accruals and contingent-liability completeness
+  "Contingencies",
+  "GoingConcern",
+  "EventsAfter",
+  "RelatedParty", // completeness of related-party disclosure
+  "FixedAssets", // impairment judgment
+  "IntangibleAssets", // goodwill impairment judgment
+  "Investments", // impairment / fair-value judgment
+  "Tax", // deferred-tax-asset realisability judgment
+  "Borrowings", // covenant classification judgment
+  "Fraud", // inherently about management's own conduct
+  "Equity", // completeness of dividend declaration
+  "CSR", // judgment on unspent-amount treatment
+  "GeneralAudit",
+]);
+
+const ESTIMATE_OR_COMPLETENESS_STANDARD_PATTERN =
+  /\bSA\s*540\b|\bSA\s*570\b|\bSA\s*550\b|\bSA\s*240\b/i;
+
+function isRepresentationRelevant(topicId, evidencedInsights) {
+  if (MANAGEMENT_ESTIMATE_OR_COMPLETENESS_TOPICS.has(topicId)) return true;
+  return evidencedInsights.some((item) =>
+    ESTIMATE_OR_COMPLETENESS_STANDARD_PATTERN.test(item.standard || ""),
+  );
+}
+
+// The materiality procedure is unconditional (see above); confirmations and
+// representations are now gated by isConfirmationRelevant/isRepresentationRelevant.
+// evidence is deliberately empty on every item here: these are standard-mandated
+// or relevance-gated, never derived from a specific document quotation, and an
+// empty evidence field says that honestly rather than inventing one.
 //
 // rawText is read ONLY to check for a stated overall-materiality figure
 // (extractStatedMateriality), which is deterministic string matching against
@@ -417,9 +520,20 @@ function formatRupeesForSentence(rupees) {
 //
 // topicLabel names the audit area in the confirmations/representations items
 // rather than the vague "this area", when a caller supplied or resolved one -
-// falls back to the previous generic wording when it did not, so nothing
-// regresses for a caller that sends no topic at all.
-function buildMandatoryProcedures(rawText, topicLabel) {
+// falls back to the previous generic wording when it did not. topicId drives
+// the relevance decision itself and is separate from topicLabel because a
+// caller may send a free-form topicName with no catalogue-matched topicId at
+// all, in which case relevance falls back to the content signal alone.
+// evidencedInsights is the combined, already-validated primary-plus-coverage
+// list for THIS run - empty for a caller with no accepted insights yet (the
+// INSUFFICIENT_EVIDENCE and all-rejected paths), which is correct: with
+// nothing accepted, only the topic-level signal can justify relevance.
+function buildMandatoryProcedures(
+  rawText,
+  topicLabel,
+  topicId = null,
+  evidencedInsights = [],
+) {
   const statedMateriality = extractStatedMateriality(rawText);
   const materialityDetail = statedMateriality
     ? `This working paper states overall materiality as Rs ${formatRupeesForSentence(statedMateriality)}. Confirm performance materiality is documented separately (typically a proportion of the overall figure, not the same number) and use it, not the overall figure, as the basis for sample size and item selection.`
@@ -433,7 +547,7 @@ function buildMandatoryProcedures(rawText, topicLabel) {
       ? topicLabel.trim()
       : "this area";
 
-  return [
+  const procedures = [
     {
       title: "Determine materiality and sample basis",
       detail: materialityDetail,
@@ -445,7 +559,10 @@ function buildMandatoryProcedures(rawText, topicLabel) {
       amountMinor: null,
       workingPaperRef: null,
     },
-    {
+  ];
+
+  if (isConfirmationRelevant(topicId, evidencedInsights)) {
+    procedures.push({
       title: "Obtain external third-party confirmations",
       detail: `Obtain external third-party confirmations for balances, holdings or amounts in ${areaLabel} that involve outside parties such as banks, customers, suppliers, job-workers or lenders.`,
       risk: "medium",
@@ -456,8 +573,11 @@ function buildMandatoryProcedures(rawText, topicLabel) {
         "If a confirmation cannot be obtained, perform alternative procedures and document why the confirmation was unavailable.",
       amountMinor: null,
       workingPaperRef: null,
-    },
-    {
+    });
+  }
+
+  if (isRepresentationRelevant(topicId, evidencedInsights)) {
+    procedures.push({
       title: "Obtain written representations from management",
       detail: `Obtain written representations from management covering the completeness and key assertions of ${areaLabel}.`,
       risk: "medium",
@@ -468,8 +588,10 @@ function buildMandatoryProcedures(rawText, topicLabel) {
         "File the signed representation with the working papers before forming a conclusion on this area.",
       amountMinor: null,
       workingPaperRef: null,
-    },
-  ];
+    });
+  }
+
+  return procedures;
 }
 
 // Best-effort match from a free-form topic name to one of AUDIT_TOPICS, used
@@ -529,22 +651,60 @@ function packagedContextBlock(packaged) {
 // standard selection and fact-versus-risk discipline - a second copy that
 // drifts from the first would let the coverage pass accept something the
 // primary pass would have rejected, or vice versa.
+//
+// Restructured 2026-08-14 around a human reviewer's cross-audit critique
+// (five to six real runs reviewed): the tool's core issue-detection was
+// judged strong, but it consistently (1) jumped from evidence straight to a
+// conclusion without stating what the evidence actually establishes versus
+// merely suggests, (2) collapsed a control deficiency, a fraud RISK
+// indicator, and confirmed fraud/misstatement into one tier of language,
+// (3) recommended procedures a document's own "Procedures Performed"
+// section already states were done, (4) cited amounts without explaining
+// performance-materiality significance or separating genuinely misstated
+// amounts from correctly-recorded ones nearby, and (5) assumed a specific
+// accounting standard (Ind AS 115/2/10, SA 540) applies without the source
+// text actually stating that framework, sometimes reclassifying a plain
+// cut-off issue as an estimate or subsequent-event issue in the process.
+// The REASONING PIPELINE and SELF-CHECK sections below target each of
+// these directly; the rest of the hard rules are the prior discipline this
+// builds on, not a replacement for it.
 function insightsHardRulesBlock() {
-  return `Hard rules:
+  return `REASONING PIPELINE — work through these steps for each candidate finding before writing it. The output only has one "detail" field, but the steps below decide what that field is allowed to say:
+1. EVIDENCE: the exact passage in the text that triggered your attention.
+2. WHAT IS ACTUALLY ESTABLISHED: restate, in your own words, only what this passage proves on its own — no inference yet. A control deficiency ("no independent review of a journal entry") is established by an absence-of-control statement; a suspicious PATTERN ("an unusual login while its holder was away") is established only as a pattern, not as proof anyone did anything wrong.
+3. RISK: what could this mean if the underlying cause turns out to be the worst plausible explanation? State the risk as a possibility ("could indicate...", "is consistent with...") — this step is where a risk is named, never where it is confirmed.
+4. EVIDENCE GAP: what specific, additional evidence would confirm or rule out the risk named in step 3? This is what the procedure you recommend must actually close — not a generic textbook procedure for the topic area, but the one piece of missing information this specific finding needs.
+5. MATERIALITY: is the amount involved, if any, large enough next to overall/performance materiality to matter on its own, or is it only significant in combination with something else? Do not silently add this amount to a DIFFERENT, correctly-recorded transaction's amount to produce a bigger headline figure — an amount that is proven correct is not part of a misstatement total.
+6. CLASSIFICATION: pick exactly ONE tier for the risk named in step 3, and hold it there for the rest of the finding:
+   - "control deficiency" — a process/control weakness the text describes (missing review, missing approval, missing segregation of duties), with NO stated indication that anyone actually misused it.
+   - "fraud risk indicator" — a pattern that COULD be exploited for fraud (unusual timing, an unusual login, pressure language, related-party terms) but the text does not say the underlying act was confirmed.
+   - "confirmed misstatement" or "confirmed non-compliance" — ONLY when the text itself states the outcome was already established (an amount already found wrong, a rule already found breached), not merely suspected.
+   Never write wording from a lower tier as if it were a higher one. "A control deficiency" must never be described using fraud-toned language ("the fraudulent transfer", "management's deception"); a "fraud risk indicator" must never be described as if confirmed ("investigate the unauthorized changes" implies they already ARE unauthorized — write "verify whether the changes were authorized" instead).
+7. REQUIRED NEXT PROCEDURE: the imperative action that closes the evidence gap from step 4 — this becomes "detail". It must be the procedure this document's own gap needs, not a generic procedure for the topic that this document has already satisfied elsewhere (see "PROCEDURES ALREADY PERFORMED" below, when present).
+8. CONCLUSION: the "why" and "nextAction" fields state what happens once the procedure in step 7 resolves the gap — not a foregone conclusion about what the answer will turn out to be.
+
+SELF-CHECK — before including a finding in your output, answer these three questions; if the answer to any is "no", revise or drop the finding rather than including it as-is:
+- "Has this procedure already been performed?" Check the PROCEDURES ALREADY PERFORMED block below (when present) and the text's own Procedures/Work-performed narrative. If the specific check you were about to recommend is already described as done, do not recommend it again — recommend only what its outcome left unresolved.
+- "Is this procedure actually necessary for THIS specific risk?" A textbook list of standard procedures for a topic area is not a substitute for one procedure that closes THIS finding's specific evidence gap. Do not add a procedure only because it is customary for the topic if this particular finding does not need it.
+- "Is my conclusion directly supported by the evidence?" Re-read step 2 above: if your "detail" states something as an established fact that step 2 only established as a pattern or a possibility, rewrite it down a tier rather than leaving the overstatement in.
+
+Hard rules:
 - Each "detail" MUST be an audit procedure phrased as an imperative action, starting with a verb such as Obtain, Inspect, Confirm, Recompute, Trace, Vouch, Perform, Reconcile, Assess, Evaluate, Test, Determine, Select, Verify, Review, Examine, Request, Investigate or Quantify. Never write business or management advice.
 - SURFACE THE EXACT FIGURE, NOT A VAGUE REFERENCE: when the text states a specific amount, party name, day count or date, the "title" and "detail" MUST quote that figure directly instead of a vague phrase. Write "Evaluate adequacy of provision for the Rs 62,00,000 receivable from Vantage Garments LLC, overdue 400+ days" — never "Evaluate adequacy of provision for the receivable". A reviewer scanning the list must see the stakes without re-opening the source text.
-- STATE AN ALREADY-REACHED CONCLUSION AS A FACT, NOT AN OPEN QUESTION: if the text itself already states a finding, determination or conclusion (for example "credit control confirmed no recovery plan exists", "management decided X"), the "detail" MUST state that finding as an established fact (wording such as "has confirmed", "appears inadequate", "was already determined") and then name the next verification or escalation step. Do not phrase an already-reached conclusion as something that still needs open-ended "assessment" from zero — that understates what the source material already established.
+- STATE AN ALREADY-REACHED CONCLUSION AS A FACT, NOT AN OPEN QUESTION: if the text itself already states a finding, determination or conclusion (for example "credit control confirmed no recovery plan exists", "management decided X"), the "detail" MUST state that finding as an established fact (wording such as "has confirmed", "appears inadequate", "was already determined") and then name the next verification or escalation step. Do not phrase an already-reached conclusion as something that still needs open-ended "assessment" from zero — that understates what the source material already established. This rule is about HOW MUCH the text already established (step 2 of the pipeline above), never about which classification tier (step 6) it belongs to — an already-established control deficiency is still only a "control deficiency", stated as a fact, not automatically promoted to fraud.
 - DISTINGUISH A CONFIRMED FACT FROM A SUSPECTED RISK — do not overstate a pattern as a proven conclusion: if the text shows a PATTERN consistent with a risk (an unusual login used while its usual holder was away, a transaction structured in an unusual way, a payment near a threshold) but nothing in the text says the underlying wrongdoing was actually confirmed, phrase the finding as something to VERIFY or ASSESS ("verify whether the changes were authorized", "assess the risk that..."), never as an established fact ("investigate the unauthorized changes", "the fraudulent transfer"). Reserve fact-stating language (see the rule above) strictly for things the text itself already says were confirmed, found, or decided — a suspicious pattern is evidence toward a risk, not proof of one.
-- STANDARD SELECTION — cite the standard that actually governs the activity described, not merely one that sounds plausible:
+- FRAMEWORK / STANDARD SELECTION — cite the standard or accounting framework that actually governs the activity described, and NEVER cite a specific accounting standard (Ind AS 115, Ind AS 2, Ind AS 10, or similarly specific standards) unless the text itself states or clearly implies which financial reporting framework the entity follows. When no framework is stated, cite the AUDITING standard that governs the PROCEDURE (SA numbers govern how the auditor tests something, and apply regardless of which accounting framework the entity itself follows), and leave the accounting-standard citation as an empty or generic reference rather than guessing a specific Ind AS number:
+  - A plain timing/cut-off issue (a transaction recorded in the wrong period, with no accounting judgment involved) → SA 500 (audit evidence) or SA 330 (test of details on the timing), NOT SA 540 and NOT reclassified as an accounting-estimate issue or a subsequent-events issue merely because a date is involved. Only cite SA 540 when the finding is actually about an ESTIMATE (a provision, an impairment, a fair value) — not every finding involving a number is an estimate.
   - Testing an existing accounting estimate or provision already made (doubtful-debt provision, warranty provision, impairment) → SA 540, not SA 315 (SA 315 is risk identification during planning, not testing an estimate that already exists).
   - External third-party confirmations (banks, customers, suppliers, lenders) → SA 505.
   - Related party transactions → SA 550. Fraud risk or management-override indicators → SA 240.
-  - Subsequent events after the reporting date → SA 560 (with Ind AS 10 if disclosure is relevant). Going concern doubts → SA 570.
+  - Subsequent events after the reporting date → SA 560 — genuinely AFTER the reporting date, not a same-period cut-off timing issue. Cite Ind AS 10 alongside it ONLY if the text states or implies Ind AS is the applicable framework; otherwise cite SA 560 alone.
+  - Going concern doubts → SA 570.
   - Reliance on a management expert or specialist → SA 620. Opening balances on a first engagement → SA 510.
   Cite a specific clause number ONLY when certain; otherwise cite the standard/Act without a number rather than guessing one.
-- Each procedure MUST include "evidence": an exact, verbatim quotation of the specific amount, date, party, or transaction detail from the text below that makes this procedure apply. Quote the text exactly; do not paraphrase, translate, or invent a quotation. A procedure with no specific document evidence to quote must not be included here — the three universal procedures (materiality, confirmations, representations) are already handled separately and must NOT be repeated in your response.
+- Each procedure MUST include "evidence": an exact, verbatim quotation of the specific amount, date, party, or transaction detail from the text below that makes this procedure apply. Quote the text exactly; do not paraphrase, translate, or invent a quotation. A procedure with no specific document evidence to quote must not be included here — the mandatory procedures (materiality always, confirmations and representations only when relevant) are already handled separately and must NOT be repeated in your response.
 - Do NOT invent facts. Only cite something that is actually written in the text below.
-- Where relevant to what the text says, cover: a roll-forward/roll-back reconciliation if a count or verification date differs from the reporting date; the effect on going concern [SA 570]; a subsequent events review [SA 560 / Ind AS 10]; export or cross-border control-transfer timing; a formal cut-off test; and any indicator of fraud or management pressure on the numbers [SA 240].
+- Where relevant to what the text says, cover: a roll-forward/roll-back reconciliation if a count or verification date differs from the reporting date; the effect on going concern [SA 570]; a subsequent events review [SA 560]; export or cross-border control-transfer timing; a formal cut-off test; and any indicator of fraud or management pressure on the numbers [SA 240] — but only add these when THIS text's own content actually raises them, not as a standard checklist applied regardless of content.
 - No generic filler, no repeated points, no two procedures citing the same evidence for the same purpose. If two distinct passages describe the SAME underlying finding (a fact, and then a conclusion about that fact), combine them into ONE procedure rather than two - do not produce a second procedure that only restates or narrows the first.
 - "why": ONE short plain-language sentence with no jargon, explaining to a junior team member why this procedure or standard matters here — for example "A written confirmation direct from the customer is stronger evidence than internal correspondence, because it cannot be influenced by company management." Explain the REASON, do not repeat the detail text.
 - "nextAction": ONE short sentence naming what the reviewer does depending on the outcome of this procedure — for example "If the provision is found inadequate, propose an adjusting entry and record it as an unadjusted misstatement for review."
@@ -556,11 +716,11 @@ Respond ONLY with JSON of this exact shape:
 Keep title under 100 characters, detail under 320 characters, why under 220 characters, nextAction under 220 characters, and evidence under ${MAX_EVIDENCE_LENGTH} characters.`;
 }
 
-function buildInsightsPrompt(rawText, topicLabel, packaged) {
+function buildInsightsPrompt(rawText, topicLabel, packaged, performedSections) {
   return `Read the audit text below. It may contain OCR noise, broken grammar, misspellings, abbreviations, ALL CAPS, or a Hindi-English (Hinglish) mix — infer the real meaning and do not be thrown off by formatting.
 
 For the audit area "${topicLabel}", decide which of the KNOWN PROCEDURES below apply to THIS specific text, and whether THIS text shows evidence of any KNOWN COMMON MISTAKES. Produce ${MODEL_INSIGHT_TARGET} document-specific AUDIT PROCEDURES the engagement team must perform because of what THIS text actually says. This is selection and evidencing, not free generation, and it is audit documentation, not management commentary.
-${packagedContextBlock(packaged)}
+${packagedContextBlock(packaged)}${performedProceduresBlock(performedSections)}
 ${insightsHardRulesBlock()}
 
 TEXT:
@@ -633,6 +793,7 @@ function buildCoverageCheckPrompt(
   packaged,
   primaryPassInsights,
   uncoveredSections,
+  performedSections,
 ) {
   const coveredBlock = primaryPassInsights
     .map(
@@ -653,12 +814,12 @@ function buildCoverageCheckPrompt(
 
 For context only, here is what the first pass already found in OTHER sections (do not repeat these; they are not the sections below):
 ${coveredBlock}
-${packagedContextBlock(packaged)}
+${packagedContextBlock(packaged)}${performedProceduresBlock(performedSections)}
 Now examine EACH of the following sections and produce ONE document-specific audit procedure per section that genuinely requires one, grounded in that section's own text:
 
 ${sectionsBlock}
 
-If a specific section genuinely contains nothing requiring a distinct audit procedure beyond the three universal ones (materiality, confirmations, representations), simply do not produce an insight for that section - do not force one. If NONE of the sections above require anything, set "result" to "INSUFFICIENT_EVIDENCE" with a one-sentence reason and an empty "insights" array.
+If a specific section genuinely contains nothing requiring a distinct audit procedure beyond materiality, confirmations, or representations (already handled separately), simply do not produce an insight for that section - do not force one. If NONE of the sections above require anything, set "result" to "INSUFFICIENT_EVIDENCE" with a one-sentence reason and an empty "insights" array.
 
 ${insightsHardRulesBlock()}
 
@@ -675,7 +836,7 @@ ${safeStr(rawText, INSIGHTS_TEXT_CAP)}
 
 ALREADY IDENTIFIED (do not repeat these):
 ${coveredBlock}
-${packagedContextBlock(packaged)}
+${packagedContextBlock(packaged)}${performedProceduresBlock(performedSections)}
 Now read the FULL text below again, specifically hunting for any OTHER distinct passage describing a finding, exception, dispute, control gap, unusual transaction, or risk indicator that is NOT already covered above. Pay particular attention to: a passage near the end of the document, which a first pass sometimes shortchanges; and an issue that resembles an already-covered one in TYPE but concerns a DIFFERENT transaction, amount, date, or party (these are still genuinely separate findings, not restatements).
 
 If you find one or more genuinely new, evidence-backed findings, produce one procedure for each, in the JSON shape below. If, after this careful re-check, there is truly nothing left uncovered, set "result" to "INSUFFICIENT_EVIDENCE" with a one-sentence reason and an empty "insights" array — this is a normal, GOOD outcome meaning the first pass was already complete. Do not invent a finding just to report something.
@@ -905,6 +1066,110 @@ function sectionTextsByWorkingPaperRef(sentTextOriginalCase, tags) {
   return sections;
 }
 
+// Root fix for a human reviewer's own critique, observed across several real
+// audits: "it frequently recommends procedures that have already been
+// performed; instead of identifying the actual remaining evidence gap, it
+// repeats confirmation, vouching, cut-off, or subsequent-payment procedures
+// already documented in the working paper." A real statutory working paper
+// routinely states what was already done, under a heading such as
+// "Procedures Performed" or "Audit Procedures Performed" - that text is
+// simply never shown to the model today, so the model has no way to know a
+// procedure it is about to propose is one the working paper's own author
+// already carried out.
+//
+// This extracts that stated text deterministically (regex against known
+// heading words, never model-derived) and the prompt then quotes it back
+// verbatim with an explicit "do not recommend these again" instruction - the
+// same "give the model the fact rather than ask it to notice the fact"
+// principle extractStatedMateriality and findUncoveredSections already use
+// elsewhere in this file, extended to a new class of fact.
+//
+// Heading matching is heuristic by nature - real working papers do not share
+// one fixed template - but is anchored on the two heading phrasings observed
+// directly in this session's own fixtures ("Procedures Performed:" as an
+// inline label, and "Audit Procedures Performed" as a standalone heading
+// line), plus the closest common synonyms. A document using a heading this
+// pattern does not recognise simply yields no extracted block, which is the
+// honest fallback: the prompt's own self-check rule (see
+// insightsHardRulesBlock) still asks the model to avoid repeating anything
+// the text describes as already done, so detection is not solely dependent
+// on this regex firing.
+const WORKING_PAPER_HEADING_PATTERN =
+  /\b(?:Objective|Background(?:\s*\/\s*Facts\s*Noted)?|(?:Audit\s+)?Procedures\s+(?:Performed|Carried\s+Out)|Work\s+Performed|Findings(?:\s*\/\s*Observations)?|Preparer'?s?\s+Conclusion|Conclusion)\s*:?/gi;
+
+const PROCEDURES_PERFORMED_HEADING_PATTERN =
+  /\b(?:(?:Audit\s+)?Procedures\s+(?:Performed|Carried\s+Out)|Work\s+Performed)\s*:?/i;
+
+// Finds every recognised heading in the ORIGINAL (uncapped, structure-
+// preserving) text, and for each one matching the "procedures performed"
+// family, captures the text from immediately after that heading up to
+// whichever comes next: another recognised heading, the next "[WP Ref: ...]"
+// tag, or the end of the document. Attributed to the nearest preceding WP Ref
+// tag using the same convention findNearestWorkingPaperRef already applies
+// to evidence, so a multi-section document's performed-procedures text stays
+// correctly grouped by which finding it actually belongs to.
+function extractPerformedProceduresSections(rawText) {
+  const text = String(rawText || "");
+  if (!text) return [];
+
+  const wpTags = extractAllWorkingPaperRefTags(text);
+
+  const headings = [];
+  const headingScanPattern = new RegExp(
+    WORKING_PAPER_HEADING_PATTERN.source,
+    "gi",
+  );
+  let match;
+  while ((match = headingScanPattern.exec(text))) {
+    headings.push({
+      index: match.index,
+      end: match.index + match[0].length,
+      label: match[0],
+    });
+  }
+  if (headings.length === 0) return [];
+
+  const boundaries = [
+    ...headings.map((h) => h.index),
+    ...wpTags.map((t) => t.index),
+    text.length,
+  ].sort((a, b) => a - b);
+
+  const results = [];
+  for (const heading of headings) {
+    if (!PROCEDURES_PERFORMED_HEADING_PATTERN.test(heading.label)) continue;
+
+    const nextBoundary =
+      boundaries.find((boundary) => boundary > heading.index) ?? text.length;
+    const bodyText = text.slice(heading.end, nextBoundary).trim();
+    if (bodyText.length === 0) continue;
+
+    let nearestRef = null;
+    for (const tag of wpTags) {
+      if (tag.index <= heading.index) {
+        if (!nearestRef || tag.index > nearestRef.index) nearestRef = tag;
+      }
+    }
+    results.push({ ref: nearestRef ? nearestRef.ref : null, text: bodyText });
+  }
+  return results;
+}
+
+// Formats extracted performed-procedures sections into the prompt block both
+// the primary and coverage-check prompts inject. Empty string (nothing
+// added to the prompt) when the document had no such heading at all, rather
+// than an empty/misleading block.
+function performedProceduresBlock(sections) {
+  if (!sections || sections.length === 0) return "";
+  const lines = sections.map((section, index) => {
+    const label = section.ref
+      ? `[WP Ref: ${section.ref}]`
+      : `Section ${index + 1}`;
+    return `${label}: ${safeStr(section.text, 600)}`;
+  });
+  return `\nPROCEDURES ALREADY PERFORMED, as stated by the working paper itself (do NOT recommend any of these again as if they were still outstanding - identify and recommend only the REMAINING evidence gap, i.e. what these already-performed procedures did not resolve):\n${lines.join("\n")}\n`;
+}
+
 // Root fix for the "the tool produced two entries for one finding" class of
 // defect. Measured against a real live-model run and confirmed directly by
 // a human reviewer's own critique of it: "Test unsupported Rs 2,50,000
@@ -1119,7 +1384,14 @@ export async function generateInsights(req, res, next) {
 
     const topicLabel = safeStr(topicName || topicId || "General audit", 100);
     const packaged = packagedContextFor(topicId, topicName);
-    const prompt = buildInsightsPrompt(rawText, topicLabel, packaged);
+    const resolvedTopicId = packaged?.topicId ?? topicId ?? null;
+    const performedSections = extractPerformedProceduresSections(rawText);
+    const prompt = buildInsightsPrompt(
+      rawText,
+      topicLabel,
+      packaged,
+      performedSections,
+    );
 
     const system =
       "You are an Indian Chartered Accountant acting as the engagement partner on a statutory audit. You produce AUDIT PROCEDURES to be performed (imperative, executable steps), each grounded in a verbatim quotation from the supplied text. Never write management advice or general commentary. Return ONLY valid JSON. No markdown, no commentary.";
@@ -1201,7 +1473,11 @@ export async function generateInsights(req, res, next) {
         generated: true,
         insufficientEvidence: true,
         reason,
-        insights: buildMandatoryProcedures(rawText, topicLabel),
+        insights: buildMandatoryProcedures(
+          rawText,
+          topicLabel,
+          resolvedTopicId,
+        ),
         ...(partial ? { partial: true } : {}),
       });
     }
@@ -1235,7 +1511,11 @@ export async function generateInsights(req, res, next) {
         insufficientEvidence: true,
         reason:
           "No procedure returned by the assistant could be grounded in specific evidence from this text.",
-        insights: buildMandatoryProcedures(rawText, topicLabel),
+        insights: buildMandatoryProcedures(
+          rawText,
+          topicLabel,
+          resolvedTopicId,
+        ),
         ...(partial ? { partial: true } : {}),
       });
     }
@@ -1280,6 +1560,7 @@ export async function generateInsights(req, res, next) {
           packaged,
           primaryPassInsights,
           uncoveredSections,
+          performedSections,
         );
         const coverageResponse = await callDeepSeek({
           system,
@@ -1333,13 +1614,22 @@ export async function generateInsights(req, res, next) {
       }
     }
 
+    const allEvidencedInsights = [
+      ...primaryPassInsights,
+      ...coveragePassInsights,
+    ];
+
     return res.json({
       ok: true,
       generated: true,
       insights: [
-        ...buildMandatoryProcedures(rawText, topicLabel),
-        ...primaryPassInsights,
-        ...coveragePassInsights,
+        ...buildMandatoryProcedures(
+          rawText,
+          topicLabel,
+          resolvedTopicId,
+          allEvidencedInsights,
+        ),
+        ...allEvidencedInsights,
       ].slice(0, MAX_TOTAL_INSIGHTS),
       ...(partial || coveragePartial ? { partial: true } : {}),
     });
