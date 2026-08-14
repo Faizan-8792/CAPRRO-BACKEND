@@ -1,9 +1,12 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import {
   getDigestInbox,
   getDigestPreview,
+  getDigestUnsubscribePreview,
   patchDigestPreferences,
   patchFirmDigestSettings,
+  postDigestUnsubscribe,
   readDigestInboxItem,
   readDigestPreferences,
 } from "../controllers/digest.controller.js";
@@ -19,6 +22,29 @@ const captureDaily = captureOptionalFeatureFlag("dailyDigest");
 const captureWeekly = captureOptionalFeatureFlag("weeklySummary");
 const captureNoticeCases = captureOptionalFeatureFlag("noticeCases");
 
+// Generous but bounded - this is a public, unauthenticated route reachable by
+// anyone who has ever received a digest email (or guesses the shape of the
+// link), so it needs its own limiter independent of a signed-in caller's
+// identity. 30/15min per IP comfortably covers a real recipient clicking a
+// link, reloading the confirmation page, and confirming, while still
+// bounding a token-guessing attempt (which the HMAC signature itself
+// already defeats, but rate limiting slows any attempt down further).
+const unsubscribeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: "Too many requests. Try again in 15 minutes." },
+});
+
+// Public, no-login unsubscribe (RFC 8058 / CAN-SPAM) - mounted ABOVE the
+// blanket auth gate below, following the same "public routes first" shape
+// auth.routes.js uses for its own pre-login endpoints. The recipient's
+// identity and authority to act come entirely from the signed token in the
+// request, never from a session.
+router.get("/unsubscribe", unsubscribeLimiter, getDigestUnsubscribePreview);
+router.post("/unsubscribe", unsubscribeLimiter, postDigestUnsubscribe);
+
 router.use(authRequired, requireFirmMember);
 router.get("/preferences", readDigestPreferences);
 router.patch("/preferences", patchDigestPreferences);
@@ -28,7 +54,7 @@ router.get(
   captureDaily,
   captureWeekly,
   captureNoticeCases,
-  getDigestPreview
+  getDigestPreview,
 );
 router.get("/inbox", getDigestInbox);
 router.post("/inbox/:deliveryId/read", readDigestInboxItem);

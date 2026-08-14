@@ -50,6 +50,14 @@ import {
 
 mongoose.set("bufferCommands", false);
 
+// Needed from here on, not just at the later app.js import below: sending a
+// digest now builds an HMAC-signed unsubscribe link
+// (digest.service.js's buildDigestUnsubscribeLinks), which falls back to
+// JWT_SECRET when DIGEST_UNSUBSCRIBE_SECRET is unset - exactly the
+// production fallback, so this placeholder exercises the real fallback path
+// rather than a special test-only branch.
+process.env.JWT_SECRET ||= "digest-correctness-placeholder";
+
 const FIXED_NOW = new Date("2026-03-20T12:00:00.000Z");
 const DIGEST_RECOVERY_LEGACY_FENCE = new Date(8_640_000_000_000_000);
 const DIGEST_RECOVERY_ACTIVE_TOKEN_PATTERN =

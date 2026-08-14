@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import mongoose from "mongoose";
 import AppConfig from "../models/AppConfig.js";
 import AutomationJob from "../models/AutomationJob.js";
@@ -715,6 +715,282 @@ function digestBusinessIdentity({ firmId, kind, periodKey, recipientUserId }) {
     "recipientUserId",
   );
   return `digest:${canonicalFirmId}:${String(kind)}:${String(periodKey)}:${canonicalRecipientUserId}`;
+}
+
+// ─── Unsubscribe-by-link (one-click, no login required) ──────────────────
+//
+// RFC 8058 / CAN-SPAM: every marketing/automated email needs a way to stop
+// receiving it that does not require the recipient to sign in first - an
+// unsubscribed recipient with an expired session, a deactivated firm
+// membership, or simply no wish to log in must still be able to stop the
+// mail. The link travels inside the email itself, so it cannot rely on a
+// session cookie or JWT; it carries its own signed credential instead,
+// following the same HMAC-SHA256 "expiry.signature" pattern already used
+// for the TDS preview/action tokens (tds-import.service.js's
+// previewTokenForFingerprint, tds-health.service.js's actionToken) - same
+// algorithm and wire format, but with a much longer TTL: those tokens back
+// one interactive session and expire in 15 minutes, while this one has to
+// keep working from inside a mailbox weeks or months after send.
+const DIGEST_UNSUBSCRIBE_TOKEN_TTL_MS = 180 * 24 * 60 * 60 * 1000; // 180 days
+// Overridable only so a non-production environment can point the link at
+// itself; every real deployment uses the one production API host, the same
+// hardcoded convention already used for FROM_EMAIL and the CORS/CSP origin.
+const DIGEST_UNSUBSCRIBE_BASE_URL =
+  process.env.DIGEST_UNSUBSCRIBE_BASE_URL || "https://api.caprotoolkit.in";
+
+function digestUnsubscribeSecret() {
+  const secret =
+    process.env.DIGEST_UNSUBSCRIBE_SECRET || process.env.JWT_SECRET;
+  if (!secret) {
+    throw new DigestError(
+      "Digest unsubscribe link signing is unavailable",
+      503,
+      "DIGEST_UNSUBSCRIBE_UNAVAILABLE",
+    );
+  }
+  return secret;
+}
+
+function digestUnsubscribeTokenPayload(recipientUserId, kind, expiresAt) {
+  return `${recipientUserId}.${kind}.${expiresAt}`;
+}
+
+// expiresAt is a parameter (not always "now + TTL") so a test can pin it and
+// so digestUnsubscribeTokenMatches's own expected-signature recomputation
+// derives from the exact same function.
+function buildDigestUnsubscribeToken(
+  recipientUserId,
+  kind,
+  expiresAt = Date.now() + DIGEST_UNSUBSCRIBE_TOKEN_TTL_MS,
+) {
+  const canonicalRecipientUserId = requireCanonicalObjectId(
+    recipientUserId,
+    "recipientUserId",
+  );
+  if (!DIGEST_KINDS.has(kind)) throw new DigestError("Digest kind is invalid");
+  const signature = createHmac("sha256", digestUnsubscribeSecret())
+    .update(
+      digestUnsubscribeTokenPayload(canonicalRecipientUserId, kind, expiresAt),
+    )
+    .digest("hex");
+  return `${expiresAt}.${signature}`;
+}
+
+// Constant-time comparison (timingSafeEqual), same as
+// tds-health.service.js's actionTokenMatches - a byte-by-byte comparison of
+// a security signature must not let an attacker learn how many leading
+// bytes matched from response timing.
+function digestUnsubscribeTokenMatches(recipientUserId, kind, token) {
+  const canonicalRecipientUserId = canonicalObjectId(recipientUserId);
+  if (!canonicalRecipientUserId || !DIGEST_KINDS.has(kind)) return false;
+  const [expiresText, signature = ""] = String(token || "").split(".");
+  const expiresAt = Number(expiresText);
+  if (
+    !Number.isSafeInteger(expiresAt) ||
+    expiresAt <= Date.now() ||
+    !/^[a-f0-9]{64}$/i.test(signature)
+  ) {
+    return false;
+  }
+  const expected = createHmac("sha256", digestUnsubscribeSecret())
+    .update(
+      digestUnsubscribeTokenPayload(canonicalRecipientUserId, kind, expiresAt),
+    )
+    .digest();
+  const actual = Buffer.from(signature, "hex");
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+// Builds the two URLs a digest email needs, both carrying the same signed
+// token but for two different readers:
+//
+//   pageUrl - the human-facing link placed in the email's visible footer.
+//     Opens the static confirmation page (public/unsubscribe.html) so a
+//     person sees what they are unsubscribing from and can choose "just
+//     this email" or "all digest emails" before anything changes.
+//   apiUrl  - the machine-facing target placed in the List-Unsubscribe /
+//     List-Unsubscribe-Post headers (RFC 8058). A compliant mail client
+//     (Gmail, Outlook, Apple Mail) POSTs to this URL directly, with a fixed
+//     body of "List-Unsubscribe=One-Click" and nothing else, expecting the
+//     unsubscribe to happen immediately with no page and no further
+//     confirmation - pointing this at the static HTML page instead would
+//     not work, since a POST to a static asset does nothing.
+//
+// u and k merely name WHICH recipient and WHICH digest kind the link is
+// about and are not secret; t's signature is what actually prevents anyone
+// from forging or altering a request, so u/k/t travelling together, plainly
+// visible in the URL, is safe by design - exactly as an RFC 8058 link is
+// expected to be self-contained with no session of its own.
+function buildDigestUnsubscribeLinks({ recipientUserId, kind }) {
+  const canonicalRecipientUserId = requireCanonicalObjectId(
+    recipientUserId,
+    "recipientUserId",
+  );
+  if (!DIGEST_KINDS.has(kind)) throw new DigestError("Digest kind is invalid");
+  const token = buildDigestUnsubscribeToken(canonicalRecipientUserId, kind);
+  const query = new URLSearchParams({
+    u: canonicalRecipientUserId,
+    k: kind,
+    t: token,
+  }).toString();
+  return {
+    pageUrl: `${DIGEST_UNSUBSCRIBE_BASE_URL}/unsubscribe.html?${query}`,
+    apiUrl: `${DIGEST_UNSUBSCRIBE_BASE_URL}/api/digests/unsubscribe?${query}`,
+  };
+}
+
+function digestKindLabel(kind) {
+  return kind === DAILY_KIND
+    ? "Daily personal work digest"
+    : "Weekly firm operations summary";
+}
+
+// THIS_KIND stops only the specific digest the clicked link was about;
+// ALL stops every digest email regardless of kind, by turning off email
+// copies entirely (digestPreferences.emailEnabled) - the two options named
+// on the confirmation page.
+const DIGEST_UNSUBSCRIBE_SCOPES = Object.freeze(["THIS_KIND", "ALL"]);
+
+function digestUnsubscribeTokenFailure() {
+  return new DigestError(
+    "This unsubscribe link is invalid or has expired",
+    400,
+    "DIGEST_UNSUBSCRIBE_TOKEN_INVALID",
+  );
+}
+
+function digestUnsubscribeAccountFailure() {
+  return new DigestError(
+    "This account is unavailable",
+    404,
+    "DIGEST_UNSUBSCRIBE_ACCOUNT_NOT_FOUND",
+  );
+}
+
+// Validates the link's token and returns just enough to render the
+// confirmation page - never mutates anything. Must be safe to call
+// repeatedly with no side effects (a mail client's link-preview/security
+// scanner following the link automatically, a person reloading the page).
+async function previewDigestUnsubscribe(
+  { recipientUserId, kind, token },
+  { User: UserModel = User } = {},
+) {
+  const canonicalRecipientUserId = canonicalObjectId(recipientUserId);
+  if (
+    !canonicalRecipientUserId ||
+    !DIGEST_KINDS.has(kind) ||
+    !digestUnsubscribeTokenMatches(canonicalRecipientUserId, kind, token)
+  ) {
+    throw digestUnsubscribeTokenFailure();
+  }
+  const user = await UserModel.findOne(
+    combineQueryFilters(
+      strictObjectIdFilter({ _id: canonicalRecipientUserId }),
+      { isActive: true },
+    ),
+  )
+    .select("email digestPreferences")
+    .lean();
+  if (!user) throw digestUnsubscribeAccountFailure();
+  return {
+    email: user.email,
+    kind,
+    kindLabel: digestKindLabel(kind),
+    preferences: effectivePreferences(user),
+  };
+}
+
+// Applies the unsubscribe choice made on the confirmation page - or, for a
+// mail client that supports RFC 8058 one-click List-Unsubscribe-Post, a
+// direct POST with no human ever seeing the page at all, so this must be
+// safe to call the moment the token itself is verified, without any further
+// confirmation step of its own.
+//
+// This deliberately does NOT go through updateDigestPreferences /
+// requireActiveDigestAccess: those assume an authenticated session scoped to
+// one active firm workspace, which a mailed link cannot assume - the
+// recipient may have switched workspaces, left the firm, or simply not be
+// signed in on this device at all. digestPreferences lives on the User
+// document directly and is not firm-scoped, so none of that firm/membership
+// context is actually needed to honour the request.
+async function applyDigestUnsubscribe(
+  { recipientUserId, kind, token, scope },
+  {
+    User: UserModel = User,
+    safeRecordActivity: recordActivity = safeRecordActivity,
+  } = {},
+) {
+  const canonicalRecipientUserId = canonicalObjectId(recipientUserId);
+  if (
+    !canonicalRecipientUserId ||
+    !DIGEST_KINDS.has(kind) ||
+    !digestUnsubscribeTokenMatches(canonicalRecipientUserId, kind, token)
+  ) {
+    throw digestUnsubscribeTokenFailure();
+  }
+  if (!DIGEST_UNSUBSCRIBE_SCOPES.includes(scope)) {
+    throw new DigestError(
+      "scope must be THIS_KIND or ALL",
+      400,
+      "DIGEST_UNSUBSCRIBE_SCOPE_INVALID",
+    );
+  }
+
+  const before = await UserModel.findOne(
+    combineQueryFilters(
+      strictObjectIdFilter({ _id: canonicalRecipientUserId }),
+      { isActive: true },
+    ),
+  )
+    .select("firmId personalFirmId email digestPreferences")
+    .lean();
+  if (!before) throw digestUnsubscribeAccountFailure();
+
+  const update =
+    scope === "ALL"
+      ? { "digestPreferences.emailEnabled": false }
+      : kind === DAILY_KIND
+        ? {
+            "digestPreferences.dailyFrequency": "OFF",
+            "digestPreferences.dailyEnabled": false,
+          }
+        : { "digestPreferences.weeklyEnabled": false };
+
+  const user = await UserModel.findOneAndUpdate(
+    combineQueryFilters(
+      strictObjectIdFilter({ _id: canonicalRecipientUserId }),
+      { isActive: true },
+    ),
+    { $set: update },
+    { new: true, runValidators: true },
+  )
+    .select("digestPreferences")
+    .lean();
+  if (!user) throw digestUnsubscribeAccountFailure();
+
+  // Best effort, same as every other activity record in this file: a
+  // mailed-link action has no firm context of its own, so this uses
+  // whichever workspace pointer the user happens to have (falling back to
+  // null, which safeRecordActivity tolerates by logging and continuing
+  // rather than failing the preference change that already succeeded).
+  await recordActivity({
+    firmId: before.firmId || before.personalFirmId || null,
+    actorUserId: canonicalRecipientUserId,
+    source: "USER",
+    action: "DIGEST_UNSUBSCRIBED_VIA_EMAIL_LINK",
+    entityType: "User",
+    entityId: canonicalRecipientUserId,
+    beforeSummary: effectivePreferences(before),
+    afterSummary: effectivePreferences(user),
+    metadata: { kind, scope },
+  });
+
+  return {
+    scope,
+    kind,
+    kindLabel: digestKindLabel(kind),
+    preferences: effectivePreferences(user),
+  };
 }
 
 function digestSendingRecoveryReason(delivery, now = new Date()) {
@@ -3628,6 +3904,10 @@ export async function processDigestDeliveryJob(
       lines: summaryLines(delivery.summary),
       idempotencyKey:
         delivery.email?.idempotencyKey || `digest-delivery:${delivery._id}`,
+      ...buildDigestUnsubscribeLinks({
+        recipientUserId: delivery.recipientUserId,
+        kind: delivery.kind,
+      }),
     });
     providerAccepted = true;
     const updated = await DigestDeliveryModel.updateOne(claimFilter, {
@@ -4311,6 +4591,10 @@ export async function sendTestDigestNow(
     periodLabel: copy.periodLabel,
     lines: summaryLines(summary),
     idempotencyKey: `test-digest:${canonicalFirmId}:${summary.kind}:${summary.periodKey}:${now.getTime()}`,
+    ...buildDigestUnsubscribeLinks({
+      recipientUserId: user._id,
+      kind: summary.kind,
+    }),
   });
   return {
     summary,
@@ -4411,16 +4695,21 @@ export {
   FIRM_SCAN_BATCH,
   SEND_CLAIM_STALE_MS,
   WEEKLY_KIND,
+  applyDigestUnsubscribe,
   buildDigestSummary,
+  buildDigestUnsubscribeLinks,
+  buildDigestUnsubscribeToken,
   claimDigestDelivery,
   dailyDigestDueForFrequency,
   digestBusinessIdentity,
   digestEmailSuppressionReason,
   digestSendingRecoveryReason,
+  digestUnsubscribeTokenMatches,
   effectiveDailyFrequency,
   effectivePreferences,
   enqueueRecipientDigest,
   hasWeeklyDigestAuthority,
+  previewDigestUnsubscribe,
   requireActiveDigestAccess,
   summaryLines,
   validTimezone,

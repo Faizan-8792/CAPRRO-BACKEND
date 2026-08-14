@@ -332,7 +332,20 @@ app.use((req, res, next) => {
   const ct = String(req.headers["content-type"] || "").toLowerCase();
   const isCaseOcrMultipart =
     req.path === "/api/cases/ocr" && ct.includes("multipart/form-data");
-  if (!ct.includes("application/json") && !isCaseOcrMultipart) {
+  // A compliant mail client's automatic RFC 8058 one-click unsubscribe
+  // handler POSTs application/x-www-form-urlencoded with a fixed body
+  // ("List-Unsubscribe=One-Click") that it does not let the sender
+  // customize - it cannot be made to send application/json instead. This is
+  // the one other place, alongside the OCR multipart exemption above, this
+  // guard has to recognise a second real content type.
+  const isDigestUnsubscribeForm =
+    req.path === "/api/digests/unsubscribe" &&
+    ct.includes("application/x-www-form-urlencoded");
+  if (
+    !ct.includes("application/json") &&
+    !isCaseOcrMultipart &&
+    !isDigestUnsubscribeForm
+  ) {
     return res.status(415).json({
       ok: false,
       error: "Unsupported Media Type — Content-Type must be application/json",
@@ -342,6 +355,12 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: "1mb" }));
+// A mail client's automatic RFC 8058 one-click unsubscribe POST sends
+// Content-Type: application/x-www-form-urlencoded with a fixed body of
+// "List-Unsubscribe=One-Click" - express.json() alone does not parse that
+// content type, which would leave req.body undefined for that one request
+// shape. Kept small: this route is the only form-urlencoded consumer.
+app.use(express.urlencoded({ extended: false, limit: "10kb" }));
 app.use(sanitizeInputs);
 // HTTP Parameter Pollution protection: collapse duplicated query/body params
 // to a single value so `?role=user&role=admin` cannot smuggle unexpected arrays.

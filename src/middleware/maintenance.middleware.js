@@ -10,6 +10,10 @@ const ALLOW_PREFIXES = [
   "/api/app-config",
   "/api/super/",
   "/health",
+  // A recipient's right to stop receiving mail cannot depend on the site
+  // being out of maintenance mode - CAN-SPAM/RFC 8058 unsubscribe is exactly
+  // the kind of request that must always be honoured.
+  "/api/digests/unsubscribe",
 ];
 
 function isAllowed(path) {
@@ -27,7 +31,9 @@ export async function maintenanceGate(req, res, next) {
       return res.status(503).json({
         ok: false,
         error: "maintenance",
-        message: cfg.maintenanceMessage || "Service under maintenance. Please try again later.",
+        message:
+          cfg.maintenanceMessage ||
+          "Service under maintenance. Please try again later.",
       });
     }
     return next();

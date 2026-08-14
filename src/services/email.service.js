@@ -55,13 +55,22 @@ export async function sendOtpEmail(toEmail, otp) {
     if (res?.error) {
       // Resend returns a soft error object (unverified domain, invalid key, etc.)
       // without throwing. Surface it so we never report a false "OTP sent".
-      throw new Error(String(res.error.message || "Resend rejected the OTP email"));
+      throw new Error(
+        String(res.error.message || "Resend rejected the OTP email"),
+      );
     }
-    console.log(`📧 OTP email sent to: ${toEmail}`, res?.data?.id || res?.id || "");
+    console.log(
+      `📧 OTP email sent to: ${toEmail}`,
+      res?.data?.id || res?.id || "",
+    );
     return res;
   } catch (err) {
     // Surface the full Resend error body so you can diagnose domain/key issues
-    console.error("❌ Resend OTP error:", err?.message, JSON.stringify(err?.response?.data ?? err?.cause ?? {}));
+    console.error(
+      "❌ Resend OTP error:",
+      err?.message,
+      JSON.stringify(err?.response?.data ?? err?.cause ?? {}),
+    );
     throw err;
   }
 }
@@ -124,9 +133,14 @@ export async function sendComplianceReminderEmail({
     });
 
     if (res?.error) {
-      throw new Error(String(res.error.message || "Resend rejected the reminder email"));
+      throw new Error(
+        String(res.error.message || "Resend rejected the reminder email"),
+      );
     }
-    console.log(`📧 Compliance reminder sent to: ${toEmail}`, res?.data?.id || res?.id || "");
+    console.log(
+      `📧 Compliance reminder sent to: ${toEmail}`,
+      res?.data?.id || res?.id || "",
+    );
     return res;
   } catch (err) {
     console.error("❌ Resend reminder error:", err);
@@ -148,32 +162,51 @@ function escapeHtml(s) {
     .replaceAll("'", "&#39;");
 }
 
-export async function sendDigestEmail({
-  toEmail,
+// A bare, unstyled http(s) URL only - one of these is placed verbatim inside
+// a List-Unsubscribe header (a strict mail-header value, no HTML/quoting
+// rules apply there the way they do inside an href), the other as the
+// literal href in the HTML footer. Rejecting anything else means a caller
+// mistake (a relative path, a javascript: URL, a stray angle bracket) fails
+// loudly here rather than reaching a real inbox.
+function requireUnsubscribeUrl(url, label) {
+  const value = String(url || "").trim();
+  if (!/^https:\/\/[^\s<>"]+$/.test(value) || value.length > 2000) {
+    throw new Error(`sendDigestEmail: ${label} must be a bare https:// URL`);
+  }
+  return value;
+}
+
+// Pure content builder, deliberately separated from sendDigestEmail's
+// Resend call below: this is the part with actual branching logic worth
+// unit-testing directly (URL validation, escaping, the RFC 8058 headers,
+// html/text parity), while the Resend call itself is a thin, untestable-
+// without-a-live-key wrapper around it. Throws the same errors sendDigestEmail
+// always threw for these inputs, so callers see no behavioural change.
+export function buildDigestEmailContent({
   subject,
   heading,
   periodLabel,
   lines = [],
-  idempotencyKey,
+  pageUrl,
+  apiUrl,
 }) {
-  if (!toEmail || !subject || !heading) {
-    throw new Error(
-      "sendDigestEmail: toEmail, subject, and heading are required"
-    );
+  if (!subject || !heading) {
+    throw new Error("sendDigestEmail: subject and heading are required");
   }
   if (!Array.isArray(lines) || lines.length > 30) {
     throw new Error("sendDigestEmail: lines must contain at most 30 entries");
   }
-  const normalizedIdempotencyKey = String(idempotencyKey || "").trim();
-  if (
-    !normalizedIdempotencyKey ||
-    normalizedIdempotencyKey.length > 256 ||
-    /[^\x21-\x7E]/.test(normalizedIdempotencyKey)
-  ) {
-    throw new Error(
-      "sendDigestEmail: idempotencyKey must contain 1 to 256 visible ASCII characters"
-    );
-  }
+  // Required, not optional: a digest is an automated, recurring email, which
+  // is exactly the class of message RFC 8058/CAN-SPAM require an unsubscribe
+  // path for. Making the caller supply both here - rather than defaulting to
+  // "no link" - means a future call site can never silently ship a digest
+  // with no way to stop receiving it. pageUrl is the visible footer link a
+  // human clicks (opens the confirmation page); apiUrl is what a mail
+  // client's automatic one-click handler POSTs to directly (see the header
+  // below) - two different readers, two different URLs, and they are not
+  // interchangeable: a POST to the static confirmation page would do nothing.
+  const safePageUrl = requireUnsubscribeUrl(pageUrl, "pageUrl");
+  const safeApiUrl = requireUnsubscribeUrl(apiUrl, "apiUrl");
 
   const safeLines = lines.map((line) => ({
     label: String(line?.label || "").slice(0, 120),
@@ -195,7 +228,7 @@ export async function sendDigestEmail({
                 <tr>
                   <th scope="row" style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">${escapeHtml(line.label)}</th>
                   <td style="text-align:right; padding:8px; border-bottom:1px solid #e5e7eb;">${escapeHtml(line.value)}</td>
-                </tr>`
+                </tr>`,
             )
             .join("")}
         </tbody>
@@ -203,8 +236,72 @@ export async function sendDigestEmail({
       <p style="font-size:12px; color:#6b7280; margin-top:16px;">
         Operational counts only. Review source records in CA PRO Toolkit before acting.
       </p>
+      <p style="font-size:12px; color:#6b7280; margin-top:8px;">
+        <a href="${escapeHtml(safePageUrl)}" style="color:#6b7280;">Unsubscribe from this email</a>
+      </p>
     </div>
   `;
+  // Plain-text alternative: some mail clients render text/plain by default,
+  // and a text part is also what a screen reader or a low-bandwidth client
+  // falls back to. safeLines are already length-bounded above.
+  const text = [
+    heading,
+    ...(periodLabel ? [periodLabel] : []),
+    "",
+    ...safeLines.map((line) => `${line.label}: ${line.value}`),
+    "",
+    "Operational counts only. Review source records in CA PRO Toolkit before acting.",
+    "",
+    `Unsubscribe from this email: ${safePageUrl}`,
+  ].join("\n");
+
+  return {
+    html,
+    text,
+    // RFC 8058: List-Unsubscribe-Post lets a compliant mail client (Gmail,
+    // Outlook, Apple Mail) unsubscribe with a direct POST and no human ever
+    // opening the link - the "one-click" in one-click unsubscribe. The two
+    // headers must be offered together; a List-Unsubscribe header with no
+    // List-Unsubscribe-Post is treated by those clients as "manual visit
+    // only", not one-click.
+    headers: {
+      "List-Unsubscribe": `<${safeApiUrl}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    },
+  };
+}
+
+export async function sendDigestEmail({
+  toEmail,
+  subject,
+  heading,
+  periodLabel,
+  lines = [],
+  idempotencyKey,
+  pageUrl,
+  apiUrl,
+}) {
+  if (!toEmail) {
+    throw new Error("sendDigestEmail: toEmail is required");
+  }
+  const normalizedIdempotencyKey = String(idempotencyKey || "").trim();
+  if (
+    !normalizedIdempotencyKey ||
+    normalizedIdempotencyKey.length > 256 ||
+    /[^\x21-\x7E]/.test(normalizedIdempotencyKey)
+  ) {
+    throw new Error(
+      "sendDigestEmail: idempotencyKey must contain 1 to 256 visible ASCII characters",
+    );
+  }
+  const { html, text, headers } = buildDigestEmailContent({
+    subject,
+    heading,
+    periodLabel,
+    lines,
+    pageUrl,
+    apiUrl,
+  });
 
   try {
     const response = await getResend().emails.send(
@@ -213,22 +310,26 @@ export async function sendDigestEmail({
         to: toEmail,
         subject: String(subject).slice(0, 240),
         html,
+        text,
+        headers,
       },
-      { idempotencyKey: normalizedIdempotencyKey }
+      { idempotencyKey: normalizedIdempotencyKey },
     );
     if (response?.error) {
       throw new Error(
-        String(response.error.message || "Resend rejected digest email")
+        String(response.error.message || "Resend rejected digest email"),
       );
     }
-    console.log(`Digest email sent to: ${toEmail}`, response?.data?.id || response?.id || "");
+    console.log(
+      `Digest email sent to: ${toEmail}`,
+      response?.data?.id || response?.id || "",
+    );
     return response;
   } catch (error) {
     console.error("Resend digest error:", error?.message || error);
     throw error;
   }
 }
-
 
 /**
  * ================================
@@ -252,7 +353,11 @@ export async function sendTestEmail(toEmail) {
       </div>
     `,
   });
-  if (res?.error) throw new Error(String(res.error.message || "Resend rejected test email"));
-  console.log(`📧 Test email sent to: ${toEmail}`, res?.data?.id || res?.id || "");
+  if (res?.error)
+    throw new Error(String(res.error.message || "Resend rejected test email"));
+  console.log(
+    `📧 Test email sent to: ${toEmail}`,
+    res?.data?.id || res?.id || "",
+  );
   return res;
 }
