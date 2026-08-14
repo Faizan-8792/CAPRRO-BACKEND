@@ -24,6 +24,36 @@
 //   B5  a duplicate title, a non-imperative detail, and an ungrounded evidence
 //       span are each rejected; an all-rejected batch reports insufficient
 //       evidence rather than an empty success
+//
+// Added 2026-08-14, from a real live-model run against a genuine seven-issue
+// statutory working paper (Stellar Textiles fixture below) that surfaced a
+// sixth root cause the fixture above never exercised, because its passage is
+// one continuous paragraph with no section structure:
+//
+//   M6  evidenceIsGrounded demanded ONE contiguous substring. A real working
+//       paper's "Background: ... Findings: ... Conclusion: ..." layout means
+//       the fact and the conclusion about it often sit in different
+//       sections, so a model quoting both loses the whole evidence string -
+//       5 of 6 real findings were silently discarded on first measurement.
+//   M7  the model's own quote-character choice (straight single vs straight
+//       double, or a curly variant) can legitimately differ from the
+//       source's while quoting the exact same words, and the exact-substring
+//       check treated that as a fabrication.
+//
+// Fixed by splitting evidence into sentence-like fragments and grounding each
+// independently (resolveGroundedEvidence/splitEvidenceFragments), and by
+// comparing fragments quote-blind (normalizeQuotesForComparison) while never
+// rewriting what is actually displayed. Also added: workingPaperRef, a
+// deterministic (regex/position, never model-trusted) lookup of the nearest
+// preceding "[WP Ref: X-NN]" tag before an insight's evidence, matching the
+// same convention this fixture's own documents already use.
+//
+//   B6  a multi-sentence evidence string spanning two labelled sections is
+//       still accepted, with only the fragments that actually ground kept
+//   B7  a real quote-character mismatch (model uses ' where source uses ")
+//       no longer causes the whole evidence string to be rejected
+//   B8  workingPaperRef resolves to the nearest preceding tag, is null when
+//       the source has no such tags, and is never provided by the model
 
 process.env.DEEPSEEK_API_KEY =
   process.env.DEEPSEEK_API_KEY || "test-key-not-used";
@@ -559,6 +589,210 @@ const TRUNCATED_RESPONSE = COMPLETE_TRUNCATION_SOURCE.slice(0, cutPoint);
     "B4: truncated response is reported partial:true rather than silently complete",
     result.body?.partial === true,
     `body: ${JSON.stringify(result.body).slice(0, 200)}`,
+  );
+}
+
+// ─── B6/B7/B8: a real labelled working-paper fixture with non-contiguous
+//     evidence and a genuine quote-character mismatch ──────────────────
+//
+// Modelled directly on the actual Stellar Textiles document that surfaced
+// this defect: short sections tagged "[WP Ref: X-NN]", each with its own
+// Background/Findings/Conclusion sentences, and a quoted term the model will
+// legitimately re-quote with a different quote character.
+
+const WORKING_PAPER_PASSAGE = `Trade Receivables — Provision for Doubtful Debts [WP Ref: A-01]
+Background: Total trade receivables at year-end stand at Rs. 4,10,00,000. Of this, Rs. 62,00,000 is outstanding from a single customer, Vantage Garments LLC, overdue by more than 400 days. No provision has been made against this balance.
+Findings: Credit control confirmed no realistic recovery plan exists. Management believes the amount will "eventually be settled through arbitration."
+Preparer's Conclusion: Recoverability is doubtful based on evidence obtained; provisioning appears inadequate.
+
+Journal Entry Testing — Reversing Entries at Quarter-End [WP Ref: F-06]
+Background: Four manual journal entries totaling Rs. 41,00,000 were posted to "Other Income" on 30 September 2024 (Q2 close), all by the Deputy CFO. All four entries were reversed in the first week of October 2024.
+Findings: No supporting documentation was available for any of the four entries at the time of testing.
+Preparer's Conclusion: Indicators consistent with possible earnings management around interim reporting.`;
+
+// Evidence spans two labelled sections of A-01: a Background sentence and a
+// Findings sentence, with the section label and "Findings:" between them in
+// the source - genuinely non-contiguous, exactly the shape that discarded
+// real findings before this fix.
+const NON_CONTIGUOUS_RESPONSE = JSON.stringify({
+  result: "SUPPORTED",
+  insufficientEvidenceReason: "",
+  insights: [
+    {
+      title: "Evaluate adequacy of provision for Rs 62,00,000 receivable",
+      detail:
+        "Assess the recoverability of the Rs 62,00,000 receivable from Vantage Garments LLC and determine if the provision is adequate under SA 540.",
+      risk: "high",
+      standard: "SA 540",
+      evidence:
+        "Rs. 62,00,000 is outstanding from a single customer, Vantage Garments LLC, overdue by more than 400 days. Credit control confirmed no realistic recovery plan exists.",
+      why: "A large, long-overdue, disputed receivable with no recovery plan suggests the provision is understated.",
+      nextAction: "If inadequate, propose an adjusting entry.",
+    },
+    // Quotes the same "Other Income" words the source wraps in double quotes,
+    // but with straight single quotes - a real quote-character mismatch, not
+    // a fabrication. Also spans Background + Findings, same non-contiguity.
+    {
+      title: "Investigate quarter-end reversing entries of Rs 41,00,000",
+      detail:
+        "Investigate the four manual journal entries totaling Rs 41,00,000 posted to Other Income and reversed in early October under SA 240.",
+      risk: "high",
+      standard: "SA 240",
+      evidence:
+        "Four manual journal entries totaling Rs. 41,00,000 were posted to 'Other Income' on 30 September 2024 (Q2 close), all by the Deputy CFO. No supporting documentation was available for any of the four entries at the time of testing.",
+      why: "Quarter-end entries with no support and prompt reversal are a classic fraud indicator.",
+      nextAction: "Obtain explanation from the Deputy CFO.",
+    },
+  ],
+});
+
+{
+  nextResponse = NON_CONTIGUOUS_RESPONSE;
+  const result = await callInsights({
+    rawText: WORKING_PAPER_PASSAGE,
+    topicId: null,
+    topicName: null,
+  });
+
+  check("labelled fixture: HTTP 200", result.status === 200);
+  check(
+    "labelled fixture: not flagged insufficientEvidence",
+    result.body?.insufficientEvidence !== true,
+  );
+
+  const insights = Array.isArray(result.body?.insights)
+    ? result.body.insights
+    : [];
+  const modelDerived = insights.filter(
+    (item) =>
+      ![
+        "Determine materiality and sample basis",
+        "Obtain external third-party confirmations",
+        "Obtain written representations from management",
+      ].includes(item.title),
+  );
+
+  check(
+    "B6: both non-contiguous, cross-section findings survive (not silently dropped)",
+    modelDerived.length === 2,
+    JSON.stringify(modelDerived.map((i) => i.title)),
+  );
+
+  const receivableItem = modelDerived.find((i) =>
+    i.title.includes("62,00,000"),
+  );
+  check(
+    "B6: the surviving evidence carries both fragments, joined with an elision marker",
+    receivableItem?.evidence.includes("...") &&
+      receivableItem.evidence.includes("Vantage Garments LLC") &&
+      receivableItem.evidence.includes("no realistic recovery plan"),
+    receivableItem?.evidence,
+  );
+
+  const journalItem = modelDerived.find((i) => i.title.includes("41,00,000"));
+  check(
+    "B7: evidence quoting 'Other Income' in single quotes still grounds against a source using double quotes",
+    journalItem !== undefined,
+    JSON.stringify(modelDerived.map((i) => i.title)),
+  );
+  check(
+    "B7: the model's own single-quote choice is preserved verbatim in the displayed evidence, not silently rewritten",
+    journalItem?.evidence.includes("'Other Income'"),
+    journalItem?.evidence,
+  );
+
+  check(
+    "B8: workingPaperRef resolves to the nearest preceding tag for each finding",
+    receivableItem?.workingPaperRef === "A-01" &&
+      journalItem?.workingPaperRef === "F-06",
+    JSON.stringify({
+      receivable: receivableItem?.workingPaperRef,
+      journal: journalItem?.workingPaperRef,
+    }),
+  );
+
+  const mandatoryItems = insights.filter((item) =>
+    [
+      "Determine materiality and sample basis",
+      "Obtain external third-party confirmations",
+      "Obtain written representations from management",
+    ].includes(item.title),
+  );
+  check(
+    "B8: the three mandatory procedures always carry workingPaperRef: null",
+    mandatoryItems.every((item) => item.workingPaperRef === null),
+    JSON.stringify(mandatoryItems.map((i) => i.workingPaperRef)),
+  );
+}
+
+// ─── B8: no "[WP Ref: ...]" tag anywhere in the source ──────────────
+
+{
+  nextResponse = GROUNDED_RESPONSE;
+  const result = await callInsights({
+    rawText: REVENUE_PASSAGE, // the untagged fixture from the top of this file
+    topicId: "Revenue",
+    topicName: "Revenue Recognition",
+  });
+
+  const insights = Array.isArray(result.body?.insights)
+    ? result.body.insights
+    : [];
+  check(
+    "B8: workingPaperRef is null for every insight when the source has no WP Ref tags at all",
+    insights.every((item) => item.workingPaperRef === null),
+    JSON.stringify(insights.map((i) => i.workingPaperRef)),
+  );
+}
+
+// ─── An evidence string with one fabricated fragment loses only that
+//     fragment, not the whole finding ────────────────────────────────
+
+const PARTIALLY_FABRICATED_RESPONSE = JSON.stringify({
+  result: "SUPPORTED",
+  insufficientEvidenceReason: "",
+  insights: [
+    {
+      title: "Test the dispatch cut-off with a padded fabrication",
+      detail:
+        "Trace the Rs 18.5 lakh dispatch against the delivery request dates and the fabricated detail below.",
+      risk: "high",
+      standard: "SA 500",
+      evidence:
+        "Rs 18.5 lakh of goods dispatched on 31 March 2026 to two customers who had explicitly written requesting delivery only after 5 April, yet revenue was recognised in the year under audit. This sentence was never in the source text at all and is entirely fabricated.",
+    },
+  ],
+});
+
+{
+  nextResponse = PARTIALLY_FABRICATED_RESPONSE;
+  const result = await callInsights({
+    rawText: REVENUE_PASSAGE,
+    topicId: "Revenue",
+  });
+
+  const insights = Array.isArray(result.body?.insights)
+    ? result.body.insights
+    : [];
+  const modelDerived = insights.filter(
+    (item) =>
+      ![
+        "Determine materiality and sample basis",
+        "Obtain external third-party confirmations",
+        "Obtain written representations from management",
+      ].includes(item.title),
+  );
+
+  check(
+    "a real fragment survives even when padded with one fabricated sentence",
+    modelDerived.length === 1,
+    JSON.stringify(modelDerived.map((i) => i.title)),
+  );
+  check(
+    "the fabricated fragment is dropped from the displayed evidence, not merely tolerated",
+    modelDerived[0] !== undefined &&
+      !modelDerived[0].evidence.includes("never in the source text"),
+    modelDerived[0]?.evidence,
   );
 }
 

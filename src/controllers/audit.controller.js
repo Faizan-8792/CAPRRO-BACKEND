@@ -279,11 +279,19 @@ export async function refineAuditClassification(req, res, next) {
 // evidences rather than re-deriving generically (packagedContextFor).
 
 // Requested from the model. Kept deliberately small: the three universal
-// procedures no longer come from here, and an evidence-grounded set of 4-6 is a
-// higher bar than 6-8 ungrounded ones.
-const MODEL_INSIGHT_TARGET = "4 to 6";
-const MAX_MODEL_INSIGHTS = 6;
-const MAX_TOTAL_INSIGHTS = 9; // 3 deterministic + up to 6 model-derived
+// procedures no longer come from here, and an evidence-grounded set is a
+// higher bar than an ungrounded one at any size.
+//
+// Raised from "4 to 6"/6/9 (2026-08-14, agent-testing dense-document pass):
+// a real seven-issue statutory working paper (Stellar Textiles fixture)
+// showed the model already proposing all seven document-specific findings
+// within the old ceiling's neighbourhood, but the ceiling itself meant an
+// eighth or ninth genuinely distinct, evidence-grounded finding on a dense
+// document had nowhere to go. maxTokens below is raised in step so the extra
+// headroom is real rather than nominal.
+const MODEL_INSIGHT_TARGET = "4 to 8";
+const MAX_MODEL_INSIGHTS = 8;
+const MAX_TOTAL_INSIGHTS = 11; // 3 deterministic + up to 8 model-derived
 // Raised from 3500 (2026-08-13, agent-testing feature request) to shrink how much of a long
 // document went unseen and unexamined by a single call. Desktop-side chunking (see
 // CaPro.Desktop.Core.Audit.AuditAssistanceService.GetInsightsForTextAsync) is what now carries
@@ -329,6 +337,20 @@ const IMPERATIVE_VERBS = new Set([
   "IDENTIFY",
   "ENSURE",
   "VALIDATE",
+  // Added 2026-08-14: the prompt's own instruction lists these as "a verb
+  // such as..." - illustrative, not exhaustive - but the set enforcing it
+  // was closed. Measured directly against a real live-model run on a
+  // seven-issue statutory working paper (Stellar Textiles fixture): the
+  // model opened one finding's detail with "Quantify" (extending a sampled
+  // FX-rate error to the full population, a genuine audit procedure) and
+  // another with "Investigate" (a quarter-end journal-entry reversal with no
+  // supporting documentation - a textbook fraud-indicator procedure, not
+  // management commentary). Both findings were silently discarded over a
+  // word the prompt never actually forbade. Added only these two, rather
+  // than guessing at a longer list: each is confirmed by a real model
+  // response, not speculated.
+  "INVESTIGATE",
+  "QUANTIFY",
 ]);
 
 // The three procedures every statutory audit response needs regardless of what
@@ -352,6 +374,7 @@ function buildMandatoryProcedures() {
       nextAction:
         "Record the materiality figure and sample basis in the working paper before testing individual items.",
       amountMinor: null,
+      workingPaperRef: null,
     },
     {
       title: "Obtain external third-party confirmations",
@@ -364,6 +387,7 @@ function buildMandatoryProcedures() {
       nextAction:
         "If a confirmation cannot be obtained, perform alternative procedures and document why the confirmation was unavailable.",
       amountMinor: null,
+      workingPaperRef: null,
     },
     {
       title: "Obtain written representations from management",
@@ -376,6 +400,7 @@ function buildMandatoryProcedures() {
       nextAction:
         "File the signed representation with the working papers before forming a conclusion on this area.",
       amountMinor: null,
+      workingPaperRef: null,
     },
   ];
 }
@@ -431,7 +456,7 @@ function buildInsightsPrompt(rawText, topicLabel, packaged) {
 For the audit area "${topicLabel}", decide which of the KNOWN PROCEDURES below apply to THIS specific text, and whether THIS text shows evidence of any KNOWN COMMON MISTAKES. Produce ${MODEL_INSIGHT_TARGET} document-specific AUDIT PROCEDURES the engagement team must perform because of what THIS text actually says. This is selection and evidencing, not free generation, and it is audit documentation, not management commentary.
 ${contextBlock}
 Hard rules:
-- Each "detail" MUST be an audit procedure phrased as an imperative action, starting with a verb such as Obtain, Inspect, Confirm, Recompute, Trace, Vouch, Perform, Reconcile, Assess, Evaluate, Test, Determine, Select, Verify, Review, Examine or Request. Never write business or management advice.
+- Each "detail" MUST be an audit procedure phrased as an imperative action, starting with a verb such as Obtain, Inspect, Confirm, Recompute, Trace, Vouch, Perform, Reconcile, Assess, Evaluate, Test, Determine, Select, Verify, Review, Examine, Request, Investigate or Quantify. Never write business or management advice.
 - SURFACE THE EXACT FIGURE, NOT A VAGUE REFERENCE: when the text states a specific amount, party name, day count or date, the "title" and "detail" MUST quote that figure directly instead of a vague phrase. Write "Evaluate adequacy of provision for the Rs 62,00,000 receivable from Vantage Garments LLC, overdue 400+ days" — never "Evaluate adequacy of provision for the receivable". A reviewer scanning the list must see the stakes without re-opening the source text.
 - STATE AN ALREADY-REACHED CONCLUSION AS A FACT, NOT AN OPEN QUESTION: if the text itself already states a finding, determination or conclusion (for example "credit control confirmed no recovery plan exists", "management decided X"), the "detail" MUST state that finding as an established fact (wording such as "has confirmed", "appears inadequate", "was already determined") and then name the next verification or escalation step. Do not phrase an already-reached conclusion as something that still needs open-ended "assessment" from zero — that understates what the source material already established.
 - STANDARD SELECTION — cite the standard that actually governs the activity described, not merely one that sounds plausible:
@@ -491,10 +516,63 @@ function extractRupeeMinorFromEvidence(evidence) {
   return Math.round(rupees * 100);
 }
 
+// Every quote-like character - straight single, straight double, and the four
+// curly/smart variants - is collapsed to one canonical character for
+// grounding purposes only (never in what is displayed: callers slice from
+// the ORIGINAL evidence string, this normalization exists solely to decide
+// whether a span is a real quotation). Measured directly against a live
+// model response on the Stellar Textiles fixture: the source wrote a quoted
+// term in straight DOUBLE quotes ("Other Income"), the model quoted the same
+// words back in straight SINGLE quotes ('Other Income') - not a curly-vs-
+// straight mismatch at all, but two different ASCII quote characters that a
+// curly-only mapping does not touch. Collapsing both to `'` (rather than
+// mapping one to the other, which would just relocate the same bug) is what
+// actually closes it. A model rewriting a document's quote style has not
+// changed a single word - only the glyph MarkDown-style JSON prose defaults
+// to - and rejecting the whole evidence string over that punishes a
+// formatting artefact as if it were a fabrication.
+function normalizeQuotesForComparison(value) {
+  return String(value ?? "").replace(/[\u2018\u2019\u201A\u201B'"]/g, "'");
+}
+
 function normalizeWhitespace(value) {
-  return String(value ?? "")
+  return normalizeQuotesForComparison(String(value ?? ""))
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// Real statutory working papers are commonly written as short labelled
+// sections - "Background: ... Findings: ... Preparer's Conclusion: ..." -
+// so the two sentences that together make one finding worth citing (the fact,
+// and what was concluded about it) often sit in different sections with other
+// sentences between them. A careful model quotes both because both are true
+// and both matter; asked for ONE contiguous span it cannot supply, so the
+// previous single-substring check rejected such evidence in its entirety -
+// discarding a real, verbatim, well-grounded finding because of how the
+// source document happened to be laid out, not because anything was invented.
+//
+// Splits a multi-sentence evidence string into individual sentence-like
+// fragments (splitting on ". "/"; " before a capital letter or quote, and on
+// an ellipsis the model may use to mark its own elision) and checks EACH
+// fragment against the sent text independently. A fragment that does not
+// resolve is dropped rather than failing the whole evidence string, so a
+// model that pads one fabricated sentence onto two real ones still loses only
+// the fabricated part. Grounded fragments are re-joined with " ... " (the
+// same marker a model already uses for its own elisions) so the final
+// evidence string a reviewer sees never claims contiguity that is not there.
+// Splits on whitespace-normalized text but deliberately does NOT run quote
+// normalization here: what is returned is what a reviewer sees, and the
+// model's own quote-character choice (however it differs from the source) is
+// preserved verbatim rather than silently rewritten to a canonical glyph.
+// Quote-blindness is applied only where fragments are checked against the
+// source in resolveGroundedEvidence, never in what is displayed.
+function splitEvidenceFragments(evidence) {
+  return String(evidence ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(/\s*\.{3}\s*|(?<=[.;])\s+(?=[A-Z"'\u2018\u201C])/)
+    .map((fragment) => fragment.trim())
+    .filter((fragment) => fragment.length > 0);
 }
 
 // Fix for M2: the previous grounding mechanism was one sentence of prose with
@@ -502,15 +580,83 @@ function normalizeWhitespace(value) {
 // actually appeared anywhere in the input. This is the check. It runs against
 // the text the model was actually sent (capped at INSIGHTS_TEXT_CAP), because
 // that is the only text the model could truthfully quote from.
-function evidenceIsGrounded(evidence, sentTextNormalized) {
-  const normalized = normalizeWhitespace(evidence);
-  if (
-    normalized.length < MIN_EVIDENCE_LENGTH ||
-    normalized.length > MAX_EVIDENCE_LENGTH
-  ) {
-    return false;
+//
+// Returns { text, firstFragment } where text is the evidence actually
+// grounded (which may be a subset of what was submitted, rejoined with
+// " ... ") and firstFragment is its first individually-verified span - kept
+// separately because that is what findNearestWorkingPaperRef locates a
+// position with, or null when nothing in the submitted evidence grounds at
+// all. The overall length bound is checked against what is actually kept,
+// not the model's original submission, so trimming a partly-fabricated
+// evidence string down to its real portion cannot itself trip the ceiling.
+function resolveGroundedEvidence(evidence, sentTextNormalized) {
+  const fragments = splitEvidenceFragments(evidence);
+  const kept = fragments.filter((fragment) => {
+    if (fragment.length < MIN_EVIDENCE_LENGTH) return false;
+    // Compared quote-blind (a model rewriting " to ' has changed no word),
+    // but the fragment itself - what gets displayed - keeps its own
+    // original quote characters untouched.
+    const comparable = normalizeQuotesForComparison(fragment).toLowerCase();
+    return sentTextNormalized.includes(comparable);
+  });
+  if (kept.length === 0) return null;
+
+  const joined = kept.join(" ... ");
+  if (joined.length > MAX_EVIDENCE_LENGTH) return null;
+
+  return { text: joined, firstFragment: kept[0] };
+}
+
+// Matches the bracketed working-paper-reference convention already used in
+// this fixture's own documents ("[WP Ref: A-01]"), tolerant of a missing
+// colon, extra spaces, or no surrounding brackets - never inferred, only
+// recognised: a document with no such tag anywhere simply gets
+// workingPaperRef: null on every insight, which is the honest answer.
+const WORKING_PAPER_REF_PATTERN =
+  /\[?\s*WP\s*Ref\.?\s*:?\s*([A-Za-z]{1,4}-?\d{1,4}(?:\.\d+)?)\s*\]?/gi;
+
+// Deterministic (non-LLM), the same design principle as
+// extractRupeeMinorFromEvidence: a working paper reference is a fact about
+// WHERE in the source document a finding's evidence sits, not something a
+// model should be trusted to report about its own output. Finds every
+// "[WP Ref: X-NN]" tag in the ORIGINAL text (case preserved, so the tag's
+// own casing is returned unchanged) and returns whichever one appears
+// nearest before the grounded evidence's first fragment - the same
+// convention this fixture's own documents use, where one tag heads a section
+// and every subsequent sentence until the next tag belongs to it. Returns
+// null when the source contains no such tags at all, or when the evidence's
+// position could not be located (should not happen for evidence already
+// confirmed grounded, but fails safe rather than guessing).
+function findNearestWorkingPaperRef(firstFragment, sentTextOriginalCase) {
+  if (!sentTextOriginalCase) return null;
+
+  const tags = [];
+  let match;
+  WORKING_PAPER_REF_PATTERN.lastIndex = 0;
+  while ((match = WORKING_PAPER_REF_PATTERN.exec(sentTextOriginalCase))) {
+    tags.push({ ref: match[1], index: match.index });
   }
-  return sentTextNormalized.includes(normalized.toLowerCase());
+  if (tags.length === 0) return null;
+
+  // Quote-blind for the same reason resolveGroundedEvidence is: firstFragment
+  // may carry the model's own quote-character choice, which can differ from
+  // the source's while quoting the exact same words.
+  const needle = normalizeQuotesForComparison(
+    String(firstFragment || ""),
+  ).toLowerCase();
+  if (!needle) return null;
+  const haystack =
+    normalizeQuotesForComparison(sentTextOriginalCase).toLowerCase();
+  const evidenceIndex = haystack.indexOf(needle);
+  if (evidenceIndex === -1) return null;
+
+  let nearest = null;
+  for (const tag of tags) {
+    if (tag.index <= evidenceIndex) {
+      if (!nearest || tag.index > nearest.index) nearest = tag;
+    }
+  }
+  return nearest ? nearest.ref : null;
 }
 
 // A narrow, closed set of subject-plus-modal openings that name the auditor/team as the
@@ -540,7 +686,17 @@ function isImperativeDetail(detail) {
 // title), a detail with no imperative verb, and any procedure whose evidence
 // does not resolve against the text the model was actually sent. What remains
 // is capped and field-bounded the same way the previous version always was.
-function validateAndFilterInsights(rawItems, sentTextNormalized) {
+//
+// sentTextNormalized is lowercase (whitespace/quote-normalized) and is what
+// every substring check runs against. sentTextOriginalCase is the same text
+// with its original casing intact, needed only so a recovered
+// [WP Ref: A-01]-style tag is returned in the case it was actually written,
+// not forced to lower case.
+function validateAndFilterInsights(
+  rawItems,
+  sentTextNormalized,
+  sentTextOriginalCase,
+) {
   const seenTitles = new Set();
   const accepted = [];
 
@@ -556,12 +712,9 @@ function validateAndFilterInsights(rawItems, sentTextNormalized) {
     const normalizedTitle = title.toLowerCase();
     if (seenTitles.has(normalizedTitle)) continue;
     if (!isImperativeDetail(detail)) continue;
-    if (!evidenceIsGrounded(evidence, sentTextNormalized)) continue;
 
-    const groundedEvidence = normalizeWhitespace(evidence).slice(
-      0,
-      MAX_EVIDENCE_LENGTH,
-    );
+    const resolved = resolveGroundedEvidence(evidence, sentTextNormalized);
+    if (resolved === null) continue;
 
     seenTitles.add(normalizedTitle);
     accepted.push({
@@ -571,7 +724,7 @@ function validateAndFilterInsights(rawItems, sentTextNormalized) {
         ? String(item.risk).toLowerCase()
         : "medium",
       standard: safeStr(item.standard, 60).trim(),
-      evidence: groundedEvidence,
+      evidence: resolved.text,
       // Model-written, but bounded and optional: an absent or blank value
       // is dropped rather than defaulted to an empty string reaching the
       // client as if it were a deliberate "nothing to add" answer.
@@ -582,7 +735,15 @@ function validateAndFilterInsights(rawItems, sentTextNormalized) {
       // evidence is a verbatim quotation already checked against the source
       // document above, so a figure found inside it is the actual stated
       // amount, not a model computation that could silently be wrong.
-      amountMinor: extractRupeeMinorFromEvidence(groundedEvidence),
+      amountMinor: extractRupeeMinorFromEvidence(resolved.text),
+      // Deterministically located from the ORIGINAL text by proximity, never
+      // from the model: see findNearestWorkingPaperRef below for why
+      // position in the source is what a working-paper reference actually
+      // means.
+      workingPaperRef: findNearestWorkingPaperRef(
+        resolved.firstFragment,
+        sentTextOriginalCase,
+      ),
     });
   }
 
@@ -614,9 +775,14 @@ export async function generateInsights(req, res, next) {
     const system =
       "You are an Indian Chartered Accountant acting as the engagement partner on a statutory audit. You produce AUDIT PROCEDURES to be performed (imperative, executable steps), each grounded in a verbatim quotation from the supplied text. Never write management advice or general commentary. Return ONLY valid JSON. No markdown, no commentary.";
 
-    // Fix for M3: raised from 1600. The deterministic block no longer competes
-    // for tokens, but each remaining item now also carries an evidence quote,
-    // so headroom is kept generous rather than tuned to a single fixture.
+    // Fix for M3: raised from 1600, then again from 3000 to 4000 (2026-08-14)
+    // alongside MAX_MODEL_INSIGHTS rising from 6 to 8. Measured on the Stellar
+    // Textiles fixture (a real seven-issue statutory working paper): 6
+    // fully-populated insights (title/detail/evidence/why/nextAction/standard
+    // each) cost 1,346 completion tokens, so 8 needs roughly 1,800 plus
+    // headroom for a longer prompt on a denser source document - 4000 keeps
+    // that generous rather than tuned to one fixture, same principle as the
+    // original increase from 1600.
     //
     // timeoutMs lowered from 40000 and maxAttemptsPerModel from the default 2
     // to 1 (2026-08-13, accuracy/speed pass). The old combination allowed a
@@ -636,7 +802,7 @@ export async function generateInsights(req, res, next) {
       system,
       prompt,
       jsonResponse: true,
-      maxTokens: 3000,
+      maxTokens: 4000,
       temperature: 0.2,
       timeoutMs: 25000,
       maxAttemptsPerModel: 1,
@@ -692,13 +858,24 @@ export async function generateInsights(req, res, next) {
     }
 
     // Grounding runs against the exact text the model was sent (capped, same
-    // as the prompt), normalized the same way on both sides.
-    const sentTextNormalized = normalizeWhitespace(
-      safeStr(rawText, INSIGHTS_TEXT_CAP),
-    ).toLowerCase();
+    // as the prompt), normalized the same way on both sides. The
+    // original-case copy (whitespace collapsed, but quote characters and
+    // letter case both left exactly as written) is kept alongside purely so
+    // a "[WP Ref: A-01]"-style tag can be recovered in the case it was
+    // actually written; findNearestWorkingPaperRef does its own quote-blind
+    // comparison internally, so this copy does not need to be pre-normalized
+    // for that.
+    const sentTextCapped = safeStr(rawText, INSIGHTS_TEXT_CAP);
+    const sentTextOriginalCase = sentTextCapped.replace(/\s+/g, " ");
+    const sentTextNormalized =
+      normalizeWhitespace(sentTextCapped).toLowerCase();
 
     const rawItems = Array.isArray(parsed.insights) ? parsed.insights : [];
-    const validated = validateAndFilterInsights(rawItems, sentTextNormalized);
+    const validated = validateAndFilterInsights(
+      rawItems,
+      sentTextNormalized,
+      sentTextOriginalCase,
+    );
 
     if (validated.length === 0) {
       return res.json({
