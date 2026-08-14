@@ -291,7 +291,14 @@ export async function refineAuditClassification(req, res, next) {
 // headroom is real rather than nominal.
 const MODEL_INSIGHT_TARGET = "4 to 8";
 const MAX_MODEL_INSIGHTS = 8;
-const MAX_TOTAL_INSIGHTS = 11; // 3 deterministic + up to 8 model-derived
+// New genuinely-uncovered findings the coverage-check pass (see
+// buildCoverageCheckPrompt) may contribute on top of the primary pass. Kept
+// smaller than MAX_MODEL_INSIGHTS: a well-run primary pass should already
+// find most of what a document has, so a second pass finding more than a
+// handful more is unusual, and an unbounded second pass would make the
+// response length unpredictable for a reviewer.
+const MAX_COVERAGE_MODEL_INSIGHTS = 4;
+const MAX_TOTAL_INSIGHTS = 15; // 3 deterministic + up to 8 primary + up to 4 coverage-check
 // Raised from 3500 (2026-08-13, agent-testing feature request) to shrink how much of a long
 // document went unseen and unexamined by a single call. Desktop-side chunking (see
 // CaPro.Desktop.Core.Audit.AuditAssistanceService.GetInsightsForTextAsync) is what now carries
@@ -353,6 +360,46 @@ const IMPERATIVE_VERBS = new Set([
   "QUANTIFY",
 ]);
 
+// Matches a stated overall-materiality figure anywhere in the source, e.g.
+// "Materiality (Overall): Rs. 22,50,000" or "Overall Materiality: Rs 32,00,000".
+// Deliberately anchored on the word "materiality" within 80 characters of a
+// rupee figure, rather than the bare RUPEE_AMOUNT_PATTERN used for per-insight
+// evidence - this one is scanned against the WHOLE document, and an unanchored
+// version would as happily match the first amount mentioned anywhere near the
+// word "material" in an unrelated sentence.
+const MATERIALITY_STATEMENT_PATTERN =
+  /materiality[^.\n]{0,80}?(?:rs\.?|inr|₹)\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(lakh|lakhs|crore|crores)?/i;
+
+// Deterministic (non-LLM), same principle as extractRupeeMinorFromEvidence:
+// whether a document states an overall materiality figure is a fact about the
+// document, not something a model should be asked to notice or restate. Root
+// fix for the mandatory materiality procedure reading as fully generic
+// ("Determine materiality...") even when the working paper already states one
+// on its cover page - the model was never shown this because it is asked to
+// select and evidence document-specific FINDINGS, not to read the document's
+// own header block.
+function extractStatedMateriality(rawText) {
+  const match = MATERIALITY_STATEMENT_PATTERN.exec(String(rawText || ""));
+  if (!match) return null;
+
+  const numeral = Number(match[1].replace(/,/g, ""));
+  if (!Number.isFinite(numeral) || numeral <= 0) return null;
+
+  const unit = match[2] ? match[2].toLowerCase() : null;
+  const scale = unit && unit.startsWith("crore") ? 10000000 : unit ? 100000 : 1;
+  const rupees = numeral * scale;
+  if (!Number.isFinite(rupees) || rupees > 10000000000) return null;
+
+  // Whole rupees, not minor units: this is used only to build a prose sentence
+  // below, never compared against another minor-unit figure, so there is no
+  // reason to introduce paise here.
+  return Math.round(rupees);
+}
+
+function formatRupeesForSentence(rupees) {
+  return rupees.toLocaleString("en-IN");
+}
+
 // The three procedures every statutory audit response needs regardless of what
 // the text says (SA 320/530 materiality, SA 505 confirmations, SA 580 written
 // representations). Static and topic-independent, exactly as the previous
@@ -361,25 +408,46 @@ const IMPERATIVE_VERBS = new Set([
 // evidence is deliberately empty: these are standard-mandated, not derived from
 // this document, and an empty evidence field says that honestly rather than
 // inventing a quotation to satisfy the schema.
-function buildMandatoryProcedures() {
+//
+// rawText is read ONLY to check for a stated overall-materiality figure
+// (extractStatedMateriality), which is deterministic string matching against
+// the document's own header, not model output - amountMinor stays null
+// regardless, so the existing "every mandatory procedure carries amountMinor:
+// null" invariant is unaffected; only the materiality item's prose changes.
+//
+// topicLabel names the audit area in the confirmations/representations items
+// rather than the vague "this area", when a caller supplied or resolved one -
+// falls back to the previous generic wording when it did not, so nothing
+// regresses for a caller that sends no topic at all.
+function buildMandatoryProcedures(rawText, topicLabel) {
+  const statedMateriality = extractStatedMateriality(rawText);
+  const materialityDetail = statedMateriality
+    ? `This working paper states overall materiality as Rs ${formatRupeesForSentence(statedMateriality)}. Confirm performance materiality is documented separately (typically a proportion of the overall figure, not the same number) and use it, not the overall figure, as the basis for sample size and item selection.`
+    : "Determine materiality and performance materiality for this area and document the basis for sample size and item selection.";
+  const materialityNextAction = statedMateriality
+    ? "Confirm the performance materiality figure is documented, then record the sample basis before testing individual items."
+    : "Record the materiality figure and sample basis in the working paper before testing individual items.";
+
+  const areaLabel =
+    typeof topicLabel === "string" && topicLabel.trim().length > 0
+      ? topicLabel.trim()
+      : "this area";
+
   return [
     {
       title: "Determine materiality and sample basis",
-      detail:
-        "Determine materiality and performance materiality for this area and document the basis for sample size and item selection.",
+      detail: materialityDetail,
       risk: "medium",
       standard: "SA 320, SA 530",
       evidence: "",
       why: "Materiality sets the threshold for what counts as a significant misstatement, so every other procedure in this area is scoped against it.",
-      nextAction:
-        "Record the materiality figure and sample basis in the working paper before testing individual items.",
+      nextAction: materialityNextAction,
       amountMinor: null,
       workingPaperRef: null,
     },
     {
       title: "Obtain external third-party confirmations",
-      detail:
-        "Obtain external third-party confirmations for balances, holdings or amounts in this area that involve outside parties such as banks, customers, suppliers, job-workers or lenders.",
+      detail: `Obtain external third-party confirmations for balances, holdings or amounts in ${areaLabel} that involve outside parties such as banks, customers, suppliers, job-workers or lenders.`,
       risk: "medium",
       standard: "SA 505",
       evidence: "",
@@ -391,8 +459,7 @@ function buildMandatoryProcedures() {
     },
     {
       title: "Obtain written representations from management",
-      detail:
-        "Obtain written representations from management covering the completeness and key assertions of this area.",
+      detail: `Obtain written representations from management covering the completeness and key assertions of ${areaLabel}.`,
       risk: "medium",
       standard: "SA 580",
       evidence: "",
@@ -446,19 +513,28 @@ function packagedContextFor(topicId, topicName) {
   };
 }
 
-function buildInsightsPrompt(rawText, topicLabel, packaged) {
-  const contextBlock = packaged
+// Selects and formats the packaged reference procedures/mistakes for a topic
+// into the prompt block both the primary and coverage-check prompts share.
+// Factored out so the two prompts cannot silently drift into two different
+// wordings of the same instruction.
+function packagedContextBlock(packaged) {
+  return packaged
     ? `\nKNOWN PROCEDURES for this audit area (select the ones THIS text actually supports; do not just restate all of them):\n${packaged.procedures.map((p) => `- ${p}`).join("\n")}\n\nKNOWN COMMON MISTAKES for this audit area (check whether THIS text shows evidence of any of these):\n${packaged.mistakes.map((m) => `- ${m}`).join("\n")}\n`
     : "";
+}
 
-  return `Read the audit text below. It may contain OCR noise, broken grammar, misspellings, abbreviations, ALL CAPS, or a Hindi-English (Hinglish) mix — infer the real meaning and do not be thrown off by formatting.
-
-For the audit area "${topicLabel}", decide which of the KNOWN PROCEDURES below apply to THIS specific text, and whether THIS text shows evidence of any KNOWN COMMON MISTAKES. Produce ${MODEL_INSIGHT_TARGET} document-specific AUDIT PROCEDURES the engagement team must perform because of what THIS text actually says. This is selection and evidencing, not free generation, and it is audit documentation, not management commentary.
-${contextBlock}
-Hard rules:
+// The rules and output schema shared by the primary generation pass and the
+// coverage-check pass below. Factored into one function so the two prompts
+// are held to literally the same bar for evidence, imperative phrasing,
+// standard selection and fact-versus-risk discipline - a second copy that
+// drifts from the first would let the coverage pass accept something the
+// primary pass would have rejected, or vice versa.
+function insightsHardRulesBlock() {
+  return `Hard rules:
 - Each "detail" MUST be an audit procedure phrased as an imperative action, starting with a verb such as Obtain, Inspect, Confirm, Recompute, Trace, Vouch, Perform, Reconcile, Assess, Evaluate, Test, Determine, Select, Verify, Review, Examine, Request, Investigate or Quantify. Never write business or management advice.
 - SURFACE THE EXACT FIGURE, NOT A VAGUE REFERENCE: when the text states a specific amount, party name, day count or date, the "title" and "detail" MUST quote that figure directly instead of a vague phrase. Write "Evaluate adequacy of provision for the Rs 62,00,000 receivable from Vantage Garments LLC, overdue 400+ days" — never "Evaluate adequacy of provision for the receivable". A reviewer scanning the list must see the stakes without re-opening the source text.
 - STATE AN ALREADY-REACHED CONCLUSION AS A FACT, NOT AN OPEN QUESTION: if the text itself already states a finding, determination or conclusion (for example "credit control confirmed no recovery plan exists", "management decided X"), the "detail" MUST state that finding as an established fact (wording such as "has confirmed", "appears inadequate", "was already determined") and then name the next verification or escalation step. Do not phrase an already-reached conclusion as something that still needs open-ended "assessment" from zero — that understates what the source material already established.
+- DISTINGUISH A CONFIRMED FACT FROM A SUSPECTED RISK — do not overstate a pattern as a proven conclusion: if the text shows a PATTERN consistent with a risk (an unusual login used while its usual holder was away, a transaction structured in an unusual way, a payment near a threshold) but nothing in the text says the underlying wrongdoing was actually confirmed, phrase the finding as something to VERIFY or ASSESS ("verify whether the changes were authorized", "assess the risk that..."), never as an established fact ("investigate the unauthorized changes", "the fraudulent transfer"). Reserve fact-stating language (see the rule above) strictly for things the text itself already says were confirmed, found, or decided — a suspicious pattern is evidence toward a risk, not proof of one.
 - STANDARD SELECTION — cite the standard that actually governs the activity described, not merely one that sounds plausible:
   - Testing an existing accounting estimate or provision already made (doubtful-debt provision, warranty provision, impairment) → SA 540, not SA 315 (SA 315 is risk identification during planning, not testing an estimate that already exists).
   - External third-party confirmations (banks, customers, suppliers, lenders) → SA 505.
@@ -469,7 +545,7 @@ Hard rules:
 - Each procedure MUST include "evidence": an exact, verbatim quotation of the specific amount, date, party, or transaction detail from the text below that makes this procedure apply. Quote the text exactly; do not paraphrase, translate, or invent a quotation. A procedure with no specific document evidence to quote must not be included here — the three universal procedures (materiality, confirmations, representations) are already handled separately and must NOT be repeated in your response.
 - Do NOT invent facts. Only cite something that is actually written in the text below.
 - Where relevant to what the text says, cover: a roll-forward/roll-back reconciliation if a count or verification date differs from the reporting date; the effect on going concern [SA 570]; a subsequent events review [SA 560 / Ind AS 10]; export or cross-border control-transfer timing; a formal cut-off test; and any indicator of fraud or management pressure on the numbers [SA 240].
-- No generic filler, no repeated points, no two procedures citing the same evidence for the same purpose.
+- No generic filler, no repeated points, no two procedures citing the same evidence for the same purpose. If two distinct passages describe the SAME underlying finding (a fact, and then a conclusion about that fact), combine them into ONE procedure rather than two - do not produce a second procedure that only restates or narrows the first.
 - "why": ONE short plain-language sentence with no jargon, explaining to a junior team member why this procedure or standard matters here — for example "A written confirmation direct from the customer is stronger evidence than internal correspondence, because it cannot be influenced by company management." Explain the REASON, do not repeat the detail text.
 - "nextAction": ONE short sentence naming what the reviewer does depending on the outcome of this procedure — for example "If the provision is found inadequate, propose an adjusting entry and record it as an unadjusted misstatement for review."
 - If the text genuinely does not contain enough specific detail to support ANY document-specific procedure (e.g. it is too short, too vague, or not really audit-relevant), set "result" to "INSUFFICIENT_EVIDENCE", give a one-sentence "insufficientEvidenceReason", and return an empty "insights" array. Do not force procedures onto text that does not support them.
@@ -477,13 +553,148 @@ Hard rules:
 Respond ONLY with JSON of this exact shape:
 {"result": "SUPPORTED or INSUFFICIENT_EVIDENCE", "insufficientEvidenceReason": "required when result is INSUFFICIENT_EVIDENCE, empty string otherwise", "insights": [{"title": "short imperative procedure title with the specific figure included", "detail": "1-3 sentence executable audit procedure tied to the text, citing the standard, with specific figures and any already-reached conclusion stated as fact", "risk": "high|medium|low", "standard": "precise standard/section or empty string", "evidence": "exact quotation from the text below", "why": "one plain-language sentence explaining why this matters", "nextAction": "one sentence on what to do depending on the outcome"}]}
 
-Keep title under 100 characters, detail under 320 characters, why under 220 characters, nextAction under 220 characters, and evidence under ${MAX_EVIDENCE_LENGTH} characters.
+Keep title under 100 characters, detail under 320 characters, why under 220 characters, nextAction under 220 characters, and evidence under ${MAX_EVIDENCE_LENGTH} characters.`;
+}
+
+function buildInsightsPrompt(rawText, topicLabel, packaged) {
+  return `Read the audit text below. It may contain OCR noise, broken grammar, misspellings, abbreviations, ALL CAPS, or a Hindi-English (Hinglish) mix — infer the real meaning and do not be thrown off by formatting.
+
+For the audit area "${topicLabel}", decide which of the KNOWN PROCEDURES below apply to THIS specific text, and whether THIS text shows evidence of any KNOWN COMMON MISTAKES. Produce ${MODEL_INSIGHT_TARGET} document-specific AUDIT PROCEDURES the engagement team must perform because of what THIS text actually says. This is selection and evidencing, not free generation, and it is audit documentation, not management commentary.
+${packagedContextBlock(packaged)}
+${insightsHardRulesBlock()}
 
 TEXT:
 """
 ${safeStr(rawText, INSIGHTS_TEXT_CAP)}
 """`;
 }
+
+// Root fix for a class of defect a human reviewer traced directly to a real
+// document (the Orion/Stellar fixtures below): a single generation pass, even
+// a well-grounded one, can read a multi-section working paper and simply stop
+// after finding "enough" issues, silently leaving one or more labelled
+// sections unaddressed. Measured live on the Stellar Textiles fixture: a
+// single pass covered 5 of 7 real, evidenced, WP-Ref-tagged findings and
+// silently dropped the other 2 (B-02 foreign-exchange mismatch and G-07 going-
+// concern/working-capital renewal) despite the response having room to spare
+// under the insight-count ceiling - so raising the ceiling alone would not
+// have caught this; the model chose to stop short of it, not hit it.
+//
+// A first version of this pass asked the model to "re-read the whole document
+// and hunt for anything missed", which is the same vague instruction a single
+// pass already effectively had (the primary prompt already says to cover
+// everything relevant). Measured live: it recovered some missed findings but
+// not all (a going-concern finding was recovered; a foreign-exchange finding
+// on the same document was still missed). The fix below is deterministic
+// rather than a second guess: findUncoveredSections computes EXACTLY which
+// "[WP Ref: ...]"-tagged sections have zero primary-pass coverage, using the
+// same tag-extraction machinery findNearestWorkingPaperRef relies on, and
+// this prompt is then built to ask about ONLY those specific, named, quoted
+// sections - one finding is requested per uncovered section rather than a
+// generic re-read of the whole text. This turns "did you miss anything?"
+// into "here is section B-02, verbatim - what, if anything, does it
+// require?", which is a fill-in-the-blank task rather than a repeat of the
+// open-ended search that already under-delivered once.
+function findUncoveredSections(sentTextOriginalCase, primaryPassInsights) {
+  const tags = extractAllWorkingPaperRefTags(sentTextOriginalCase);
+  if (tags.length === 0) return null; // No tagging convention in this document at all.
+
+  const coveredRefs = new Set(
+    primaryPassInsights.map((item) => item.workingPaperRef).filter(Boolean),
+  );
+  const uniqueTags = [];
+  const seenRefs = new Set();
+  for (const tag of tags) {
+    if (!seenRefs.has(tag.ref)) {
+      seenRefs.add(tag.ref);
+      uniqueTags.push(tag);
+    }
+  }
+
+  const uncoveredRefs = uniqueTags.filter((tag) => !coveredRefs.has(tag.ref));
+  if (uncoveredRefs.length === 0) return [];
+
+  const sections = sectionTextsByWorkingPaperRef(sentTextOriginalCase, tags);
+  return uncoveredRefs.map((tag) => ({
+    ref: tag.ref,
+    text: sections.get(tag.ref) || "",
+  }));
+}
+
+// Builds a targeted coverage-check prompt naming and quoting the SPECIFIC
+// uncovered sections computed by findUncoveredSections, when the document
+// uses the "[WP Ref: ...]" convention. Falls back to a generic whole-document
+// re-read only for a document with no such tags at all (uncoveredSections is
+// null), since there is then no deterministic way to know which parts a
+// first pass addressed.
+function buildCoverageCheckPrompt(
+  rawText,
+  topicLabel,
+  packaged,
+  primaryPassInsights,
+  uncoveredSections,
+) {
+  const coveredBlock = primaryPassInsights
+    .map(
+      (item, index) =>
+        `${index + 1}. ${item.title} — evidence already cited: "${safeStr(item.evidence, 160)}"`,
+    )
+    .join("\n");
+
+  if (uncoveredSections && uncoveredSections.length > 0) {
+    const sectionsBlock = uncoveredSections
+      .map(
+        (section, index) =>
+          `SECTION ${index + 1} [WP Ref: ${section.ref}]:\n"""\n${safeStr(section.text, 2000)}\n"""`,
+      )
+      .join("\n\n");
+
+    return `You are reviewing specific sections of an audit working paper for the audit area "${topicLabel}" that a first review pass did NOT produce any finding for. These sections were NOT examined in the first pass at all - your job is to examine each one now and decide what, if anything, it requires.
+
+For context only, here is what the first pass already found in OTHER sections (do not repeat these; they are not the sections below):
+${coveredBlock}
+${packagedContextBlock(packaged)}
+Now examine EACH of the following sections and produce ONE document-specific audit procedure per section that genuinely requires one, grounded in that section's own text:
+
+${sectionsBlock}
+
+If a specific section genuinely contains nothing requiring a distinct audit procedure beyond the three universal ones (materiality, confirmations, representations), simply do not produce an insight for that section - do not force one. If NONE of the sections above require anything, set "result" to "INSUFFICIENT_EVIDENCE" with a one-sentence reason and an empty "insights" array.
+
+${insightsHardRulesBlock()}
+
+TEXT (for reference; the sections needing your attention are quoted above):
+"""
+${safeStr(rawText, INSIGHTS_TEXT_CAP)}
+"""`;
+  }
+
+  // Fallback for a document with no "[WP Ref: ...]" tagging convention at
+  // all: there is no deterministic way to know which passages a first pass
+  // addressed, so this asks for a careful whole-document re-read instead.
+  return `You are re-reviewing the SAME audit text below for the audit area "${topicLabel}". On a first pass, the following document-specific findings were already identified and must NOT be repeated or closely restated:
+
+ALREADY IDENTIFIED (do not repeat these):
+${coveredBlock}
+${packagedContextBlock(packaged)}
+Now read the FULL text below again, specifically hunting for any OTHER distinct passage describing a finding, exception, dispute, control gap, unusual transaction, or risk indicator that is NOT already covered above. Pay particular attention to: a passage near the end of the document, which a first pass sometimes shortchanges; and an issue that resembles an already-covered one in TYPE but concerns a DIFFERENT transaction, amount, date, or party (these are still genuinely separate findings, not restatements).
+
+If you find one or more genuinely new, evidence-backed findings, produce one procedure for each, in the JSON shape below. If, after this careful re-check, there is truly nothing left uncovered, set "result" to "INSUFFICIENT_EVIDENCE" with a one-sentence reason and an empty "insights" array — this is a normal, GOOD outcome meaning the first pass was already complete. Do not invent a finding just to report something.
+
+${insightsHardRulesBlock()}
+
+TEXT:
+"""
+${safeStr(rawText, INSIGHTS_TEXT_CAP)}
+"""`;
+}
+
+// Below this length a document is very unlikely to contain more distinct,
+// independently-evidenced findings than a single pass would already surface,
+// so the coverage-check pass (a second full model call) is skipped rather
+// than spent on text where it is very unlikely to add anything. Real
+// multi-issue statutory working papers (the actual use case this pass exists
+// for) run well into the thousands of characters.
+const COVERAGE_CHECK_MIN_TEXT_LENGTH = 300;
 
 // Deterministic (non-LLM) extraction of a stated rupee figure from a GROUNDED
 // evidence quote, so a materiality ratio never depends on model arithmetic -
@@ -659,6 +870,133 @@ function findNearestWorkingPaperRef(firstFragment, sentTextOriginalCase) {
   return nearest ? nearest.ref : null;
 }
 
+// Extracts every "[WP Ref: X-NN]" tag in the source with its position, in
+// document order - completely separate from findNearestWorkingPaperRef above,
+// which instead finds the nearest tag BEFORE one specific piece of evidence.
+// This is the groundwork for the coverage-check pass below: knowing how many
+// labelled sections a document has, and where each one starts, is what makes
+// it possible to check which sections a first model pass actually addressed
+// versus which it silently skipped.
+function extractAllWorkingPaperRefTags(sentTextOriginalCase) {
+  const tags = [];
+  let match;
+  WORKING_PAPER_REF_PATTERN.lastIndex = 0;
+  while ((match = WORKING_PAPER_REF_PATTERN.exec(sentTextOriginalCase))) {
+    tags.push({ ref: match[1], index: match.index });
+  }
+  return tags;
+}
+
+// Slices the source into per-section text, keyed by ref label, using each
+// tag's start position through the next tag's start (or end of document for
+// the last one). A ref appearing more than once (should not normally happen
+// in a well-formed document) has its slices concatenated rather than the
+// later one overwriting the earlier, so no text is silently lost.
+function sectionTextsByWorkingPaperRef(sentTextOriginalCase, tags) {
+  const sections = new Map();
+  for (let i = 0; i < tags.length; i += 1) {
+    const start = tags[i].index;
+    const end =
+      i + 1 < tags.length ? tags[i + 1].index : sentTextOriginalCase.length;
+    const slice = sentTextOriginalCase.slice(start, end).trim();
+    const existing = sections.get(tags[i].ref);
+    sections.set(tags[i].ref, existing ? existing + "\n\n" + slice : slice);
+  }
+  return sections;
+}
+
+// Root fix for the "the tool produced two entries for one finding" class of
+// defect. Measured against a real live-model run and confirmed directly by
+// a human reviewer's own critique of it: "Test unsupported Rs 2,50,000
+// accrual" and "Investigate unsupported Rs 2,50,000 accrual portion" were
+// named as the same issue restated, while a third item on the same journal
+// entry - "Evaluate manual journal entry for management override" - was
+// explicitly named by the same reviewer as "different and useful" and
+// should survive as its own finding.
+//
+// Two candidate signals were tried against those exact three real titles
+// before settling on this one. Word-overlap on TITLE ALONE cannot separate
+// the two cases correctly: the genuine duplicate pair's title-word overlap
+// ratio (0.5) is LOWER than the genuinely-distinct pair's ratio (0.57),
+// because "portion" replacing "from manual journal entry" removes more
+// shared words than the word "unsupported" it keeps - so no single
+// threshold can accept the real duplicate while rejecting the real
+// non-duplicate. What actually distinguishes them: the two duplicate items
+// cite the EXACT SAME evidence quotation, while the distinct third item
+// cites a different quotation ("no evidence of independent review" versus
+// "the remaining Rs 2,50,000 has not been supported"). Evidence equality is
+// therefore checked FIRST, as the dominant signal - a model producing two
+// items grounded in literally the same quoted sentence is restating one
+// finding, almost by definition, regardless of how differently the two
+// titles happen to be worded. Title-word overlap is kept only as a secondary
+// safety net, for a paraphrased-but-not-identical evidence string that is
+// still obviously the same point, and its threshold is set high enough
+// (0.75) to require near-total title agreement rather than merely a shared
+// topic - low enough to still catch an exact-duplicate title with slightly
+// reworded evidence, high enough to leave the genuinely distinct third item
+// alone. The earlier occurrence in the list is kept in both cases.
+function normalizeEvidenceForDuplicateComparison(evidence) {
+  return String(evidence || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function significantWords(title) {
+  return new Set(
+    String(title || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((word) => word.length > 3),
+  );
+}
+
+const NEAR_DUPLICATE_TITLE_OVERLAP_THRESHOLD = 0.75;
+
+// True when candidate is a near-duplicate of ANY item in referenceItems, by
+// the evidence-equality-first, title-overlap-second rule described above.
+// Factored out so the within-pass dedup below and the cross-pass
+// (coverage-pass-against-primary-pass) check in generateInsights share one
+// definition of "near-duplicate" rather than two that could silently drift.
+function isNearDuplicateOfAny(candidate, referenceItems) {
+  const candidateEvidence = normalizeEvidenceForDuplicateComparison(
+    candidate.evidence,
+  );
+  const candidateWords = significantWords(candidate.title);
+
+  return referenceItems.some((existing) => {
+    const existingEvidence = normalizeEvidenceForDuplicateComparison(
+      existing.evidence,
+    );
+    if (
+      candidateEvidence.length > 0 &&
+      candidateEvidence === existingEvidence
+    ) {
+      return true;
+    }
+
+    const existingWords = significantWords(existing.title);
+    const overlap = [...candidateWords].filter((word) =>
+      existingWords.has(word),
+    ).length;
+    const smaller = Math.min(candidateWords.size, existingWords.size);
+    return (
+      smaller > 0 && overlap / smaller >= NEAR_DUPLICATE_TITLE_OVERLAP_THRESHOLD
+    );
+  });
+}
+
+function deduplicateNearIdenticalInsights(items) {
+  const kept = [];
+  for (const item of items) {
+    if (!isNearDuplicateOfAny(item, kept)) {
+      kept.push(item);
+    }
+  }
+  return kept;
+}
+
 // A narrow, closed set of subject-plus-modal openings that name the auditor/team as the
 // one acting and say they should/must/shall/need to/are to do something - "The auditor
 // should verify X" is exactly as actionable as "Verify X", and rejecting it purely for
@@ -692,17 +1030,28 @@ function isImperativeDetail(detail) {
 // with its original casing intact, needed only so a recovered
 // [WP Ref: A-01]-style tag is returned in the case it was actually written,
 // not forced to lower case.
+//
+// options.maxAccepted overrides MAX_MODEL_INSIGHTS - used by the
+// coverage-check pass, which is deliberately capped lower (see
+// MAX_COVERAGE_MODEL_INSIGHTS). options.excludeTitles is a Set of normalized
+// titles (lowercase) already accepted from an earlier pass on the same
+// request: defense in depth alongside the coverage-check prompt's own
+// "do not repeat these" instruction, so a model that repeats an
+// already-covered finding anyway does not get it counted twice even though
+// the prompt asked it not to.
 function validateAndFilterInsights(
   rawItems,
   sentTextNormalized,
   sentTextOriginalCase,
+  options = {},
 ) {
-  const seenTitles = new Set();
+  const maxAccepted = options.maxAccepted ?? MAX_MODEL_INSIGHTS;
+  const seenTitles = new Set(options.excludeTitles ?? []);
   const accepted = [];
 
   for (const item of rawItems) {
     if (!item || typeof item !== "object") continue;
-    if (accepted.length >= MAX_MODEL_INSIGHTS) break;
+    if (accepted.length >= maxAccepted) break;
 
     const title = safeStr(item.title, 120).trim();
     const detail = safeStr(item.detail, 500).trim();
@@ -852,7 +1201,7 @@ export async function generateInsights(req, res, next) {
         generated: true,
         insufficientEvidence: true,
         reason,
-        insights: buildMandatoryProcedures(),
+        insights: buildMandatoryProcedures(rawText, topicLabel),
         ...(partial ? { partial: true } : {}),
       });
     }
@@ -871,32 +1220,128 @@ export async function generateInsights(req, res, next) {
       normalizeWhitespace(sentTextCapped).toLowerCase();
 
     const rawItems = Array.isArray(parsed.insights) ? parsed.insights : [];
-    const validated = validateAndFilterInsights(
-      rawItems,
-      sentTextNormalized,
-      sentTextOriginalCase,
+    const primaryPassInsights = deduplicateNearIdenticalInsights(
+      validateAndFilterInsights(
+        rawItems,
+        sentTextNormalized,
+        sentTextOriginalCase,
+      ),
     );
 
-    if (validated.length === 0) {
+    if (primaryPassInsights.length === 0) {
       return res.json({
         ok: true,
         generated: true,
         insufficientEvidence: true,
         reason:
           "No procedure returned by the assistant could be grounded in specific evidence from this text.",
-        insights: buildMandatoryProcedures(),
+        insights: buildMandatoryProcedures(rawText, topicLabel),
         ...(partial ? { partial: true } : {}),
       });
+    }
+
+    // Coverage-check pass: re-reads the same document, told what the primary
+    // pass already found, and asked specifically what else it missed. See
+    // buildCoverageCheckPrompt for why this exists - a single pass can stop
+    // short of a full multi-section document even when it has room left
+    // under the insight ceiling. Best-effort: skipped for short text where a
+    // second pass is very unlikely to find anything (fixed cost, near-zero
+    // expected benefit), and any failure of this second call - timeout, no
+    // content, unparseable response - simply means the response carries only
+    // the primary pass's findings, exactly as it always did before this
+    // pass existed. A coverage-check failure must never fail or shrink an
+    // otherwise-successful primary result.
+    let coveragePassInsights = [];
+    let coveragePartial = false;
+
+    const uncoveredSections = findUncoveredSections(
+      sentTextOriginalCase,
+      primaryPassInsights,
+    );
+    // A document that tags every section AND already has a finding for
+    // every one of them needs no coverage-check call at all - there is
+    // nothing left to ask about. Only skip when the tagging convention
+    // exists (uncoveredSections is an array, not null) and it is empty; a
+    // null (no tags at all) still runs the whole-document fallback below,
+    // because that document offers no deterministic way to know the
+    // primary pass was complete.
+    const everyTaggedSectionAlreadyCovered =
+      Array.isArray(uncoveredSections) && uncoveredSections.length === 0;
+
+    if (
+      sentTextCapped.length >= COVERAGE_CHECK_MIN_TEXT_LENGTH &&
+      primaryPassInsights.length < MAX_MODEL_INSIGHTS &&
+      !everyTaggedSectionAlreadyCovered
+    ) {
+      try {
+        const coveragePrompt = buildCoverageCheckPrompt(
+          rawText,
+          topicLabel,
+          packaged,
+          primaryPassInsights,
+          uncoveredSections,
+        );
+        const coverageResponse = await callDeepSeek({
+          system,
+          prompt: coveragePrompt,
+          jsonResponse: true,
+          maxTokens: 2000,
+          temperature: 0.2,
+          timeoutMs: 25000,
+          maxAttemptsPerModel: 1,
+          model: INSIGHTS_MODEL,
+        });
+
+        if (coverageResponse.ok) {
+          coveragePartial = wasJsonTruncated(coverageResponse.content);
+          const coverageParsed = parseJsonObject(coverageResponse.content);
+          const coverageResultTag = String(
+            coverageParsed?.result || "SUPPORTED",
+          )
+            .trim()
+            .toUpperCase();
+
+          if (coverageResultTag !== "INSUFFICIENT_EVIDENCE") {
+            const coverageRawItems = Array.isArray(coverageParsed?.insights)
+              ? coverageParsed.insights
+              : [];
+            const excludeTitles = new Set(
+              primaryPassInsights.map((item) => item.title.toLowerCase()),
+            );
+            coveragePassInsights = deduplicateNearIdenticalInsights(
+              validateAndFilterInsights(
+                coverageRawItems,
+                sentTextNormalized,
+                sentTextOriginalCase,
+                { maxAccepted: MAX_COVERAGE_MODEL_INSIGHTS, excludeTitles },
+              ),
+            );
+            // A finding from the coverage pass might still be a near-duplicate
+            // of a PRIMARY-pass finding even though the model was told not to
+            // repeat them (defense in depth, using the same shared rule
+            // deduplicateNearIdenticalInsights uses within one pass).
+            coveragePassInsights = coveragePassInsights.filter(
+              (candidate) =>
+                !isNearDuplicateOfAny(candidate, primaryPassInsights),
+            );
+          }
+        }
+      } catch (coverageErr) {
+        // Logged for diagnosis; never surfaced or allowed to fail the request,
+        // per the best-effort contract stated above.
+        console.error("DeepSeek insights coverage-check error:", coverageErr);
+      }
     }
 
     return res.json({
       ok: true,
       generated: true,
-      insights: [...buildMandatoryProcedures(), ...validated].slice(
-        0,
-        MAX_TOTAL_INSIGHTS,
-      ),
-      ...(partial ? { partial: true } : {}),
+      insights: [
+        ...buildMandatoryProcedures(rawText, topicLabel),
+        ...primaryPassInsights,
+        ...coveragePassInsights,
+      ].slice(0, MAX_TOTAL_INSIGHTS),
+      ...(partial || coveragePartial ? { partial: true } : {}),
     });
   } catch (err) {
     console.error("generateInsights error:", err);
