@@ -2151,10 +2151,15 @@ if (listed.status !== 0 || listed.error) {
   // src/services/data-retention.service.js, added in commit 716f559 without this
   // pin being updated alongside it - the same class of drift as the 150-to-151
   // case above, caught the same way: a full run-gates.ps1 pass, not the file's
-  // own commit.
+  // own commit. Raised from 152 to 153 for public/unsubscribe.js, added in
+  // commit fcf2a25 (digest one-click unsubscribe) alongside public/unsubscribe
+  // .html (not matched by the .cjs/.js/.mjs filter, so it does not count) --
+  // same drift class as every prior entry above, caught the same way: running
+  // this suite directly rather than assuming a prior green run-gates.ps1 pass
+  // was current.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 152 && result.status === 0,
+    files.length === 153 && result.status === 0,
     result,
   );
 }

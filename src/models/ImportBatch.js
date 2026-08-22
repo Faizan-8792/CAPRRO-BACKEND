@@ -93,6 +93,11 @@ const ImportBatchSchema = new mongoose.Schema(
     importFingerprint: { type: String, trim: true, maxlength: 128, default: null },
     normalizationVersion: { type: String, trim: true, maxlength: 80, default: "legacy" },
     delimiter: { type: String, enum: [",", ";", "TAB"], default: "," },
+    // "" means committed before the file-level date-order fix (C3) and is
+    // deliberately distinct from "NOT_APPLICABLE" (every date in the file
+    // stated its own order) -- see date-order-exposure.mjs (C9), which reads
+    // this default to find pre-fix batches.
+    dateOrder: { type: String, enum: ["", "DAY_FIRST", "MONTH_FIRST", "NOT_APPLICABLE"], default: "" },
     mapping: { type: mongoose.Schema.Types.Mixed, required: true },
     status: { type: String, enum: IMPORT_STATUSES, default: "QUEUED", index: true },
     totalRows: { type: Number, min: 0, default: 0 },

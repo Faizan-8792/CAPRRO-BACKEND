@@ -48,7 +48,22 @@ const PURGEABLE_CLASSES = Object.freeze([
   RETENTION_CLASSES.PURGE_CONDITIONAL,
 ]);
 
-// All 37 models in src/models, classified. Mirrors PLAN.md section 33.9.
+// All 38 models in src/models, classified. Mirrors PLAN.md section 33.9 --
+// except PLAN.md (repo root, outside this backend's own edit scope this
+// session) still says 37: ProviderUsage.js (O10's per-user/provider/period
+// spend-metering model) was added to src/models without its retention
+// classification ever being recorded there or here. Classified RETAIN, not
+// SELF_EXPIRING: unlike AutomationJob/CaseProviderOperation/Otp/
+// SystemTestRun/TaskBulkOperation/WorkspaceOperation (which really do have
+// their own TTL/idempotency-window lifecycle bounding their size), nothing
+// currently expires a ProviderUsage row -- one accumulates per (user,
+// provider, day) and per (user, provider, month) forever. Calling that
+// SELF_EXPIRING would be a false claim this file's own header warns against.
+// RETAIN also matches the actual need: a userId + a call count is not
+// sensitive personal data on the scale of a working paper, and keeping it
+// indefinitely is what lets a billing dispute be reconstructed later. A
+// future purge policy for stale periodKey rows, if ever wanted, is a new,
+// deliberate decision -- not a byproduct of a metering feature landing.
 export const RETENTION_CLASSIFICATION = Object.freeze({
   ActivityEvent: RETENTION_CLASSES.RETAIN,
   AppConfig: RETENTION_CLASSES.RETAIN,
@@ -73,6 +88,7 @@ export const RETENTION_CLASSIFICATION = Object.freeze({
   ImportBatch: RETENTION_CLASSES.RETAIN,
   ImportRow: RETENTION_CLASSES.RETAIN,
   Otp: RETENTION_CLASSES.SELF_EXPIRING,
+  ProviderUsage: RETENTION_CLASSES.RETAIN,
   ReconciliationItem: RETENTION_CLASSES.RETAIN,
   ReconciliationRun: RETENTION_CLASSES.RETAIN,
   Reminder: RETENTION_CLASSES.RETAIN,

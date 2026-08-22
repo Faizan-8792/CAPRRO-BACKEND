@@ -523,7 +523,7 @@ export const getMe = async (req, res, next) => {
     const { id } = req.user;
 
     const user = await User.findById(id).select(
-      "email name role accountType firmId personalFirmId createdAt updatedAt isActive welcomeSeenVersion"
+      "email name role accountType firmId personalFirmId createdAt updatedAt isActive welcomeSeenVersion desktopUpdateSeenAnnouncementId"
     );
 
     if (!user) {
@@ -548,6 +548,7 @@ export const getMe = async (req, res, next) => {
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
         welcomeSeenVersion: user.welcomeSeenVersion || null,
+        desktopUpdateSeenAnnouncementId: user.desktopUpdateSeenAnnouncementId || null,
       },
     });
   } catch (err) {
@@ -579,7 +580,7 @@ export const updateMe = async (req, res, next) => {
       { $set: { name: trimmed } },
       { new: true, runValidators: true }
     ).select(
-      "email name role accountType firmId personalFirmId isActive createdAt updatedAt welcomeSeenVersion"
+      "email name role accountType firmId personalFirmId isActive createdAt updatedAt welcomeSeenVersion desktopUpdateSeenAnnouncementId"
     );
 
     if (!user) {
@@ -600,6 +601,7 @@ export const updateMe = async (req, res, next) => {
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
         welcomeSeenVersion: user.welcomeSeenVersion || null,
+        desktopUpdateSeenAnnouncementId: user.desktopUpdateSeenAnnouncementId || null,
       },
     });
   } catch (err) {

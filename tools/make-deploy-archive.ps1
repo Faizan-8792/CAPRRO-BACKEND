@@ -13,12 +13,34 @@
 param(
     [string]$RepoRoot = "D:\CA-PRO-Toolkit\CA-PRO-Toolkit\capro-backend",
     [string]$OutputDirectory = "D:\CA-PRO-Toolkit",
-    [switch]$ValidateOnly
+    [switch]$ValidateOnly,
+    # .kiro/finalreleasefix.md O9: every real run leaves a new, uniquely commit-and-timestamp-named
+    # archive in $OutputDirectory and never overwrites an older one -- that is already the rollback
+    # mechanism (re-upload the previous file), it just grows unbounded without this. Keep the 5 most
+    # recent by write time, which always includes the one this run just published.
+    [int]$RetainCount = 5
 )
 
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+function Invoke-ArchiveRetentionPrune([string]$Directory, [int]$Keep) {
+    # Pure filesystem cleanup, no git/node subprocess involved. Never touches the archive this
+    # run just published (it is always among the newest by write time, so it survives the prune).
+    if ($Keep -lt 1) { throw "RetainCount must be at least 1" }
+    $existing = @(Get-ChildItem -LiteralPath $Directory -Filter "capro-backend_*.zip" -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTimeUtc -Descending)
+    if ($existing.Count -le $Keep) {
+        Write-Output ("retained      : " + $existing.Count + " archive(s), none pruned (retain limit " + $Keep + ")")
+        return
+    }
+    $toRemove = $existing | Select-Object -Skip $Keep
+    foreach ($file in $toRemove) {
+        Remove-Item -LiteralPath $file.FullName -Force
+        Write-Output ("pruned        : " + $file.Name + " (kept " + $Keep + " most recent)")
+    }
+}
 
 $allowedPaths = @("package.json", "package-lock.json", "src", "public")
 $requiredEntries = @("package.json", "package-lock.json", "src/server.js")
@@ -2731,3 +2753,6 @@ else {
 }
 Write-Output ("size          : " + [math]::Round($validatedArchiveLength / 1MB, 2) + " MB")
 Write-Output ("sha256        : " + $validatedArchiveHash)
+if (-not $ValidateOnly) {
+    Invoke-ArchiveRetentionPrune -Directory $resolvedOutputDirectory -Keep $RetainCount
+}

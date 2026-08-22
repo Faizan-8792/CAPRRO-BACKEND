@@ -18,7 +18,12 @@ import {
   normalizeGstin,
 } from "./gst-normalization.service.js";
 
-const GST_IMPORT_NORMALIZATION_VERSION = "gst-import-v2";
+// Bumped to v3 when dateOrder joined the fingerprint material (C3): a batch
+// committed under v2 has no dateOrder recorded and will not replay against a
+// re-submission of the same file, because its fingerprint no longer matches
+// one computed with a dateOrder value. That is the honest consequence of
+// closing the date-swap gap, not a bug -- see .kiro/finalreleasefix.md C3.
+const GST_IMPORT_NORMALIZATION_VERSION = "gst-import-v3";
 const GST_IMPORT_PROCESSING_LEASE_MS = 10 * 60 * 1000;
 
 function serviceError(message, statusCode = 400, details = null, code = "") {
@@ -64,6 +69,7 @@ function buildImportFingerprint({
   clientId,
   gstin,
   period,
+  dateOrder,
 }) {
   const material = JSON.stringify(
     canonicalValue({
@@ -75,6 +81,11 @@ function buildImportFingerprint({
       clientId: String(clientId),
       gstin,
       period,
+      // Included so a file cannot be previewed under one date-order reading
+      // and committed under another with the same token -- see C3 in
+      // .kiro/finalreleasefix.md. "NOT_APPLICABLE" is a real, distinct value
+      // (every date in the file states its own order), not an absence.
+      dateOrder: dateOrder || "NOT_APPLICABLE",
     })
   );
   return createHash("sha256").update(material).digest("hex");
@@ -112,6 +123,7 @@ async function createGstImportPreviewAuthorization({
   clientId,
   gstin,
   period,
+  dateOrder = null,
 }) {
   assertObjectId(firmId, "Firm");
   assertObjectId(clientId, "Client");
@@ -137,6 +149,7 @@ async function createGstImportPreviewAuthorization({
     text,
     mapping,
     delimiter: delimiter === "TAB" ? "\t" : delimiter,
+    dateOrder,
   });
   if (parsed.sourceHash !== sourceHash) {
     throw serviceError(
@@ -157,6 +170,10 @@ async function createGstImportPreviewAuthorization({
     );
   }
 
+  // Authoritative: the SERVER'S OWN resolution from this parse, never the raw
+  // request value, so the token is keyed to what the file itself proved (or to
+  // what the person explicitly answered), not to whatever a caller claims.
+  const resolvedDateOrder = parsed.dateOrder.resolved || "NOT_APPLICABLE";
   const importFingerprint = buildImportFingerprint({
     sourceHash,
     kind: normalizedKind,
@@ -165,6 +182,7 @@ async function createGstImportPreviewAuthorization({
     clientId,
     gstin: normalizedGstin,
     period,
+    dateOrder: resolvedDateOrder,
   });
   return {
     importFingerprint,
@@ -195,6 +213,7 @@ function serializeImportBatch(batch) {
     importFingerprint: source.importFingerprint,
     normalizationVersion: source.normalizationVersion,
     delimiter: source.delimiter,
+    dateOrder: source.dateOrder || "",
     status: source.status,
     totalRows: source.totalRows || 0,
     validRows: source.validRows || 0,
@@ -218,6 +237,7 @@ export async function commitGstImport({
   text,
   mapping,
   delimiter = null,
+  dateOrder = null,
   previewToken,
   clientId,
   gstin,
@@ -237,6 +257,12 @@ export async function commitGstImport({
   if (!isValidGstin(normalizedGstin)) throw serviceError("A valid GSTIN is required");
   if (!isValidPeriod(period)) throw serviceError("Period must use YYYY-MM");
 
+  // Computed from the CALLER-supplied dateOrder, which a well-behaved desktop
+  // took verbatim from preview.dateOrder.resolved (never from its own UI
+  // control -- see C5). This is what makes previewing a file under one order
+  // and committing it under another fail the token check below: the token was
+  // minted over the order preview actually resolved to, so a different value
+  // here simply does not reproduce it.
   const importFingerprint = buildImportFingerprint({
     sourceHash: String(sourceHash).toLowerCase(),
     kind: normalizedKind,
@@ -245,6 +271,7 @@ export async function commitGstImport({
     clientId,
     gstin: normalizedGstin,
     period,
+    dateOrder,
   });
   if (!previewTokenMatches(importFingerprint, previewToken)) {
     throw serviceError(
@@ -259,7 +286,25 @@ export async function commitGstImport({
     text,
     mapping,
     delimiter,
+    dateOrder,
   });
+
+  // An unanswered ambiguous file must never reach storage, whatever the token
+  // situation is -- this is the hard backstop, independent of the controller
+  // convenience check and independent of a client that manufactured a token
+  // some other way.
+  if (parsed.dateOrder.status === "AMBIGUOUS" && !parsed.dateOrder.resolved) {
+    throw serviceError(
+      "This file has dates that could be read either day-first or month-first, and no answer was given for which. Read the file again and state the date order before committing it.",
+      409,
+      { code: "GST_IMPORT_PREVIEW_STALE" }
+    );
+  }
+
+  // Authoritative: the fresh re-parse's OWN resolution, not the value the
+  // caller sent, so a file that changed between preview and commit (or whose
+  // stated order no longer resolves the same way) fails this check rather
+  // than silently committing under a different reading than what was reviewed.
   const parsedFingerprint = buildImportFingerprint({
     sourceHash: parsed.sourceHash,
     kind: normalizedKind,
@@ -268,6 +313,7 @@ export async function commitGstImport({
     clientId,
     gstin: normalizedGstin,
     period,
+    dateOrder: parsed.dateOrder.resolved || "NOT_APPLICABLE",
   });
   if (
     parsed.sourceHash !== String(sourceHash).toLowerCase() ||
@@ -349,6 +395,7 @@ export async function commitGstImport({
           sourceHash: parsed.sourceHash,
           normalizationVersion: GST_IMPORT_NORMALIZATION_VERSION,
           delimiter: parsed.delimiter,
+          dateOrder: parsed.dateOrder.resolved || "NOT_APPLICABLE",
           mapping: parsed.mapping,
           status: "PROCESSING",
           processingToken,
@@ -451,6 +498,7 @@ export async function commitGstImport({
             sourceHash: parsed.sourceHash,
             importGeneration: processingToken,
             sourceRow: row.row,
+            dateOrder: parsed.dateOrder.resolved || "NOT_APPLICABLE",
             ...row.values,
             warnings: parsed.warnings
               .filter((warning) => warning.row === row.row)
@@ -510,6 +558,7 @@ export async function commitGstImport({
         totalRows: parsed.summary.totalRows,
         totalTaxMinor: committedTaxMinor,
         importFingerprint,
+        dateOrder: parsed.dateOrder.resolved || "NOT_APPLICABLE",
         gstr3bBasis: gstr3bControl?.basis || null,
       },
     });

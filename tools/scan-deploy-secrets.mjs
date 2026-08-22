@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import {
   parse,
   version as acornVersion,
@@ -58,7 +59,7 @@ const ALLOWED_PACKAGE_MANIFEST_FIELDS = new Set([
   "peerDependencies",
   "peerDependenciesMeta",
 ]);
-const PROVIDER_SECRET_PATTERNS = [
+export const PROVIDER_SECRET_PATTERNS = [
   ["private key", /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i],
   ["credentialed MongoDB URI", /mongodb(?:\+srv)?:\/\/[^/\s:]+:[^@\s]+@/i],
   ["Google OAuth client secret", /\bGOCSPX-[A-Za-z0-9_-]{20,}\b/i],
@@ -4725,39 +4726,50 @@ function parseJavaScript(file, comments = []) {
   fail(`${file.path}${location} is not valid JavaScript`);
 }
 
-if (acornVersion !== EXPECTED_ACORN_VERSION) {
-  fail(
-    `expected Acorn ${EXPECTED_ACORN_VERSION}, but resolved ${acornVersion ?? "unknown"}`,
-  );
-}
-
-const payload = await readPayload();
-const secretNames = validatePayload(payload);
-if (payload.mode === "archive") validateManifests(payload.manifests);
-const findings = [];
-
-for (const file of payload.files) {
-  const ast = parseJavaScript(file);
-  if (ast === null) continue;
-  const finding = scanTree(ast, secretNames);
-  if (finding) {
-    findings.push({
-      column: finding.node.loc.start.column + 1,
-      kind: finding.kind,
-      line: finding.node.loc.start.line,
-      name: finding.name,
-      path: file.path,
-    });
-  }
-}
-
-if (findings.length > 0) {
-  for (const finding of findings) {
-    console.error(
-      `REFUSED: ${finding.path}:${finding.line}:${finding.column} contains a hardcoded ${finding.name} ${finding.kind}`,
+// Guarded so this file can also be `import`ed for its exported bindings
+// (PROVIDER_SECRET_PATTERNS -- see O2/scan-repo-secrets.mjs, which reuses the
+// same table rather than keeping a second, driftable copy) without triggering
+// this CLI's own side effects: reading and blocking on stdin, and exiting the
+// whole process on a version/payload problem. Every existing caller
+// (deploy-archive-security.mjs, deploy-archive-boundary.mjs,
+// make-deploy-archive.ps1, run-gates.ps1) invokes this file as `node
+// tools/scan-deploy-secrets.mjs` in a child process, where process.argv[1] is
+// this file's own path -- so the guard changes nothing for any of them.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  if (acornVersion !== EXPECTED_ACORN_VERSION) {
+    fail(
+      `expected Acorn ${EXPECTED_ACORN_VERSION}, but resolved ${acornVersion ?? "unknown"}`,
     );
   }
-  process.exit(2);
-}
 
-console.log(`JavaScript secret AST scan: PASS (${payload.files.length} files)`);
+  const payload = await readPayload();
+  const secretNames = validatePayload(payload);
+  if (payload.mode === "archive") validateManifests(payload.manifests);
+  const findings = [];
+
+  for (const file of payload.files) {
+    const ast = parseJavaScript(file);
+    if (ast === null) continue;
+    const finding = scanTree(ast, secretNames);
+    if (finding) {
+      findings.push({
+        column: finding.node.loc.start.column + 1,
+        kind: finding.kind,
+        line: finding.node.loc.start.line,
+        name: finding.name,
+        path: file.path,
+      });
+    }
+  }
+
+  if (findings.length > 0) {
+    for (const finding of findings) {
+      console.error(
+        `REFUSED: ${finding.path}:${finding.line}:${finding.column} contains a hardcoded ${finding.name} ${finding.kind}`,
+      );
+    }
+    process.exit(2);
+  }
+
+  console.log(`JavaScript secret AST scan: PASS (${payload.files.length} files)`);
+}

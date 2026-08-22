@@ -160,6 +160,195 @@
           </div>
           <div id="welcomeStatus" class="small-label mt-2"></div>
         </div>
+
+        <div class="card p-3 super-admin-card mt-3">
+          <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Feature Flags</h6>
+          <p class="text-muted mb-2" style="font-size:12px;">
+            Every flag below defaults to OFF on a fresh deployment. Toggle the ones you want live, then press Save -- only the flags you actually change are sent to the server.
+          </p>
+          <div class="row g-2">
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-zeroApprovalFirmCreation">
+                <span>zeroApprovalFirmCreation</span>
+              </label>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-unrestrictedTasks">
+                <span>unrestrictedTasks</span>
+              </label>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-fullReminderOffsets">
+                <span>fullReminderOffsets</span>
+              </label>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-reliableReminderDelivery">
+                <span>reliableReminderDelivery</span>
+              </label>
+              <div class="text-muted" style="font-size:10.5px;margin-left:20px;">Enables outbound email.</div>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-fullTabWorkspace">
+                <span>fullTabWorkspace</span>
+              </label>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-sampleWorkspace">
+                <span>sampleWorkspace</span>
+              </label>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-homeWorkspace">
+                <span>homeWorkspace</span>
+              </label>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-clientComplianceProfile">
+                <span>clientComplianceProfile</span>
+              </label>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-complianceGenerationShadow">
+                <span>complianceGenerationShadow</span>
+              </label>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-complianceGenerationLive">
+                <span>complianceGenerationLive</span>
+              </label>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-gstReconciliation">
+                <span>gstReconciliation</span>
+              </label>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-tdsHealth">
+                <span>tdsHealth</span>
+              </label>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-noticeCases">
+                <span>noticeCases</span>
+              </label>
+              <div class="text-muted" style="font-size:10.5px;margin-left:20px;">Turning this on runs a server-side index-readiness check that may reject the save.</div>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-assuranceEngagements">
+                <span>assuranceEngagements</span>
+              </label>
+              <div class="text-muted" style="font-size:10.5px;margin-left:20px;">Turning this on runs a server-side index-readiness check that may reject the save.</div>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-filingDashboard">
+                <span>filingDashboard</span>
+              </label>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-teamWorkload">
+                <span>teamWorkload</span>
+              </label>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-auditWorkingPapers">
+                <span>auditWorkingPapers</span>
+              </label>
+              <div class="text-muted" style="font-size:10.5px;margin-left:20px;">Turning this on runs a server-side index-readiness check that may reject the save.</div>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-dailyDigest">
+                <span>dailyDigest</span>
+              </label>
+              <div class="text-muted" style="font-size:10.5px;margin-left:20px;">Enables outbound email.</div>
+            </div>
+            <div class="col-md-4 col-sm-6">
+              <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+                <input type="checkbox" id="flag-weeklySummary">
+                <span>weeklySummary</span>
+              </label>
+              <div class="text-muted" style="font-size:10.5px;margin-left:20px;">Enables outbound email.</div>
+            </div>
+          </div>
+          <div class="mt-2 text-end">
+            <button class="btn btn-sm btn-primary" id="saveFeatureFlagsBtn">Save Feature Flags</button>
+          </div>
+          <div id="featureFlagsStatus" class="small-label mt-2" style="white-space:pre-wrap;"></div>
+        </div>
+
+        <div class="card p-3 super-admin-card mt-3">
+          <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Provider Usage</h6>
+          <p class="text-muted mb-2" style="font-size:12px;">
+            DeepSeek and OCR.space are billed per call. Each is metered per user (daily + monthly caps) and against a provider-wide daily ceiling, enforced at the two provider choke points before any paid call is made. Figures below are live counts against those caps.
+          </p>
+          <div id="providerUsageStatus" class="text-muted small mb-2">Loading...</div>
+          <div class="row g-3" id="providerUsageGrid"></div>
+        </div>
+
+        <div class="card p-3 super-admin-card mt-3">
+          <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Desktop Release</h6>
+          <div id="desktopReleaseLive" class="text-muted small mb-2">Nothing announced yet.</div>
+          <div class="row g-2">
+            <div class="col-md-3">
+              <label class="form-label small-label">Latest version</label>
+              <input type="text" class="form-control" id="desktopLatestVersion" placeholder="0.1.2">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small-label">Minimum supported version</label>
+              <input type="text" class="form-control" id="desktopMinSupportedVersion" placeholder="Leave blank for no minimum">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small-label">Download URL</label>
+              <input type="text" class="form-control" id="desktopDownloadUrl" placeholder="https://caprotoolkit.in/download/CA-PRO-Toolkit-Setup-0.1.2-x64.exe">
+              <div class="text-muted" style="font-size:11px;margin-top:4px;">Upload the installer to the website first, then paste its URL here. Only https URLs on caprotoolkit.in are accepted. Get the SHA-256 and size from the release script output.</div>
+            </div>
+          </div>
+          <div class="row g-2 mt-2">
+            <div class="col-md-8">
+              <label class="form-label small-label">SHA-256</label>
+              <input type="text" class="form-control" id="desktopSha256" maxlength="64" placeholder="64 hex characters">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small-label">Size (bytes)</label>
+              <input type="number" class="form-control" id="desktopSizeBytes" placeholder="0">
+            </div>
+          </div>
+          <div class="mt-2">
+            <label class="form-label small-label">Release notes</label>
+            <textarea class="form-control" id="desktopReleaseNotes" rows="4" maxlength="4000"></textarea>
+          </div>
+          <div class="mt-2 d-flex align-items-center gap-2 flex-wrap">
+            <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+              <input type="checkbox" id="desktopMandatory">
+              <span>Required update -- users cannot dismiss it</span>
+            </label>
+            <label class="d-flex align-items-center gap-1" style="font-size:12px;">
+              <input type="checkbox" id="desktopEnabled">
+              <span>Enabled</span>
+            </label>
+            <button class="btn btn-sm btn-primary ms-auto" id="saveDesktopReleaseBtn">Save Release</button>
+            <button class="btn btn-sm btn-warning" id="notifyDesktopReleaseBtn">Notify all users</button>
+          </div>
+          <div id="desktopReleaseStatus" class="small-label mt-2"></div>
+        </div>
       </section>
 
       <!-- USAGE ANALYTICS -->
@@ -505,6 +694,6 @@
 
     <!-- Bootstrap JS no longer needed (custom modal). Kept removed. -->
     <script src="file-tools.js"></script>
-    <script src="super.js?v=20"></script>
+    <script src="super.js?v=21"></script>
   </body>
 </html>

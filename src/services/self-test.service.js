@@ -402,10 +402,21 @@ function engineChecks() {
         documentCount: conversion.meta.documentCount,
         validRows: parsed.summary.validRows,
         invalidRows: parsed.summary.invalidRows,
+        // The portal's dd-mm-yyyy is pinned at conversion (C4), so this file's
+        // one date column is never ambiguous -- confirms the fix actually
+        // resolved the conversion path rather than merely converting the string.
+        documentDate: parsed.rows[0].values.documentDate,
+        dateOrderStatus: parsed.dateOrder.status,
       };
-      const expected = { documentCount: 1, validRows: 1, invalidRows: 0 };
+      const expected = {
+        documentCount: 1,
+        validRows: 1,
+        invalidRows: 0,
+        documentDate: "2026-04-05",
+        dateOrderStatus: "NOT_APPLICABLE",
+      };
       assert(JSON.stringify(actual) === JSON.stringify(expected), `Unexpected GSTR-2B conversion output: ${JSON.stringify(actual)}`);
-      return { detail: "Portal JSON produced one valid import row", expected, actual };
+      return { detail: "Portal JSON produced one valid import row, dd-mm-yyyy pinned so no date-order question is ever asked", expected, actual };
     }],
     ["import-preview", "Delimited import preview", async () => {
       const parsed = parseMappedImport({
@@ -448,6 +459,52 @@ function engineChecks() {
       assert(JSON.stringify(actual) === JSON.stringify(expected), `Timezone output mismatch: ${JSON.stringify(actual)}`);
       return {
         detail: "Timezone validation, exact zoned parts, and midnight boundary output are correct",
+        expected,
+        actual,
+      };
+    }],
+    ["date-order-inference", "File-level date-order inference, refusal, and statement", async () => {
+      const mapping = { supplierGstin: "S", recipientGstin: "R", invoiceNumber: "Inv", documentDate: "Dt", documentType: "Ty", taxableValue: "Tax", igst: "I", cgst: "C", sgst: "Sg", cess: "Ce" };
+      const row = (inv, date) => `27AABCS1111A1Z5,27AABCR0000A1Z5,${inv},${date},Invoice,1000,180,0,0,0`;
+
+      const conflicting = `S,R,Inv,Dt,Ty,Tax,I,C,Sg,Ce\n${row("A1", "25/06/2026")}\n${row("A2", "06/25/2026")}\n`;
+      let conflictingThrew = null;
+      try {
+        parseMappedImport({ kind: "GST_PURCHASE", text: conflicting, mapping });
+      } catch (error) {
+        conflictingThrew = error;
+      }
+
+      const ambiguous = `S,R,Inv,Dt,Ty,Tax,I,C,Sg,Ce\n${row("A1", "03/05/2026")}\n${row("A2", "04/06/2026")}\n`;
+      const ambiguousParsed = parseMappedImport({ kind: "GST_PURCHASE", text: ambiguous, mapping });
+
+      const dayFirst = `S,R,Inv,Dt,Ty,Tax,I,C,Sg,Ce\n${row("A1", "03/05/2026")}\n${row("A2", "25/06/2026")}\n`;
+      const dayFirstParsed = parseMappedImport({ kind: "GST_PURCHASE", text: dayFirst, mapping });
+
+      const actual = {
+        conflictingCode: conflictingThrew?.code || null,
+        conflictingStatus: conflictingThrew?.statusCode || null,
+        ambiguousStatus: ambiguousParsed.dateOrder.status,
+        ambiguousInvalidRows: ambiguousParsed.summary.invalidRows,
+        ambiguousPreviewEqualsTotal: ambiguousParsed.summary.previewRows === ambiguousParsed.summary.totalRows,
+        dayFirstStatus: dayFirstParsed.dateOrder.status,
+        dayFirstDocumentDate: dayFirstParsed.rows[0].values.documentDate,
+      };
+      const expected = {
+        conflictingCode: "IMPORT_DATE_ORDER_CONFLICTING",
+        conflictingStatus: 400,
+        ambiguousStatus: "AMBIGUOUS",
+        ambiguousInvalidRows: 0,
+        ambiguousPreviewEqualsTotal: true,
+        dayFirstStatus: "DAY_FIRST",
+        dayFirstDocumentDate: "2026-05-03",
+      };
+      assert(
+        JSON.stringify(actual) === JSON.stringify(expected),
+        `Unexpected date-order inference: ${JSON.stringify(actual)}`
+      );
+      return {
+        detail: "A conflicting file is refused, an ambiguous file previews without error, and evidence resolves the order",
         expected,
         actual,
       };
@@ -1302,7 +1359,7 @@ function normalizeDeepSeekReview(payload, response, deterministicStatuses) {
   };
 }
 
-function deepSeekGroup(runtime) {
+function deepSeekGroup(runtime, requestedBy) {
   return {
     id: "deepseek",
     name: "DeepSeek semantic evidence review",
@@ -1364,6 +1421,13 @@ function deepSeekGroup(runtime) {
           maxTokens: 2400,
           timeoutMs: 45000,
           temperature: 0,
+          // The self-test itself is only reachable by a super admin
+          // (assertSuper on POST /api/super/self-test), and runs rarely, so
+          // billing it against the invoking admin's own account is both
+          // correct (someone's account is genuinely spending real money here)
+          // and in no danger of tripping a per-user quota meant to catch a
+          // runaway retry loop, not one deliberate low-volume admin check.
+          userId: requestedBy,
         });
       } catch {
         runtime.deepSeekReview = {
@@ -1540,7 +1604,7 @@ function unknownCleanup(planned, error) {
   };
 }
 
-async function executeDeepSelfTest(runId, executionToken, fixture) {
+async function executeDeepSelfTest(runId, executionToken, fixture, requestedBy) {
   const runtime = {
     groups: [],
     completed: 0,
@@ -1624,7 +1688,7 @@ async function executeDeepSelfTest(runId, executionToken, fixture) {
     return;
   }
 
-  await runGroup(runId, executionToken, runtime, deepSeekGroup(runtime));
+  await runGroup(runId, executionToken, runtime, deepSeekGroup(runtime, requestedBy));
   const summary = summarizeGroups(runtime.groups);
   runtime.phase = "Completed";
   await updateOwnedRun(runId, executionToken, {
@@ -1787,7 +1851,7 @@ export async function startDeepSelfTest({ requestedBy }) {
 
   const fixture = makeFixture(run._id, executionToken);
   setImmediate(() => {
-    executeDeepSelfTest(run._id, executionToken, fixture).catch(async (error) => {
+    executeDeepSelfTest(run._id, executionToken, fixture, requestedBy).catch(async (error) => {
       const cleanup = await cleanupManifestWithRetry(fixture.planned).catch((cleanupError) =>
         unknownCleanup(fixture.planned.length, cleanupError)
       );

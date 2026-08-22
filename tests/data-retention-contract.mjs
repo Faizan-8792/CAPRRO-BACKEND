@@ -114,8 +114,8 @@ test("an invalid now is refused rather than silently treated as epoch", () => {
 
 // -------------------------------------------------------------- classification
 
-test("all 37 models are classified", () => {
-  assert.equal(Object.keys(RETENTION_CLASSIFICATION).length, 37);
+test("all 38 models are classified", () => {
+  assert.equal(Object.keys(RETENTION_CLASSIFICATION).length, 38);
 });
 
 test("classification matches the real src/models directory exactly", () => {
@@ -123,9 +123,9 @@ test("classification matches the real src/models directory exactly", () => {
   const modelNames = readdirSync(join(here, "..", "src", "models"))
     .filter((name) => name.endsWith(".js"))
     .map((name) => name.replace(/\.js$/, ""));
-  assert.equal(modelNames.length, 37);
+  assert.equal(modelNames.length, 38);
   const result = assertClassificationCoversModels(modelNames);
-  assert.equal(result.classified, 37);
+  assert.equal(result.classified, 38);
 });
 
 test("a new unclassified model makes the guard throw, naming it", () => {
@@ -152,7 +152,15 @@ test("a removed model also makes the guard throw, so the table cannot rot", () =
   );
 });
 
-test("classification totals match PLAN.md 33.9", () => {
+// PLAN.md 33.9 itself (repo root) still says 37/RETAIN:29 as of this test's
+// last edit -- it was not updated when ProviderUsage.js (O10's spend-metering
+// model) landed without a retention classification. This suite is the source
+// of truth for the code (data-retention.service.js's RETENTION_CLASSIFICATION,
+// asserted immediately above to equal the real src/models directory), so its
+// own expected totals are updated to 38/RETAIN:30 to match; PLAN.md's prose
+// count is a documentation drift left for whoever next edits PLAN.md, since
+// this session's task explicitly scoped changes to capro-backend/ only.
+test("classification totals match PLAN.md 33.9 (see note above: PLAN.md's own prose count is stale pending an out-of-scope doc edit)", () => {
   const counts = Object.values(RETENTION_CLASSIFICATION).reduce(
     (acc, value) => {
       acc[value] = (acc[value] || 0) + 1;
@@ -160,13 +168,13 @@ test("classification totals match PLAN.md 33.9", () => {
     },
     {},
   );
-  assert.equal(counts[RETENTION_CLASSES.RETAIN], 29);
+  assert.equal(counts[RETENTION_CLASSES.RETAIN], 30);
   assert.equal(counts[RETENTION_CLASSES.PURGE_FIELD], 1);
   assert.equal(counts[RETENTION_CLASSES.PURGE_CONDITIONAL], 1);
   assert.equal(counts[RETENTION_CLASSES.SELF_EXPIRING], 6);
   assert.equal(
     Object.values(counts).reduce((total, value) => total + value, 0),
-    37,
+    38,
   );
 });
 

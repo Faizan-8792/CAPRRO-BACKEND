@@ -432,6 +432,9 @@ try {
         -LiteralPath (Join-Path $resolvedRepoRoot "tools\scan-deploy-secrets.mjs") `
         -ErrorAction Stop
     $syntaxFiles += Get-Item `
+        -LiteralPath (Join-Path $resolvedRepoRoot "tools\scan-repo-secrets.mjs") `
+        -ErrorAction Stop
+    $syntaxFiles += Get-Item `
         -LiteralPath (Join-Path $resolvedRepoRoot "tests\deploy-archive-security.mjs") `
         -ErrorAction Stop
     $syntaxFiles += Get-Item `
@@ -467,6 +470,7 @@ try {
         "workspace-operation-contract",
         "firm-authorization-contract",
         "task-flow-checklist",
+        "task-date-contract",
         "taxworker-flow-checklist",
         "digest-delivery-correctness",
         "digest-frequency-checklist",
@@ -476,6 +480,8 @@ try {
         "case-ocr-route-behaviour",
         "error-contract-invariants",
         "gst-owner-authorization-contract",
+        "import-date-order-contract",
+        "gstr2b-amount-contract",
         "audit-insights-grounding",
         "audit-insights-accuracy-speed",
         "audit-insights-coverage-and-discipline",
@@ -490,8 +496,13 @@ try {
         "task-version-guard-contract",
         "taxworker-duplicate-audit-contract",
         "case-verified-references-contract",
+        "engagement-reviewer-authorization-contract",
         "deploy-archive-security",
-        "deploy-archive-boundary"
+        "deploy-archive-boundary",
+        "app-config-checklist",
+        "desktop-release-contract",
+        "provider-quota-contract",
+        "client-version-contract"
     )
     $report.Add("")
     $report.Add("===== test suites =====")

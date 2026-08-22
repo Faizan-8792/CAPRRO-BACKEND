@@ -82,6 +82,56 @@ async function loadMe() {
 }
 
 // ─── App Config (maintenance + welcome) ────────────────────────────
+// Holds the last-loaded desktop-release draft so the notify handler's re-notify warning (see
+// bindAppConfigHandlers) can tell whether the version currently in the form was already announced,
+// without a fresh network round-trip on every keystroke.
+let lastDesktopReleaseDraft = null;
+
+// Order mirrors DEFAULT_FEATURE_FLAGS in src/models/AppConfig.js exactly -- the server rejects
+// any key outside that set with "Unknown feature flags", so this list must stay in lockstep with
+// the real constant rather than being re-derived here.
+const FEATURE_FLAG_KEYS = [
+  "zeroApprovalFirmCreation",
+  "unrestrictedTasks",
+  "fullReminderOffsets",
+  "reliableReminderDelivery",
+  "fullTabWorkspace",
+  "sampleWorkspace",
+  "homeWorkspace",
+  "clientComplianceProfile",
+  "complianceGenerationShadow",
+  "complianceGenerationLive",
+  "gstReconciliation",
+  "tdsHealth",
+  "noticeCases",
+  "assuranceEngagements",
+  "filingDashboard",
+  "teamWorkload",
+  "auditWorkingPapers",
+  "dailyDigest",
+  "weeklySummary",
+];
+
+// Last-loaded server state for feature flags, so Save can diff against it and send only the
+// keys the operator actually changed (mirrors lastDesktopReleaseDraft's role above).
+let lastFeatureFlags = null;
+
+function featureFlagCheckbox(key) {
+  return qs(`flag-${key}`);
+}
+
+// The public GET /api/app-config response always merges featureFlags over DEFAULT_FEATURE_FLAGS
+// server-side (see getAppConfig / AppConfigSchema.statics.getFeatureFlags), so every key is
+// always present here -- no per-key fallback is needed.
+function loadFeatureFlagsSection(featureFlags) {
+  const flags = featureFlags || {};
+  lastFeatureFlags = { ...flags };
+  for (const key of FEATURE_FLAG_KEYS) {
+    const box = featureFlagCheckbox(key);
+    if (box) box.checked = flags[key] === true;
+  }
+}
+
 async function loadAppConfigSection() {
   try {
     const r = await api("/app-config");
@@ -100,8 +150,53 @@ async function loadAppConfigSection() {
     if (qs("welcomeTitleInput")) qs("welcomeTitleInput").value = wa.title || "";
     if (qs("welcomeBodyInput")) qs("welcomeBodyInput").value = wa.body || "";
     if (qs("welcomeEnabled")) qs("welcomeEnabled").checked = wa.enabled !== false;
+
+    loadFeatureFlagsSection(c.featureFlags);
   } catch (err) {
     console.warn("App config load fail:", err.message);
+  }
+
+  // Deliberately a SEPARATE call to the super-only draft route below, NOT the public GET above --
+  // a saved-but-unannounced draft is served as null there on purpose (see publishableDesktopRelease
+  // in appconfig.controller.js), so this is the only way the panel can see what is actually saved.
+  try {
+    const dr = await api("/app-config/desktop-release");
+    const d = dr.desktopRelease || {};
+    lastDesktopReleaseDraft = d;
+
+    if (qs("desktopLatestVersion")) qs("desktopLatestVersion").value = d.latestVersion || "";
+    if (qs("desktopMinSupportedVersion")) qs("desktopMinSupportedVersion").value = d.minSupportedVersion || "";
+    if (qs("desktopDownloadUrl")) qs("desktopDownloadUrl").value = d.downloadUrl || "";
+    if (qs("desktopSha256")) qs("desktopSha256").value = d.sha256 || "";
+    if (qs("desktopSizeBytes")) qs("desktopSizeBytes").value = d.sizeBytes || "";
+    if (qs("desktopReleaseNotes")) qs("desktopReleaseNotes").value = d.releaseNotes || "";
+    if (qs("desktopMandatory")) qs("desktopMandatory").checked = d.mandatory === true;
+    // Strict === true, unlike welcomeEnabled's "!== false" above: desktopRelease.enabled defaults
+    // to false (AppConfig.js), not true, so a missing/undefined value here must read as unchecked.
+    if (qs("desktopEnabled")) qs("desktopEnabled").checked = d.enabled === true;
+
+    renderDesktopReleaseLive(d);
+  } catch (err) {
+    console.warn("Desktop release draft load fail:", err.message);
+  }
+}
+
+// Renders the "what's actually live" readout above the desktop-release form. Every server-supplied
+// string is passed through escapeHtml before it touches innerHTML -- never trust the draft's own
+// text (release notes, urls, ids) to be safe markup.
+function renderDesktopReleaseLive(d) {
+  const el = qs("desktopReleaseLive");
+  if (!el) return;
+  const draft = d || {};
+  if (draft.announcementId) {
+    const when = draft.announcedAt ? new Date(draft.announcedAt).toLocaleString() : "an unknown time";
+    const shortId = String(draft.announcementId).slice(0, 8);
+    el.innerHTML =
+      `Currently announced: <b>${escapeHtml(draft.latestVersion || "—")}</b> -- announced ${escapeHtml(when)} -- id ${escapeHtml(shortId)}...`;
+  } else if (draft.latestVersion || draft.downloadUrl || draft.sha256) {
+    el.textContent = "Saved but never announced. Users will not see it until you press Notify all users.";
+  } else {
+    el.textContent = "Nothing announced yet.";
   }
 }
 
@@ -199,6 +294,163 @@ function bindAppConfigHandlers() {
       } finally {
         saveWelcomeBtn.disabled = false;
         saveWelcomeBtn.textContent = "Save Announcement";
+      }
+    });
+  }
+
+  const saveFeatureFlagsBtn = qs("saveFeatureFlagsBtn");
+  const featureFlagsStatus = qs("featureFlagsStatus");
+  if (saveFeatureFlagsBtn) {
+    saveFeatureFlagsBtn.addEventListener("click", async () => {
+      // Diff against the last-loaded/saved state so only the flags the operator actually
+      // flipped are sent -- updateFeatureFlags merges per-key and leaves the rest untouched,
+      // so sending all 19 on every save would be safe but needlessly wide.
+      const changed = {};
+      for (const key of FEATURE_FLAG_KEYS) {
+        const box = featureFlagCheckbox(key);
+        if (!box) continue;
+        if (!lastFeatureFlags || lastFeatureFlags[key] !== box.checked) {
+          changed[key] = box.checked;
+        }
+      }
+      if (!Object.keys(changed).length) {
+        if (featureFlagsStatus) {
+          featureFlagsStatus.textContent = "No changes to save.";
+          featureFlagsStatus.style.color = "var(--muted)";
+        }
+        return;
+      }
+
+      saveFeatureFlagsBtn.disabled = true;
+      saveFeatureFlagsBtn.textContent = "Saving...";
+      try {
+        const r = await api("/app-config/features", {
+          method: "PATCH",
+          body: { featureFlags: changed },
+        });
+        loadFeatureFlagsSection(r.featureFlags);
+        if (featureFlagsStatus) {
+          // Render the flag map the server echoes back verbatim (textContent, not innerHTML --
+          // no escaping needed and none of this can carry markup).
+          featureFlagsStatus.textContent = `Saved.\n${JSON.stringify(r.featureFlags, null, 2)}`;
+          featureFlagsStatus.style.color = "#2d7a55";
+        }
+      } catch (err) {
+        if (featureFlagsStatus) {
+          if (err.status === 403) {
+            featureFlagsStatus.textContent = "Only the super-admin account may change feature flags.";
+          } else {
+            // Covers the index-readiness rejection for noticeCases/assuranceEngagements/
+            // auditWorkingPapers (and any other server error): show the server's own message
+            // verbatim rather than inventing a generic one client-side.
+            featureFlagsStatus.textContent = err.message || "Save failed.";
+          }
+          featureFlagsStatus.style.color = "#b44545";
+        }
+      } finally {
+        saveFeatureFlagsBtn.disabled = false;
+        saveFeatureFlagsBtn.textContent = "Save Feature Flags";
+      }
+    });
+  }
+
+  const saveDesktopReleaseBtn = qs("saveDesktopReleaseBtn");
+  const notifyDesktopReleaseBtn = qs("notifyDesktopReleaseBtn");
+  const desktopReleaseStatus = qs("desktopReleaseStatus");
+
+  if (saveDesktopReleaseBtn) {
+    saveDesktopReleaseBtn.addEventListener("click", async () => {
+      saveDesktopReleaseBtn.disabled = true;
+      saveDesktopReleaseBtn.textContent = "Saving...";
+      try {
+        const r = await api("/app-config/desktop-release", {
+          method: "PATCH",
+          body: {
+            latestVersion: qs("desktopLatestVersion")?.value?.trim() || "",
+            minSupportedVersion: qs("desktopMinSupportedVersion")?.value?.trim() || "",
+            downloadUrl: qs("desktopDownloadUrl")?.value?.trim() || "",
+            sha256: qs("desktopSha256")?.value?.trim() || "",
+            sizeBytes: Number(qs("desktopSizeBytes")?.value) || 0,
+            releaseNotes: qs("desktopReleaseNotes")?.value || "",
+            mandatory: !!qs("desktopMandatory")?.checked,
+            // Republish confirmation is not part of this UI -- Save always refuses to re-publish
+            // an unchanged version number; bump the version to save again.
+            allowRepublish: false,
+          },
+        });
+        lastDesktopReleaseDraft = r.desktopRelease || lastDesktopReleaseDraft;
+        renderDesktopReleaseLive(lastDesktopReleaseDraft);
+        if (desktopReleaseStatus) {
+          desktopReleaseStatus.textContent =
+            "Saved. Nothing has been sent to users yet -- press Notify all users when you are ready.";
+          desktopReleaseStatus.style.color = "#2d7a55";
+        }
+      } catch (err) {
+        if (desktopReleaseStatus) {
+          desktopReleaseStatus.textContent = err.message || "Save failed.";
+          desktopReleaseStatus.style.color = "#b44545";
+        }
+      } finally {
+        saveDesktopReleaseBtn.disabled = false;
+        saveDesktopReleaseBtn.textContent = "Save Release";
+      }
+    });
+  }
+
+  if (notifyDesktopReleaseBtn) {
+    notifyDesktopReleaseBtn.addEventListener("click", async () => {
+      const version = qs("desktopLatestVersion")?.value?.trim() || "";
+
+      // Re-notify warning (checked before either confirm): the currently-loaded draft already
+      // carries this exact version AND an announcementId, so pressing Notify again would re-alert
+      // users who already dismissed it.
+      const alreadyAnnounced =
+        !!lastDesktopReleaseDraft?.announcementId &&
+        lastDesktopReleaseDraft?.latestVersion === version;
+
+      let confirmMsg = `Notify every CA PRO desktop user that version ${version} is available? This cannot be undone.`;
+      if (alreadyAnnounced) {
+        confirmMsg =
+          `Version ${version} has already been announced -- notifying again will re-alert users who already dismissed it. ` +
+          confirmMsg;
+      }
+
+      // Gate 1: plain confirm. Declining must make NO network request.
+      if (!window.confirm(confirmMsg)) return;
+
+      // Gate 2: typed confirm. Anything but an exact match must also make NO network request.
+      const typed = window.prompt(`Type the version number exactly (${version}) to confirm.`);
+      if (typed !== version) {
+        if (desktopReleaseStatus) {
+          desktopReleaseStatus.textContent = "Cancelled -- the version did not match.";
+          desktopReleaseStatus.style.color = "#b44545";
+        }
+        return;
+      }
+
+      notifyDesktopReleaseBtn.disabled = true;
+      notifyDesktopReleaseBtn.textContent = "Notifying...";
+      try {
+        await api("/app-config/desktop-release/notify", { method: "POST" });
+        if (desktopReleaseStatus) {
+          desktopReleaseStatus.textContent =
+            "Notified. Every desktop on an older build will see the update banner within a few minutes, and a Windows notification once.";
+          desktopReleaseStatus.style.color = "#2d7a55";
+        }
+        await loadAppConfigSection();
+      } catch (err) {
+        if (desktopReleaseStatus) {
+          if (err.status === 409 && err.data?.code === "RELEASE_INCOMPLETE") {
+            desktopReleaseStatus.textContent =
+              "Release is incomplete -- save a complete release (latest version, download URL, SHA-256, size) before notifying.";
+          } else {
+            desktopReleaseStatus.textContent = err.message || "Notify failed.";
+          }
+          desktopReleaseStatus.style.color = "#b44545";
+        }
+      } finally {
+        notifyDesktopReleaseBtn.disabled = false;
+        notifyDesktopReleaseBtn.textContent = "Notify all users";
       }
     });
   }
@@ -307,6 +559,67 @@ async function loadUsageStats() {
   } catch (err) {
     console.error("Usage stats error:", err);
     if (statusEl) statusEl.textContent = err.message || "Failed to load usage stats.";
+  }
+}
+
+// ─── Provider Usage (O10 spend meter/cap) ────────────────────────────
+const PROVIDER_USAGE_LABELS = { DEEPSEEK: "DeepSeek", OCR_SPACE: "OCR.space" };
+
+function renderProviderUsageTopUsers(rows) {
+  if (!rows.length) {
+    return `<div style="color:var(--muted);font-style:italic;font-size:12px;">No calls yet today</div>`;
+  }
+  return rows
+    .map(
+      (row, i) => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:${i < rows.length - 1 ? "1px solid var(--border)" : "none"};">
+          <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(row.email || "—")}</div>
+          <div style="font-weight:700;color:var(--teal-dark);font-size:12.5px;margin-left:8px;">${Number(row.calls) || 0}</div>
+        </div>`,
+    )
+    .join("");
+}
+
+async function loadProviderUsageStats() {
+  const statusEl = qs("providerUsageStatus");
+  const gridEl = qs("providerUsageGrid");
+
+  try {
+    const data = await api("/super/provider-usage");
+    if (!data.ok) throw new Error("Failed to load provider usage");
+    const u = data.usage || {};
+    if (statusEl) statusEl.textContent = "";
+
+    if (gridEl) {
+      gridEl.innerHTML = Object.keys(PROVIDER_USAGE_LABELS)
+        .map((provider) => {
+          const today = Number(u.today?.[provider]) || 0;
+          const month = Number(u.thisMonth?.[provider]) || 0;
+          const topUsers = Array.isArray(u.topUsersToday?.[provider]) ? u.topUsersToday[provider] : [];
+          return `
+            <div class="col-md-6">
+              <div class="card p-3">
+                <h6 class="mb-2" style="font-size: 12.5px; font-weight: 700;">${escapeHtml(PROVIDER_USAGE_LABELS[provider])}</h6>
+                <div class="d-flex gap-4 mb-2">
+                  <div>
+                    <div style="font-size:20px;font-weight:700;color:var(--text);">${today}</div>
+                    <div style="font-size:11px;color:var(--muted);">calls today</div>
+                  </div>
+                  <div>
+                    <div style="font-size:20px;font-weight:700;color:var(--text);">${month}</div>
+                    <div style="font-size:11px;color:var(--muted);">calls this month</div>
+                  </div>
+                </div>
+                <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.04em;">Top users today</div>
+                ${renderProviderUsageTopUsers(topUsers)}
+              </div>
+            </div>`;
+        })
+        .join("");
+    }
+  } catch (err) {
+    console.error("Provider usage error:", err);
+    if (statusEl) statusEl.textContent = err.message || "Failed to load provider usage.";
   }
 }
 
@@ -1202,6 +1515,7 @@ async function initSuperPage() {
     await Promise.all([
       loadAppConfigSection(),
       loadUsageStats(),
+      loadProviderUsageStats(),
       loadDashboardStats(),
       loadUserDirectory(),
       loadTermsAcceptanceHistory(),

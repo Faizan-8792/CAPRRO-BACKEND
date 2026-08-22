@@ -160,9 +160,9 @@ check(
 
 check(
   "applyAppConfig hides welcome when maintenance is ON",
-  /if\s*\(\s*config\.maintenanceMode\s*\)[\s\S]{0,200}showMaintenanceOverlay/.test(popupJs) &&
+  /if\s*\(\s*config\.maintenanceMode\s*(?:&&[^)]*)?\)[\s\S]{0,200}showMaintenanceOverlay/.test(popupJs) &&
     /else[\s\S]{0,200}if\s*\(user\)\s*showWelcomeIfNeeded/.test(popupJs),
-  "Maintenance takes priority over welcome"
+  "Maintenance takes priority over welcome, except for a super admin who must retain access to toggle it back off"
 );
 
 // ─── Super Admin UI ────────────────────────────────────────────────

@@ -47,6 +47,7 @@ export async function previewCaseOcr(req, res, next) {
       mimeType: req.file?.mimetype,
       fileName: req.file?.originalname,
       consent: String(req.body?.consent || "").toLowerCase() === "true",
+      userId: req.user.id,
     });
     return res.json({ ok: true, zeroWrite: true, result });
   } catch (error) {

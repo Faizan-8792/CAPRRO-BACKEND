@@ -1,5 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
+import rateLimit from "express-rate-limit";
 import {
   confirmFields,
   createCase,
@@ -55,11 +56,25 @@ const upload = multer({
   },
 });
 
+// O10: cheap second line of defense on top of (not instead of) the per-user/
+// monthly/global quota enforced inside extractTextWithOcrSpace itself
+// (ocr-space.service.js) -- this bounds how fast a burst can run, the quota
+// bounds the total spend that burst can rack up in a day. Same
+// express-rate-limit pattern and per-IP keying as auth.routes.js.
+const ocrRouteLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: "Too many OCR requests. Wait a few minutes and try again." },
+});
+
 router.post(
   "/ocr",
   authRequiredWithoutUsageTracking,
   requireFirmMember,
   requireFeatureFlag("noticeCases"),
+  ocrRouteLimiter,
   upload.single("file"),
   previewCaseOcr,
 );

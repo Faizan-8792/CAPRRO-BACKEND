@@ -45,6 +45,28 @@ const AppConfigSchema = new mongoose.Schema(
       enabled: { type: Boolean, default: true },
       updatedAt: { type: Date, default: Date.now },
     },
+    // Every default below is empty/false/0, so a singleton that predates this field reads as
+    // "nothing announced" -- never as "an update is required". This matters because
+    // AppConfigSchema.statics.getInstance (below) synthesises a fresh doc via
+    // `new this({_id:"singleton"}).toObject()` when none exists, so these defaults ARE the live
+    // values on a cold database.
+    //
+    // announcementId is deliberately NOT operator-supplied and defaults to "": it is stamped
+    // server-side with randomUUID() only by the notify route. An operator-typed id would let a
+    // typo either re-notify everyone or silently notify nobody.
+    desktopRelease: {
+      latestVersion: { type: String, trim: true, maxlength: 32, default: "" },
+      minSupportedVersion: { type: String, trim: true, maxlength: 32, default: "" },
+      downloadUrl: { type: String, trim: true, maxlength: 500, default: "" },
+      releaseNotes: { type: String, trim: true, maxlength: 4000, default: "" },
+      mandatory: { type: Boolean, default: false },
+      announcementId: { type: String, trim: true, maxlength: 64, default: "" },
+      announcedAt: { type: Date, default: null },
+      sha256: { type: String, trim: true, lowercase: true, maxlength: 64, default: "" },
+      sizeBytes: { type: Number, min: 0, max: 524288000, default: 0 },
+      enabled: { type: Boolean, default: false },
+      updatedAt: { type: Date, default: null },
+    },
     featureFlags: {
       zeroApprovalFirmCreation: { type: Boolean, default: false },
       unrestrictedTasks: { type: Boolean, default: false },
@@ -107,6 +129,11 @@ AppConfigSchema.statics.getFeatureFlags = async function () {
     ...DEFAULT_FEATURE_FLAGS,
     ...(config.featureFlags || {}),
   };
+};
+
+AppConfigSchema.statics.getDesktopRelease = async function () {
+  const cfg = await this.getInstance();
+  return cfg.desktopRelease || {};
 };
 
 AppConfigSchema.statics.getFeatureFlagState = async function (

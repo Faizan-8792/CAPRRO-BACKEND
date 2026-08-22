@@ -19,6 +19,7 @@ const PREVIEW_FIELDS = new Set([
   "text",
   "mapping",
   "delimiter",
+  "dateOrder",
   "clientId",
   "gstin",
   "period",
@@ -32,6 +33,7 @@ const COMMIT_FIELDS = new Set([
   "text",
   "mapping",
   "delimiter",
+  "dateOrder",
   "sourceName",
   "clientId",
   "gstin",
@@ -43,6 +45,7 @@ const TDS_COMMIT_FIELDS = new Set([
   "text",
   "mapping",
   "delimiter",
+  "dateOrder",
   "sourceName",
   "clientId",
   "tan",
@@ -82,9 +85,18 @@ export async function previewMappedImport(req, res, next) {
       text: req.body.text,
       mapping: req.body.mapping,
       delimiter: requestDelimiter(req.body.delimiter),
+      dateOrder: req.body.dateOrder || null,
     });
     let authorization = {};
-    if (TDS_IMPORT_KINDS.includes(preview.kind)) {
+    // An AMBIGUOUS file with no resolved order must never carry a commit
+    // authorization, whatever kind it is -- the person has not yet said which
+    // reading of the dates the figures below actually mean.
+    const dateOrderUnanswered = preview.dateOrder
+      && preview.dateOrder.status === "AMBIGUOUS"
+      && !preview.dateOrder.resolved;
+    if (dateOrderUnanswered) {
+      // authorization stays {}; no commitToken is issued.
+    } else if (TDS_IMPORT_KINDS.includes(preview.kind)) {
       authorization = createTdsImportPreviewAuthorization({
         sourceHash: preview.sourceHash,
         kind: preview.kind,
@@ -95,6 +107,10 @@ export async function previewMappedImport(req, res, next) {
         financialYear: req.body.financialYear,
         quarter: req.body.quarter,
         statementType: req.body.statementType,
+        // This function does not re-parse the file, so it is given the
+        // ALREADY-RESOLVED order from the previewImport() call above, not the
+        // raw stated request value.
+        dateOrder: preview.dateOrder.resolved || "NOT_APPLICABLE",
       });
     } else if (preview.kind !== "CLIENTS") {
       authorization = await createGstImportPreviewAuthorization({
@@ -107,6 +123,10 @@ export async function previewMappedImport(req, res, next) {
         clientId: req.body.clientId,
         gstin: req.body.gstin,
         period: req.body.period,
+        // This function re-parses the file itself, so it is given the raw
+        // stated request value and derives its own authoritative resolution
+        // from that fresh parse.
+        dateOrder: req.body.dateOrder || null,
       });
     }
 
@@ -134,6 +154,7 @@ export async function commitMappedGstImport(req, res, next) {
       text: req.body.text,
       mapping: req.body.mapping,
       delimiter: requestDelimiter(req.body.delimiter),
+      dateOrder: req.body.dateOrder || null,
       previewToken: req.body.previewToken,
       clientId: req.body.clientId,
       gstin: req.body.gstin,
@@ -163,6 +184,7 @@ export async function commitMappedTdsImport(req, res, next) {
       text: req.body.text,
       mapping: req.body.mapping,
       delimiter: requestDelimiter(req.body.delimiter),
+      dateOrder: req.body.dateOrder || null,
       previewToken: req.body.previewToken,
       clientId: req.body.clientId,
       tan: req.body.tan,

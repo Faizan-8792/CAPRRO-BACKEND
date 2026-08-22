@@ -118,9 +118,20 @@ globalThis.fetch = async () => {
 const { generateInsights } =
   await import("../src/controllers/audit.controller.js");
 
+// O10 added a per-user/monthly/global spend quota at the callDeepSeek choke
+// point (ProviderUsage.reserveProviderCall), backed by a real MongoDB
+// collection there is no live connection to here. This suite tests evidence
+// GROUNDING, not quota, so the increment is stubbed to always succeed -- see
+// tests/provider-quota-contract.mjs for the quota logic itself.
+const { default: ProviderUsage } = await import("../src/models/ProviderUsage.js");
+ProviderUsage.findOneAndUpdate = async (_filter, update) => ({ calls: update?.$inc?.calls ?? 1 });
+ProviderUsage.updateOne = async () => ({ matchedCount: 1 });
+
 function fakeReqRes(body) {
   const state = { status: 200, body: null };
-  const req = { body };
+  // O10 made userId a required param on callDeepSeek (metered per user), and
+  // this controller now reads it from req.user.id -- a fake req needs one too.
+  const req = { body, user: { id: "6512ab00ab00ab00ab00ab99" } };
   const res = {
     status(code) {
       state.status = code;

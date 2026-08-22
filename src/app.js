@@ -31,6 +31,8 @@ import { sanitizeInputs } from "./middleware/sanitize.middleware.js";
 import { trackUsage } from "./middleware/usage-tracker.middleware.js";
 import { requestId } from "./middleware/request-id.middleware.js";
 import { maintenanceGate } from "./middleware/maintenance.middleware.js";
+import { clientVersionGate } from "./middleware/client-version.middleware.js";
+import { superLimiter } from "./middleware/rate-limit.middleware.js";
 import { DEFAULT_FEATURE_FLAGS } from "./models/AppConfig.js";
 
 const PUBLIC_ERROR_CODES = new Set([
@@ -91,6 +93,15 @@ const PUBLIC_ERROR_CODES = new Set([
   "OCR_PROCESSING_FAILED",
   "OCR_PROVIDER_UNAVAILABLE",
   "OCR_TIMEOUT",
+  // OCR_QUOTA_EXCEEDED (O10's per-user/monthly/global OCR.space spend cap) is
+  // deliberately absent here, unlike its OCR_* siblings above: its message is
+  // built at runtime from ProviderUsage.reserveProviderCall's returned
+  // `reason` string, not a literal, so tests/error-contract-invariants.mjs
+  // and tests/notice-case-contract.mjs cannot statically prove it is safe to
+  // show verbatim the way every other entry in this Set is provably safe. It
+  // still answers 429 with a perfectly good generic message either way
+  // (publicErrorMessage's status===429 branch: "Too many requests were
+  // received. Wait briefly and try again."), so nothing user-facing is lost.
   "IMPORT_MAPPING_UNSUPPORTED_FIELDS",
   "IMPORT_MAPPING_MISSING_FIELDS",
   "IMPORT_MAPPING_HEADER_NOT_FOUND",
@@ -98,6 +109,15 @@ const PUBLIC_ERROR_CODES = new Set([
   "GST_IMPORT_CLIENT_NOT_FOUND",
   "GST_IMPORT_PREVIEW_STALE",
   "RECIPIENT_GSTIN_MISMATCH",
+  // IMPORT_DATE_ORDER_CONFLICTING is deliberately absent from
+  // PUBLIC_IMPORT_ERROR_MESSAGES below. Its thrown message already names the
+  // two proving row numbers (see import-preview.service.js), and a public code
+  // with no fixed-message entry falls through to `err.message` unchanged
+  // (publicErrorMessage() below) -- the CA-facing point of this error is
+  // exactly those row numbers, so a generic override here would erase the one
+  // thing worth telling them.
+  "IMPORT_DATE_ORDER_CONFLICTING",
+  "IMPORT_DATE_ORDER_UNSUPPORTED",
 ]);
 
 const PUBLIC_IMPORT_ERROR_MESSAGES = Object.freeze({
@@ -114,6 +134,8 @@ const PUBLIC_IMPORT_ERROR_MESSAGES = Object.freeze({
     "Import inputs changed after preview. Preview current data again.",
   RECIPIENT_GSTIN_MISMATCH:
     "Recipient GSTIN does not match selected registration.",
+  IMPORT_DATE_ORDER_UNSUPPORTED:
+    "Date order must be day-first, month-first, or left unset to be detected from the file.",
 });
 
 const app = express();
@@ -261,14 +283,9 @@ const globalLimiter = rateLimit({
 });
 app.use(globalLimiter);
 
-// Super admin endpoints: moderate - 50 requests per 15 minutes
-const superLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 50,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { ok: false, error: "Rate limit exceeded for admin operations." },
-});
+// Super admin endpoints: moderate - 50 requests per 15 minutes.
+// Defined in rate-limit.middleware.js (not inline) so every super-admin write route -- on
+// /api/super below and on /api/app-config's five super-only routes -- shares one definition.
 
 /* ===============================
    ADDITIONAL SECURITY HEADERS
@@ -290,7 +307,15 @@ app.use((req, res, next) => {
    - Allows backend same-origin
    - Allows chrome-extension
    - Allows localhost dev
+   - Allows the marketing site (read-only, public routes only)
 ================================ */
+// Exact-string allowlist for the marketing site — never .startsWith() and
+// never a regex here, or "https://caprotoolkit.in.evil.com" would also match.
+const MARKETING_SITE_ORIGINS = Object.freeze([
+  "https://caprotoolkit.in",
+  "https://www.caprotoolkit.in",
+]);
+
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -299,6 +324,21 @@ app.use(
 
       // ✅ Allow backend itself
       if (origin === "https://api.caprotoolkit.in") {
+        return callback(null, true);
+      }
+
+      // ✅ Allow the marketing site (caprotoolkit.in / www.caprotoolkit.in) to
+      //    read the public GET /api/app-config route — the download page
+      //    (U12) needs this so the website and the desktop app quote one
+      //    shared source of truth for version, SHA-256 and size, instead of
+      //    the website hardcoding a stale copy.
+      //    NOTE: this only widens what a BROWSER on that origin may READ over
+      //    CORS. Every authenticated route is still gated by its own auth
+      //    middleware — credentials:true is safe here only because we match
+      //    an exact-string allowlist, never a wildcard and never a prefix
+      //    match (a .startsWith() check would also let
+      //    "https://caprotoolkit.in.evil.com" through).
+      if (MARKETING_SITE_ORIGINS.includes(origin)) {
         return callback(null, true);
       }
 
@@ -460,6 +500,16 @@ app.use("/api/app-config", appConfigRoutes);
 
 // Maintenance gate — applies to all subsequent /api/* routes except the allowlist
 app.use(maintenanceGate);
+
+// O11: minimum-supported-client-version gate — same "applies to all subsequent
+// /api/* routes except the allowlist" placement as maintenanceGate immediately
+// above, for the same reason (routes mounted earlier, like /api/auth and
+// /api/app-config, already never reach either gate; this is defense-in-depth
+// plus the one true guarantee for /api/super and everything below). Fails
+// open on a missing/unparseable header or an unset floor — see
+// client-version.middleware.js's own header comment for why that must never
+// be softened.
+app.use(clientVersionGate);
 
 app.use("/api/super", superLimiter, superRoutes);
 app.use("/api/tasks", taskRoutes);

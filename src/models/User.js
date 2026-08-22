@@ -135,6 +135,13 @@ const UserSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // The desktop update announcement this user has dismissed, by announcement id rather than
+    // by version -- dismissing 0.1.2 must not silence 0.1.3. Persists across logout and
+    // reinstall, same as welcomeSeenVersion.
+    desktopUpdateSeenAnnouncementId: {
+      type: String,
+      default: null,
+    },
     digestPreferences: {
       // Cadence for the personal "daily work digest" email.
       // DAILY = every day, EVERY_3_DAYS, WEEKLY = once a week, OFF = never.

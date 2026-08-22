@@ -86,10 +86,9 @@ const INSIGHTS_MODEL =
 // sends its own catalog, that is used instead (keeps ids single-sourced).
 // Kept in sync with audit-nlp-extension/data/topics.json's `id`/`display_name` pairs -
 // this is the desktop and every other caller's only source for the catalogue, since
-// neither client sends its own (see PLAN.md/mandatorycompletion.md T113). A topic added
-// to that file without a matching entry here silently narrows what a desktop caller is
-// offered relative to what the extension shows, which is exactly the drift this list
-// exists to prevent.
+// neither client sends its own. A topic added to that file without a matching entry
+// here silently narrows what a desktop caller is offered relative to what the
+// extension shows, which is exactly the drift this list exists to prevent.
 export const AUDIT_TOPICS = [
   { id: "Inventory", name: "Inventory & Stock Audit" },
   { id: "Revenue", name: "Revenue Recognition" },
@@ -202,6 +201,7 @@ export async function refineAuditClassification(req, res, next) {
       maxTokens: 900,
       temperature: 0,
       model: classifierModel,
+      userId: req.user.id,
     });
 
     if (!r.ok) {
@@ -1466,6 +1466,7 @@ export async function generateInsights(req, res, next) {
       timeoutMs: 25000,
       maxAttemptsPerModel: 1,
       model: INSIGHTS_MODEL,
+      userId: req.user.id,
     });
 
     if (!r.ok) {
@@ -1609,6 +1610,7 @@ export async function generateInsights(req, res, next) {
           timeoutMs: 25000,
           maxAttemptsPerModel: 1,
           model: INSIGHTS_MODEL,
+          userId: req.user.id,
         });
 
         if (coverageResponse.ok) {
@@ -1786,6 +1788,7 @@ Goal: remind them documents have been pending for ${daysPending}+ days and reque
       jsonResponse: false,
       maxTokens: 400,
       temperature: 0.6,
+      userId: req.user.id,
     });
 
     if (!r.ok || !r.content?.trim()) {
@@ -1873,6 +1876,7 @@ Keep it 120-200 words, professional and specific to Indian practice. If "${code}
       temperature: 0.2,
       timeoutMs: 30000,
       model: INSIGHTS_MODEL,
+      userId: req.user.id,
     });
 
     if (!r.ok || !r.content?.trim()) {

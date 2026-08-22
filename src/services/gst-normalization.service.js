@@ -148,10 +148,13 @@ function normalizeDocumentType(value) {
   return aliases[normalized] || normalized;
 }
 
-function normalizeDocumentDate(value) {
+function normalizeDocumentDate(value, dateOrder) {
   // Accepts ISO, DD/MM/YYYY, DD-Mon-YYYY, Excel serial, YYYYMMDD, 2-digit years,
   // etc. Returns canonical ISO YYYY-MM-DD, or null when not a real date.
-  return parseFlexibleDateIso(cleanText(value, 40));
+  // `dateOrder` is the file-level order resolved once by import-preview.service.js
+  // (classifyDateColumn / resolveDateOrder) -- it decides an ambiguous row only;
+  // a row that proves its own order (one field > 12) is unaffected by it.
+  return parseFlexibleDateIso(cleanText(value, 40), { dateOrder });
 }
 
 function parseMoneyMinor(value, { allowBlank = true } = {}) {
@@ -231,7 +234,7 @@ function calculateGstr3bClaimed(rows) {
   return { claimed: result, basis };
 }
 
-function normalizeGstImportRow(kind, input) {
+function normalizeGstImportRow(kind, input, { dateOrder } = {}) {
   const errors = [];
   const warnings = [];
   const addError = (field, code, message = "") => errors.push({ field, code, message });
@@ -294,7 +297,7 @@ function normalizeGstImportRow(kind, input) {
   const supplierGstin = normalizeGstin(input.supplierGstin);
   const recipientGstin = normalizeGstin(input.recipientGstin);
   const invoice = normalizeInvoiceNumber(input.invoiceNumber);
-  const documentDate = normalizeDocumentDate(input.documentDate);
+  const documentDate = normalizeDocumentDate(input.documentDate, dateOrder);
   const documentType = normalizeDocumentType(input.documentType);
   let reverseCharge = false;
 

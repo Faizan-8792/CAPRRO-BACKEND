@@ -11,6 +11,13 @@ import {
   normalizeTdsImportRow,
   summarizeTdsRows,
 } from "./tds-normalization.service.js";
+import {
+  DATE_FIELDS_BY_KIND,
+  DATE_ORDER_STATUS,
+  classifyDateColumn,
+  classifyNumericDate,
+  resolveDateOrder,
+} from "./robust-normalize.service.js";
 
 const MAX_TEXT_BYTES = 500_000;
 const MAX_ROWS = 500;
@@ -128,7 +135,13 @@ function importRequestError(message, code, details = null) {
   return error;
 }
 
-function validateRequest({ kind, text, mapping, delimiter }) {
+function validateRequest({ kind, text, mapping, delimiter, dateOrder }) {
+  if (dateOrder != null && dateOrder !== "" && dateOrder !== "DAY_FIRST" && dateOrder !== "MONTH_FIRST") {
+    throw importRequestError(
+      "Date order must be DAY_FIRST, MONTH_FIRST, or left unset to be detected from the file.",
+      "IMPORT_DATE_ORDER_UNSUPPORTED"
+    );
+  }
   const normalizedKind = String(kind || "").toUpperCase();
   if (["GSTR7", "GSTR-7"].includes(normalizedKind)) {
     throw new Error("GSTR-7 is GST TDS and cannot be used as Income-tax TDS evidence");
@@ -203,19 +216,71 @@ function validateRequest({ kind, text, mapping, delimiter }) {
   return { headers, normalizedKind, parsed, selectedDelimiter, spec };
 }
 
-export function parseMappedImport({ kind, text, mapping, delimiter = null }) {
+export function parseMappedImport({ kind, text, mapping, delimiter = null, dateOrder = null }) {
   const {
     headers,
     normalizedKind,
     parsed,
     selectedDelimiter,
     spec,
-  } = validateRequest({ kind, text, mapping, delimiter });
+  } = validateRequest({ kind, text, mapping, delimiter, dateOrder });
   const headerIndex = new Map(headers.map((header, index) => [header, index]));
   const errors = [];
   const warnings = [];
   const normalizedRows = [];
   const isTdsImport = TDS_IMPORT_KINDS.includes(normalizedKind);
+
+  // Resolve the date order ONCE for the whole file, before parsing a single row.
+  // This is the root fix: the old per-row guess in parseFlexibleDateIso is
+  // replaced by one file-level decision, inferred from every mapped date column
+  // pooled together, or explicitly stated by the caller.
+  const dateFields = (DATE_FIELDS_BY_KIND[normalizedKind] || []).filter(
+    (field) => mapping[field]
+  );
+  const dateEntries = [];
+  for (const field of dateFields) {
+    const sourceHeader = mapping[field];
+    const columnIndex = headerIndex.get(sourceHeader);
+    parsed.slice(1).forEach((row, rowIndex) => {
+      dateEntries.push({ row: rowIndex + 2, value: cleanValue(row[columnIndex] ?? "") });
+    });
+  }
+  const dateClassification = classifyDateColumn(dateEntries);
+  const resolvedDateOrder = resolveDateOrder({ classification: dateClassification, stated: dateOrder || null });
+
+  if (resolvedDateOrder.status === DATE_ORDER_STATUS.CONFLICTING) {
+    // A single template literal, not a concatenation of several -- kept that
+    // way on purpose so tests/error-contract-invariants.mjs's static scan
+    // (which matches one literal message per throw call) can see this code is
+    // actually thrown. A `+`-joined message is invisible to that scan.
+    throw importRequestError(
+      `This file mixes day-first and month-first dates (row ${resolvedDateOrder.dayFirstEvidenceRow} reads as day-first, row ${resolvedDateOrder.monthFirstEvidenceRow} reads as month-first), so CA PRO cannot tell what any ambiguous row means. Fix the date column in the source file and read it again.`,
+      "IMPORT_DATE_ORDER_CONFLICTING",
+      {
+        dayFirstEvidenceRow: resolvedDateOrder.dayFirstEvidenceRow,
+        monthFirstEvidenceRow: resolvedDateOrder.monthFirstEvidenceRow,
+      }
+    );
+  }
+
+  // A single order for the whole file. AMBIGUOUS with no stated answer parses
+  // internally as day-first so every row still renders for review, but the
+  // caller is told below (via warnings + the dateOrder block) that nothing was
+  // actually resolved, and import.controller.js withholds the commit token.
+  const rowDateOrder = resolvedDateOrder.resolved || "DAY_FIRST";
+  const ambiguousUnanswered = resolvedDateOrder.status === DATE_ORDER_STATUS.AMBIGUOUS && !resolvedDateOrder.resolved;
+
+  // Which specific rows are themselves ambiguous (both numeric fields <= 12) --
+  // used below to warn on exactly the affected rows, not every row that merely
+  // has a date value in a file where SOME row happens to be ambiguous.
+  const ambiguousRowNumbers = ambiguousUnanswered
+    ? new Set(
+        dateEntries
+          .filter((entry) => classifyNumericDate(entry.value).proves === null
+            && classifyNumericDate(entry.value).shape === "NUMERIC")
+          .map((entry) => entry.row)
+      )
+    : null;
 
   parsed.slice(1).forEach((row, rowIndex) => {
     const mapped = {};
@@ -243,11 +308,24 @@ export function parseMappedImport({ kind, text, mapping, delimiter = null }) {
     }
 
     const normalized = isTdsImport
-      ? normalizeTdsImportRow(normalizedKind, mapped)
-      : normalizeGstImportRow(normalizedKind, mapped);
+      ? normalizeTdsImportRow(normalizedKind, mapped, { dateOrder: rowDateOrder })
+      : normalizeGstImportRow(normalizedKind, mapped, { dateOrder: rowDateOrder });
     normalized.errors.forEach((error) => errors.push({ row: displayRow, ...error }));
     normalized.warnings.forEach((warning) => warnings.push({ row: displayRow, ...warning }));
     normalizedRows.push({ row: displayRow, values: normalized.values });
+
+    // AMBIGUOUS-and-unanswered is surfaced as a WARNING, never an error and
+    // never counted against validRows/previewRows -- see TRAP 1 in the C1-C12
+    // workstream notes: a file-level error, or one pinned to row 0, makes the
+    // desktop mapper discard the whole preview. Withholding the commit token
+    // (done in import.controller.js) is what actually blocks the commit.
+    if (ambiguousUnanswered && ambiguousRowNumbers.has(displayRow)) {
+      for (const field of dateFields) {
+        if (mapped[field]) {
+          warnings.push({ row: displayRow, field, code: "DATE_ORDER_REQUIRED" });
+        }
+      }
+    }
   });
 
   let gstr3bControl = null;
@@ -299,6 +377,21 @@ export function parseMappedImport({ kind, text, mapping, delimiter = null }) {
       warningCount: warnings.length,
       previewRows: Math.min(normalizedRows.length, PREVIEW_ROWS),
       financialTotals,
+    },
+    // Additive response key -- the app-config pattern this codebase already
+    // relies on. An older client that does not read it keeps working exactly
+    // as before; resolved is null for AMBIGUOUS-unanswered and CONFLICTING
+    // never reaches here (it threw above).
+    dateOrder: {
+      status: resolvedDateOrder.status,
+      resolved: resolvedDateOrder.resolved,
+      source: resolvedDateOrder.source,
+      fields: dateFields,
+      ambiguousRows: resolvedDateOrder.ambiguousRows,
+      unambiguousRows: resolvedDateOrder.unambiguousRows,
+      unparseableRows: resolvedDateOrder.unparseableRows,
+      dayFirstEvidenceRow: resolvedDateOrder.dayFirstEvidenceRow,
+      monthFirstEvidenceRow: resolvedDateOrder.monthFirstEvidenceRow,
     },
     rows: normalizedRows,
     errors: errors.slice(0, 200),

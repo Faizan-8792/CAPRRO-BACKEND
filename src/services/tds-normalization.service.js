@@ -5,7 +5,10 @@ import {
   parseFlexibleMoneyMinor,
 } from "./robust-normalize.service.js";
 
-const TDS_NORMALIZATION_VERSION = "tds-import-v1";
+// Bumped to v2 when dateOrder joined the fingerprint material (C3) -- a batch
+// committed under v1 will not replay against a re-submission of the same file.
+// See GST_IMPORT_NORMALIZATION_VERSION in gst-import.service.js for why.
+const TDS_NORMALIZATION_VERSION = "tds-import-v2";
 
 // Label alias tables (keys are UPPERCASE alphanumeric-only; see aliasLookup).
 const FILING_STATUS_ALIASES = Object.freeze({
@@ -93,10 +96,10 @@ function addSafeMinorUnits(values) {
   return Number(total);
 }
 
-function normalizeIsoDay(value, { field, required = false } = {}) {
+function normalizeIsoDay(value, { field, required = false, dateOrder } = {}) {
   const normalized = String(value || "").trim();
   if (!normalized && !required) return "";
-  const iso = parseFlexibleDateIso(normalized);
+  const iso = parseFlexibleDateIso(normalized, { dateOrder });
   if (!iso) throw new Error(`${field} must be a real date (YYYY-MM-DD or common formats)`);
   return iso;
 }
@@ -138,7 +141,7 @@ function localPanFormatStatus(value) {
   return PAN_PATTERN.test(pan) ? "FORMAT_VALID" : "FORMAT_INVALID";
 }
 
-function normalizeTdsImportRow(kind, mapped) {
+function normalizeTdsImportRow(kind, mapped, { dateOrder } = {}) {
   const normalizedKind = normalizeCode(kind);
   if (["GSTR7", "GSTR-7"].includes(normalizedKind)) {
     throw new Error("GSTR-7 is not Income-tax TDS evidence");
@@ -159,7 +162,7 @@ function normalizeTdsImportRow(kind, mapped) {
     values.deducteeName = String(mapped.deducteeName || "").trim();
     values.deducteePan = normalizeCode(mapped.deducteePan);
     values.sectionCode = normalizeCode(mapped.sectionCode);
-    capture("transactionDate", () => normalizeIsoDay(mapped.transactionDate, { field: "transactionDate", required: true }));
+    capture("transactionDate", () => normalizeIsoDay(mapped.transactionDate, { field: "transactionDate", required: true, dateOrder }));
     capture("amountPaidMinor", () => parseMinorUnits(mapped.amountPaid, { field: "amountPaid", required: true, nonNegative: true }));
     capture("deductedMinor", () => parseMinorUnits(mapped.deductedAmount, { field: "deductedAmount", required: true, nonNegative: true }));
     capture("surchargeMinor", () => parseMinorUnits(mapped.surcharge, { field: "surcharge", nonNegative: true }));
@@ -174,7 +177,7 @@ function normalizeTdsImportRow(kind, mapped) {
     values.sectionCode = normalizeCode(mapped.sectionCode);
     if (!/^\d{7}$/.test(values.bsrCode)) errors.push({ field: "bsrCode", code: "INVALID_BSR", message: "ITNS 281 BSR code must contain 7 digits" });
     if (!/^\d{1,5}$/.test(values.challanSerial)) errors.push({ field: "challanSerial", code: "INVALID_CHALLAN_SERIAL", message: "Challan serial must contain 1 to 5 digits" });
-    capture("challanDate", () => normalizeIsoDay(mapped.challanDate, { field: "challanDate", required: true }));
+    capture("challanDate", () => normalizeIsoDay(mapped.challanDate, { field: "challanDate", required: true, dateOrder }));
     capture("depositedMinor", () => parseMinorUnits(mapped.depositedAmount, { field: "depositedAmount", required: true, nonNegative: true }));
   } else if (normalizedKind === "TDS_STATEMENTS") {
     values.filingStatus = aliasLookup(mapped.filingStatus, FILING_STATUS_ALIASES, normalizeCode(mapped.filingStatus));
@@ -197,7 +200,7 @@ function normalizeTdsImportRow(kind, mapped) {
     if (values.certificateType && !["FORM_16", "FORM_16A"].includes(values.certificateType)) {
       errors.push({ field: "certificateType", code: "INVALID_CERTIFICATE_TYPE" });
     }
-    capture("filedDate", () => normalizeIsoDay(mapped.filedDate, { field: "filedDate" }));
+    capture("filedDate", () => normalizeIsoDay(mapped.filedDate, { field: "filedDate", dateOrder }));
     capture("reportedMinor", () => parseMinorUnits(mapped.reportedAmount, { field: "reportedAmount", required: true, nonNegative: true }));
     if (["FILED", "CORRECTED"].includes(values.filingStatus) && !values.filedDate) {
       warnings.push({ field: "filedDate", code: "FILED_DATE_MISSING" });
@@ -210,7 +213,7 @@ function normalizeTdsImportRow(kind, mapped) {
     values.deducteePan = normalizeCode(mapped.deducteePan);
     values.sectionCode = normalizeCode(mapped.sectionCode);
     values.sourceReference = String(mapped.sourceReference || "").trim();
-    capture("creditDate", () => normalizeIsoDay(mapped.creditDate, { field: "creditDate", required: true }));
+    capture("creditDate", () => normalizeIsoDay(mapped.creditDate, { field: "creditDate", required: true, dateOrder }));
     capture("creditedMinor", () => parseMinorUnits(mapped.creditedAmount, { field: "creditedAmount", required: true, nonNegative: true }));
     if (localPanFormatStatus(values.deducteePan) !== "FORMAT_VALID") {
       warnings.push({ field: "deducteePan", code: "PAN_REVIEW_REQUIRED", message: "Imported credit PAN cannot be matched confidently" });

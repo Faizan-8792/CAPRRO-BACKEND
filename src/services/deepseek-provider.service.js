@@ -1,3 +1,5 @@
+import ProviderUsage from "../models/ProviderUsage.js";
+
 const DEEPSEEK_URL =
   process.env.DEEPSEEK_URL || "https://api.deepseek.com/chat/completions";
 // Models are env-configurable so provider naming changes never need a code
@@ -7,6 +9,24 @@ const DEEPSEEK_URL =
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-v4-flash";
 const DEEPSEEK_MODEL_FALLBACK =
   process.env.DEEPSEEK_MODEL_FALLBACK || "deepseek-v4-pro";
+
+// O10 spend meter/cap: DeepSeek is billed per call, and callDeepSeek is the one
+// choke point every caller (classifier, insights, reminder, standard-guidance,
+// audit working papers, case AI, the super-admin self-test) funnels through, so
+// this is where the whole app's DeepSeek spend is bounded. Per-user numbers are
+// sized for a genuinely busy working day: a single notice can trigger several
+// calls (refine + insights + a coverage follow-up + a reminder message), so 60/
+// day gives headroom for a dozen-plus documents in one sitting; 800/month covers
+// sustained daily use at roughly 26/day average with room for busy-day bursts up
+// to the daily cap. The global ceiling is deliberately NOT per-user-cap x
+// expected-users -- it is a flat backstop on the owner's own DeepSeek bill that
+// stays in force no matter how many accounts sign up.
+const DEEPSEEK_DAILY_CALL_CAP_PER_USER =
+  Number(process.env.DEEPSEEK_DAILY_CALL_CAP_PER_USER) || 60;
+const DEEPSEEK_MONTHLY_CALL_CAP_PER_USER =
+  Number(process.env.DEEPSEEK_MONTHLY_CALL_CAP_PER_USER) || 800;
+const DEEPSEEK_GLOBAL_DAILY_CALL_CAP =
+  Number(process.env.DEEPSEEK_GLOBAL_DAILY_CALL_CAP) || 1500;
 
 function boundedString(value, max = 4000) {
   return String(value ?? "").slice(0, max);
@@ -176,10 +196,32 @@ async function callDeepSeek({
   temperature = 0.3,
   model,
   maxAttemptsPerModel = 2,
+  userId,
 }) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) {
     return { ok: false, reason: "DEEPSEEK_API_KEY not configured" };
+  }
+  // Required, not optional with a fallback: a required parameter means a NEW
+  // call site added later cannot compile/run without deciding whose usage this
+  // call is billed against, so it cannot silently escape metering the way an
+  // optional param with a default could.
+  if (!userId) {
+    throw new Error("callDeepSeek requires userId for provider-usage metering");
+  }
+  // Quota check happens BEFORE the paid call, and the reservation it makes is
+  // only released (see ProviderUsage.reserveProviderCall) if a later tier in the
+  // same check refuses -- so a refused call is never counted, and an attempted
+  // one always is, regardless of whether the call below ultimately succeeds.
+  const reservation = await ProviderUsage.reserveProviderCall({
+    userId,
+    provider: "DEEPSEEK",
+    dailyCapPerUser: DEEPSEEK_DAILY_CALL_CAP_PER_USER,
+    monthlyCapPerUser: DEEPSEEK_MONTHLY_CALL_CAP_PER_USER,
+    globalDailyCap: DEEPSEEK_GLOBAL_DAILY_CALL_CAP,
+  });
+  if (!reservation.allowed) {
+    return { ok: false, reason: reservation.reason };
   }
   const attemptsPerModel = Math.max(1, Number(maxAttemptsPerModel) || 1);
   const primary = model || DEEPSEEK_MODEL;

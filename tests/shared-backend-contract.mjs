@@ -351,7 +351,9 @@ check(
 // held in the extension's own chrome.storage.local, which another extension cannot
 // read. Narrowing it would break unpacked development builds, which get a different
 // id, and risks breaking the production extension -- so it is raised for a human
-// rather than changed here. See AGENT-COORDINATION.md H10.
+// rather than changed here. See agenttesting.md A-13.14: confirm on every full run that this
+// is still not exploitable (bearer token in the extension's own storage, no auth cookie) and
+// that the pin still holds.
 
 check(
   "CORS admits chrome-extension origins",

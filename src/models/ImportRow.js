@@ -52,6 +52,7 @@ const ImportRowSchema = new mongoose.Schema(
     invoiceNumberOriginal: { type: String, trim: true, maxlength: 120, default: "" },
     invoiceNumberNormalized: { type: String, trim: true, uppercase: true, maxlength: 120, default: "" },
     documentDate: { type: String, match: /^\d{4}-\d{2}-\d{2}$/, default: null },
+    dateOrder: { type: String, enum: ["", "DAY_FIRST", "MONTH_FIRST", "NOT_APPLICABLE"], default: "" },
     documentType: { type: String, trim: true, uppercase: true, maxlength: 40, default: "" },
     taxableValueMinor: moneyField(),
     igstMinor: moneyField(),

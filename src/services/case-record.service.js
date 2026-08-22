@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { parseStatutoryDayIso } from "./robust-normalize.service.js";
 import Client from "../models/Client.js";
 import CaseAnalysis from "../models/CaseAnalysis.js";
 import CaseDraft from "../models/CaseDraft.js";
@@ -799,7 +800,7 @@ async function runCaseExtraction({
         await beginNoticePublicationWrite(noticePublication);
         let result = readCaseProviderOperationResult(reservation.operation);
         if (!result) {
-          result = await proposeCaseExtraction(caseMatter);
+          result = await proposeCaseExtraction(caseMatter, actorUserId);
           reservation = {
             ...reservation,
             operation: await stageCaseProviderOperationResult(
@@ -1219,9 +1220,13 @@ async function addCaseTimelineEntry({
   const detail = boundedText(input.detail, 5000, { label: "detail" });
   const metadata = {};
   if (kind === "HEARING_RECORDED") {
-    const hearingAt = new Date(input.hearingAt);
-    if (Number.isNaN(hearingAt.getTime())) {
-      throw httpError(400, "hearingAt must be a valid date");
+    // Strict on purpose -- see parseStatutoryDayIso's remarks in robust-normalize.service.js.
+    // new Date(string) would silently read an ambiguous hearing date the wrong way round.
+    let hearingAt;
+    try {
+      hearingAt = parseStatutoryDayIso(input.hearingAt, "hearingAt");
+    } catch (error) {
+      throw httpError(error.statusCode || 400, error.message);
     }
     metadata.hearingAt = hearingAt.toISOString();
   }

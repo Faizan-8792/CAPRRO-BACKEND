@@ -3,6 +3,7 @@
 import Task from "../models/Task.js";
 import User from "../models/User.js";
 import AppConfig from "../models/AppConfig.js";
+import { parseStatutoryDayIso } from "../services/robust-normalize.service.js";
 
 const PRODUCT_ACCESS_MODEL = "FREE";
 const DEFAULT_TASK_PAGE_SIZE = 50;
@@ -95,6 +96,15 @@ export const createTask = async (req, res) => {
       });
     }
 
+    // Strict on purpose -- new Date(string) silently mis-reads an ambiguous DD-MM/MM-DD
+    // task due date. See parseStatutoryDayIso's remarks in robust-normalize.service.js.
+    let dueDate;
+    try {
+      dueDate = parseStatutoryDayIso(dueDateISO, "dueDateISO");
+    } catch {
+      return res.status(400).json({ ok: false, error: "Invalid dueDateISO" });
+    }
+
     // Product access is free for every authenticated firm. Operational limits
     // such as request-size caps and rate limiting remain enforced elsewhere.
 
@@ -118,7 +128,7 @@ export const createTask = async (req, res) => {
       clientName,
       serviceType: serviceType || "OTHER",
       title,
-      dueDateISO: new Date(dueDateISO).toISOString(),
+      dueDateISO: dueDate.toISOString(),
       assignedTo: assignedToUserId,
       status: initialStatus,
       completedAt: initiallyComplete ? new Date() : null,
@@ -326,7 +336,13 @@ export const updateTask = async (req, res) => {
     }
 
     if (dueDateISO) {
-      task.dueDateISO = new Date(dueDateISO).toISOString();
+      let updatedDueDate;
+      try {
+        updatedDueDate = parseStatutoryDayIso(dueDateISO, "dueDateISO");
+      } catch {
+        return res.status(400).json({ ok: false, error: "Invalid dueDateISO" });
+      }
+      task.dueDateISO = updatedDueDate.toISOString();
     }
 
     if (assignedTo !== undefined) {

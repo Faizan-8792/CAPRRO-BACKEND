@@ -35,9 +35,178 @@ function expandYear(raw) {
   return n;
 }
 
-// Parse a huge range of real-world date shapes into ISO YYYY-MM-DD (day-first for
-// ambiguous numeric dates — India convention). Returns null when not a real date.
-function parseFlexibleDateIso(value) {
+// Whether an ambiguous numeric date (both fields <= 12) is read day-first or
+// month-first. There is no third option for an ambiguous row: one file, one order.
+const DATE_ORDER = Object.freeze({ DAY_FIRST: "DAY_FIRST", MONTH_FIRST: "MONTH_FIRST" });
+
+// The full outcome space for classifying a whole date COLUMN (not one value).
+// AMBIGUOUS: no row disambiguates, but at least one numeric-shaped row exists.
+// CONFLICTING: one row proves day-first and another proves month-first in the
+// same column -- no single order is coherent for the file.
+// NOT_APPLICABLE: no numeric-shaped (DD/MM vs MM/DD) row exists at all -- every
+// date is already unambiguous (ISO, month-name, Excel serial, etc).
+const DATE_ORDER_STATUS = Object.freeze({
+  DAY_FIRST: "DAY_FIRST",
+  MONTH_FIRST: "MONTH_FIRST",
+  AMBIGUOUS: "AMBIGUOUS",
+  CONFLICTING: "CONFLICTING",
+  NOT_APPLICABLE: "NOT_APPLICABLE",
+});
+
+// The complete set of date fields that reach parseFlexibleDateIso today, verified
+// by grep across gst-normalization.service.js:297 and tds-normalization.service.js
+// (lines 162, 177, 200, 213). Used to decide which mapped columns to pool into one
+// file-level date-order classification, rather than resolving order per column.
+const DATE_FIELDS_BY_KIND = Object.freeze({
+  CLIENTS: [],
+  GST_PURCHASE: ["documentDate"],
+  GSTR2B: ["documentDate"],
+  GSTR3B_SUMMARY: [],
+  TDS_DEDUCTIONS: ["transactionDate"],
+  TDS_CHALLANS: ["challanDate"],
+  TDS_STATEMENTS: ["filedDate"],
+  TDS_26AS: ["creditDate"],
+});
+
+// Classifies ONE value's numeric-date shape without deciding an order. Used to
+// build file-level evidence before any row is actually parsed.
+//   shape: "NUMERIC"      -- matches the DD/MM (or MM/DD) two-numeric-field shape.
+//          "UNAMBIGUOUS"  -- matches a shape that states its own order (ISO, a
+//                            month NAME, YYYYMMDD, or an Excel serial).
+//          "UNPARSEABLE"  -- matches none of the parser's shapes.
+//   proves: for a NUMERIC value, which single order this ROW alone proves --
+//          DATE_ORDER.DAY_FIRST when field1 > 12 (only day-first can be true),
+//          DATE_ORDER.MONTH_FIRST when field2 > 12 (only month-first can be true),
+//          "IMPOSSIBLE" when both fields > 12 (not a valid date under either
+//          order -- e.g. "13/13/2026"), or null when both fields are <= 12 (this
+//          row alone cannot prove an order either way).
+function classifyNumericDate(value) {
+  let s = String(value ?? "").trim();
+  if (!s) return { shape: "UNPARSEABLE", proves: null };
+  s = s.replace(/\bT\d{1,2}:\d{2}.*$/i, "").trim();
+  s = s.replace(/\s+\d{1,2}:\d{2}(:\d{2})?\s*(am|pm)?$/i, "").trim();
+
+  const numeric = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
+  if (numeric) {
+    const field1 = Number(numeric[1]);
+    const field2 = Number(numeric[2]);
+    let proves = null;
+    if (field1 > 12 && field2 > 12) proves = "IMPOSSIBLE";
+    else if (field1 > 12 && field2 <= 12) proves = DATE_ORDER.DAY_FIRST;
+    else if (field2 > 12 && field1 <= 12) proves = DATE_ORDER.MONTH_FIRST;
+    return { shape: "NUMERIC", field1, field2, proves };
+  }
+
+  const isoLike = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.test(s);
+  const monthName = /^(\d{1,2})[-/. ]+([A-Za-z]{3,9})[-/. ]+(\d{2,4})$/.test(s)
+    || /^([A-Za-z]{3,9})[-/. ]+(\d{1,2}),?[-/. ]+(\d{2,4})$/.test(s);
+  const compact = /^(\d{4})(\d{2})(\d{2})$/.test(s);
+  const serial = /^\d{5}$/.test(s);
+  if (isoLike || monthName || compact || serial) {
+    return { shape: "UNAMBIGUOUS", proves: null };
+  }
+
+  return { shape: "UNPARSEABLE", proves: null };
+}
+
+// Classifies a whole mapped date COLUMN (every value from every date field in one
+// imported file, pooled) into one DATE_ORDER_STATUS with the evidence that
+// produced it. This is the file-level decision that replaces the old per-row
+// guess: date order is decided ONCE, from everything the file itself proves.
+//
+// entries: [{ row, value }] -- row is the 1-based data row number the caller
+// wants cited back to the person reviewing the file (typically spreadsheet row,
+// i.e. header row + 1-based index).
+function classifyDateColumn(entries) {
+  let dayFirstEvidenceRow = null;
+  let monthFirstEvidenceRow = null;
+  let ambiguousRows = 0;
+  let unambiguousRows = 0;
+  let unparseableRows = 0;
+  let sawNumeric = false;
+
+  for (const { row, value } of entries ?? []) {
+    const classified = classifyNumericDate(value);
+    if (classified.shape === "UNAMBIGUOUS") {
+      unambiguousRows++;
+      continue;
+    }
+    if (classified.shape === "UNPARSEABLE") {
+      unparseableRows++;
+      continue;
+    }
+    // NUMERIC from here.
+    sawNumeric = true;
+    if (classified.proves === "IMPOSSIBLE") {
+      unparseableRows++;
+    } else if (classified.proves === DATE_ORDER.DAY_FIRST) {
+      if (dayFirstEvidenceRow === null) dayFirstEvidenceRow = row;
+    } else if (classified.proves === DATE_ORDER.MONTH_FIRST) {
+      if (monthFirstEvidenceRow === null) monthFirstEvidenceRow = row;
+    } else {
+      ambiguousRows++;
+    }
+  }
+
+  let status;
+  let resolved = null;
+  if (dayFirstEvidenceRow !== null && monthFirstEvidenceRow !== null) {
+    status = DATE_ORDER_STATUS.CONFLICTING;
+  } else if (dayFirstEvidenceRow !== null) {
+    status = DATE_ORDER_STATUS.DAY_FIRST;
+    resolved = DATE_ORDER.DAY_FIRST;
+  } else if (monthFirstEvidenceRow !== null) {
+    status = DATE_ORDER_STATUS.MONTH_FIRST;
+    resolved = DATE_ORDER.MONTH_FIRST;
+  } else if (sawNumeric) {
+    status = DATE_ORDER_STATUS.AMBIGUOUS;
+  } else {
+    status = DATE_ORDER_STATUS.NOT_APPLICABLE;
+  }
+
+  return {
+    status,
+    resolved,
+    source: resolved ? "INFERRED" : "NONE",
+    ambiguousRows,
+    unambiguousRows,
+    unparseableRows,
+    dayFirstEvidenceRow,
+    monthFirstEvidenceRow,
+  };
+}
+
+// Folds a person's explicitly STATED order into a file's inferred classification.
+// A stated order can resolve an AMBIGUOUS file, but can never override a
+// CONFLICTING one: if the file itself contains rows proving both orders, no
+// single order the person picks can make every row coherent, so the file must
+// still be refused and corrected at the source.
+function resolveDateOrder({ classification, stated }) {
+  if (stated != null && stated !== "" && stated !== DATE_ORDER.DAY_FIRST && stated !== DATE_ORDER.MONTH_FIRST) {
+    return { status: "UNSUPPORTED" };
+  }
+
+  if (classification.status === DATE_ORDER_STATUS.CONFLICTING) {
+    return { ...classification, source: classification.source };
+  }
+  if (classification.status === DATE_ORDER_STATUS.NOT_APPLICABLE) {
+    return { ...classification, resolved: null, source: "NONE" };
+  }
+  if (!stated) {
+    return classification;
+  }
+  // A stated order wins for AMBIGUOUS, DAY_FIRST and MONTH_FIRST classifications.
+  return { ...classification, resolved: stated, source: "STATED" };
+}
+
+// Parse a huge range of real-world date shapes into ISO YYYY-MM-DD. `dateOrder`
+// decides an AMBIGUOUS row (both numeric fields <= 12); it has no effect on a row
+// that proves its own order (one field > 12), which is read the same way under
+// either resolution -- see the C1 verification gate for why this matters: a row
+// that proves day-first stays day-first even when the file overall resolved
+// month-first, because that row was never ambiguous in the first place.
+// Returns null when not a real date.
+function parseFlexibleDateIso(value, { dateOrder = DATE_ORDER.DAY_FIRST } = {}) {
   let s = String(value ?? "").trim();
   if (!s) return null;
   // strip a leading weekday and any time / timezone portion
@@ -48,15 +217,22 @@ function parseFlexibleDateIso(value) {
   let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
   if (m) return isoFrom(Number(m[1]), Number(m[2]), Number(m[3]));
 
-  // DD-MM-YYYY / DD/MM/YYYY / DD.MM.YYYY  (also 2-digit year)  -- day first
+  // DD-MM-YYYY / DD/MM/YYYY / DD.MM.YYYY  (also 2-digit year)
   m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
   if (m) {
     let day = Number(m[1]);
     let month = Number(m[2]);
     const year = expandYear(m[3]);
-    // If clearly month-first (day <= 12 < first field), swap.
-    if (day > 12 && month <= 12) { /* already day-first */ }
-    else if (month > 12 && day <= 12) { const t = day; day = month; month = t; }
+    if (day > 12 && month <= 12) {
+      // already day-first -- this row proves its own order regardless of dateOrder
+    } else if (month > 12 && day <= 12) {
+      const t = day; day = month; month = t;
+    } else if (day > 12 && month > 12) {
+      return null;
+    } else if (dateOrder === DATE_ORDER.MONTH_FIRST) {
+      const t = day; day = month; month = t;
+    }
+    // else: both <= 12 and dateOrder is DAY_FIRST (the default) -- day/month as read.
     return isoFrom(year, month, day);
   }
 
@@ -262,12 +438,77 @@ function buildMappingFromHeaders(headers, kind) {
   return mapping;
 }
 
+/* --------------------------------------------------------------- statutory dates */
+// Strict date parsing for anything that decides a statutory outcome (a hearing date, a
+// limitation date, a compliance due date, a reminder). Deliberately separate from the
+// tolerant parseFlexibleDateIso above: an IMPORTED FILE's dates get every reasonable
+// benefit of the doubt with an explicit, reviewable date-order decision (see
+// classifyDateColumn), but a value typed or posted directly into one API field gets none.
+// The reason is `new Date(string)`, which this function replaces at every site that used
+// to call it on a request-supplied value:
+//   new Date('05-03-2026').getUTCMonth()  === 4   -- reads as May, not 5 March
+//   new Date('03/05/2026').toISOString()  starts '2026-03-04' -- reads as 5 March, one
+//                                                                 day early once shifted to UTC
+// Both are silent, and there is no per-file classification pass to catch a single posted
+// value the way there is for a whole imported column, so guessing here is not an option:
+// this function accepts ONLY an unambiguous shape and refuses everything else.
+function parseStatutoryDayIso(value, label) {
+  const raw = String(value ?? "").trim();
+  const dayOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (dayOnly) {
+    const [, y, mo, d] = dayOnly;
+    const iso = isoFrom(Number(y), Number(mo), Number(d));
+    if (!iso) {
+      throw new StatutoryDateError(`${label} is not a real calendar date`);
+    }
+    return new Date(`${iso}T00:00:00.000Z`);
+  }
+
+  // A full ISO 8601 instant, constructed via Date.UTC from the CAPTURED parts rather than
+  // handed to the Date constructor, so this function never itself relies on the ambiguous
+  // parsing it exists to refuse.
+  const instant = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-]\d{2}:?\d{2})$/.exec(raw);
+  if (instant) {
+    const [, y, mo, d, h, mi, s, ms, offset] = instant;
+    if (!isoFrom(Number(y), Number(mo), Number(d))) {
+      throw new StatutoryDateError(`${label} is not a real calendar date`);
+    }
+    let ms1 = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s || 0), Number((ms || "0").padEnd(3, "0")));
+    if (offset !== "Z") {
+      const sign = offset[0] === "-" ? 1 : -1;
+      const [oh, om] = offset.slice(1).replace(":", "").match(/^(\d{2})(\d{2})$/).slice(1).map(Number);
+      ms1 += sign * ((oh * 60 + om) * 60_000);
+    }
+    const date = new Date(ms1);
+    if (Number.isNaN(date.getTime())) {
+      throw new StatutoryDateError(`${label} is not a real calendar date`);
+    }
+    return date;
+  }
+
+  throw new StatutoryDateError(`${label} must be an ISO date (YYYY-MM-DD) or a full ISO timestamp with a timezone`);
+}
+
+class StatutoryDateError extends Error {
+  constructor(message) {
+    super(message);
+    this.statusCode = 400;
+  }
+}
+
 export {
+  DATE_FIELDS_BY_KIND,
+  DATE_ORDER,
+  DATE_ORDER_STATUS,
   HEADER_SYNONYMS,
   aliasLookup,
   buildMappingFromHeaders,
+  classifyDateColumn,
+  classifyNumericDate,
   labelKey,
   parseFlexibleDateIso,
   parseFlexibleMoneyMinor,
+  parseStatutoryDayIso,
+  resolveDateOrder,
   resolveHeaderField,
 };

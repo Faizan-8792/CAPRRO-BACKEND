@@ -4,6 +4,7 @@ import express from "express";
 import { authRequired } from "../middleware/auth.middleware.js";
 import {
   getUsageStats,
+  getProviderUsageStats,
   getSuperDashboardStats,
   listAllUsers,
   listPendingAdmins,
@@ -61,6 +62,10 @@ router.get("/dashboard-stats", getSuperDashboardStats);
 
 // Extension usage analytics (DAU/WAU/MAU)
 router.get("/usage-stats", getUsageStats);
+
+// O10: paid-provider (DeepSeek / OCR.space) call-volume meter -- backs the
+// "Provider usage" admin panel card.
+router.get("/provider-usage", requireSuperAdmin, getProviderUsageStats);
 
 // Full user directory (search, activity/role filters, pagination)
 router.get("/users", listAllUsers);

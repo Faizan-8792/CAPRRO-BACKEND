@@ -6,6 +6,7 @@ import User from "../models/User.js";
 import AppConfig from "../models/AppConfig.js";
 import { sendComplianceReminderEmail } from "../services/reminder.service.js";
 import { safeRecordActivity } from "../services/activity.service.js";
+import { parseStatutoryDayIso } from "../services/robust-normalize.service.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DELIVERY_LOCK_MS = 10 * 60 * 1000;
@@ -640,8 +641,12 @@ export async function createReminder(req, res) {
       });
     }
 
-    const dueDate = new Date(dueDateISO);
-    if (Number.isNaN(dueDate.getTime())) {
+    // Strict on purpose -- new Date(string) silently mis-reads an ambiguous DD-MM/MM-DD
+    // reminder date. See parseStatutoryDayIso's remarks in robust-normalize.service.js.
+    let dueDate;
+    try {
+      dueDate = parseStatutoryDayIso(dueDateISO, "dueDateISO");
+    } catch {
       return res.status(400).json({ ok: false, error: "Invalid dueDateISO" });
     }
 
@@ -797,8 +802,10 @@ export async function updateReminder(req, res) {
     if (typeId !== undefined) updates.typeId = typeId;
     if (clientLabel !== undefined) updates.clientLabel = clientLabel;
     if (dueDateISO !== undefined) {
-      const dueDate = new Date(dueDateISO);
-      if (Number.isNaN(dueDate.getTime())) {
+      let dueDate;
+      try {
+        dueDate = parseStatutoryDayIso(dueDateISO, "dueDateISO");
+      } catch {
         return res.status(400).json({ ok: false, error: "Invalid dueDateISO" });
       }
       updates.dueDateISO = dueDate.toISOString();

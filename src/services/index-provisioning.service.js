@@ -20,16 +20,27 @@ import { REQUIRED_AUDIT_WORKING_PAPER_INDEXES } from "./audit-working-paper-inde
 import { REQUIRED_CASE_INDEXES } from "./case-index-readiness.service.js";
 import { REQUIRED_DIGEST_INDEXES } from "./digest-index-readiness.service.js";
 import { REQUIRED_ENGAGEMENT_INDEXES } from "./engagement-index-readiness.service.js";
+import { REQUIRED_PROVIDER_USAGE_INDEXES } from "./provider-usage-index-readiness.service.js";
 
 // Taking the model set from the same requirement lists startup asserts against
 // keeps the two in step. A hand-maintained list would drift the moment a
 // requirement was added, and the symptom of that drift is a deploy that cannot
 // reach readiness.
+//
+// "providerUsage" is not gated behind a feature flag like the other three
+// group names below it -- O10's per-user/monthly/global spend cap on DeepSeek
+// and OCR.space applies unconditionally whenever either provider is called,
+// so its unique index is provisioned every boot the same way "digest" is.
+// Found missing entirely (in every environment, not just production) while
+// closing out O10's live-database gates -- see
+// provider-usage-index-readiness.service.js's header comment for the direct
+// evidence.
 const REQUIREMENT_GROUPS = Object.freeze([
   ["digest", REQUIRED_DIGEST_INDEXES],
   ["noticeCases", REQUIRED_CASE_INDEXES],
   ["assuranceEngagements", REQUIRED_ENGAGEMENT_INDEXES],
   ["auditWorkingPapers", REQUIRED_AUDIT_WORKING_PAPER_INDEXES],
+  ["providerUsage", REQUIRED_PROVIDER_USAGE_INDEXES],
 ]);
 
 function isNamespaceMissing(error) {

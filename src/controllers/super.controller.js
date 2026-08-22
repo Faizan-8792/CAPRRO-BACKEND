@@ -12,6 +12,13 @@ import {
 } from "../services/self-test.service.js";
 import { sendTestEmail } from "../services/email.service.js";
 import { sendTestDigestNow } from "../services/digest.service.js";
+import ProviderUsage, {
+  GLOBAL_USAGE_USER_ID,
+  dailyPeriodKey,
+  monthlyPeriodKey,
+} from "../models/ProviderUsage.js";
+
+const PROVIDER_USAGE_PROVIDERS = ["DEEPSEEK", "OCR_SPACE"];
 
 const SUPER_EMAIL = "saifullahfaizan786@gmail.com";
 
@@ -117,6 +124,75 @@ export const getUsageStats = async (req, res, next) => {
           totalEverActive > 0 ? Math.round((wau / totalEverActive) * 100) : 0,
         dailyActivity,
         topUsers,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// 0b) O10: paid-provider (DeepSeek / OCR.space) spend meter -- today's and this
+// month's call counts per provider, plus the top users by call count today, so
+// the owner can see who is actually driving the bill behind the per-user/
+// monthly/global caps enforced in deepseek-provider.service.js and
+// ocr-space.service.js. Excludes the internal global-ceiling sentinel row
+// (GLOBAL_USAGE_USER_ID) from every total and from the top-users list -- that
+// row is bookkeeping for the global cap, never a real user's usage.
+export const getProviderUsageStats = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+
+    const dayKey = dailyPeriodKey();
+    const monthKey = monthlyPeriodKey();
+    const realUserFilter = { userId: { $ne: GLOBAL_USAGE_USER_ID } };
+
+    const totalsByProvider = (rows) =>
+      Object.fromEntries(
+        PROVIDER_USAGE_PROVIDERS.map((provider) => [
+          provider,
+          rows.find((row) => row._id === provider)?.total || 0,
+        ]),
+      );
+
+    const [dailyTotalsRaw, monthlyTotalsRaw, topUsersByProvider] =
+      await Promise.all([
+        ProviderUsage.aggregate([
+          { $match: { ...realUserFilter, periodKey: dayKey } },
+          { $group: { _id: "$provider", total: { $sum: "$calls" } } },
+        ]),
+        ProviderUsage.aggregate([
+          { $match: { ...realUserFilter, periodKey: monthKey } },
+          { $group: { _id: "$provider", total: { $sum: "$calls" } } },
+        ]),
+        Promise.all(
+          PROVIDER_USAGE_PROVIDERS.map((provider) =>
+            ProviderUsage.find({ ...realUserFilter, provider, periodKey: dayKey })
+              .sort({ calls: -1 })
+              .limit(5)
+              .populate("userId", "email name")
+              .lean(),
+          ),
+        ),
+      ]);
+
+    const topUsersToday = Object.fromEntries(
+      PROVIDER_USAGE_PROVIDERS.map((provider, index) => [
+        provider,
+        topUsersByProvider[index].map((row) => ({
+          userId: String(row.userId?._id || row.userId || ""),
+          email: row.userId?.email || "(deleted user)",
+          name: row.userId?.name || "",
+          calls: row.calls,
+        })),
+      ]),
+    );
+
+    return res.json({
+      ok: true,
+      usage: {
+        today: totalsByProvider(dailyTotalsRaw),
+        thisMonth: totalsByProvider(monthlyTotalsRaw),
+        topUsersToday,
       },
     });
   } catch (err) {

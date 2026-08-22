@@ -40,11 +40,28 @@ function sanitizeObject(obj) {
  * Express middleware: sanitizes req.body, req.query, and req.params
  */
 export function sanitizeInputs(req, res, next) {
-  const isOpaqueImportPreview =
-    req.method === "POST" && /^\/api\/imports\/preview\/?$/.test(req.path);
+  // The whole /api/imports/* commit pipeline (preview, GST commit, TDS
+  // commit) carries a raw CSV `text` field whose SHA-256 must reproduce
+  // exactly across requests: import.controller.js/gst-import.service.js/
+  // tds-import.service.js re-hash it at commit time and compare against the
+  // preview-time fingerprint, refusing with *_PREVIEW_STALE on any mismatch.
+  // sanitizeValue()'s .trim() (and its HTML-tag/js:/on*= stripping) mutates
+  // that text -- ordinary exported CSVs almost always end in a trailing
+  // newline, so .trim() alone made every real commit fail as "stale" even
+  // when byte-for-byte faithful to its own preview. /preview was already
+  // exempted for this exact reason; the two commit routes were not, which is
+  // the same defect on the two routes that actually persist data. Root-fixed
+  // here (found live while closing out C3's live-database gate) by exempting
+  // the whole POST /api/imports/* surface, not just the one route someone
+  // had already noticed -- these routes validate their own body shape via
+  // import.controller.js's validateBody()/COMMIT_FIELDS allow-lists, so they
+  // do not depend on this middleware for input safety the way free-text
+  // routes elsewhere do.
+  const isOpaqueImportRoute =
+    req.method === "POST" && /^\/api\/imports\//.test(req.path);
 
   if (
-    !isOpaqueImportPreview &&
+    !isOpaqueImportRoute &&
     req.body &&
     typeof req.body === "object"
   ) {
