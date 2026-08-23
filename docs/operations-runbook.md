@@ -69,13 +69,93 @@ the repository, or in a deploy archive.
 
 ## Backup and restore
 
-**INCOMPLETE — blocked on O4, which has not been built or drilled.** When it exists this section
-carries the exact `backup-database.ps1` and `restore-drill.ps1` invocations, the schedule line, and
-**the date and pasted output of the most recent drill**. A restore procedure that has never been
-executed is an assumption; the pasted drill output is what makes it a fact.
+Both scripts exist and the whole path has been drilled end to end. **What has NOT happened yet is a
+run against production**, because that needs the Atlas credential and an off-host destination (O3).
+Read the "Still outstanding" note at the end of this section before assuming you are covered.
 
-Until then the honest statement is: there is no verified restore path. This is the single largest
-operational gap in this document, and it is why the cold-read gate on O5 cannot pass yet.
+### Taking a backup
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\backup-database.ps1
+```
+
+It reads the connection string from `$env:CAPRO_BACKUP_URI` and the gpg recipient from
+`$env:CAPRO_BACKUP_RECIPIENT`, so neither is ever typed on a command line or visible in a process
+list. Useful switches: `-OutputDirectory`, `-OffHostDirectory`, `-Retain` (default 14),
+`-WhatIfNoUpload`, `-GpgPath`.
+
+What it does, in order: reads per-collection document counts **before** dumping (the restore drill
+has nothing to compare against otherwise), runs `mongodump --gzip --archive`, refuses any archive
+under 1 KB, refuses an archive whose size moved by more than 10x against the previous run,
+encrypts with gpg to the recipient, **deletes the plaintext dump**, writes a manifest beside the
+archive, copies both off-host, and prunes beyond `-Retain`.
+
+### Running the drill
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\restore-drill.ps1 `
+    -ArchivePath <the .archive.gz.gpg> `
+    -ScratchUri  "mongodb://127.0.0.1:27017/scratch-drill" `
+    -HealthUri   "mongodb://127.0.0.1:27117/scratch-drill" `
+    -IncludeHealthCheck
+```
+
+**The drill refuses to run unless the database in `-ScratchUri` starts with `scratch-`**, and it
+checks that before decrypting anything. It exits **2** for that refusal and **1** for a genuine
+drill failure, so a script can tell them apart. This guard is the only thing between a mistyped URI
+and `mongorestore --drop` deleting a live database.
+
+### Three traps this environment has already sprung, all real
+
+- **Two different addresses for one database.** The mongo tools run inside the
+  `capro-mongo-dev` container and see Mongo on **27017**; the health-check backend runs on the host
+  and must use the published **27117**. Getting this wrong does not error, it just leaves
+  `db.state` at `"connecting"` until the drill times out. That is why `-HealthUri` exists.
+- **A database name in the restore URI silently defeats `--nsFrom`/`--nsTo`.** mongorestore treats
+  it as an implicit `--db`, scopes the restore to a namespace the archive does not contain, and
+  exits **0** having written nothing. The script strips it; do not add it back.
+- **gpg is usually not on PATH.** Git for Windows ships one under `usr\bin` that only Git Bash
+  sees. The script searches the known locations, and `-GpgPath` overrides. If you use Git's gpg,
+  `GNUPGHOME` must be a POSIX-style path (`/c/...`), not `C:\...`.
+
+### Scheduling it
+
+Not yet scheduled. When the credential exists, register it as a daily task:
+
+```
+schtasks /Create /TN "CAPRO nightly backup" /SC DAILY /ST 02:30 /RL HIGHEST /RU SYSTEM ^
+  /TR "powershell -NoProfile -ExecutionPolicy Bypass -File D:\CA-PRO-Toolkit\CA-PRO-Toolkit\capro-backend\tools\backup-database.ps1"
+```
+
+A task running as SYSTEM does not inherit a user's environment, so set `CAPRO_BACKUP_URI` and
+`CAPRO_BACKUP_RECIPIENT` as **machine-level** variables (`setx /M`) or the task will fail on its
+first night with "No MongoDB URI". Prefer a scheduler on the hosting side over this if one is
+available: a backup that depends on one developer's PC being powered on is a backup that stops the
+first time that PC is off.
+
+### Last drill
+
+| | |
+|---|---|
+| Date | 2026-08-23 |
+| Source | `capro-o4-backup-source` on the local `capro-mongo-dev` container |
+| Archive | `capro-capro-o4-backup-source-20260823-064106.archive.gz.gpg` (5,641 bytes ciphertext, 5,008 plaintext) |
+| Collections compared | **39** |
+| Mismatches | **0** |
+| Non-zero collections | clients 23, tasks 41, firmmemberships 11, users 7, firms 3, engagements 1 |
+| App health | `{"status":"ok","uptime":2,"db":{"state":"connected","ping_ms":2},"background":"ready"}` |
+| Guard test | pointed at a non-`scratch-` database, refused with exit 2, nothing decrypted, mongorestore never called |
+| Result | **PASS** (exit 0), scratch database dropped afterwards |
+
+### Still outstanding
+
+- **The drill has never run against production.** It ran against a local container database.
+  Needs the Atlas credential from O3.
+- **No off-host destination.** Until `-OffHostDirectory` points somewhere, an archive lives on the
+  same machine that made it and does not survive losing that machine.
+- **Not scheduled**, so no backup happens unless someone runs it by hand.
+- Until those three are done, the honest statement remains: **there is no verified restore path for
+  production data.** Re-run the drill after any change to the model set in `capro-backend/src/models/`.
 
 ## Deploy
 
@@ -282,9 +362,12 @@ An honest list. Every item here is a real constraint a new operator will hit, no
 - **No staging.** See the Staging section above — this is an unrecorded owner cost decision.
 - **Single region, single instance.** One Hostinger app, one database. There is no failover.
 - **Deploys originate from one developer's PC.** See "Known limitation: one developer's PC".
-- **No backup at all, and therefore no restore.** The database is an Atlas M0 free tier, which
-  has no snapshot or point-in-time facility. See Database and Backup-and-restore. This is the
-  one item on this list that can lose a customer's work irrecoverably.
+- **No backup of production yet.** The database is an Atlas M0 free tier, which has no snapshot
+  or point-in-time facility of its own. `toolsackup-database.ps1` and `toolsestore-drill.ps1`
+  now exist and the whole path was drilled end to end on 2026-08-23 (39/39 collections, app
+  health 200) -- but against a LOCAL database, not production, and nothing is scheduled. Until
+  the Atlas credential and an off-host destination exist, production still has no restorable
+  copy. This remains the one item on this list that can lose a customer's work irrecoverably.
 - **No alerting.** See Observability — blocked on O7. Outages are user-reported.
 - **The installer is unsigned, by owner decision.** There is no paid code-signing certificate, so
   Windows SmartScreen warns on first install and the user must click "More info -> Run anyway".
