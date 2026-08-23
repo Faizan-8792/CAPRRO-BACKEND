@@ -279,6 +279,48 @@ define("POST", "api/engagements", async () => {
   return result;
 });
 
+// Un-skipped 2026-08-23. The "second real firm id" this needs is the one `api/firms` creates a few
+// lines below and caches as chain.sharedFirmId. operationId is required for the same reason it is
+// on `api/firms`: beginWorkspaceRequest -> workspaceOperationService.claim reads req.body.operationId,
+// and without it the claim is untracked and the response carries no "operation" key for
+// ResponseMapper.ReadWorkspaceOperation to read - a capture-realism gap, not a backend bug.
+// The firm is created here on demand rather than trusting alphabetical iteration order.
+define("POST", "api/firms/switch", async () => {
+  if (!chain.sharedFirmId) {
+    const seed = await call("POST", "api/firms", {
+      body: {
+        displayName: "Fixture Switch Target",
+        handle: "fixture-switch-target",
+        operationId: randomUUID().replaceAll("-", ""),
+      },
+    });
+    chain.sharedFirmId = seed.json?.firm?._id ?? null;
+  }
+  return call("POST", "api/firms/switch", {
+    body: { firmId: chain.sharedFirmId, operationId: randomUUID().replaceAll("-", "") },
+  });
+});
+
+// Un-skipped 2026-08-23. The "pre-existing set of task ids" is the task `api/tasks` already creates
+// and caches as chain.taskId; created here on demand so this does not depend on iteration order.
+// Route is requireFirmAdmin, which the capture user satisfies as the firm's own creator/OWNER.
+// normalizePatch accepts status/assignedTo/dueDateISO; status is the least stateful of the three.
+define("POST", "api/tasks/bulk/preview", async () => {
+  if (!chain.taskId) {
+    const seed = await call("POST", "api/tasks", {
+      body: {
+        title: "Fixture bulk-preview task",
+        clientName: "Fixture Client",
+        dueDateISO: "2026-12-31",
+      },
+    });
+    chain.taskId = seed.json?.task?._id ?? null;
+  }
+  return call("POST", "api/tasks/bulk/preview", {
+    body: { items: [{ taskId: chain.taskId, patch: { status: "IN_PROGRESS" } }] },
+  });
+});
+
 define("POST", "api/firms", async () => {
   // operationId is not optional in practice: CaProApiClient.CreateFirmAsync validates it
   // client-side (IsOperationId, a lowercase GUID-N) before ever sending the request, so every
@@ -344,7 +386,6 @@ define("POST", "api/audit/reminder-message", async () =>
 const preSkippedKeys = new Set();
 for (const [key, reason] of [
   ["POST api/firms/join", "needs a real, pre-existing join code from a second firm"],
-  ["POST api/firms/switch", "needs a second real firm id to switch into"],
   [
     "POST api/app-config/dismiss-desktop-update",
     "needs an announced desktopRelease on this fresh AppConfig singleton",
@@ -360,7 +401,6 @@ for (const [key, reason] of [
     "POST api/imports/gstr2b/convert",
     "needs a real multipart GSTR-2B JSON file body this tool does not yet build",
   ],
-  ["POST api/tasks/bulk/preview", "needs a real, pre-existing set of task ids to preview a bulk patch against"],
   [
     "PATCH api/digests/settings",
     "updateFirmDigestSettings runs inside a MongoDB session/transaction, which requires a replica " +
