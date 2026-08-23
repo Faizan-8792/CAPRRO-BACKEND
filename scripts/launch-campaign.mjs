@@ -277,7 +277,7 @@ function buildHtml({ name, email } = {}) {
                 &nbsp;&middot;&nbsp;
                 <a href="${unsubscribe}" style="color:#0f5260;text-decoration:underline;">Unsubscribe</a>
                 &nbsp;&middot;&nbsp;
-                <span>&copy; 2026 CA PRO Toolkit</span>
+                <span>&copy; 2026 Saifullah Faizan, sole proprietor, trading as CA PRO Toolkit</span>
               </p>
             </td>
           </tr>
@@ -307,7 +307,7 @@ function buildText({ name } = {}) {
     ``,
     `Website: ${WEBSITE_URL}`,
     `To unsubscribe, reply to this email with "Unsubscribe".`,
-    `© 2026 CA PRO Toolkit`,
+    `© 2026 Saifullah Faizan, sole proprietor, trading as CA PRO Toolkit`,
   ].join("\n");
 }
 

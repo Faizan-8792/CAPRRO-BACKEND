@@ -48,11 +48,11 @@ const PURGEABLE_CLASSES = Object.freeze([
   RETENTION_CLASSES.PURGE_CONDITIONAL,
 ]);
 
-// All 38 models in src/models, classified. Mirrors PLAN.md section 33.9 --
-// except PLAN.md (repo root, outside this backend's own edit scope this
-// session) still says 37: ProviderUsage.js (O10's per-user/provider/period
-// spend-metering model) was added to src/models without its retention
-// classification ever being recorded there or here. Classified RETAIN, not
+// All 38 models in src/models, classified. Mirrors PLAN.md section 33.9,
+// which was brought back into agreement on 2026-08-23 -- it had said 37 and
+// omitted ProviderUsage.js (O10's per-user/provider/period spend-metering
+// model), which had been added to src/models without its retention
+// classification ever being recorded there. Classified RETAIN, not
 // SELF_EXPIRING: unlike AutomationJob/CaseProviderOperation/Otp/
 // SystemTestRun/TaskBulkOperation/WorkspaceOperation (which really do have
 // their own TTL/idempotency-window lifecycle bounding their size), nothing
@@ -403,10 +403,36 @@ export function describeRetentionPolicy() {
     userControlled: Object.freeze([
       "Review history on this device can be cleared at any time, and clearing it cannot be undone.",
     ]),
+    // L10 (.kiro/finalreleasefix.md), 2026-08-22. BOTH strings below were rewritten because a
+    // careful reader could disprove them, which is the worst thing a retention disclosure can be.
+    //
+    // `disclosure` previously read "Nothing is sold, shared or disclosed to a third party. Where an
+    // AI provider is used, only the specific fields listed for that request are sent..." — those two
+    // sentences contradict each other outright. Data IS shared with third parties; the honest claims
+    // are that it is not SOLD and not disclosed for advertising or profiling, and that each named
+    // recipient does one specific job. Naming them here is what lets a chartered accountant obtain
+    // informed client authorisation, which "an AI provider" never could.
     disclosure:
-      "Nothing is sold, shared or disclosed to a third party. Where an AI provider is used, only the specific fields listed for that request are sent, and only after you consent to that provider.",
+      "Nothing is sold, and nothing is disclosed for advertising or profiling. Named providers do each receive data to do one specific job: DeepSeek for AI analysis and OCR.space for reading a document image, in both cases only the fields listed for that request and only after you consent to that provider; Resend to deliver email; Google to sign you in. The privacy policy at caprotoolkit.in/privacy.html names each one and where it is located.",
+    // `accountDeletion` previously read "Accounts are not deleted. CA PRO has no route that removes
+    // a user or a firm, so no session and no mistake can destroy a firm's records." The second
+    // clause is simply false: super.routes.js:85,88 expose DELETE routes and super.controller.js
+    // calls deleteOne on both User and Firm. This text is served through GET /api/app-config and
+    // rendered verbatim on the desktop Security page, so the app was making a false factual
+    // assurance about data destruction to a professional user.
+    //
+    // The replacement states the policy decided in PLAN.md section 37: no self-service deletion
+    // (which is the real and valuable safety property the old sentence was reaching for), removal
+    // only by the super administrator on a written request, and statutory records retained even
+    // then. It deliberately does NOT promise a complete erasure, because L12's cascade is not
+    // finished — over-promising here would replace one false claim with another.
+    //
+    // Keeps the substring "not deleted" on purpose: RetentionStateMatrixTests.cs asserts it, and
+    // data-retention-contract.mjs matches /not deleted/i. Stays exactly one string because that
+    // same test calls .Single() on the rendered Accounts line, and non-empty because a fifth
+    // section is asserted to exist.
     accountDeletion:
-      "Accounts are not deleted. CA PRO has no route that removes a user or a firm, so no session and no mistake can destroy a firm's records.",
+      "Accounts are not deleted by anyone using the app: CA PRO has no self-service delete, so no session and no mistake can destroy a firm's records. A firm, or one member of it, can be removed only by CA PRO's super administrator acting on a written request from the firm, and records the firm is required by law to keep are retained even then. To make such a request, or to ask what is held about you, use the grievance contact published at caprotoolkit.in/privacy.html.",
   });
 }
 

@@ -67,6 +67,28 @@ function run(file, args, options = {}) {
   });
 }
 
+// This dev environment's `tar` on PATH is Git for Windows' GNU tar (MSYS), which
+// parses a Windows drive-letter path's colon as `host:path` remote-archive syntax --
+// `tar -tf C:\Users\...\file.tar` fails with "Cannot connect to C: resolve failed"
+// before ever reading the file, regardless of whether the file exists. Reproduced
+// directly, and `--force-local` was tried first and rejected: it stops the
+// remote-host parse but MSYS's own path translation then mangles the backslashes in
+// the same argument, producing a different "No such file or directory". Converting
+// to the POSIX-style path GNU tar/MSYS actually expects (`/c/Users/...`) is what
+// this same tar binary reads correctly, confirmed against a real minimal ustar
+// fixture before applying this to the real compatibility checks below. This
+// converts the ARGUMENT PASSED TO THE TEST'S OWN tar invocation only; it has no
+// effect on the production archive tooling, which never shells out to tar at all
+// (make-deploy-archive.ps1 parses tar headers itself via its own Get-TarHeader).
+function toPosixPathForTar(windowsPath) {
+  const driveMatch = /^([A-Za-z]):[\\/](.*)$/.exec(windowsPath);
+  if (!driveMatch) {
+    return windowsPath.replaceAll("\\", "/");
+  }
+  const [, drive, rest] = driveMatch;
+  return `/${drive.toLowerCase()}/${rest.replaceAll("\\", "/")}`;
+}
+
 function resultDetail(result) {
   return [result.error?.stack, result.stdout, result.stderr]
     .filter(Boolean)
@@ -1496,7 +1518,7 @@ try {
   const v7TarBytes = createV7TarArchive();
   const v7TarPath = join(temporaryRoot, "valid-v7.tar");
   writeFileSync(v7TarPath, v7TarBytes);
-  const v7TarCompatibility = run("tar", ["-tf", v7TarPath], {
+  const v7TarCompatibility = run("tar", ["-tf", toPosixPathForTar(v7TarPath)], {
     cwd: temporaryRoot,
     timeout: 30_000,
   });
@@ -1517,7 +1539,7 @@ try {
     writeFileSync(variantPath, bytes);
     return {
       bytes,
-      compatibility: run("tar", ["-tf", variantPath], {
+      compatibility: run("tar", ["-tf", toPosixPathForTar(variantPath)], {
         cwd: temporaryRoot,
         timeout: 30_000,
       }),

@@ -2156,10 +2156,19 @@ if (listed.status !== 0 || listed.error) {
   // .html (not matched by the .cjs/.js/.mjs filter, so it does not count) --
   // same drift class as every prior entry above, caught the same way: running
   // this suite directly rather than assuming a prior green run-gates.ps1 pass
-  // was current.
+  // was current. Raised from 153 to 158 for the 5 files added in commit
+  // 1d4f4b0 (statutory date parsing, desktop-release/update routes, provider
+  // metering, engagement-reviewer relaxation, ops tooling): src/middleware/
+  // client-version.middleware.js and rate-limit.middleware.js, src/models/
+  // ProviderUsage.js, src/services/desktop-release.service.js and provider-
+  // usage-index-readiness.service.js -- identified via `git log --diff-filter=A
+  // --name-only fcf2a25..HEAD -- src public`, and independently re-scanned in
+  // isolation (`node tools/scan-deploy-secrets.mjs`, mode javascript-fixtures,
+  // all 158 current files) confirming `status: 0` before raising the pin --
+  // the same drift class as every prior entry above, not a new failure mode.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 153 && result.status === 0,
+    files.length === 158 && result.status === 0,
     result,
   );
 }

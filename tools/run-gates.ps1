@@ -502,7 +502,8 @@ try {
         "app-config-checklist",
         "desktop-release-contract",
         "provider-quota-contract",
-        "client-version-contract"
+        "client-version-contract",
+        "desktop-fixture-drift-contract"
     )
     $report.Add("")
     $report.Add("===== test suites =====")

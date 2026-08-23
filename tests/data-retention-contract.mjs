@@ -601,17 +601,41 @@ test("the policy says work product is never removed automatically", () => {
   assert.match(kept, /findings/);
 });
 
-test("the policy states no third-party disclosure", () => {
+// L10 (.kiro/finalreleasefix.md): both tests below were RENAMED and strengthened, not just left to
+// pass. Their old names ("states no third-party disclosure", "states plainly that accounts are not
+// deleted") asserted the exact framing that turned out to be false, so a suite that kept them would
+// keep vouching for the retired claim even while the shipped string was corrected. A test name is
+// part of the contract it documents.
+test("the disclosure names its real recipients instead of hiding them behind a category", () => {
   const policy = describeRetentionPolicy();
-  assert.match(
-    policy.disclosure,
-    /not sold, shared or disclosed|Nothing is sold/i,
-  );
+  // Still true and still asserted: nothing is sold.
+  assert.match(policy.disclosure, /Nothing is sold/i);
+  // The claim that replaced the self-contradicting one: each recipient is named. A regression back
+  // to "an AI provider" or "a third party" fails here, which is the point.
+  for (const recipient of ["DeepSeek", "OCR.space", "Resend", "Google"]) {
+    assert.ok(
+      policy.disclosure.includes(recipient),
+      `disclosure must name ${recipient} rather than a generic category`,
+    );
+  }
+  // The old text's self-contradiction, pinned so it cannot come back: a blanket "nothing is
+  // shared/disclosed to a third party" cannot coexist with naming providers that receive data.
+  assert.doesNotMatch(policy.disclosure, /not sold, shared or disclosed/i);
 });
 
-test("the policy states plainly that accounts are not deleted", () => {
+test("account removal is described truthfully: no self-service delete, but a super-admin route does exist", () => {
   const policy = describeRetentionPolicy();
+  // Kept: the true and reassuring half.
   assert.match(policy.accountDeletion, /not deleted/i);
+  // The false clause that was removed. super.routes.js:85,88 expose real DELETE routes and
+  // super.controller.js calls deleteOne on User and Firm, so any text claiming no such route
+  // exists is disprovable from this same repository.
+  assert.doesNotMatch(policy.accountDeletion, /no route that removes/i);
+  // What replaced it must actually say who can remove an account and on what basis.
+  assert.match(policy.accountDeletion, /super administrator/i);
+  assert.match(policy.accountDeletion, /written request/i);
+  // Must not over-promise erasure while L12's cascade is unfinished.
+  assert.match(policy.accountDeletion, /required by law to keep are retained/i);
 });
 
 test("the policy contains no engineering leakage a user should never see", () => {
