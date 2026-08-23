@@ -8,8 +8,8 @@ function deepFreeze(value) {
 }
 
 const termsDocument = {
-  version: "2026-08-01",
-  effectiveDate: "2026-08-01",
+  version: "2026-08-23",
+  effectiveDate: "2026-08-23",
   title: "Terms & Conditions",
   summary:
     "Review these terms before signing in. CA PRO Toolkit supports professional review and organisation; it does not file, submit, approve, or replace professional judgment.",
@@ -18,7 +18,8 @@ const termsDocument = {
     {
       heading: "1. Acceptance of terms",
       paragraphs: [
-        "These Terms & Conditions (\"Terms\") form an agreement between you and CA PRO Toolkit (\"we\", \"us\", \"our\") governing your use of the CA PRO Toolkit Windows desktop application, browser extension, workspace and Web View, tool pages, and backend services (together, the \"Service\"). If you do not agree, do not use the Service.",
+        "These Terms & Conditions (\"Terms\") form an agreement between you and Saifullah Faizan, sole proprietor, trading as CA PRO Toolkit (\"we\", \"us\", \"our\") governing your use of the CA PRO Toolkit Windows desktop application, browser extension, workspace and Web View, tool pages, and backend services (together, the \"Service\"). If you do not agree, do not use the Service.",
+        "That sole proprietorship is the contracting party under these Terms. No other person or company is a party to them.",
       ],
       bullets: [],
     },
@@ -115,7 +116,7 @@ const termsDocument = {
     {
       heading: "14. Governing law",
       paragraphs: [
-        "These Terms are governed by the laws of India. Courts at the place of our principal operations will have jurisdiction, subject to mandatory consumer-protection rights that may apply to you.",
+        "These Terms are governed by the laws of India. The courts at Kolkata will have exclusive jurisdiction, subject to any mandatory consumer-protection rights that apply to you and cannot be excluded by agreement.",
       ],
       bullets: [],
     },
@@ -129,9 +130,23 @@ const termsDocument = {
     {
       heading: "16. Contact",
       paragraphs: [
-        "Questions about these Terms may be sent to saifullahfaizan786@gmail.com. See the Privacy Policy for information about personal-data handling.",
+        "Questions about these Terms may be sent to support@caprotoolkit.in. See the Privacy Policy for information about personal-data handling, and section 17 below for the grievance route under the Digital Personal Data Protection Act, 2023.",
       ],
       bullets: [],
+    },
+    {
+      heading: "17. Grievance officer",
+      paragraphs: [
+        "Under section 13 of the Digital Personal Data Protection Act, 2023, you may raise any question or complaint about how your personal data is handled with the grievance officer named below. This includes asking what data is held about you, asking for a correction, or asking for erasure.",
+        "You will receive a substantive answer within 30 days. If you are not satisfied with the response, the Act allows you to complain to the Data Protection Board of India.",
+      ],
+      bullets: [
+        "Grievance officer: Saifullah Faizan",
+        "Designation: Proprietor",
+        "Email: support@caprotoolkit.in",
+        "Response window: 30 days",
+        "Postal address: published in the Privacy Policy at https://caprotoolkit.in/privacy.html",
+      ],
     },
   ],
 };

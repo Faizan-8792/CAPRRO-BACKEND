@@ -177,8 +177,11 @@ try {
 
     assert.match(documentHash, /^[a-f0-9]{64}$/);
     assert.equal(documentHash, recomputed);
-    assert.equal(CURRENT_TERMS.version, "2026-08-01");
-    assert.equal(CURRENT_TERMS.effectiveDate, "2026-08-01");
+    // Pinned deliberately so a text edit cannot move the document without someone updating this
+    // line. Bumped 2026-08-01 -> 2026-08-23 by L13, which named the counterparty, named Kolkata as
+    // the forum, replaced the personal contact address, and added section 17 (grievance officer).
+    assert.equal(CURRENT_TERMS.version, "2026-08-23");
+    assert.equal(CURRENT_TERMS.effectiveDate, "2026-08-23");
     assert.equal(Object.isFrozen(CURRENT_TERMS), true);
     assert.equal(Object.isFrozen(CURRENT_TERMS.sections), true);
   });

@@ -31,15 +31,29 @@ granting the role alone. The fourth surface is the Windows desktop app, which ta
 
 ## Database
 
-**INCOMPLETE — blocked on O3, which is an owner decision.** What must be recorded here, and cannot
-be inferred from the repository: the provider and tier, the cluster name, the region, the database
-name, the agreed RPO and RTO, and the retention setting on whatever backup the provider runs.
+**Partially supplied 2026-08-23 (PLAN.md section 39).**
 
-What *is* known from the code, and is true regardless of how O3 lands: the connection string comes
-from `MONGODB_URI`, and pool sizing from `MONGO_POOL_MIN` / `MONGO_POOL_MAX`. One correction that
-must survive into the finished section: **the desktop's `EncryptedCache` is not a replica and is
-not a backup.** It is a per-machine local cache of what one signed-in user last saw. It cannot be
-used to reconstruct the database, and no recovery plan may treat it as a copy.
+| Field | Value |
+|---|---|
+| Provider | MongoDB Atlas |
+| Tier | **M0 (free)** |
+| Region | Mumbai, India |
+| Backup | **none** |
+| Cluster name | *not recorded — ask the owner* |
+| Database name | *not recorded — ask the owner* |
+| RPO / RTO | *not agreed* |
+
+Connection string comes from `MONGODB_URI`; pool sizing from `MONGO_POOL_MIN` / `MONGO_POOL_MAX`.
+
+**Read this before you assume there is a way back.** An Atlas **M0 free tier has no backup facility
+at all** — no snapshots, no point-in-time restore, no restore-to-scratch-cluster — and a 512 MB
+storage cap. There is currently **no copy of the production database anywhere**. If a collection is
+dropped or a migration truncates one, the data is gone. That is the single largest operational risk
+in this document, it is why O4 exists, and it must be resolved before a public download.
+
+**The desktop's `EncryptedCache` is not a replica and is not a backup.** It is a per-machine local
+cache of what one signed-in user last saw. It cannot reconstruct the database and no recovery plan
+may treat it as a copy.
 
 ## Credential custody
 
@@ -268,7 +282,9 @@ An honest list. Every item here is a real constraint a new operator will hit, no
 - **No staging.** See the Staging section above — this is an unrecorded owner cost decision.
 - **Single region, single instance.** One Hostinger app, one database. There is no failover.
 - **Deploys originate from one developer's PC.** See "Known limitation: one developer's PC".
-- **No verified restore.** See Backup and restore — blocked on O4.
+- **No backup at all, and therefore no restore.** The database is an Atlas M0 free tier, which
+  has no snapshot or point-in-time facility. See Database and Backup-and-restore. This is the
+  one item on this list that can lose a customer's work irrecoverably.
 - **No alerting.** See Observability — blocked on O7. Outages are user-reported.
 - **The installer is unsigned, by owner decision.** There is no paid code-signing certificate, so
   Windows SmartScreen warns on first install and the user must click "More info -> Run anyway".
