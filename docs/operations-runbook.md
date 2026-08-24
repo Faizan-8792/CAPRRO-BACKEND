@@ -194,7 +194,38 @@ Hostinger deploys from an uploaded archive, not from git (`tools/make-deploy-arc
    you upload it, make a note of which archive was live until now** (the second-newest file in that
    directory, by write time, right before this run); you will need its filename if this deploy has
    to be rolled back.
-4. **Upload through the Hostinger panel**, restart the Node app.
+4. **Upload and deploy.** Two ways; prefer the first, because it is repeatable and leaves evidence.
+
+   **From this machine (no panel):**
+   ```
+   # Load the token into the environment only. Never paste it on a command line or into a file.
+   $env:HOSTINGER_API_TOKEN = (Select-String -Path .env -Pattern '^HOSTINGER_API_TOKEN=' |
+       ForEach-Object { $_.Line -replace '^HOSTINGER_API_TOKEN=', '' }).Trim('"', "'")
+
+   node tools/hostinger-upload-file.mjs --domain api.caprotoolkit.in `
+       --file "D:/CA-PRO-Toolkit/capro-backend_<commit>_<timestamp>.zip" `
+       --remote "capro-backend.zip"
+
+   node tools/hostinger-deploy-backend.mjs --node-version 22
+   ```
+   The upload tool re-downloads the file afterwards and compares SHA-256 before reporting success.
+   The deploy tool reads the build settings off the uploaded archive on the server (it never invents
+   an entry file), triggers the build, waits for a terminal state, and then asks the running app for
+   `/api/app-config` — a completed build is not the same as a healthy service. Add `--dry-run` to
+   see the settings a deploy would use without triggering one.
+
+   **`--node-version` is not optional in practice.** The settings endpoint infers a Node major from
+   the archive and has been observed inferring **20** while production runs **22**. Deploying new
+   code and a new runtime major together makes any failure ambiguous, so pin the version that is
+   already serving and change one thing at a time. Check what is running with
+   `hosting_listJsDeployments` (or the panel) before deploying if you are unsure.
+
+   **Through the Hostinger panel** is the fallback if the API is unavailable: upload the same
+   archive as `capro-backend.zip`, then trigger the Node app build and restart.
+
+   Either way, expect the service to answer `/api/app-config` within seconds but `/health` to report
+   `"status":"degraded"` with `"background":"initializing"` for a while after the restart — see the
+   readiness note in step 5.
 5. **Run the post-deploy smoke**, all four, in order:
    - `curl -si https://api.caprotoolkit.in/health` -> `200`, body contains `"status":"ok"` and
      `"db":{"state":"connected"`.
@@ -208,6 +239,20 @@ Hostinger deploys from an uploaded archive, not from git (`tools/make-deploy-arc
    `GET /health` -> `200` `{"status":"ok","uptime":7973,"db":{"state":"connected","ping_ms":77},
    "background":"ready"}`; `GET /` -> `200`.
 
+   **Do not read the first `/health` as a failure.** `server.js` starts accepting connections before
+   `bootstrap()` finishes, and readiness is only set true after connect -> provision-indexes ->
+   rollout-flags -> feature-index-readiness -> digest-startup all complete. Until then `/health`
+   honestly reports `"status":"degraded"`, `"background":"initializing"` while `db.state` is already
+   `connected`. Measured on 2026-08-24 across three real deploys: **roughly 60-90 s** for a deploy
+   that changes only code, and **about 3.5 minutes** (uptime 202 s at the moment it flipped) for the
+   deploy that introduced a new collection, because provisioning that collection's indexes on the
+   Atlas **M0 free tier** is slow. Poll until `"status":"ok"` before declaring the deploy good, and
+   only treat it as a failure if it has not settled after roughly 5 minutes.
+
+   `node tools/verify-live-posture.mjs` runs the health check plus the CORS and error-envelope
+   checks in one pass; a clean result is `8 passed, 0 failed, 2 skipped` (the 2 skips need a
+   super-admin token in `CAPRO_TOKEN`).
+
 ## Rollback
 
 **The rollback restores code, not data.** If the bad deploy ran a destructive migration, rolling
@@ -217,7 +262,9 @@ RTO applies instead of this section.
 1. Identify the last-known-good archive: the file noted in Deploy step 3 before this deploy (or,
    if that note was not kept, the second-newest `capro-backend_*.zip` in the output directory by
    write time — the newest is the one just rolled back from).
-2. Re-upload that archive through the Hostinger panel exactly as in Deploy step 4. Restart.
+2. Re-upload that archive exactly as in Deploy step 4 — the same two commands, pointed at the
+   older file. Nothing else changes; `--remote capro-backend.zip` is always the same destination,
+   so a rollback is a normal deploy of an older archive rather than a special path.
 3. Re-run the same four-item post-deploy smoke from Deploy step 5. All four must pass before the
    incident is considered contained.
 4. Record the wall-clock time this took, end to end, in this section (the next entry below) — an
@@ -228,7 +275,34 @@ this list empty for a release that claims this procedure is trustworthy):
 
 | Date | Operator | From commit | To commit | Wall-clock | Smoke result |
 |---|---|---|---|---|---|
-| _(none yet)_ | | | | | |
+| 2026-08-24 | agent (Opus 5), rehearsal | `0ea0bcb` | `10bf147` | **89 s** | 3 of 4 pass — see note |
+| 2026-08-24 | agent (Opus 5), roll-forward | `10bf147` | `0ea0bcb` | **52 s** | 4 of 4 pass — see note |
+
+**What that rehearsal actually did**, so the numbers above are readable rather than decorative. It
+was a real rollback against production, not a described one: the live API was moved back to the
+previous archive and then forward again, both through the tooling in Deploy step 4.
+
+The rollback was confirmed by content, not by the deploy reporting success — after it, the live
+`accountDeletion` string was **466 characters** (the previous build's text) and after the
+roll-forward it was **768** and byte-identical to the repository's. That comparison is the reliable
+check: **an HTTP 401 does not prove a route is deployed.** `/api/super/*` sits behind router-level
+authentication that runs before route matching, so a path that does not exist in the deployed build
+still answers `401`, not `404`. Anything asserting "the new routes are live" from a 401 is asserting
+nothing.
+
+**Smoke coverage, stated honestly.** Of Deploy step 5's four checks, three ran on both legs and
+passed: `/health` (after the readiness wait), `/api/app-config` (`ok:true`, `featureFlags` present)
+and `GET /`. The fourth — an authenticated read returning `200` — was **not run**: it needs a real
+production bearer token, and this session holds none. Minting one would mean reaching into the
+production database for a user id, which is not something a rehearsal should require. Until that
+fourth check has been run on a rollback, treat this procedure as rehearsed for availability but not
+for authenticated behaviour.
+
+**Prune interaction, worth knowing before an incident.** `-RetainCount` defaults to 5 and prunes by
+write time after each real build. A rollback deploys an *older* archive but does not re-create it,
+so the file's mtime does not move and it stays as old as it was — five further deploys after a
+rollback will prune the very archive you rolled back to. If you are sitting on a known-good archive
+during an incident, copy it somewhere outside the output directory before continuing to deploy.
 
 ## Kill switches
 
@@ -363,7 +437,8 @@ An honest list. Every item here is a real constraint a new operator will hit, no
 - **Single region, single instance.** One Hostinger app, one database. There is no failover.
 - **Deploys originate from one developer's PC.** See "Known limitation: one developer's PC".
 - **No backup of production yet.** The database is an Atlas M0 free tier, which has no snapshot
-  or point-in-time facility of its own. `toolsackup-database.ps1` and `toolsestore-drill.ps1`
+  or point-in-time facility of its own. `toolsackup-database.ps1` and `tools
+estore-drill.ps1`
   now exist and the whole path was drilled end to end on 2026-08-23 (39/39 collections, app
   health 200) -- but against a LOCAL database, not production, and nothing is scheduled. Until
   the Atlas credential and an off-host destination exist, production still has no restorable
