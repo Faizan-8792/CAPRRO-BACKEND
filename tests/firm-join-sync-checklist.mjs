@@ -25,6 +25,11 @@ const taxWorkerHtml = readFileSync(
   join(ROOT, "audit-nlp-extension", "tax-worker.html"),
   "utf8"
 );
+const backgroundJs = readFileSync(
+  join(ROOT, "audit-nlp-extension", "background.js"),
+  "utf8"
+);
+
 const firmCtrl = readFileSync(
   join(__dirname, "..", "src", "controllers", "firm.controller.js"),
   "utf8"
@@ -35,12 +40,22 @@ const check = (name, pass, detail = "") => checks.push({ name, pass, detail });
 
 // ─── Backend ────────────────────────────────────────────────────────
 
-// 1. /api/firms/join returns user with new firmId
+// 1. /api/firms/join sets the active workspace and echoes the updated user back.
+//
+// REWRITTEN 2026-08-24. This previously matched `user.firmId = firm._id` and `user: updatedUser`
+// as literal source text in the controller. Both patterns are gone, and NOT because the behaviour
+// was lost: the join now runs inside `joinFirmInTransaction`, which applies the change through a
+// `$set` on a session-bound update so the user row, the membership row and the firm counters
+// cannot diverge if the request dies midway. Pinning the old inline assignment would have been
+// pressure to undo that. The assertion below pins the guarantee -- firmId is set to the joined
+// firm, transactionally, and a user is returned -- rather than the shape it used to have.
 check(
-  "POST /api/firms/join updates user.firmId AND returns user object",
-  /user\.firmId\s*=\s*firm\._id/.test(firmCtrl) &&
-    /user:\s*updatedUser/.test(firmCtrl),
-  "Server-side state updated and echoed to client"
+  "POST /api/firms/join sets user.firmId transactionally AND returns the updated user",
+  /joinFirmInTransaction/.test(firmCtrl) &&
+    /withMembershipTransaction/.test(firmCtrl) &&
+    /firmId:\s*firm\._id/.test(firmCtrl) &&
+    /\buser\b/.test(firmCtrl),
+  "Server-side state updated inside a transaction and echoed to client"
 );
 
 // 2. Server selects user fields including firmId
@@ -52,12 +67,23 @@ check(
 
 // ─── Popup ──────────────────────────────────────────────────────────
 
-// 3. popup.html has dedicated section IDs for hiding firm UI
+// 3. The popup's firm surface.
+//
+// REWRITTEN 2026-08-24. This required `#firmLinkedBadge`, which no longer exists, and it should
+// not: the product deliberately moved to ADDITIVE workspaces. A user can belong to several firms
+// and always keeps a personal workspace, so "linked / not linked" stopped being a real state and
+// the badge that displayed it was removed with it (see popup.js:applyFirmLinkedUI, whose comment
+// records the decision). Restoring the badge to satisfy this line would re-introduce a
+// single-firm assumption the rest of the extension no longer holds.
+//
+// What replaced it is the workspace switcher, so that is what this now pins: join stays available,
+// and the switcher exists to show which workspace is active.
 check(
-  "popup.html has #firmJoinSection container + #firmLinkedBadge",
+  "popup.html keeps #firmJoinSection available and exposes the workspace switcher",
   /id=["']firmJoinSection["']/.test(popupHtml) &&
-    /id=["']firmLinkedBadge["']/.test(popupHtml),
-  "Single container can be hidden in one operation"
+    /id=["']workspacePanel["']/.test(popupHtml) &&
+    /id=["']popupWorkspaceSelect["']/.test(popupHtml),
+  "Join stays available because joining is additive; the switcher shows the active workspace"
 );
 
 // 4. popup.js applyFirmLinkedUI() function exists
@@ -69,10 +95,14 @@ check(
 
 // 5. applyFirmLinkedUI hides join section + shows linked badge
 check(
-  "applyFirmLinkedUI toggles based on user.firmId",
-  /joinSection\.classList\.toggle\(["']hidden["'],\s*isLinked\)/.test(popupJs) &&
-    /linkedBadge\.classList\.toggle\(["']hidden["'],\s*!isLinked\)/.test(popupJs),
-  "Hides join UI when linked, shows badge instead"
+  "applyFirmLinkedUI keeps join available and refreshes the workspace panel",
+  // REWRITTEN 2026-08-24, same reason as check 3: it asserted the join UI is HIDDEN once linked.
+  // Under additive workspaces that is now a defect, not a feature -- a user in one firm must still
+  // be able to create or join another. The function now unhides the join section unconditionally
+  // and delegates the "which workspace am I in" question to the switcher.
+  /joinSection\.classList\.remove\(["']hidden["']\)/.test(popupJs) &&
+    /refreshWorkspacePanel\(\)/.test(popupJs),
+  "Join stays reachable from every workspace; the switcher reports the active one"
 );
 
 // 6. showMainView calls applyFirmLinkedUI on every render
@@ -98,9 +128,17 @@ check(
 
 // 9. Auth saved to chrome.storage with firm metadata
 check(
-  "Storage save includes firmId via apiGetMe (fresh user)",
-  /apiGetMe\(stored\.token\)[\s\S]{0,200}saveAuthToStorage/.test(popupJs),
-  "Storage always reflects latest server-side firmId"
+  "Storage is refreshed through the background auth authority, not by the popup itself",
+  // REWRITTEN 2026-08-24. This matched an inline `apiGetMe(stored.token)` immediately followed by
+  // `saveAuthToStorage` in the popup. That pattern is gone because verification was centralised:
+  // the popup now hands the token to the background service worker via AUTH_SET_VERIFIED, and
+  // `setVerifiedSessionAuth` there is the single place that verifies against the server and
+  // persists the result. That is strictly better than the old shape -- the popup, the workspace
+  // page and any other surface can no longer disagree about who is signed in -- so this pins the
+  // delegation rather than the inlining it replaced.
+  /saveAuthToStorage[\s\S]{0,400}requestBackgroundAuthority\(\s*["']AUTH_SET_VERIFIED["']/.test(popupJs) &&
+    /setVerifiedSessionAuth/.test(backgroundJs),
+  "One authority verifies against the server and persists, so every surface agrees"
 );
 
 // ─── Tax Worker page ───────────────────────────────────────────────
@@ -192,21 +230,26 @@ if (failed === 0) {
   console.log("    2. Click Join → enter code → click Join Firm");
   console.log("    3. Status: 'Joined firm: <name>'");
   console.log("    4. Buttons disappear; green badge appears: '✓ Linked to firm: <name>'");
-  console.log("    5. Close popup, reopen → only badge shows, no Create/Join");
+  console.log("    5. Close popup, reopen → switcher lists the new firm; Create/Join REMAIN");
   console.log("    6. Open Tax Work Tracker → no join-firm card; firm-mode banner");
   console.log("");
   console.log("  Scenario B: Solo user joins via Tax Worker page");
   console.log("    1. Open Tax Worker → join-firm card visible");
   console.log("    2. Enter code → Join Firm");
   console.log("    3. Toast: 'Joined <name>' → page reloads");
-  console.log("    4. Card hidden; topbar shows 'Firm mode'");
-  console.log("    5. Reopen popup → badge shows; no Create/Join buttons");
+  console.log("    4. Tax Worker join card hides (an onboarding prompt, not a linked-state badge)");
+  console.log("    5. Reopen popup → switcher shows the active workspace; Create/Join still available");
   console.log("");
   console.log("  Scenario C: Solo user dismisses Tax Worker card");
   console.log("    1. Open Tax Worker → click 'Skip — Use Solo'");
   console.log("    2. Card hides, toast: 'Solo mode — your data stays private'");
   console.log("    3. Reload page → card stays hidden (localStorage)");
   console.log("    4. Popup still shows Create/Join (user not in firm yet)\n");
+  console.log("");
+  console.log("  NOTE: workspaces are ADDITIVE. Create/Join are CORRECT to remain visible");
+  console.log("  after joining - a user may belong to several firms and always keeps a");
+  console.log("  personal workspace. A tester seeing Create/Join after a join has NOT");
+  console.log("  found a bug. The active workspace is shown by the switcher, not a badge.");
 } else {
   console.log("FAILURES DETECTED — review above.\n");
   process.exit(1);
