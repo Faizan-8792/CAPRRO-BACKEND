@@ -249,6 +249,15 @@ Hostinger deploys from an uploaded archive, not from git (`tools/make-deploy-arc
    Atlas **M0 free tier** is slow. Poll until `"status":"ok"` before declaring the deploy good, and
    only treat it as a failure if it has not settled after roughly 5 minutes.
 
+   **One thing to check on the first deploy after 2026-08-24.** Index provisioning now covers the
+   GST storage collections (ImportBatch, ImportRow, ReconciliationRun and friends), which it did not
+   before -- a fresh database could not commit a GST import at all. Provisioning builds a UNIQUE
+   index over existing data, and a unique index cannot be built over duplicates. If production
+   already holds duplicate rows under one of those keys, the build refuses and the collection is
+   recorded in the provisioning result's `failures` list; boot continues rather than aborting, so
+   this fails QUIETLY. After that deploy, confirm GST still imports rather than assuming it: commit
+   one small import, or check the boot log for a provisioning failure naming a GST collection.
+
    `node tools/verify-live-posture.mjs` runs the health check plus the CORS and error-envelope
    checks in one pass; a clean result is `8 passed, 0 failed, 2 skipped` (the 2 skips need a
    super-admin token in `CAPRO_TOKEN`).
