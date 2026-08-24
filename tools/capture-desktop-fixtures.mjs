@@ -84,7 +84,15 @@ delete process.env.OCR_SPACE_API_KEY;
 
 function parseDesktopRoutes(sourcePath) {
   const text = readFileSync(sourcePath, "utf8");
-  const pattern = /(?:Authorized|new HttpRequestMessage)\(HttpMethod\.(\w+),\s*"([^"]+)"/g;
+  // `\(\s*`, not `\(`: the client formats longer calls with a newline after the opening
+  // paren, e.g. `Authorized(\n    HttpMethod.Get,\n    "api/cases?..."`. Without tolerating
+  // that, this parser silently missed TEN real static routes, every one of them a list/index
+  // GET: cases, engagements, engagements/working-papers, filing-dashboard,
+  // gst-reconciliation/runs, review-queue, tasks/board, taxworker/clients, tds-health/runs and
+  // workspace/search. They were never skipped with a reason -- they were never DISCOVERED, so
+  // the "uncovered by plan: 0" line was measured against a set that already excluded them.
+  // A discovery bug is worse than a coverage gap, because it reports as completeness.
+  const pattern = /(?:Authorized|new HttpRequestMessage)\(\s*HttpMethod\.(\w+),\s*"([^"]+)"/g;
   const seen = new Map();
   let match;
   while ((match = pattern.exec(text))) {
@@ -620,6 +628,49 @@ define("PATCH", "api/digests/settings", async () => {
     body: { timezone: "Asia/Kolkata", dailyHour: 7, weeklyDay: 1, weeklyHour: 8 },
   });
 });
+
+// ── The ten list/index GETs the discovery regex used to miss ────────────────────────────────
+//
+// Every one of these is an ordinary authenticated GET against the firm this capture already seeds.
+// They were never hard to capture; they were invisible, because the route parser required
+// `Authorized(HttpMethod.X` on one line and these are formatted with a newline after the paren.
+// The discovered path carries its trailing "?" because that is how the client writes it before
+// appending a query string, so the plan key has to match that exactly.
+//
+// Captured with no query parameters, deliberately: the default view is the one the desktop opens
+// with, and adding filters would capture a narrower shape than the client's own first request.
+for (const path of [
+  "api/cases?",
+  "api/engagements?",
+  "api/filing-dashboard?",
+  "api/gst-reconciliation/runs?",
+  "api/review-queue?",
+  "api/tasks/board?",
+  "api/taxworker/clients?",
+  "api/tds-health/runs?",
+]) {
+  define("GET", path, async () => call("GET", path));
+}
+
+// working-papers needs an engagementId: listAuditWorkingPapers calls objectId(query.engagementId)
+// and throws without it, so an unparameterised call captures a 400 validation refusal instead of
+// the list contract. Chained off the engagement this capture already creates a few routes earlier.
+define("GET", "api/engagements/working-papers?", async () => {
+  if (!chain.engagementId) {
+    return { skip: "api/engagements did not return an engagement id to list working papers for" };
+  }
+  return call(
+    "GET",
+    "api/engagements/working-papers?engagementId=" + encodeURIComponent(String(chain.engagementId)),
+  );
+});
+
+// workspace/search is the one of the ten that needs a parameter: the client always sends
+// q=<term> and the route answers 400 without it. Capturing that 400 would record a validation
+// refusal as if it were the search contract, so this sends a real term against the seeded firm.
+define("GET", "api/workspace/search?", async () =>
+  call("GET", "api/workspace/search?q=" + encodeURIComponent("Fixture")),
+);
 
 // Explicitly out of reach for this pass, with the real reason recorded rather than left silent.
 // Tracked in preSkippedKeys (not just the skipped[] report list) so the "uncovered by plan"
