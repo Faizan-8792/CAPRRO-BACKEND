@@ -105,6 +105,51 @@ function parseDesktopRoutes(sourcePath) {
 
 const staticRoutes = parseDesktopRoutes(clientPath);
 
+/**
+ * The OTHER half of the client's surface: routes built with an interpolated string, e.g.
+ * `$"api/tds-health/runs/{Uri.EscapeDataString(runId)}/checks/{Uri.EscapeDataString(checkId)}"`.
+ *
+ * WHY THESE ARE COUNTED SEPARATELY RATHER THAN IGNORED
+ * ---------------------------------------------------
+ * A literal scan cannot capture them: each needs a real id for the entity it addresses, and the
+ * ids only exist once this capture has created the entity. Until this session they were not merely
+ * uncaptured, they were UNCOUNTED -- the tool reported "routes discovered" as though the static
+ * literals were the whole surface, which is how "33 of 33" came to read as full coverage while a
+ * quarter of the real surface had never been looked at (and the interpolated majority never at all).
+ *
+ * So they are discovered, normalised and REPORTED, but deliberately kept out of `planless`: making
+ * them fail the run today would turn a green gate red for a gap that has always existed and that
+ * nothing in this pass closes. The number is the honest measure of how far the desktop-to-backend
+ * coupling actually reaches, and it should go down over time rather than being hidden.
+ */
+function parseInterpolatedRoutes(sourcePath) {
+  const text = readFileSync(sourcePath, "utf8");
+  const pattern = /(?:Authorized|new HttpRequestMessage)\(\s*HttpMethod\.(\w+),\s*\$"([^"]+)"/g;
+  const seen = new Map();
+  let match;
+  while ((match = pattern.exec(text))) {
+    const method = match[1].toUpperCase();
+    // Collapse `{Uri.EscapeDataString(runId)}` and `{query}` down to `{runId}` / `{query}` so the
+    // report reads as a route template rather than as C# source.
+    // Collapse every interpolated hole to its last identifier, so a template is a stable route
+    // shape rather than a snapshot of the C# inside it:
+    //   {Uri.EscapeDataString(runId)}      -> {runId}
+    //   {Math.Clamp(limit, 1, 100)}        -> {limit}
+    //   {string.Join('&', queryParts)}     -> {queryParts}
+    // Otherwise the key changes whenever someone edits a clamp bound, and every fixture bound to
+    // it silently becomes uncaptured.
+    const path = match[2].replace(/\{([^}]*)\}/g, (whole, inner) => {
+      const identifiers = String(inner).match(/[A-Za-z_][A-Za-z0-9_]*/g);
+      if (!identifiers || identifiers.length === 0) return whole;
+      return `{${identifiers[identifiers.length - 1]}}`;
+    });
+    seen.set(`${method} ${path}`, { method, path });
+  }
+  return [...seen.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+const interpolatedRoutes = parseInterpolatedRoutes(clientPath);
+
 // ─── Step 2: boot the real app in-process, exactly as tests/production-error-envelope.mjs does ──
 
 const toFileUrl = (...segments) => pathToFileURL(join(repoRoot, ...segments)).href;
@@ -672,6 +717,118 @@ define("GET", "api/workspace/search?", async () =>
   call("GET", "api/workspace/search?q=" + encodeURIComponent("Fixture")),
 );
 
+// ── Parameterised routes, batch 1: reads reachable from ids this capture already creates ────
+//
+// These are the first fixtures for the INTERPOLATED half of the client's surface. Everything here
+// is a GET, deliberately: a read cannot disturb the state a later route depends on, and the first
+// batch should not risk the 43 fixtures that already work. Writes and destructive routes
+// (join-code rotation, leave, DELETE user, run locks) are left for a later pass where ordering has
+// to be reasoned about rather than assumed.
+//
+// Each guards on its chained id and SKIPS with a real reason rather than capturing a 404, because a
+// 404 fixture would record "not found" as if it were the route's contract.
+
+/**
+ * A case that exists in the CURRENTLY active firm.
+ *
+ * `chain.caseId` is created before `POST api/firms/switch` moves the active workspace, and every
+ * interpolated route runs after the static ones, so reading that id back answers 404 -- verified
+ * directly, not assumed. Creating one here binds the fixture to the firm actually in scope.
+ */
+let currentFirmCaseId = null;
+async function ensureCaseInCurrentFirm() {
+  if (currentFirmCaseId) return currentFirmCaseId;
+  const clientId = await ensureClientId();
+  if (!clientId) return null;
+  const created = await call("POST", "api/cases", {
+    body: {
+      clientId,
+      caseType: "GST_NOTICE_ASSESSMENT",
+      title: "Fixture case for detail reads",
+      mutationKey: `fixture-capture-case-detail-${randomUUID().replaceAll("-", "").slice(0, 12)}`,
+    },
+  });
+  currentFirmCaseId = created.json?.case?._id ?? null;
+  return currentFirmCaseId;
+}
+
+let currentFirmEngagementId = null;
+async function ensureEngagementInCurrentFirm() {
+  if (currentFirmEngagementId) return currentFirmEngagementId;
+  const clientId = await ensureClientId();
+  if (!clientId) return null;
+  const created = await call("POST", "api/engagements", {
+    body: {
+      clientId,
+      engagementType: "STATUTORY_AUDIT",
+      scope: "Fixture scope for detail reads.",
+      targetDate: "2026-12-31",
+      reviewerUserId: String(user._id),
+      mutationKey: `fixture-capture-engagement-detail-${randomUUID().replaceAll("-", "").slice(0, 12)}`,
+    },
+  });
+  currentFirmEngagementId = created.json?.engagement?._id ?? null;
+  return currentFirmEngagementId;
+}
+
+define("GET", "api/cases/{caseId}?{query}", async () => {
+  const caseId = await ensureCaseInCurrentFirm();
+  if (!caseId) return { skip: "could not create a case in the active firm to read back" };
+  return call("GET", `api/cases/${encodeURIComponent(String(caseId))}`);
+});
+
+define("GET", "api/cases/{caseId}/references", async () => {
+  const caseId = await ensureCaseInCurrentFirm();
+  if (!caseId) return { skip: "could not create a case in the active firm" };
+  return call("GET", `api/cases/${encodeURIComponent(String(caseId))}/references`);
+});
+
+define("GET", "api/cases/{caseId}/export", async () => {
+  const caseId = await ensureCaseInCurrentFirm();
+  if (!caseId) return { skip: "could not create a case in the active firm" };
+  return call("GET", `api/cases/${encodeURIComponent(String(caseId))}/export`);
+});
+
+define("GET", "api/engagements/{engagementId}", async () => {
+  const engagementId = await ensureEngagementInCurrentFirm();
+  if (!engagementId) return { skip: "could not create an engagement in the active firm" };
+  return call("GET", `api/engagements/${encodeURIComponent(String(engagementId))}`);
+});
+
+define("GET", "api/engagements/{engagementId}/export", async () => {
+  const engagementId = await ensureEngagementInCurrentFirm();
+  if (!engagementId) return { skip: "could not create an engagement in the active firm" };
+  return call("GET", `api/engagements/${encodeURIComponent(String(engagementId))}/export`);
+});
+
+define("GET", "api/firms/{firmId}", async () => {
+  const firmId = chain.sharedFirmId || user.firmId;
+  if (!firmId) return { skip: "no firm id available to read back" };
+  return call("GET", `api/firms/${encodeURIComponent(String(firmId))}`);
+});
+
+define("GET", "api/firms/{firmId}/members", async () => {
+  const firmId = chain.sharedFirmId || user.firmId;
+  if (!firmId) return { skip: "no firm id available to list members for" };
+  return call("GET", `api/firms/${encodeURIComponent(String(firmId))}/members`);
+});
+
+// No id at all -- these three were invisible purely because they carry a query string built by
+// interpolation, not because they need anything this capture does not have.
+define("GET", "api/team-workload?page={page}&limit={limit}", async () =>
+  call("GET", "api/team-workload?page=1&limit=25"),
+);
+
+define("GET", "api/digests/inbox?page={boundedPage}&limit={boundedLimit}", async () =>
+  call("GET", "api/digests/inbox?page=1&limit=25"),
+);
+
+// The kind vocabulary is the server's, not a guess: digest.routes.js validates against it and
+// answered 400 for "DAILY". The real vocabulary is DAILY_PERSONAL / WEEKLY_FIRM (digest.service.js:18-19).
+define("GET", "api/digests/preview?kind={kind}", async () =>
+  call("GET", "api/digests/preview?kind=DAILY_PERSONAL"),
+);
+
 // Explicitly out of reach for this pass, with the real reason recorded rather than left silent.
 // Tracked in preSkippedKeys (not just the skipped[] report list) so the "uncovered by plan"
 // check below -- which exists to catch a route the parser found that this file forgot about
@@ -696,7 +853,15 @@ if (existsSync(fixturesDir)) {
 }
 mkdirSync(fixturesDir, { recursive: true });
 
-for (const route of staticRoutes) {
+// Static routes always; interpolated routes only where a handler exists. An interpolated route
+// with no handler is not a failure -- it is the remaining coverage gap, counted in the manifest
+// under parameterisedRoutesNotCaptured rather than turning the gate red for a gap that predates
+// this tool.
+const interpolatedWithHandler = interpolatedRoutes.filter((route) =>
+  plan.has(`${route.method} ${route.path}`),
+);
+
+for (const route of [...staticRoutes, ...interpolatedWithHandler]) {
   const key = `${route.method} ${route.path}`;
   if (preSkippedKeys.has(key)) continue; // already recorded once, with its real reason, above.
 
@@ -742,6 +907,14 @@ const manifest = {
   // different database class" instead of reporting the difference as a field-shape change.
   transactionsAvailable: usingReplicaSet,
   uncoveredByPlan: planless.map((route) => `${route.method} ${route.path}`),
+  // The parameterised surface. Discovered and counted, not captured -- see parseInterpolatedRoutes
+  // for why these are reported rather than failed. Shrinking this list is real coverage work; a
+  // fixture for one of these is worth more than a fixture for another list endpoint, because every
+  // TDS-health and GST-reconciliation contract claim in the desktop suite sits behind one.
+  parameterisedRoutesTotal: interpolatedRoutes.length,
+  parameterisedRoutesNotCaptured: interpolatedRoutes
+    .filter((r) => !plan.has(`${r.method} ${r.path}`))
+    .map((r) => `${r.method} ${r.path}`),
 };
 writeFileSync(join(fixturesDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
 
@@ -749,6 +922,10 @@ console.log(`routes discovered : ${staticRoutes.length}`);
 console.log(`captured          : ${captured.length}`);
 console.log(`skipped           : ${skipped.length}`);
 console.log(`uncovered by plan : ${planless.length}`);
+console.log(
+  `parameterised     : ${interpolatedRoutes.length} discovered, ${interpolatedWithHandler.length} captured, ` +
+    `${interpolatedRoutes.length - interpolatedWithHandler.length} outstanding (see manifest)`,
+);
 for (const item of planless) console.log(`  UNCOVERED: ${item.method} ${item.path}`);
 
 await mongoose.connection.close();
