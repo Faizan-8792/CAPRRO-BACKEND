@@ -2166,9 +2166,19 @@ if (listed.status !== 0 || listed.error) {
   // isolation (`node tools/scan-deploy-secrets.mjs`, mode javascript-fixtures,
   // all 158 current files) confirming `status: 0` before raising the pin --
   // the same drift class as every prior entry above, not a new failure mode.
+  // Raised from 158 to 161 for the 3 files added by L12's erasure cascade:
+  // src/models/ErasureReceipt.js, src/services/erasure-classification.js and
+  // src/services/firm-erasure.service.js -- identified with `git log
+  // --diff-filter=A --name-only 1d4f4b0..HEAD -- src public`, and the scan
+  // itself independently confirmed clean over all 161 before the pin moved
+  // (`make-deploy-archive.ps1 -ValidateOnly` -> "JavaScript secret AST scan:
+  // PASS (161 files)"). Same drift class again, and caught the same way: a full
+  // run-gates.ps1 pass, not the commit that added the files. Worth noting the
+  // pin is doing its job -- it is deliberately a COUNT, so a new runtime file
+  // cannot enter the deploy surface without a human confirming it was scanned.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 158 && result.status === 0,
+    files.length === 161 && result.status === 0,
     result,
   );
 }
