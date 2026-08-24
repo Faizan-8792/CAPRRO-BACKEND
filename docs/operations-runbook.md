@@ -304,6 +304,102 @@ so the file's mtime does not move and it stays as old as it was — five further
 rollback will prune the very archive you rolled back to. If you are sitting on a known-good archive
 during an incident, copy it somewhere outside the output directory before continuing to deploy.
 
+## Withdrawing a desktop release
+
+**Start from what a desktop rollback cannot do.** The backend rollback above restores code that runs
+on one server. A desktop release does not: once an installer has been downloaded, it is on other
+people's machines and there is no mechanism in this product — and no ethical one — to reach in and
+remove it. Withdrawing a release therefore means two separate things, and confusing them wastes the
+first hour of an incident:
+
+1. **Stop new installs of the bad build.** Fully within your control, effective immediately.
+2. **Get users already on it onto something better.** Only partly within your control, and the
+   levers that reach installed apps are the blunt ones.
+
+### The four levers, in order of reach
+
+| # | Lever | Reaches | Effect |
+|---|---|---|---|
+| 1 | `download/CA-PRO-Setup-<version>-x64.exe` | New downloads | The file itself. Remove or replace it and the link 404s |
+| 2 | `download/latest.json` | The website, and the download page when the API is unreachable | Advertises version, URL, SHA-256 and size |
+| 3 | `desktopRelease` on the AppConfig singleton | Installed apps' update banner | Stops advertising the bad version in-app |
+| 4 | `desktopRelease.minSupportedVersion` | Installed apps, forcibly | Locks out builds below the floor |
+
+**Levers 1 and 2 are the rollback.** Do both, in that order — the file first, then the manifest, so
+there is never a window where `latest.json` advertises a URL that 404s. Re-upload the previous
+installer and restore the previous `latest.json` (its `latestVersion`, `downloadUrl`, `sha256` and
+`sizeBytes` must all move together; a stale hash beside a new file is worse than either alone,
+because the download page tells users to verify against it). Both go up with the same tool the
+website uses:
+
+```
+node tools/hostinger-upload-file.mjs --domain caprotoolkit.in     --file "<path to the previous installer>" --remote "download/CA-PRO-Setup-<previous>-x64.exe"
+node tools/hostinger-upload-file.mjs --domain caprotoolkit.in     --file "ca-pro-website/download/latest.json" --remote "download/latest.json"
+```
+
+The upload tool re-downloads and compares SHA-256 before reporting success, so a half-finished
+upload does not read as a rollback.
+
+**Lever 3 stops the in-app nag.** `PATCH /api/app-config/desktop-release` as the super administrator,
+setting `enabled: false` (or repointing it at the previous version). Installed apps stop offering
+the bad update on their next `/api/app-config` read. This does not un-install anything; it stops the
+product recommending a build you have withdrawn, which is the part that would otherwise keep
+generating new victims after the download link is already fixed.
+
+**Lever 4 is the only one that reaches an already-installed bad build, and it is a lockout.** Raising
+`minSupportedVersion` above the bad version makes the API answer `426` to those clients: they stop
+working until the user updates. Use it only when running the bad build is worse than not running the
+product at all — data corruption, a privacy leak, a wrong figure shown as authoritative. For a
+cosmetic or partial fault it is the wrong trade: you have taken the product away from people who
+were getting value from it. Note the deliberate fail-open in the middleware: a request carrying **no**
+version header is allowed through, so the floor never locks out the browser extension or an older
+client that does not send one.
+
+### Is maintenance mode the lever? Usually not
+
+Maintenance mode is a **server-side** switch. It stops the API for every client — the Chrome
+extension, every desktop build including the good ones, every firm. It is the right lever when the
+fault is in the backend and everyone is affected anyway.
+
+It is the **wrong** lever for a bad desktop build, and reaching for it is a common instinct worth
+naming: it punishes every user on a good version to contain a fault they do not have. Use levers 1-3
+for a desktop problem, and lever 4 only under the test above.
+
+If you do engage it, remember the allowlist in `maintenance.middleware.js`: `/api/auth/*`,
+`/api/app-config`, `/api/super/*`, `/health` and `/api/digests/unsubscribe` stay reachable, which is
+what keeps the admin panel usable so you can lift it again.
+
+### What to tell users
+
+Say it in these three places, in this order, and say the same thing in each:
+
+1. **The download page** — the visible statement. Name the affected version, say plainly what goes
+   wrong, and say what to do. A user who has already installed it needs an instruction, not an
+   apology.
+2. **`releaseNotes` in `latest.json`** — the download page renders it, so it reaches someone
+   mid-download.
+3. **`desktopRelease.releaseNotes`** — reaches installed apps through the update banner.
+
+Write it as: what is wrong, which version, what a user should do now, and when a fix is expected. Do
+not describe a withdrawn build as "an issue" — a chartered accountant deciding whether their filing
+figures were affected needs to know whether the fault touched data or only display. If you do not
+yet know, say that, and say when you will know.
+
+**Do not silently replace the artefact at the same URL.** The download page publishes a SHA-256 and
+tells users to verify against it. A user who checks and finds a mismatch has been given a reason to
+distrust the whole distribution. Withdraw the version, publish the replacement under its own version
+and its own hash.
+
+### Rehearsal status
+
+The **backend** rollback is rehearsed and timed — see the log above. This desktop-side procedure is
+**written but not rehearsed**: no version has yet been withdrawn from the live site. The two are not
+interchangeable evidence, and this section should not be read as tested until an entry appears below.
+
+| Date | Operator | Version withdrawn | Levers used | Wall-clock | Outcome |
+|---|---|---|---|---|---|
+| _(none yet)_ | | | | | |
+
 ## Kill switches
 
 Two independent mechanisms, both driven from the admin panel and both read through
