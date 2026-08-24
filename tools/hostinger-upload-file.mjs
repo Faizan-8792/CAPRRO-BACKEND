@@ -170,14 +170,24 @@ if (!head.ok) fail("verify", `the file is not being served (HTTP ${head.status})
 const got = await fetch(`${publicUrl}?cb=${Date.now()}`, { redirect: "follow" });
 const bytes = Buffer.from(await got.arrayBuffer());
 const remoteSha = createHash("sha256").update(bytes).digest("hex");
+
+// The MZ check is meaningful for a Windows executable and meaningless for anything else. The first
+// version of this script applied it unconditionally, which reported a perfectly good HTML upload as
+// a MISMATCH purely because an .html file does not start with "MZ". Scope it to the case it was
+// written for: an .exe served as a 200 that is really an HTML error page.
+const expectsPe = /\.exe$/i.test(remotePath);
 const isPe = bytes[0] === 0x4d && bytes[1] === 0x5a;
 
 console.log(`  downloaded  : ${bytes.length} bytes`);
 console.log(`  sha256      : ${remoteSha}`);
 console.log(`  size match  : ${bytes.length === size}`);
 console.log(`  sha match   : ${remoteSha === localSha}`);
-console.log(`  MZ header   : ${isPe}`);
+if (expectsPe) {
+  console.log(`  MZ header   : ${isPe}`);
+} else {
+  console.log(`  MZ header   : n/a (not an .exe)`);
+}
 
-const ok = bytes.length === size && remoteSha === localSha && isPe;
+const ok = bytes.length === size && remoteSha === localSha && (!expectsPe || isPe);
 console.log(`\n=== ${ok ? "UPLOAD VERIFIED" : "MISMATCH - investigate before announcing"} ===`);
 process.exit(ok ? 0 : 1);
