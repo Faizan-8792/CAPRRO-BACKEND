@@ -1122,6 +1122,70 @@ for (const [template, build] of [
   });
 }
 
+// ── Parameterised routes, batch 3: writes that create their own subject ─────────────────────
+//
+// The first writes among the interpolated routes. Each acts on an entity this handler created, so
+// it cannot disturb the state another fixture depends on -- which is why these are safe to add
+// while the destructive ones (lock, leave, rotate join-code, DELETE user) are still left alone.
+//
+// Bodies are taken from what CaProApiClient actually sends for each route, not from the server's
+// field allow-list: the allow-list says what is permitted, the client says what is real.
+
+define("POST", "api/cases/{caseId}/timeline", async () => {
+  const caseId = await ensureCaseInCurrentFirm();
+  if (!caseId) return { skip: "could not create a case in the active firm" };
+  return call("POST", `api/cases/${encodeURIComponent(String(caseId))}/timeline`, {
+    body: {
+      mutationKey: `fixture-capture-timeline-${randomUUID().replaceAll("-", "").slice(0, 12)}`,
+      // From CASE_EVENT_TYPES (CaseTimelineEvent.js:3); a free-text type is refused by the enum.
+      type: "NOTE_ADDED",
+      title: "Fixture timeline note",
+      detail: "Recorded so the desktop has a real timeline-event shape to parse.",
+    },
+  });
+});
+
+define("POST", "api/engagements/{engagementId}/findings", async () => {
+  const engagementId = await ensureEngagementInCurrentFirm();
+  if (!engagementId) return { skip: "could not create an engagement in the active firm" };
+  return call("POST", `api/engagements/${encodeURIComponent(String(engagementId))}/findings`, {
+    body: {
+      mutationKey: `fixture-capture-finding-${randomUUID().replaceAll("-", "").slice(0, 12)}`,
+      title: "Fixture finding",
+      description: "Recorded so the desktop has a real finding shape to parse.",
+      // NOT free text, despite the schema allowing any 120-char string. The service accepts only
+      // `templateSnapshot.findingCategories` plus the literal "OTHER" (engagement.service.js:1592),
+      // and the statutory-audit template this capture creates ships WITHOUT findingCategories -- so
+      // "OTHER" is the only value it will take. Stage keys like FIELDWORK are a different
+      // vocabulary and are refused here; that was tried first and rejected.
+      category: "OTHER",
+      evidenceReferences: ["WP-1"],
+    },
+  });
+});
+
+define("POST", "api/engagements/working-papers/{workingPaperId}/rows", async () => {
+  const workingPaperId = await ensureWorkingPaperInCurrentFirm();
+  if (!workingPaperId) return { skip: "could not create a working paper in the active firm" };
+  return call(
+    "POST",
+    `api/engagements/working-papers/${encodeURIComponent(String(workingPaperId))}/rows`,
+    {
+      body: {
+        mutationKey: `fixture-capture-wp-row-${randomUUID().replaceAll("-", "").slice(0, 12)}`,
+        // A freshly created working paper is at revision 1; the row write is revision-guarded.
+        expectedRevision: 1,
+        rowKey: "TR-001",
+        description: "Fixture working-paper row",
+        observedValue: "1,20,000",
+        // Required. A working-paper row without a source reference is an assertion with no evidence
+        // behind it, which is exactly what the service refuses.
+        sourceReference: "Bank confirmation letter, 2026-07-31",
+      },
+    },
+  );
+});
+
 // Explicitly out of reach for this pass, with the real reason recorded rather than left silent.
 // Tracked in preSkippedKeys (not just the skipped[] report list) so the "uncovered by plan"
 // check below -- which exists to catch a route the parser found that this file forgot about
