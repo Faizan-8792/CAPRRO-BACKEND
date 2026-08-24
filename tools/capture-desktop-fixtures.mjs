@@ -174,6 +174,20 @@ await connectDB();
 // A fresh disposable database per run -- never accumulate stale seed data across captures.
 await mongoose.connection.dropDatabase();
 
+// Provision indexes the way a real boot does. connectDB() alone does not: server.js owns the
+// "provision-indexes" bootstrap stage, and this tool deliberately skips server.js so no scheduler
+// fires during a capture. Without it the capture runs against a database no real deployment is
+// ever in, and routes that assert storage readiness refuse -- reproduced as a 503 from every GST
+// import commit, "GST storage is not rollout-ready", which is also how that production gap was
+// found in the first place.
+const { ensureRequiredIndexes } = await import(
+  toFileUrl("src", "services", "index-provisioning.service.js")
+);
+const indexOutcome = await ensureRequiredIndexes();
+if (indexOutcome.failures?.length) {
+  console.log("index provisioning failures: " + JSON.stringify(indexOutcome.failures).slice(0, 300));
+}
+
 // Every flag defaults false on a fresh singleton (AppConfig.js's own DEFAULT_FEATURE_FLAGS), and
 // AppConfig.getInstance() synthesises and CACHES an all-false in-memory doc for 30s when none is
 // persisted -- well past this whole capture run. Persisting every flag ON before the first
@@ -729,6 +743,28 @@ define("GET", "api/workspace/search?", async () =>
 // 404 fixture would record "not found" as if it were the route's contract.
 
 /**
+ * A client the CURRENTLY active firm can see.
+ *
+ * `ensureClientId()` memoises a client created before `POST api/firms/switch` moves the active
+ * workspace, and every interpolated route runs after the static ones. Handlers that reused it were
+ * answered 404 -- "Client not found in your scope" from the tax-work session route, and
+ * "Selected client is not available in the active firm" (GST_IMPORT_CLIENT_NOT_FOUND) from the
+ * import preview. Both were reproduced, not guessed.
+ *
+ * This is the single fix for that whole class: any handler needing a client in the firm that is
+ * active NOW asks here rather than carrying its own workaround.
+ */
+let currentFirmClientId = null;
+async function ensureClientInCurrentFirm() {
+  if (currentFirmClientId) return currentFirmClientId;
+  const created = await call("POST", "api/taxworker/clients", {
+    body: { name: "Fixture Client (active firm)", entityType: "INDIVIDUAL" },
+  });
+  currentFirmClientId = created.json?.client?._id ?? null;
+  return currentFirmClientId;
+}
+
+/**
  * A case that exists in the CURRENTLY active firm.
  *
  * `chain.caseId` is created before `POST api/firms/switch` moves the active workspace, and every
@@ -955,16 +991,8 @@ define("GET", "api/tasks/bulk/{operationId}", async () => {
 
 /** A tax-work session in the current firm. */
 define("GET", "api/taxworker/sessions/{sessionId}", async () => {
-  // A client in the CURRENTLY active firm. ensureClientId caches one created before
-  // POST api/firms/switch, and this route answered 404 "Client not found in your scope" for it --
-  // the same stale-workspace trap the case and engagement handlers above avoid.
-  const madeClient = await call("POST", "api/taxworker/clients", {
-    body: { name: "Fixture Session Client", entityType: "INDIVIDUAL" },
-  });
-  const clientId = madeClient.json?.client?._id ?? null;
-  if (!clientId) {
-    return { skip: `could not create a client in the active firm (HTTP ${madeClient.status})` };
-  }
+  const clientId = await ensureClientInCurrentFirm();
+  if (!clientId) return { skip: "could not create a client in the active firm" };
   const created = await call("POST", "api/taxworker/sessions", {
     body: { clientId, taxType: "GST_MONTHLY" },
   });
@@ -972,6 +1000,127 @@ define("GET", "api/taxworker/sessions/{sessionId}", async () => {
   if (!sessionId) return { skip: `tax-work session was not created (HTTP ${created.status})` };
   return call("GET", `api/taxworker/sessions/${encodeURIComponent(String(sessionId))}`);
 });
+
+// ── A real GST reconciliation run, built through the real import pipeline ────────────────────
+//
+// The nine gst-reconciliation detail routes all key on a run id, and a run cannot be faked: it
+// requires two committed ImportBatch documents (GST_PURCHASE and GSTR2B) that agree with each other
+// and with the run on firmId, clientId, gstin and period (gst-reconciliation.service.js:470-482).
+//
+// Seeding a run straight into Mongo would produce a document the product never actually creates,
+// and the fixtures taken from it would describe a shape no user can reach. So this drives the real
+// chain: preview -> commit -> preview -> commit -> create run.
+//
+// The CSV shape is the one self-test.service.js already uses for GST_PURCHASE, which is also
+// exactly what api/imports/gstr2b/convert emits -- the converter and the importer share a contract,
+// so one table serves both kinds.
+
+const GST_FIXTURE_GSTIN = "27AAQCV9182K1ZQ";
+const GST_FIXTURE_PERIOD = "2026-07";
+const GST_MAPPING = {
+  supplierGstin: "Supplier GSTIN",
+  recipientGstin: "Recipient GSTIN",
+  invoiceNumber: "Invoice Number",
+  documentDate: "Document Date",
+  documentType: "Document Type",
+  taxableValue: "Taxable Value",
+  igst: "IGST",
+  cgst: "CGST",
+  sgst: "SGST",
+  cess: "Cess",
+};
+const GST_CSV = [
+  "Supplier GSTIN,Recipient GSTIN,Invoice Number,Document Date,Document Type,Taxable Value,IGST,CGST,SGST,Cess",
+  `29AAQCV1234K1ZP,${GST_FIXTURE_GSTIN},INV-0001,2026-07-05,INVOICE,100000.00,18000.00,0.00,0.00,0.00`,
+  `29AAQCV1234K1ZP,${GST_FIXTURE_GSTIN},INV-0002,2026-07-18,INVOICE,50000.00,0.00,4500.00,4500.00,0.00`,
+  "",
+].join("\n");
+
+/** Preview then commit one import batch, returning its id. */
+async function commitGstBatch(kind, clientId) {
+  // The commit URL keys on sourceHash, which is a hash of the TEXT. Two kinds sharing one CSV
+  // therefore share a sourceHash, and the second commit resolves the first kind's preview. Vary
+  // the invoice numbers per kind so each import has its own identity, which is also what a real
+  // books-versus-portal pair looks like.
+  const text = GST_CSV.replaceAll("INV-", kind === "GSTR2B" ? "PINV-" : "BINV-");
+  const body = {
+    kind,
+    text,
+    mapping: GST_MAPPING,
+    delimiter: ",",
+    clientId: String(clientId),
+    gstin: GST_FIXTURE_GSTIN,
+    period: GST_FIXTURE_PERIOD,
+  };
+
+  const preview = await call("POST", "api/imports/preview", { body });
+  const sourceHash = preview.json?.preview?.sourceHash ?? null;
+  const previewToken =
+    preview.json?.preview?.commitToken
+    ?? preview.json?.preview?.previewToken
+    ?? preview.json?.previewToken
+    ?? null;
+  if (!sourceHash) return null;
+
+  const commit = await call("POST", `api/imports/${encodeURIComponent(sourceHash)}/commit`, {
+    body: { ...body, ...(previewToken ? { previewToken } : {}) },
+  });
+  return commit.json?.batch?._id ?? commit.json?.batch?.id ?? commit.json?.batchId ?? null;
+}
+
+let gstRunId = null;
+let gstRunResolved = false;
+async function ensureGstRun() {
+  if (gstRunResolved) return gstRunId;
+  gstRunResolved = true;
+
+  const clientId = await ensureClientInCurrentFirm();
+  if (!clientId) return null;
+
+  const booksBatchId = await commitGstBatch("GST_PURCHASE", clientId);
+  const portalBatchId = await commitGstBatch("GSTR2B", clientId);
+  if (!booksBatchId || !portalBatchId) return null;
+
+  const created = await call("POST", "api/gst-reconciliation/runs", {
+    body: {
+      clientId: String(clientId),
+      gstin: GST_FIXTURE_GSTIN,
+      period: GST_FIXTURE_PERIOD,
+      booksBatchId: String(booksBatchId),
+      portalBatchId: String(portalBatchId),
+    },
+  });
+  gstRunId = created.json?.run?._id ?? created.json?.run?.id ?? null;
+  return gstRunId;
+}
+
+for (const [template, build] of [
+  ["GET api/gst-reconciliation/runs/{runId}", (id) => `api/gst-reconciliation/runs/${id}`],
+  ["GET api/gst-reconciliation/runs/{runId}/3b-control", (id) => `api/gst-reconciliation/runs/${id}/3b-control`],
+  ["GET api/gst-reconciliation/runs/{runId}/export", (id) => `api/gst-reconciliation/runs/${id}/export`],
+  ["GET api/gst-reconciliation/runs/{runId}/items?", (id) => `api/gst-reconciliation/runs/${id}/items`],
+  ["GET api/gst-reconciliation/runs/{runId}/supplier-chase", (id) => `api/gst-reconciliation/runs/${id}/supplier-chase`],
+]) {
+  const [method, path] = [template.slice(0, template.indexOf(" ")), template.slice(template.indexOf(" ") + 1)];
+  define(method, path, async () => {
+    const runId = await ensureGstRun();
+    if (!runId) {
+      return {
+        skip:
+          "the second GST import commit is refused by assertGstStorageIndexes with 'completed GST "
+          + "imports without generation-safe identity require approved migration'. The FIRST commit "
+          + "(GST_PURCHASE) succeeds and its batch and rows were checked field by field against "
+          + "every condition in findUnsafeLegacyDocuments -- importFingerprint, sourceHash, "
+          + "activeImportGeneration, normalizationVersion, gstin, period, importGeneration, "
+          + "sourceRow -- and all pass, so the refusal is not those. Ruled out: missing indexes "
+          + "(now provisioned at boot, which fixed the FIRST commit's earlier 503) and a shared "
+          + "sourceHash between the two kinds (the texts now differ per kind). What remains is a "
+          + "domain gate in the GST rollout path that needs someone who knows that migration story",
+      };
+    }
+    return call("GET", build(encodeURIComponent(String(runId))));
+  });
+}
 
 // Explicitly out of reach for this pass, with the real reason recorded rather than left silent.
 // Tracked in preSkippedKeys (not just the skipped[] report list) so the "uncovered by plan"

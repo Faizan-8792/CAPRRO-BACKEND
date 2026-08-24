@@ -1082,4 +1082,36 @@ export async function assertGstStorageIndexes({ reconciliation = false } = {}) {
   return true;
 }
 
+/**
+ * The models whose indexes `assertGstStorageIndexes` requires, in the shape
+ * `index-provisioning.service.js` consumes.
+ *
+ * WHY THIS EXPORT EXISTS
+ * ----------------------
+ * `db.js` sets `autoIndex: process.env.NODE_ENV !== "production"` -- "index in dev, manage in
+ * prod" -- and `index-provisioning.service.js` is what "manage in prod" means. Until this was
+ * added, NO group covered ImportBatch, ImportRow or the reconciliation collections, so on a
+ * production database that had never had autoIndex build them, every GST import commit answered
+ * **503 "GST storage is not rollout-ready: ImportBatch (import identity), ImportRow (import row
+ * generation)"** and no reconciliation could ever be created.
+ *
+ * Reproduced directly rather than reasoned about: the desktop fixture capture runs with
+ * NODE_ENV=production against a database it drops on every run, drove the real
+ * preview -> commit chain, and got exactly that 503 from
+ * `gst-storage-readiness.service.js:1075`.
+ *
+ * That makes it a latent production defect rather than a visible one: an environment whose
+ * collections were first created while autoIndex was on already has these indexes, so the running
+ * service is fine. A FRESH deployment -- or a restore into a new cluster, which is exactly what
+ * O3/O4's disaster-recovery path does -- would come up with GST import permanently refused.
+ *
+ * Derived from the same spec arrays the assertion uses, so the two cannot drift apart.
+ */
+export const REQUIRED_GST_STORAGE_INDEXES = Object.freeze(
+  [...IMPORT_INDEX_SPECS, ...RECONCILIATION_INDEX_SPECS].map((spec) => ({
+    model: spec.Model,
+    label: `GST storage: ${spec.label}`,
+  })),
+);
+
 export { indexKeyMatches, indexSpecMatches };

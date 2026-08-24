@@ -21,6 +21,7 @@ import { REQUIRED_CASE_INDEXES } from "./case-index-readiness.service.js";
 import { REQUIRED_DIGEST_INDEXES } from "./digest-index-readiness.service.js";
 import { REQUIRED_ENGAGEMENT_INDEXES } from "./engagement-index-readiness.service.js";
 import { REQUIRED_PROVIDER_USAGE_INDEXES } from "./provider-usage-index-readiness.service.js";
+import { REQUIRED_GST_STORAGE_INDEXES } from "./gst-storage-readiness.service.js";
 
 // Taking the model set from the same requirement lists startup asserts against
 // keeps the two in step. A hand-maintained list would drift the moment a
@@ -41,6 +42,11 @@ const REQUIREMENT_GROUPS = Object.freeze([
   ["assuranceEngagements", REQUIRED_ENGAGEMENT_INDEXES],
   ["auditWorkingPapers", REQUIRED_AUDIT_WORKING_PAPER_INDEXES],
   ["providerUsage", REQUIRED_PROVIDER_USAGE_INDEXES],
+  // "gstStorage" is not flag-gated either. assertGstStorageIndexes refuses every import commit and
+  // every reconciliation while these are missing, and with autoIndex off in production nothing
+  // else would ever create them -- so a fresh deployment, or a restore into a new cluster, would
+  // come up with GST permanently answering 503. See the export's own comment for the reproduction.
+  ["gstStorage", REQUIRED_GST_STORAGE_INDEXES],
 ]);
 
 function isNamespaceMissing(error) {
