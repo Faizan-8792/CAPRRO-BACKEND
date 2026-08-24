@@ -114,8 +114,10 @@ test("an invalid now is refused rather than silently treated as epoch", () => {
 
 // -------------------------------------------------------------- classification
 
-test("all 38 models are classified", () => {
-  assert.equal(Object.keys(RETENTION_CLASSIFICATION).length, 38);
+test("all 39 models are classified", () => {
+  // 38 -> 39: L12 added ErasureReceipt.js, the record of a completed erasure. This guard firing on
+  // that addition is the guard working -- a new model must be classified, not silently inherited.
+  assert.equal(Object.keys(RETENTION_CLASSIFICATION).length, 39);
 });
 
 test("classification matches the real src/models directory exactly", () => {
@@ -123,9 +125,9 @@ test("classification matches the real src/models directory exactly", () => {
   const modelNames = readdirSync(join(here, "..", "src", "models"))
     .filter((name) => name.endsWith(".js"))
     .map((name) => name.replace(/\.js$/, ""));
-  assert.equal(modelNames.length, 38);
+  assert.equal(modelNames.length, 39);
   const result = assertClassificationCoversModels(modelNames);
-  assert.equal(result.classified, 38);
+  assert.equal(result.classified, 39);
 });
 
 test("a new unclassified model makes the guard throw, naming it", () => {
@@ -168,13 +170,15 @@ test("classification totals match PLAN.md 33.9 (see note above: PLAN.md's own pr
     },
     {},
   );
-  assert.equal(counts[RETENTION_CLASSES.RETAIN], 30);
+  // 30 -> 31 with ErasureReceipt, which is RETAIN for the reason recorded beside it in
+  // data-retention.service.js: it is the proof an erasure happened and must outlive the data.
+  assert.equal(counts[RETENTION_CLASSES.RETAIN], 31);
   assert.equal(counts[RETENTION_CLASSES.PURGE_FIELD], 1);
   assert.equal(counts[RETENTION_CLASSES.PURGE_CONDITIONAL], 1);
   assert.equal(counts[RETENTION_CLASSES.SELF_EXPIRING], 6);
   assert.equal(
     Object.values(counts).reduce((total, value) => total + value, 0),
-    38,
+    39,
   );
 });
 
@@ -627,15 +631,24 @@ test("account removal is described truthfully: no self-service delete, but a sup
   const policy = describeRetentionPolicy();
   // Kept: the true and reassuring half.
   assert.match(policy.accountDeletion, /not deleted/i);
-  // The false clause that was removed. super.routes.js:85,88 expose real DELETE routes and
-  // super.controller.js calls deleteOne on User and Firm, so any text claiming no such route
-  // exists is disprovable from this same repository.
+  // The false clause that was removed. super.routes.js still exposes real DELETE routes for a
+  // firm and for a user within it, so any text claiming no such route exists is disprovable from
+  // this same repository. (Since L12 the user route tombstones rather than calling deleteOne, and
+  // the firm route runs the full classified cascade before deleting the firm row — the routes are
+  // no less real for that.)
   assert.doesNotMatch(policy.accountDeletion, /no route that removes/i);
   // What replaced it must actually say who can remove an account and on what basis.
   assert.match(policy.accountDeletion, /super administrator/i);
   assert.match(policy.accountDeletion, /written request/i);
-  // Must not over-promise erasure while L12's cascade is unfinished.
   assert.match(policy.accountDeletion, /required by law to keep are retained/i);
+  // L12 completed the cascade, so these two are now true and pinned: identity does not survive
+  // inside retained work product, and the operation produces a receipt. Both are asserted against
+  // a real run in tests/firm-erasure-e2e.mjs; pinning the wording here stops the copy drifting
+  // away from behaviour that is now verified.
+  assert.match(policy.accountDeletion, /name and email address are removed/i);
+  assert.match(policy.accountDeletion, /receipt/i);
+  // Still must not claim retained work product is destroyed, because it is not.
+  assert.doesNotMatch(policy.accountDeletion, /everything is (deleted|erased|destroyed)/i);
 });
 
 test("the policy contains no engineering leakage a user should never see", () => {

@@ -82,6 +82,10 @@ export const RETENTION_CLASSIFICATION = Object.freeze({
   ComplianceRule: RETENTION_CLASSES.RETAIN,
   DigestDelivery: RETENTION_CLASSES.RETAIN,
   Engagement: RETENTION_CLASSES.RETAIN,
+  // The record that an erasure was performed. Never purged: deleting it would destroy the proof
+  // that a request was honoured. It deliberately holds no names, emails or erased content -- only
+  // collection names, counts and status -- so keeping it forever keeps nothing about a person.
+  ErasureReceipt: RETENTION_CLASSES.RETAIN,
   EngagementFinding: RETENTION_CLASSES.RETAIN,
   Firm: RETENTION_CLASSES.RETAIN,
   FirmMembership: RETENTION_CLASSES.RETAIN,
@@ -424,15 +428,24 @@ export function describeRetentionPolicy() {
     // The replacement states the policy decided in PLAN.md section 37: no self-service deletion
     // (which is the real and valuable safety property the old sentence was reaching for), removal
     // only by the super administrator on a written request, and statutory records retained even
-    // then. It deliberately does NOT promise a complete erasure, because L12's cascade is not
-    // finished — over-promising here would replace one false claim with another.
+    // then.
+    //
+    // L12 (2026-08-24) revised it a second time, upward. The previous wording deliberately stopped
+    // short of promising a complete erasure because the cascade covered 3 of 33 firm-scoped
+    // collections; promising completeness then would have replaced one false claim with another.
+    // The cascade is now finished and verified end to end — every firm-scoped collection reaches a
+    // classified end state, and a whole-database literal scan after a real run finds no trace of
+    // the erased person's name or email, including inside records kept for statutory reasons. So
+    // two true things are added and nothing is softened: the erasure is complete, and it produces
+    // a receipt. What is still deliberately NOT claimed is that retained work product is destroyed,
+    // because it is not — client working papers survive, which is exactly what the law requires.
     //
     // Keeps the substring "not deleted" on purpose: RetentionStateMatrixTests.cs asserts it, and
     // data-retention-contract.mjs matches /not deleted/i. Stays exactly one string because that
     // same test calls .Single() on the rendered Accounts line, and non-empty because a fifth
     // section is asserted to exist.
     accountDeletion:
-      "Accounts are not deleted by anyone using the app: CA PRO has no self-service delete, so no session and no mistake can destroy a firm's records. A firm, or one member of it, can be removed only by CA PRO's super administrator acting on a written request from the firm, and records the firm is required by law to keep are retained even then. To make such a request, or to ask what is held about you, use the grievance contact published at caprotoolkit.in/privacy.html.",
+      "Accounts are not deleted by anyone using the app: CA PRO has no self-service delete, so no session and no mistake can destroy a firm's records. A firm, or one member of it, can be removed only by CA PRO's super administrator acting on a written request from the firm. Records the firm is required by law to keep are retained even then, but your own name and email address are removed from them, so retention of professional work never means keeping your identity indefinitely. Everything else the firm holds is erased, and the removal produces a receipt recording, for each type of record, what was erased and what was kept. To make such a request, to withdraw one, or to ask what is held about you, use the grievance contact published at caprotoolkit.in/privacy.html.",
   });
 }
 

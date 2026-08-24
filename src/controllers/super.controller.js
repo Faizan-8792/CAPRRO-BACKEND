@@ -11,6 +11,16 @@ import {
   startDeepSelfTest,
 } from "../services/self-test.service.js";
 import { sendTestEmail } from "../services/email.service.js";
+import {
+  eraseFirm,
+  buildErasurePlan,
+  getErasureReceipt,
+} from "../services/firm-erasure.service.js";
+import {
+  STRATEGY,
+  userTombstone,
+  userNeedsTombstone,
+} from "../services/erasure-classification.js";
 import { sendTestDigestNow } from "../services/digest.service.js";
 import ProviderUsage, {
   GLOBAL_USAGE_USER_ID,
@@ -709,10 +719,16 @@ export const deleteFirmUserForSuper = async (req, res, next) => {
         .json({ ok: false, error: "Cannot delete super admin account" });
     }
 
-    // Delete the account first. Removing memberships first would, if this step
-    // then failed, leave a live account pointing at a firm with no membership
-    // rows, which firm guards read as a legacy account rather than a removal.
-    await user.deleteOne();
+    // Tombstone rather than hard-delete. ActivityEvent rows and retained work product hold this
+    // user's _id, so removing the row leaves them pointing at nothing — the same reason the firm
+    // cascade classifies User as PSEUDONYMISE rather than PURGE. The tombstone clears every
+    // identifying field, frees the original email for reuse, and bumps tokenVersion so any live
+    // session stops authenticating immediately.
+    //
+    // Neutralise the account first. Removing memberships first would, if this step then failed,
+    // leave a live account pointing at a firm with no membership rows, which firm guards read as
+    // a legacy account rather than a removal.
+    await User.updateOne({ _id: user._id, ...userNeedsTombstone() }, userTombstone(user._id));
     await FirmMembership.deleteMany({ userId: user._id });
 
     return res.json({ ok: true });
@@ -721,7 +737,12 @@ export const deleteFirmUserForSuper = async (req, res, next) => {
   }
 };
 
-// 9) Delete a firm (and detach its users)
+// 9) Erase a firm and everything scoped to it (super admin only).
+//
+// This previously detached users and deleted Task and Reminder: 3 of the 33 firm-scoped
+// collections. The other 30 were left behind, orphaned and unreachable, which is the defect L12
+// exists to close. It now drives the classified plan in firm-erasure.service.js — the same list
+// the coverage gate enforces, so the two cannot drift apart.
 export const deleteFirmForSuper = async (req, res, next) => {
   try {
     assertSuper(req.user);
@@ -733,29 +754,91 @@ export const deleteFirmForSuper = async (req, res, next) => {
       return res.status(404).json({ ok: false, error: "Firm not found" });
     }
 
-    // Detach all users whose ACTIVE workspace is this firm: they fall back to
-    // their personal workspace on next login (getMe heals firmId).
-    await User.updateMany(
-      { firmId: firm._id },
-      {
-        $set: {
-          firmId: null,
-          role: "USER",
-          accountType: "INDIVIDUAL",
+    // Explicit confirmation. This endpoint used to do far less, and it is now irreversible across
+    // 33 collections — an old habit or a stale script must not trigger it by accident.
+    if (req.body?.confirmation !== "ERASE_FIRM_DATA") {
+      const plan = buildErasurePlan();
+      const count = (strategy) => plan.filter((r) => r.strategy === strategy).length;
+      return res.status(400).json({
+        ok: false,
+        error:
+          'Confirmation required. Send { "confirmation": "ERASE_FIRM_DATA" } to erase this firm. This cannot be undone.',
+        plan: {
+          collections: plan.length,
+          purge: count(STRATEGY.PURGE),
+          pseudonymise: count(STRATEGY.PSEUDONYMISE),
+          retain: count(STRATEGY.RETAIN),
         },
-      },
-    );
+      });
+    }
 
-    // Remove all memberships for this firm so no orphan rows remain.
-    await FirmMembership.deleteMany({ firmId: firm._id });
+    // Deterministic by default, so retrying an interrupted erasure RESUMES the existing receipt
+    // rather than starting a second cascade and a second, competing record of the same event.
+    const supplied = typeof req.body?.operationId === "string" ? req.body.operationId.trim() : "";
+    const operationId = supplied || `firm-erasure-${firmId}`;
 
-    // Cascade delete: remove all tasks and reminders belonging to this firm
-    await Task.deleteMany({ firmId: firm._id });
-    await Reminder.deleteMany({ firmId: firm._id });
+    const receipt = await eraseFirm({
+      operationId,
+      firmId: firm._id,
+      firmDisplayName: firm.name || "",
+      authorisedByUserId: req.user.id,
+      requestReference:
+        typeof req.body?.requestReference === "string" ? req.body.requestReference.trim() : "",
+    });
 
-    await firm.deleteOne();
+    // Drop the firm row only once the cascade is complete. An interrupted erasure deliberately
+    // leaves it in place: a firm row with its data already gone is recoverable by re-running,
+    // whereas a deleted firm row with live data still behind it is orphaned for good.
+    if (receipt.status === "COMPLETED") {
+      await firm.deleteOne();
+    }
 
-    return res.json({ ok: true });
+    return res.json({ ok: receipt.status === "COMPLETED", receipt });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// The outstanding erasure requests (L12 step 6). A request set through PATCH /api/auth/me lands
+// here; nothing is erased until a super administrator acts on it, which is the whole point of
+// keeping the two apart. Mirrors the pending firm-admin queue above rather than inventing a shape.
+export const listErasureRequestsForSuper = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+
+    const users = await User.find({ erasureRequestedAt: { $ne: null } })
+      .select("email name role firmId erasureRequestedAt")
+      .sort({ erasureRequestedAt: 1 })
+      .lean();
+
+    return res.json({
+      ok: true,
+      count: users.length,
+      requests: users.map((u) => ({
+        userId: String(u._id),
+        email: u.email,
+        name: u.name,
+        role: u.role,
+        firmId: u.firmId ? String(u.firmId) : null,
+        requestedAt: u.erasureRequestedAt,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Read an erasure receipt back after the fact. The receipt is returned by the erasure itself, but
+// an audit record nobody can re-read afterwards is not much of an audit record.
+export const getErasureReceiptForSuper = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+
+    const receipt = await getErasureReceipt(req.params.operationId);
+    if (!receipt) {
+      return res.status(404).json({ ok: false, error: "Erasure receipt not found" });
+    }
+    return res.json({ ok: true, receipt });
   } catch (err) {
     next(err);
   }

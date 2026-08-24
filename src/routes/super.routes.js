@@ -16,6 +16,8 @@ import {
   updateFirmUserForSuper,
   deleteFirmUserForSuper,
   deleteFirmForSuper,
+  listErasureRequestsForSuper,
+  getErasureReceiptForSuper,
   runSystemSelfTest,
   getSystemSelfTestRun,
   getLatestSystemSelfTestRun,
@@ -89,7 +91,12 @@ router.patch("/firms/:firmId/users/:userId", updateFirmUserForSuper);
 // Delete user from firm
 router.delete("/firms/:firmId/users/:userId", deleteFirmUserForSuper);
 
-// Delete firm completely
+// Erase a firm and everything scoped to it. Requires an explicit confirmation in the body;
+// see deleteFirmForSuper for why.
 router.delete("/firms/:firmId", deleteFirmForSuper);
+
+// Outstanding erasure requests, and the receipts produced by honouring them.
+router.get("/erasure-requests", listErasureRequestsForSuper);
+router.get("/erasure-receipts/:operationId", getErasureReceiptForSuper);
 
 export default router;

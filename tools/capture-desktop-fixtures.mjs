@@ -351,6 +351,14 @@ define("PATCH", "api/digests/preferences", async () =>
   call("PATCH", "api/digests/preferences", { body: { dailyEnabled: true, weeklyEnabled: true } }),
 );
 
+// L12: the desktop's erasure-request write. Captured with requestErasure:false deliberately --
+// withdrawing a request that was never made is a no-op, so the capture leaves no state behind and
+// erasureRequestedAt comes back null, which keeps the fixture stable across runs. Capturing the
+// true case would bake a fresh timestamp into the fixture and read as drift on every re-capture.
+define("PATCH", "api/auth/me", async () =>
+  call("PATCH", "api/auth/me", { body: { requestErasure: false } }),
+);
+
 // Paid-provider routes: keys are cleared above, so these capture the real, safe
 // ApiStatus.ProviderUnavailable shape rather than ever making a billed call.
 define("POST", "api/audit/insights", async () =>

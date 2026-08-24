@@ -90,6 +90,15 @@ const UserSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // Set when the user asks for their account data to be erased. Deliberately the same shape as
+    // firmAdminRequestedAt above: a timestamp the user can set and clear, which a super
+    // administrator then honours out of band. It grants nothing and destroys nothing on its own.
+    // PLAN.md section 37 rules out self-service deletion — a CA firm's working papers must not be
+    // destroyable by one session — so the request and the erasure are deliberately separate acts.
+    erasureRequestedAt: {
+      type: Date,
+      default: null,
+    },
     otpCodeHash: String,
     otpExpiresAt: Date,
     // Brute-force protection: failed OTP attempts + lockout window + resend throttle.

@@ -4,6 +4,7 @@ import { OAuth2Client } from "google-auth-library";
 import User from "../models/User.js";
 import { sendOtpEmail } from "../services/email.service.js";
 import { ensurePersonalFirm } from "../services/firm-provisioning.service.js";
+import { safeRecordActivity } from "../services/activity.service.js";
 import {
   recordCurrentTermsAcceptance,
   validateCurrentTermsAcceptance,
@@ -523,7 +524,7 @@ export const getMe = async (req, res, next) => {
     const { id } = req.user;
 
     const user = await User.findById(id).select(
-      "email name role accountType firmId personalFirmId createdAt updatedAt isActive welcomeSeenVersion desktopUpdateSeenAnnouncementId"
+      "email name role accountType firmId personalFirmId createdAt updatedAt isActive welcomeSeenVersion desktopUpdateSeenAnnouncementId erasureRequestedAt"
     );
 
     if (!user) {
@@ -547,6 +548,7 @@ export const getMe = async (req, res, next) => {
         isActive: user.isActive,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
+        erasureRequestedAt: user.erasureRequestedAt || null,
         welcomeSeenVersion: user.welcomeSeenVersion || null,
         desktopUpdateSeenAnnouncementId: user.desktopUpdateSeenAnnouncementId || null,
       },
@@ -560,27 +562,75 @@ export const getMe = async (req, res, next) => {
 // PATCH /api/auth/me   Body: { name }
 // Self-service update of the signed-in user's display name. Email, role, and
 // firm membership are never changed here.
+// The erasure request path (L12 step 6).
+//
+// This is a write on the route that already exists for a user editing their own account, not a new
+// destructive endpoint. Setting the flag ASKS for erasure; it does not perform one. PLAN.md section
+// 37 rules out self-service deletion outright, so the request and the erasure stay two separate
+// acts by two different people: the user records the request here, and a super administrator
+// honours it through the grievance channel after checking the firm's statutory retention duties.
+//
+// Reversible on purpose. A request that cannot be withdrawn is a trap, and withdrawing costs
+// nothing because nothing has been destroyed.
+export const ERASURE_GRIEVANCE_URL = "caprotoolkit.in/privacy.html";
+
 export const updateMe = async (req, res, next) => {
   try {
     const { id } = req.user;
-    const { name } = req.body || {};
+    const { name, requestErasure } = req.body || {};
 
-    if (typeof name !== "string") {
-      return res.status(400).json({ ok: false, error: "name must be a string" });
-    }
-    const trimmed = name.trim();
-    if (trimmed.length < 1 || trimmed.length > 120) {
+    const wantsErasureChange = typeof requestErasure === "boolean";
+    if (requestErasure !== undefined && !wantsErasureChange) {
       return res
         .status(400)
-        .json({ ok: false, error: "name must be between 1 and 120 characters" });
+        .json({ ok: false, error: "requestErasure must be true or false" });
+    }
+
+    // `name` stays required for an ordinary profile update, exactly as before. It becomes optional
+    // only when the caller is toggling the erasure request, so no existing client can break.
+    const set = {};
+    if (!wantsErasureChange || name !== undefined) {
+      if (typeof name !== "string") {
+        return res.status(400).json({ ok: false, error: "name must be a string" });
+      }
+      const trimmed = name.trim();
+      if (trimmed.length < 1 || trimmed.length > 120) {
+        return res
+          .status(400)
+          .json({ ok: false, error: "name must be between 1 and 120 characters" });
+      }
+      set.name = trimmed;
+    }
+
+    if (wantsErasureChange) {
+      const existing = await User.findById(id).select("erasureRequestedAt firmId").lean();
+      if (!existing) {
+        return res.status(404).json({ ok: false, error: "User not found" });
+      }
+      // Re-requesting must not move the timestamp: the date the request was first made is the date
+      // the obligation to answer it starts running from.
+      if (requestErasure) {
+        if (!existing.erasureRequestedAt) set.erasureRequestedAt = new Date();
+      } else {
+        set.erasureRequestedAt = null;
+      }
+
+      await safeRecordActivity({
+        firmId: existing.firmId,
+        actorUserId: id,
+        source: "USER",
+        action: requestErasure ? "ERASURE_REQUESTED" : "ERASURE_REQUEST_WITHDRAWN",
+        entityType: "User",
+        entityId: String(id),
+      });
     }
 
     const user = await User.findByIdAndUpdate(
       id,
-      { $set: { name: trimmed } },
+      { $set: set },
       { new: true, runValidators: true }
     ).select(
-      "email name role accountType firmId personalFirmId isActive createdAt updatedAt welcomeSeenVersion desktopUpdateSeenAnnouncementId"
+      "email name role accountType firmId personalFirmId isActive createdAt updatedAt welcomeSeenVersion desktopUpdateSeenAnnouncementId erasureRequestedAt"
     );
 
     if (!user) {
@@ -602,7 +652,11 @@ export const updateMe = async (req, res, next) => {
         updatedAt: user.updatedAt,
         welcomeSeenVersion: user.welcomeSeenVersion || null,
         desktopUpdateSeenAnnouncementId: user.desktopUpdateSeenAnnouncementId || null,
+        erasureRequestedAt: user.erasureRequestedAt || null,
       },
+      // Returned on the profile write so a client never hard-codes the address, and so the app and
+      // the published policy cannot drift apart.
+      erasureGrievanceUrl: ERASURE_GRIEVANCE_URL,
     });
   } catch (err) {
     next(err);
