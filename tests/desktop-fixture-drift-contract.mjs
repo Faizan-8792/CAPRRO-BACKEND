@@ -104,7 +104,15 @@ if (!existsSync(committedDir)) {
         cwd: repoRoot,
         stdio: "pipe",
         timeout: 60_000,
-        env: { ...process.env, MONGODB_URI: "mongodb://127.0.0.1:27117/capro-desktop-fixture-drift-check" },
+        // A database NAME, deliberately, not a URI: the capture tool prefers the replica set and
+        // falls back on its own. Pinning a standalone URI here used to strip transaction support
+        // from the re-capture only, so the two transactional routes came back different and the
+        // gate reported real field drift that did not exist.
+        env: {
+          ...process.env,
+          MONGODB_URI: "",
+          CAPTURE_DB_NAME: "capro-desktop-fixture-drift-check",
+        },
       },
     );
     record("re-capture into the temp directory exits 0", true);
@@ -113,6 +121,34 @@ if (!existsSync(committedDir)) {
       "re-capture into the temp directory exits 0",
       false,
       error.stdout?.toString() || error.message,
+    );
+  }
+
+  // Refuse to compare captures taken against different database classes. Two routes
+  // (PATCH api/digests/settings, POST api/firms/join) open MongoDB transactions, so a capture taken
+  // without a replica set genuinely cannot produce their success shapes. Comparing across the two
+  // reports real, alarming-looking field drift for a reason that has nothing to do with the code --
+  // which is exactly what this gate did on its first run after the replica set arrived.
+  const manifestOf = (dir) => {
+    try {
+      return JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
+    } catch {
+      return null;
+    }
+  };
+  const committedManifest = manifestOf(committedDir);
+  const freshManifest = manifestOf(tempDir);
+  if (
+    committedManifest
+    && freshManifest
+    && committedManifest.transactionsAvailable !== freshManifest.transactionsAvailable
+  ) {
+    record(
+      "the re-capture used the same database class as the committed fixtures",
+      false,
+      `committed fixtures were captured with transactionsAvailable=${committedManifest.transactionsAvailable} ` +
+        `but this re-capture had ${freshManifest.transactionsAvailable}. Start the replica set ` +
+        `(capro-mongo-rs on 27118) and re-run; the difference below would be the database, not the code.`,
     );
   }
 

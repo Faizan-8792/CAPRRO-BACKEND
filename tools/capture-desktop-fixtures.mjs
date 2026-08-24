@@ -47,8 +47,35 @@ const fixturesDir = outArgIndex !== -1 && process.argv[outArgIndex + 1]
 mongoose.set("bufferTimeoutMS", 5_000);
 process.env.NODE_ENV = "production";
 process.env.JWT_SECRET = process.env.JWT_SECRET || "local-verification-only";
-process.env.MONGODB_URI =
-  process.env.MONGODB_URI || "mongodb://127.0.0.1:27117/capro-desktop-fixtures-capture";
+// Prefer the replica set. One route (`PATCH api/digests/settings`) runs inside a MongoDB
+// transaction, which a standalone mongod rejects with "Transaction numbers are only allowed on a
+// replica set member or mongos" -- that was recorded here as a genuine environment limitation, and
+// it stopped being one once a replica set existed on 27118. Falls back to the standalone dev
+// container so this tool still runs where the replica set is not up; the transactional route then
+// skips itself with its real reason rather than failing the whole capture.
+async function pickDatabaseUri() {
+  if (process.env.MONGODB_URI) return process.env.MONGODB_URI;
+
+  // A NAME, not a URI. The drift gate needs its own disposable database but must not also choose
+  // the server, or it bypasses the probe below and silently loses transaction support -- which is
+  // exactly the bug that made its first run report two routes as "drift".
+  const dbName = process.env.CAPTURE_DB_NAME || "capro-desktop-fixtures-capture";
+  const replicaSet = `mongodb://127.0.0.1:27118/${dbName}?replicaSet=rs0`;
+  const standalone = `mongodb://127.0.0.1:27117/${dbName}`;
+
+  try {
+    const probe = await mongoose.createConnection(replicaSet, {
+      serverSelectionTimeoutMS: 2500,
+    }).asPromise();
+    await probe.close();
+    return replicaSet;
+  } catch {
+    return standalone;
+  }
+}
+
+process.env.MONGODB_URI = await pickDatabaseUri();
+const usingReplicaSet = /replicaSet=/.test(process.env.MONGODB_URI);
 // Deliberately cleared -- see the file header. Never let this tool make a real paid call.
 delete process.env.DEEPSEEK_API_KEY;
 delete process.env.OCR_SPACE_API_KEY;
@@ -82,6 +109,7 @@ const toFileUrl = (...segments) => pathToFileURL(join(repoRoot, ...segments)).hr
 const { connectDB } = await import(toFileUrl("src", "config", "db.js"));
 const { default: app } = await import(toFileUrl("src", "app.js"));
 const { default: User } = await import(toFileUrl("src", "models", "User.js"));
+const { default: Firm } = await import(toFileUrl("src", "models", "Firm.js"));
 const { default: AppConfig, DEFAULT_FEATURE_FLAGS } = await import(
   toFileUrl("src", "models", "AppConfig.js")
 );
@@ -101,6 +129,20 @@ await mongoose.connection.dropDatabase();
 await AppConfig.create({
   _id: "singleton",
   featureFlags: Object.fromEntries(Object.keys(DEFAULT_FEATURE_FLAGS).map((key) => [key, true])),
+  // Seeded here, not later, for the reason above the AppConfig.create call.
+  // mandatory:false is load-bearing: a mandatory update answers 409 by design, so capturing it
+  // would record the refusal shape rather than the dismissal shape the desktop actually parses.
+  desktopRelease: {
+    latestVersion: "0.1.3.0",
+    minSupportedVersion: "",
+    downloadUrl: "https://caprotoolkit.in/download.html",
+    releaseNotes: "Fixture capture announcement.",
+    mandatory: false,
+    announcementId: "fixture-announcement-1",
+    announcedAt: new Date(),
+    enabled: true,
+    updatedAt: new Date(),
+  },
 });
 
 const server = app.listen(0);
@@ -146,6 +188,33 @@ async function call(method, path, { body, auth = true } = {}) {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  let json = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = null;
+  }
+  return { status: response.status, json, text };
+}
+
+/**
+ * POST a real multipart body. Node 24 has FormData/Blob natively, so this needs no dependency and
+ * produces a genuine multipart/form-data request that multer parses as `req.file`.
+ *
+ * Deliberately does NOT set Content-Type: fetch derives it from the FormData, including the
+ * boundary. Setting it by hand is the classic way to make multer see no file at all.
+ */
+async function callMultipart(method, path, { fileField = "file", fileName, contentType, bytes, fields = {} }) {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) form.append(key, String(value));
+  form.append(fileField, new Blob([bytes], { type: contentType }), fileName);
+
+  const response = await fetch(base + "/" + path, {
+    method,
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
   });
   const text = await response.text();
   let json = null;
@@ -387,35 +456,177 @@ define("POST", "api/audit/reminder-message", async () =>
   }),
 );
 
+
+// ── Routes that used to be skipped ──────────────────────────────────────────────────────────
+//
+// TWO OF THE OLD SKIP REASONS WERE SIMPLY WRONG, and that is worth stating rather than quietly
+// fixing. `POST api/imports/preview` and `POST api/imports/gstr2b/convert` were both recorded as
+// needing "a real multipart file body this tool does not yet build". They do not. Reading
+// CaProApiClient.cs, preview sends `JsonContent.Create(body)` with the file's TEXT in a `text`
+// field, and gstr2b/convert sends a plain `{"json": ...}` string body. Neither route has multer on
+// it. The skips were inferred from the routes' subject matter rather than from what the client
+// actually sends, and they survived three passes because a skip with a confident reason attached
+// reads like a finding. Only `POST api/cases/ocr` is genuinely multipart.
+
+// CLIENTS is the one preview kind with no statutory context to invent: its spec requires exactly
+// one mapped field, `name`. `mapping` is field -> source column header, not the reverse.
+define("POST", "api/imports/preview", async () =>
+  call("POST", "api/imports/preview", {
+    body: {
+      kind: "CLIENTS",
+      text: "Client Name,PAN\nVerity Textiles Private Limited,AAACV1234K\nDhanraj & Sons,AAAFD5678L\n",
+      mapping: { name: "Client Name", pan: "PAN" },
+      delimiter: ",",
+    },
+  }),
+);
+
+// The converter reads a GSTR-2B export's own shape. This is the minimum the real portal file has
+// that the converter navigates; it is a shape fixture, not a data fixture.
+define("POST", "api/imports/gstr2b/convert", async () =>
+  call("POST", "api/imports/gstr2b/convert", {
+    body: {
+      json: {
+        data: {
+          docdata: {
+            b2b: [
+              {
+                ctin: "27AAACV1234K1ZP",
+                trdnm: "Verity Textiles Private Limited",
+                inv: [
+                  {
+                    inum: "INV-0001",
+                    dt: "01-07-2026",
+                    val: 118000,
+                    itms: [{ num: 1, itm_det: { rt: 18, txval: 100000, iamt: 18000 } }],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    },
+  }),
+);
+
+// The one genuinely multipart route. The OCR provider key is deliberately cleared at the top of
+// this file, so this captures the real "provider not configured" refusal -- which is itself a shape
+// the desktop must parse (ApiStatus.ProviderUnavailable), not a workaround.
+define("POST", "api/cases/ocr", async () =>
+  callMultipart("POST", "api/cases/ocr", {
+    fileField: "file",
+    fileName: "notice.png",
+    contentType: "image/png",
+    // "true" as TEXT, matching CaProApiClient.cs:3095 and the server's
+    // String(req.body?.consent).toLowerCase() === "true". Without it the route answers
+    // OCR_CONSENT_REQUIRED, which is a real shape but not the one this route exists to serve.
+    fields: { consent: "true" },
+    // A real 1x1 PNG, so multer sees a genuine file rather than an empty part.
+    bytes: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    ),
+  }),
+);
+
+// The announcement it dismisses is seeded onto the AppConfig singleton at the top of this file,
+// before the server starts, so it is already visible past getInstance()'s 30-second cache. The
+// route under test is the DISMISSAL, not the announcement, which is why this does not drive the
+// super-admin announce route -- this capture holds no super-admin identity.
+define("POST", "api/app-config/dismiss-desktop-update", async () =>
+  call("POST", "api/app-config/dismiss-desktop-update", {
+    body: { announcementId: "fixture-announcement-1" },
+  }),
+);
+
+// Needs a join code for a firm the caller is NOT already in, so this builds both sides itself.
+//
+// TWO SEPARATE THROWAWAY USERS, and the second one is the point. Joining a firm SWITCHES the
+// caller's active workspace, so having the main capture user join would have silently changed what
+// every later route sees. It did, on the first attempt: `GET api/firms/me` started returning the
+// host firm instead of "Fixture Shared Firm" and its fixture check failed. That is the capture
+// contaminating itself -- a fixture that is individually valid while describing a state no real
+// session would be in. A dedicated joiner keeps the main user's workspace exactly as the other 32
+// routes found it.
+define("POST", "api/firms/join", async () => {
+  const provision = async (email, name) => {
+    const created = await User.create({
+      email,
+      name,
+      role: "USER",
+      accountType: "INDIVIDUAL",
+      isActive: true,
+    });
+    return ensurePersonalFirm(created);
+  };
+
+  const asUser = async (forUser, method, path, body) => {
+    const response = await fetch(base + "/" + path, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${mintToken(forUser)}`,
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await response.text();
+    let json = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
+    }
+    return { status: response.status, json, text };
+  };
+
+  const host = await provision("desktop-fixtures-host@example.invalid", "Fixture Host User");
+  const created = await asUser(host, "POST", "api/firms", {
+    displayName: "Fixture Host Firm",
+    handle: "fixture-host-firm",
+    operationId: randomUUID().replaceAll("-", ""),
+  });
+  const hostFirmId = created.json?.firm?.id || created.json?.firm?._id;
+  if (!hostFirmId) {
+    return { skip: `second firm could not be created for a join code (HTTP ${created.status})` };
+  }
+
+  const hostFirm = await Firm.findById(hostFirmId).select("joinCode").lean();
+  if (!hostFirm?.joinCode) return { skip: "the second firm carries no join code to join with" };
+
+  const joiner = await provision("desktop-fixtures-joiner@example.invalid", "Fixture Joiner User");
+  return asUser(joiner, "POST", "api/firms/join", {
+    joinCode: hostFirm.joinCode,
+    operationId: randomUUID().replaceAll("-", ""),
+  });
+});
+
+// The transactional route. updateFirmDigestSettings opens a MongoDB session, which a standalone
+// mongod rejects outright -- that was recorded here as a genuine environment limitation and it was
+// true at the time. It stopped being true when a replica set appeared on 27118 for L12's erasure
+// work, which the connection probe at the top of this file now prefers. Still skips itself with the
+// original reason when only the standalone container is up, so this tool keeps working either way
+// rather than making the replica set a hard dependency of the drift gate.
+define("PATCH", "api/digests/settings", async () => {
+  if (!usingReplicaSet) {
+    return {
+      skip:
+        "updateFirmDigestSettings runs inside a MongoDB session/transaction, which requires a " +
+        "replica set; this run connected to a standalone mongod, which rejects it with " +
+        "'Transaction numbers are only allowed on a replica set member or mongos'",
+    };
+  }
+  return call("PATCH", "api/digests/settings", {
+    body: { timezone: "Asia/Kolkata", dailyHour: 7, weeklyDay: 1, weeklyHour: 8 },
+  });
+});
+
 // Explicitly out of reach for this pass, with the real reason recorded rather than left silent.
 // Tracked in preSkippedKeys (not just the skipped[] report list) so the "uncovered by plan"
 // check below -- which exists to catch a route the parser found that this file forgot about
 // entirely -- does not also, wrongly, flag every route named here as forgotten.
 const preSkippedKeys = new Set();
 for (const [key, reason] of [
-  ["POST api/firms/join", "needs a real, pre-existing join code from a second firm"],
-  [
-    "POST api/app-config/dismiss-desktop-update",
-    "needs an announced desktopRelease on this fresh AppConfig singleton",
-  ],
-  ["POST api/imports/preview", "needs a real multipart CSV/JSON file body this tool does not yet build"],
-  [
-    "POST api/cases/ocr",
-    "extractTextWithOcrSpace requires a real multipart image file (req.file via multer), not a " +
-      "JSON body field -- reproduced directly (\"OCR file is required\") rather than assumed; this " +
-      "tool does not yet build multipart bodies (same limitation as the two imports routes below)",
-  ],
-  [
-    "POST api/imports/gstr2b/convert",
-    "needs a real multipart GSTR-2B JSON file body this tool does not yet build",
-  ],
-  [
-    "PATCH api/digests/settings",
-    "updateFirmDigestSettings runs inside a MongoDB session/transaction, which requires a replica " +
-      "set; the local capture database (capro-mongo-dev) is a standalone mongod and rejects it " +
-      "with 'Transaction numbers are only allowed on a replica set member or mongos' -- reproduced " +
-      "directly, not assumed",
-  ],
 ]) {
   skipped.push({ route: key, reason });
   preSkippedKeys.add(key);
@@ -474,6 +685,11 @@ const manifest = {
   totalRoutesDiscovered: staticRoutes.length,
   captured,
   skipped,
+  // Which database class produced these fixtures. Two routes (PATCH api/digests/settings and
+  // POST api/firms/join) open MongoDB transactions, so a capture taken without a replica set is
+  // NOT comparable to one taken with it. Recording it lets the drift gate say "captured against a
+  // different database class" instead of reporting the difference as a field-shape change.
+  transactionsAvailable: usingReplicaSet,
   uncoveredByPlan: planless.map((route) => `${route.method} ${route.path}`),
 };
 writeFileSync(join(fixturesDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
