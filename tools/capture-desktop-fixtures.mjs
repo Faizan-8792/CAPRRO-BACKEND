@@ -753,6 +753,7 @@ async function ensureCaseInCurrentFirm() {
 }
 
 let currentFirmEngagementId = null;
+let currentFirmEngagementRevision = null;
 async function ensureEngagementInCurrentFirm() {
   if (currentFirmEngagementId) return currentFirmEngagementId;
   const clientId = await ensureClientId();
@@ -768,6 +769,9 @@ async function ensureEngagementInCurrentFirm() {
     },
   });
   currentFirmEngagementId = created.json?.engagement?._id ?? null;
+  // Carried, not assumed: assertRevision refuses a stale expectedRevision, and a fresh engagement
+  // is at revision 1 today but need not stay that way.
+  currentFirmEngagementRevision = created.json?.engagement?.revision ?? null;
   return currentFirmEngagementId;
 }
 
@@ -828,6 +832,146 @@ define("GET", "api/digests/inbox?page={boundedPage}&limit={boundedLimit}", async
 define("GET", "api/digests/preview?kind={kind}", async () =>
   call("GET", "api/digests/preview?kind=DAILY_PERSONAL"),
 );
+
+// ── Parameterised routes, batch 2: the remaining reads that need no imported run ────────────
+//
+// Same rule as batch 1 -- reads only, each creating what it needs in the firm that is active now.
+
+/** A working paper in the current firm, plus the engagement it hangs off. */
+let currentFirmWorkingPaperId = null;
+async function ensureWorkingPaperInCurrentFirm() {
+  if (currentFirmWorkingPaperId) return currentFirmWorkingPaperId;
+  const engagementId = await ensureEngagementInCurrentFirm();
+  if (!engagementId) return null;
+
+  // ATTEST FIRST. assertEngagementWritable refuses working-paper work while
+  // templateReview.status !== "ATTESTED" (audit-working-paper.service.js:283) -- a real reviewer
+  // control, reproduced live as HTTP 409 ENGAGEMENT_TEMPLATE_REVIEW_REQUIRED rather than guessed at.
+  const attested = await call("POST", `api/engagements/${encodeURIComponent(String(engagementId))}/review`, {
+    body: {
+      action: "ATTEST_TEMPLATE",
+      confirmed: true,
+      expectedRevision: currentFirmEngagementRevision,
+      reviewerName: "Fixture Reviewer",
+      credentialReference: "FIXTURE-CRED-001",
+      mutationKey: `fixture-capture-attest-${randomUUID().replaceAll("-", "").slice(0, 12)}`,
+    },
+  });
+  if (!attested.json?.ok) return null;
+
+  // No clientId: PAPER_CREATE_FIELDS is {mutationKey, engagementId, title, purpose, period,
+  // priorWorkingPaperId} and the service calls assertAllowedFields, so an extra field refuses the
+  // whole request rather than being ignored. The client comes from the engagement.
+  const created = await call("POST", "api/engagements/working-papers", {
+    body: {
+      engagementId,
+      title: "Fixture working paper",
+      purpose: "Captured so the desktop has a real working-paper shape to parse.",
+      mutationKey: `fixture-capture-wp-${randomUUID().replaceAll("-", "").slice(0, 12)}`,
+    },
+  });
+  // The route answers { ok, paper }, not { workingPaper } - read off a real 201 rather than guessed.
+  currentFirmWorkingPaperId = created.json?.paper?._id ?? null;
+  return currentFirmWorkingPaperId;
+}
+
+define("GET", "api/engagements/working-papers/{workingPaperId}", async () => {
+  const id = await ensureWorkingPaperInCurrentFirm();
+  if (!id) return { skip: "could not create a working paper in the active firm" };
+  return call("GET", `api/engagements/working-papers/${encodeURIComponent(String(id))}`);
+});
+
+define("GET", "api/engagements/working-papers/{workingPaperId}/export", async () => {
+  const id = await ensureWorkingPaperInCurrentFirm();
+  if (!id) return { skip: "could not create a working paper in the active firm" };
+  return call("GET", `api/engagements/working-papers/${encodeURIComponent(String(id))}/export`);
+});
+
+/** A task in the current firm. chain.taskId predates the workspace switch, so make a fresh one. */
+let currentFirmTaskId = null;
+async function ensureTaskInCurrentFirm() {
+  if (currentFirmTaskId) return currentFirmTaskId;
+  // Same body shape as the POST api/tasks capture above, which is known to work. "service" is not
+  // a field this route accepts.
+  const created = await call("POST", "api/tasks", {
+    body: {
+      clientName: "Fixture Client",
+      title: "Fixture task for detail read",
+      dueDateISO: "2026-12-31",
+    },
+  });
+  currentFirmTaskId = created.json?.task?._id ?? null;
+  return currentFirmTaskId;
+}
+
+define("GET", "api/tasks/{taskId}", async () => {
+  const id = await ensureTaskInCurrentFirm();
+  if (!id) return { skip: "could not create a task in the active firm" };
+  return call("GET", `api/tasks/${encodeURIComponent(String(id))}`);
+});
+
+/**
+ * A workspace-operation receipt, read back by its id.
+ *
+ * Every workspace write (firm create, switch, join) carries an operationId and the server records
+ * a receipt against it, which is how the desktop recovers from a write whose response it never
+ * saw. Rather than reuse an id from an earlier route -- whose firm may since have changed -- this
+ * performs its own switch to the firm already active, which is a no-op the server still records.
+ */
+define("GET", "api/firms/workspace-operations/{operationId}", async () => {
+  const firmId = user.firmId;
+  if (!firmId) return { skip: "no active firm to record a workspace operation against" };
+  const operationId = randomUUID().replaceAll("-", "");
+  const switched = await call("POST", "api/firms/switch", {
+    body: { firmId: String(firmId), operationId },
+  });
+  if (!switched.json?.ok) {
+    return { skip: `could not record a workspace operation to read back (HTTP ${switched.status})` };
+  }
+  return call("GET", `api/firms/workspace-operations/${encodeURIComponent(operationId)}`);
+});
+
+/** A bulk task operation, read back by its operation id. */
+define("GET", "api/tasks/bulk/{operationId}", async () => {
+  const id = await ensureTaskInCurrentFirm();
+  if (!id) return { skip: "could not create a task to build a bulk operation from" };
+  const operationId = randomUUID().replaceAll("-", "");
+  const preview = await call("POST", "api/tasks/bulk/preview", {
+    body: {
+      operationId,
+      items: [{ taskId: String(id), patch: { status: "IN_PROGRESS" } }],
+    },
+  });
+  if (!preview.json?.ok) {
+    return { skip: `bulk preview did not produce an operation to read back (HTTP ${preview.status})` };
+  }
+  // The GET keys on the operation's ObjectId, NOT on the caller-supplied operationId: getTaskBulk
+  // Operation rejects anything that is not a valid ObjectId (task-bulk.service.js:620). The preview
+  // returns it as operation.id.
+  const bulkId = preview.json?.operation?.id ?? null;
+  if (!bulkId) return { skip: "bulk preview returned no operation id to read back" };
+  return call("GET", `api/tasks/bulk/${encodeURIComponent(String(bulkId))}`);
+});
+
+/** A tax-work session in the current firm. */
+define("GET", "api/taxworker/sessions/{sessionId}", async () => {
+  // A client in the CURRENTLY active firm. ensureClientId caches one created before
+  // POST api/firms/switch, and this route answered 404 "Client not found in your scope" for it --
+  // the same stale-workspace trap the case and engagement handlers above avoid.
+  const madeClient = await call("POST", "api/taxworker/clients", {
+    body: { name: "Fixture Session Client", entityType: "INDIVIDUAL" },
+  });
+  const clientId = madeClient.json?.client?._id ?? null;
+  if (!clientId) {
+    return { skip: `could not create a client in the active firm (HTTP ${madeClient.status})` };
+  }
+  const created = await call("POST", "api/taxworker/sessions", {
+    body: { clientId, taxType: "GST_MONTHLY" },
+  });
+  const sessionId = created.json?.session?._id ?? null;
+  if (!sessionId) return { skip: `tax-work session was not created (HTTP ${created.status})` };
+  return call("GET", `api/taxworker/sessions/${encodeURIComponent(String(sessionId))}`);
+});
 
 // Explicitly out of reach for this pass, with the real reason recorded rather than left silent.
 // Tracked in preSkippedKeys (not just the skipped[] report list) so the "uncovered by plan"
