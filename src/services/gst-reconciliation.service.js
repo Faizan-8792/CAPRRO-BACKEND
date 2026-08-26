@@ -35,6 +35,7 @@ import {
   summarizeReconciliationItems,
   TAX_HEAD_FIELDS,
 } from "./gst-matching.service.js";
+import { userFacingMessage } from "../utils/user-facing-error.js";
 
 const GST_RECONCILIATION_JOB_KIND = "GST_RECONCILIATION";
 const MATCHING_CONFIG_VERSION = "gst-match-v1";
@@ -856,10 +857,13 @@ export async function processGstReconciliationJob(
       $set: {
         status: "FAILED",
         processingJobId: null,
-        lastError: String(error.message || "Reconciliation failed").slice(
-          0,
-          600,
-        ),
+        // V13-P12-F2. This field is read back verbatim into the run view (see the serialiser
+        // above, `lastError: run.lastError || ""`), so it is shown to the firm without ever
+        // passing through publicErrorMessage. Only authored copy may be stored here.
+        lastError: userFacingMessage(
+          error,
+          "Reconciliation could not be completed. Try again, or contact support if it continues.",
+        ).slice(0, 600),
       },
     });
     throw error;

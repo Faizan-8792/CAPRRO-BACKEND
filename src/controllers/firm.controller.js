@@ -9,6 +9,7 @@ import {
   ensurePersonalFirm,
 } from "../services/firm-provisioning.service.js";
 import workspaceOperationService from "../services/workspace-operation.service.js";
+import { userFacingMessage } from "../utils/user-facing-error.js";
 
 const MEMBERSHIP_TRANSACTION_OPTIONS = {
   readConcern: { level: "snapshot" },
@@ -313,7 +314,11 @@ async function setActiveWorkspace(
           {
             userId: user._id,
             httpStatus: error.statusCode,
-            message: error.message,
+            // V13-P12-F2. Safe today because the enclosing responder re-throws anything without a
+            // statusCode, so only authored 4xx copy reaches here. Gated anyway: this receipt is
+            // returned to the client (`operation` on the error body), so it is one refactor of
+            // that guard away from carrying an exception's text.
+            message: userFacingMessage(error, "Workspace operation was rejected"),
           },
         );
       } catch {

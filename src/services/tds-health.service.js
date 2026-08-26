@@ -30,6 +30,7 @@ import {
   assertTdsReviewStorageReady,
 } from "./tds-storage-readiness.service.js";
 import { normalizeTdsContext } from "./tds-normalization.service.js";
+import { userFacingMessage } from "../utils/user-facing-error.js";
 
 const TDS_HEALTH_JOB_KIND = "TDS_HEALTH";
 const MAX_PAGE_SIZE = 100;
@@ -612,7 +613,17 @@ async function createTdsHealthRun({
   } catch (error) {
     await TdsHealthRun.updateOne(
       { _id: run._id, firmId, status: "QUEUED", jobId: null },
-      { $set: { status: "FAILED", lastError: cleanText(error.message, 600) } }
+      {
+        $set: {
+          status: "FAILED",
+          // V13-P12-F2. Read back into the run view at `lastError: run.lastError || ""`,
+          // so this reaches the firm unsanitised. Authored copy only.
+          lastError: cleanText(
+            userFacingMessage(error, "TDS health checks could not be completed."),
+            600,
+          ),
+        },
+      }
     ).catch(() => {});
     throw error;
   }
@@ -969,7 +980,17 @@ async function processTdsHealthJob(job, { assertLease = async () => {} } = {}) {
         generationAttempt,
         status: "PROCESSING",
       },
-      { $set: { status: "FAILED", lastError: cleanText(error.message, 600) } }
+      {
+        $set: {
+          status: "FAILED",
+          // V13-P12-F2. Read back into the run view at `lastError: run.lastError || ""`,
+          // so this reaches the firm unsanitised. Authored copy only.
+          lastError: cleanText(
+            userFacingMessage(error, "TDS health checks could not be completed."),
+            600,
+          ),
+        },
+      }
     ).catch(() => {});
     throw error;
   }

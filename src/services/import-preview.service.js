@@ -18,6 +18,7 @@ import {
   classifyNumericDate,
   resolveDateOrder,
 } from "./robust-normalize.service.js";
+import { userFacingMessage } from "../utils/user-facing-error.js";
 
 const MAX_TEXT_BYTES = 500_000;
 const MAX_ROWS = 500;
@@ -335,11 +336,19 @@ export function parseMappedImport({ kind, text, mapping, delimiter = null, dateO
         normalizedRows.map((row) => row.values)
       );
     } catch (error) {
+      // V13-P12-F2. This catch is broad on purpose - a malformed GSTR-3B must produce a field
+      // error rather than a 500 - but the MESSAGE may only be forwarded when it was written for a
+      // user. calculateGstr3bClaimed throws four authored sentences about the file itself, and
+      // those are exactly what a firm needs to see. Anything else reaching here is a bug in our
+      // code, and its text would arrive looking like a statement about their return.
       errors.push({
         row: normalizedRows[0]?.row || 2,
         field: "category",
         code: "INVALID_GSTR3B_SUMMARY",
-        message: error.message,
+        message: userFacingMessage(
+          error,
+          "This GSTR-3B summary could not be read. Check the category and amount columns, then try again.",
+        ),
       });
     }
   }

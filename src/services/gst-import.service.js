@@ -17,6 +17,7 @@ import {
   isValidPeriod,
   normalizeGstin,
 } from "./gst-normalization.service.js";
+import { userFacingMessage } from "../utils/user-facing-error.js";
 
 // Bumped to v3 when dateOrder joined the fingerprint material (C3): a batch
 // committed under v2 has no dateOrder recorded and will not replay against a
@@ -355,7 +356,14 @@ export async function commitGstImport({
     try {
       gstr3bControl = calculateGstr3bClaimed(parsed.rows.map((row) => row.values));
     } catch (error) {
-      throw serviceError(error.message, 422, { code: "INVALID_GSTR3B_SUMMARY" });
+      throw serviceError(
+      // V13-P12-F2. INVALID_GSTR3B_SUMMARY is not on PUBLIC_ERROR_CODES, so production
+      // already replaces this with generic 4xx copy - but development returns it verbatim,
+      // and the code could be made public later without anyone revisiting this line.
+      userFacingMessage(error, "This GSTR-3B summary could not be reconciled."),
+      422,
+      { code: "INVALID_GSTR3B_SUMMARY" },
+    );
     }
   }
   const committedTaxMinor = gstr3bControl
@@ -580,7 +588,10 @@ export async function commitGstImport({
             processingExpiresAt: null,
             errorSummary: {
               code: String(error.code || error.name || "IMPORT_FAILED").slice(0, 80),
-              message: String(error.message || "Import failed").slice(0, 500),
+              // V13-P12-F2. This record is read back to the client verbatim (see toBatchView
+              // and the FAILED branch of the status route), so it never passes through
+              // publicErrorMessage. Only authored copy may be stored here.
+              message: userFacingMessage(error, "Import failed. Check the file and try again.").slice(0, 500),
             },
             completedAt: new Date(),
           },

@@ -1,3 +1,5 @@
+import { userFacingError } from "../utils/user-facing-error.js";
+
 // Robust, DETERMINISTIC adaptive-import primitives shared by the GST and TDS
 // normalizers. The goal: accept messy, format-varied, real-world data (any date
 // shape, any money shape, aliased labels, aliased column headers) while keeping
@@ -269,11 +271,14 @@ function parseFlexibleDateIso(value, { dateOrder = DATE_ORDER.DAY_FIRST } = {}) 
 // Parse a messy money string into EXACT integer paise. Handles ₹/Rs/INR prefixes,
 // Indian & international comma grouping, spaces/NBSP, parentheses or trailing CR as
 // negative, trailing DR/DB and "/-", unicode minus/dashes. Throws on genuine junk.
+// Every throw below names the user's OWN column ("amountPaid cannot be negative") and is meant to
+// be read by them, so it is tagged user-facing per V13-P12-F2. That tag is what lets the import
+// preview forward this text while still replacing the message of an unexpected exception.
 function parseFlexibleMoneyMinor(value, { allowBlank = true, nonNegative = false, field = "amount" } = {}) {
   let raw = String(value ?? "").replace(/\u00a0/g, " ").trim();
   if (!raw) {
     if (allowBlank) return 0;
-    throw new Error(`${field} is required`);
+    throw userFacingError(`${field} is required`);
   }
 
   let s = raw.toUpperCase();
@@ -297,14 +302,14 @@ function parseFlexibleMoneyMinor(value, { allowBlank = true, nonNegative = false
   s = s.replace(/[,\s']/g, "");
 
   if (!/^\d+(\.\d{1,2})?$/.test(s)) {
-    throw new Error(`${field} must be a decimal amount with at most two fraction digits`);
+    throw userFacingError(`${field} must be a decimal amount with at most two fraction digits`);
   }
   const [whole, fraction = ""] = s.split(".");
   const minor = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
   const signed = negative ? -minor : minor;
-  if (nonNegative && signed < 0n) throw new Error(`${field} cannot be negative`);
+  if (nonNegative && signed < 0n) throw userFacingError(`${field} cannot be negative`);
   if (signed > BigInt(Number.MAX_SAFE_INTEGER) || signed < BigInt(Number.MIN_SAFE_INTEGER)) {
-    throw new Error(`${field} exceeds safe currency range`);
+    throw userFacingError(`${field} exceeds safe currency range`);
   }
   return Number(signed);
 }

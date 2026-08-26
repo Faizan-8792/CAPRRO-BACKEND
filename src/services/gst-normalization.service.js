@@ -2,6 +2,7 @@ import {
   parseFlexibleDateIso,
   parseFlexibleMoneyMinor,
 } from "./robust-normalize.service.js";
+import { userFacingError, userFacingMessage } from "../utils/user-facing-error.js";
 
 const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const PERIOD_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -198,10 +199,10 @@ function calculateGstr3bClaimed(rows) {
   for (const source of rows) {
     const row = typeof source?.toObject === "function" ? source.toObject() : source;
     const category = normalizeGstr3bCategory(row?.summaryCategory);
-    if (!category) throw new Error("GSTR-3B summary contains an unsupported category");
+    if (!category) throw userFacingError("GSTR-3B summary contains an unsupported category");
     for (const field of ["igstMinor", "cgstMinor", "sgstMinor", "cessMinor"]) {
       if (Number(row?.[field] || 0) < 0) {
-        throw new Error("GSTR-3B category amounts must be non-negative");
+        throw userFacingError("GSTR-3B category amounts must be non-negative");
       }
     }
     byCategory.get(category).push(row);
@@ -211,12 +212,12 @@ function calculateGstr3bClaimed(rows) {
   const availableRows = byCategory.get("ITC_AVAILABLE");
   const reversalRows = byCategory.get("ITC_REVERSED");
   if (claimedRows.length && (availableRows.length || reversalRows.length)) {
-    throw new Error(
+    throw userFacingError(
       "GSTR-3B summary cannot mix net ITC claimed with gross available or reversal rows"
     );
   }
   if (!claimedRows.length && !availableRows.length) {
-    throw new Error("GSTR-3B summary requires ITC_CLAIMED or ITC_AVAILABLE rows");
+    throw userFacingError("GSTR-3B summary requires ITC_CLAIMED or ITC_AVAILABLE rows");
   }
 
   const fields = ["igstMinor", "cgstMinor", "sgstMinor", "cessMinor"];
@@ -247,7 +248,13 @@ function normalizeGstImportRow(kind, input, { dateOrder } = {}) {
       money[field] = parseMoneyMinor(input[field]);
     } catch (error) {
       money[field] = 0;
-      addError(field, "INVALID_MONEY", error.message);
+      addError(
+        field,
+        "INVALID_MONEY",
+        // V13-P12-F2: forward the parser's authored "<column> cannot be negative"
+        // copy, but never the text of an unexpected exception.
+        userFacingMessage(error, `${field} is not an amount we can read.`),
+      );
     }
   }
 
@@ -309,7 +316,11 @@ function normalizeGstImportRow(kind, input, { dateOrder } = {}) {
   try {
     reverseCharge = parseBoolean(input.reverseCharge);
   } catch (error) {
-    addError("reverseCharge", "INVALID_BOOLEAN", error.message);
+    addError(
+        "reverseCharge",
+        "INVALID_BOOLEAN",
+        userFacingMessage(error, "Reverse charge must read as yes or no."),
+      );
   }
 
   return {

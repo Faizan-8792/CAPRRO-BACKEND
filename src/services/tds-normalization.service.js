@@ -4,6 +4,7 @@ import {
   parseFlexibleDateIso,
   parseFlexibleMoneyMinor,
 } from "./robust-normalize.service.js";
+import { userFacingError, userFacingMessage } from "../utils/user-facing-error.js";
 
 // Bumped to v2 when dateOrder joined the fingerprint material (C3) -- a batch
 // committed under v1 will not replay against a re-submission of the same file.
@@ -100,7 +101,7 @@ function normalizeIsoDay(value, { field, required = false, dateOrder } = {}) {
   const normalized = String(value || "").trim();
   if (!normalized && !required) return "";
   const iso = parseFlexibleDateIso(normalized, { dateOrder });
-  if (!iso) throw new Error(`${field} must be a real date (YYYY-MM-DD or common formats)`);
+  if (!iso) throw userFacingError(`${field} must be a real date (YYYY-MM-DD or common formats)`);
   return iso;
 }
 
@@ -154,7 +155,15 @@ function normalizeTdsImportRow(kind, mapped, { dateOrder } = {}) {
     try {
       values[field] = callback();
     } catch (error) {
-      errors.push({ field, code: "INVALID_VALUE", message: error.message });
+      // V13-P12-F2. The callbacks below throw copy naming the user's own column, and that copy is
+      // exactly what a firm needs beside the row number. This lands in a 200 OK preview body, so
+      // the Express error handler never sees it and cannot sanitise it; a TypeError from a bug in
+      // our parsing would otherwise arrive here reading like a statement about their return.
+      errors.push({
+        field,
+        code: "INVALID_VALUE",
+        message: userFacingMessage(error, `${field} could not be read. Check this column and try again.`),
+      });
     }
   };
 

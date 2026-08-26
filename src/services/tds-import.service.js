@@ -18,6 +18,7 @@ import {
   normalizeTdsContext,
 } from "./tds-normalization.service.js";
 import { assertTdsImportStorageReady } from "./tds-storage-readiness.service.js";
+import { userFacingMessage } from "../utils/user-facing-error.js";
 
 const TDS_IMPORT_PROCESSING_LEASE_MS = 10 * 60 * 1000;
 const PREVIEW_TOKEN_TTL_MS = 15 * 60 * 1000;
@@ -440,7 +441,9 @@ async function commitTdsImport({
             processingExpiresAt: null,
             errorSummary: {
               code: String(error.code || error.name || "IMPORT_FAILED").slice(0, 80),
-              message: String(error.message || "TDS import failed").slice(0, 500),
+              // V13-P12-F2. Returned to the client as `failure` on a FAILED batch, so this
+              // text never reaches publicErrorMessage and must be authored copy.
+              message: userFacingMessage(error, "TDS import failed. Check the file and try again.").slice(0, 500),
             },
             completedAt: new Date(),
           },
