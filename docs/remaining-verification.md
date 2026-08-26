@@ -9,7 +9,7 @@ machine, or a mailbox. Anything that could be executed has been, and is recorded
 `.kiro/finalreleasefix.md` against its own task.
 
 Last updated: 2026-08-26 (second pass, same day). Ledger at the time: **65 of 115 done (56.5%)**,
-agent-completable **65 of 92 (70.7%)**, release gates **8 of 14**, protocol OK.
+agent-completable **65 of 92 (70.7%)**, release gates **8 of 14**, protocol OK. UPDATED AGAIN 2026-08-26 evening: **65 of 116 (56.0%)**, agent-completable **65 of 92 (70.7%)**, gates **8 of 14**, protocol OK — L16 was added to the denominator, which is why the headline fell.
 
 **Why the percentage moved down slightly rather than up.** Two tasks were added (`T13`, `V16`, both
 closed with evidence) and one was un-ticked (`R9`), because `ledger-status.ps1` had a bug that made it
@@ -141,10 +141,12 @@ The filled §13 block, committed.
 its own `Not verified:` and `Gate not run:` lines, which the protocol does not allow, and only a bug in
 the ledger checker hid it. It is back at `[~]` with exactly three things left, all needing you:
 
-1. **On screen:** that the 19 checkboxes' **checked state** matches `/api/app-config`. The set and the
-   order no longer need checking — confirmed against the live server without a browser: 19 live
-   `featureFlags` keys, all 19 declared in `super.js`'s `FEATURE_FLAG_KEYS`, all 19 in
-   `DEFAULT_FEATURE_FLAGS`, declaration order equal to model order, exact set match both ways.
+1. ~~**On screen:** that the 19 checkboxes' **checked state** matches `/api/app-config`.~~
+   **DONE 2026-08-26 — no longer yours.** Verified in a real headless browser against the live panel:
+   19 checkboxes rendered, all 19 checked states equal to the live values (12 on, 7 off), no box
+   disabled (which is how a failed load is distinguished from "everything off"), and the live set is
+   mixed so an all-unchecked render could not have matched by accident. See
+   `capro-backend/tools/verify-admin-provider-usage.mjs` and `verify-admin-desktop-release.mjs`.
 2. **Toggle one low-risk flag and Save**, confirming the echo changes only that key. **An agent
    deliberately did not do this**: it is a write to production feature flags, it changes what every
    user sees, and `R10` is the owner task that decides that state. A verification run is not a licence
@@ -325,6 +327,83 @@ The audit's own summary lines (`pages reached`, `forbidden tokens (total)`, `fai
 
 ---
 
+## 11. The desktop-app screen queue — six tasks, one sitting, ~40 minutes
+
+**Tasks:** L10 (bullets 4-5) · L12 (bullet 13) · L13 (bullets 2-3) · L7 (click-through) · O10 (bullet 5) · R11/R13/R7/R8 · V15 · V2/V4
+**Added 2026-08-26.** These are grouped because they share one requirement and nothing else: **the
+WinUI desktop app has to be on a screen.**
+
+### Why an agent did not do these
+Not a capability gap — a courtesy one, stated so you can overrule it. Launching `CaPro.Desktop.exe`
+puts a window up and steals focus. You said you were studying, and this machine is the one you sit
+exams on, so an agent running a UI Automation sweep could interrupt something that matters more than a
+task tick. **Every script these need is written and passing on everything else.** If you are away from
+the machine and want them run, say so and they take one pass.
+
+### What to look at, once, with the app open and signed in
+1. **Security page** — the "WHAT IS KEPT, AND FOR HOW LONG" card. The Accounts line must show the new
+   deletion text and name a real contact (L10 bullet 4). Then pull the network and re-open it: it must
+   fall back to `RetentionDisclosure.UnstatedLine`, **not** a cached copy of the old false claim
+   (L10 bullet 5). The same card carries L12 bullet 13's erasure wording and grievance address.
+2. **Sign-in screen** — click the privacy hyperlink; it must reach the published policy (L7).
+3. **Sign in on the shipped build** against the deployed backend: no terms mismatch (L13 bullet 3), and
+   on a build carrying the OLD terms hash, the changed-terms recovery path (L13 bullet 2).
+4. **Rate-limited state** — with the DeepSeek daily cap set to 2 on a non-production instance, the third
+   AI Audit Scan must show the rate-limited surface, not a crash or a generic server error (O10 bullet 5).
+5. **`ui-route-audit.ps1`** — settles V15, and V2/V4's remaining coverage.
+
+### Evidence to capture
+A screenshot of the Security card online and offline, the terms-mismatch behaviour, and the audit's
+summary lines (`pages reached`, `forbidden tokens (total)`, `failures`) plus its exit code.
+
+---
+
+## 12. Two admin-panel actions an agent refused on purpose
+
+**Tasks:** U5 (bullet 3) · R9 (bullets 2-3) · O11
+**Added 2026-08-26.** The panel itself is now verified by machine — 30 assertions across
+`tools/verify-admin-desktop-release.mjs` and `tools/verify-admin-provider-usage.mjs`, all passing
+headless against the live panel. What is left is only the things that **change production state or need
+a second identity**:
+
+1. **U5 bullet 3 — a valid-values Save on the Desktop Release card.** Its own text expects
+   `desktopRelease: null` afterwards, which is now a stale premise: release 0.1.2 **is** announced, so
+   running it as written would overwrite an announced release. Decide whether you want that bullet
+   re-scoped or performed deliberately.
+2. **R9 bullet 2 — toggle one low-risk feature flag and Save**, confirming the echo changes only that
+   key. An agent will not do this: it changes what every user sees, and `R10` is the owner task that
+   decides that state.
+3. **R9 bullet 3 / U5 bullet 6 — a non-super account gets a readable 403.** Needs a second account.
+   `mint-admin-token.mjs` mints only for the hardcoded super-admin address and needs an OTP from your
+   mailbox. Signing a token locally for a different identity was considered and rejected: forging an
+   authentication credential against production to test a refusal is not an agent's call.
+4. **O11 — raise `minSupportedVersion` and observe a real desktop show "Update required"**, then lower
+   it. A production write reaching every client.
+
+### Evidence to capture
+For the 403: the status line's exact text. For the flag toggle: the echoed map, and a
+`curl /api/app-config` before and after showing only that key moved.
+
+---
+
+## 13. One decision, five minutes: L16
+
+**Task:** L16 · **Added 2026-08-26**
+
+L10's bullet 3 demands `grep -rn "no route that removes" .` return **0 hits** repo-wide. It returns 16,
+and **0 is unreachable while the fix stays pinned** — `capro-backend/tests/data-retention-contract.mjs:639`
+must name the forbidden string in order to assert its absence. Satisfying the grep would mean deleting
+the only guard against the false claim coming back.
+
+The substance the bullet was reaching for is already proved against production: the live
+`accountDeletion` text is correct and a grep for the false claim over the live response returns 0.
+
+**L16 carries a drafted replacement wording, already measured to pass.** Reply accept or refuse in one
+clause. Refusing is legitimate — it just leaves L10 permanently unmeetable, and that should be a
+deliberate choice rather than a thing everyone steps over.
+
+---
+
 ## Resolved since the last version of this file — do not redo these
 
 - **The 23 Mongo-dependent backend suites** (was blocked under `V13` as "Docker is deliberately down").
@@ -338,3 +417,26 @@ The audit's own summary lines (`pages reached`, `forbidden tokens (total)`, `fai
 - **The three `LiveBackendContractTests`**, which had been silently skipping in every run this project
   has recorded while being counted inside a `Passed!` line. They pass against production: the real Core
   figure is **2953/2953 with 0 skipped**, not 2950 with 3 skipped.
+- **Every gate that was deferred for "no browser exists in the agent environment."** That premise was
+  false. Chrome is installed at the standard path, a full Playwright browser cache sits in
+  `LOCALAPPDATA\ms-playwright`, and `capro-backend/tools/browser-drive.mjs` — a dependency-free CDP
+  driver — had already been committed *for exactly these gates* and imported by nothing
+  (`grep -rln browser-drive` returned only itself). Two new headless harnesses now cover **30
+  assertions, all passing** against the live panel: U5's card-render and both zero-request notify
+  refusal paths, U5's invalid-input message, R9's 19-checkbox checked-state comparison, and O10's
+  Provider usage card. **U5 item 4 in this file is therefore no longer the whole ask** — only the two
+  production-state items in section 12 remain.
+- **O10's `Blocked on: OWNER` line.** Resolved. It rested entirely on the Provider usage card needing a
+  browser session.
+- **L13's "is the rewritten Terms deploy live?" question.** It is:
+  `/api/auth/terms/current` returns `documentHash 70b649d9b113e8b3...`, version `2026-08-23`, **17
+  sections**, naming Kolkata and the entity. Any note elsewhere saying a Terms redeploy is still pending
+  is stale.
+- **Both published legal pages match the repository.** `privacy.html` is byte-identical;
+  `terms.html` differs only by line endings (0 CR served vs 180 in the Windows checkout) and is
+  identical once normalised.
+- **L12's deletion cascade.** Its old note that `deleteFirmForSuper` "handles only 3 of the 32
+  collections" is stale — it now drives the classified plan. Six of its seven gates pass, including the
+  coverage gate run **in both directions**: adding a throwaway firm-scoped model makes the contract test
+  fail by name and abort, and removing it returns 75/75. Only the on-screen Security card remains
+  (section 11).
