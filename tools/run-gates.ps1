@@ -666,7 +666,8 @@ try {
         # Registered here on the day it was added, deliberately: V17's invariant is that the runner
         # executes as many suites as exist in tests/, so a new suite left unregistered breaks that
         # gate rather than merely going unrun.
-        "admin-panel-same-origin"
+        "admin-panel-same-origin",
+        "desktop-route-discovery-contract"
     )
 
     # The other four unwired suites need a REPLICA SET, not just a mongod: they run multi-document

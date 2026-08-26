@@ -31,6 +31,12 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  parseStaticRoutes as parseStaticRouteLiterals,
+  parseInterpolatedRoutes as parseInterpolatedRouteLiterals,
+  parseIndirectRoutes,
+  parseAllRouteLiterals,
+} from "./desktop-route-parsers.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -82,25 +88,21 @@ delete process.env.OCR_SPACE_API_KEY;
 
 // ─── Step 1: parse the real route list out of CaProApiClient.cs, not a hand-kept copy ──────
 
+// The regexes themselves now live in ./desktop-route-parsers.mjs, imported at the top of this file,
+// because tests/desktop-route-discovery-contract.mjs needs the same definitions and nothing can
+// import THIS file to get them -- it drops a database at module scope. Two copies of a discovery
+// regex is how a discovery gap gets closed in one place and left open in the other.
+//
+// The history worth keeping: `\(\s*` rather than `\(` matters because the client formats longer
+// calls with a newline after the opening paren, and without tolerating that this parser silently
+// missed TEN real static routes, every one a list/index GET -- cases, engagements,
+// engagements/working-papers, filing-dashboard, gst-reconciliation/runs, review-queue, tasks/board,
+// taxworker/clients, tds-health/runs, workspace/search. They were never skipped with a reason, they
+// were never DISCOVERED, so "uncovered by plan: 0" was measured against a set that already excluded
+// them. A discovery bug is worse than a coverage gap, because it reports as completeness. The same
+// thing was true again, in a different form, for the ten indirectly-built routes below.
 function parseDesktopRoutes(sourcePath) {
-  const text = readFileSync(sourcePath, "utf8");
-  // `\(\s*`, not `\(`: the client formats longer calls with a newline after the opening
-  // paren, e.g. `Authorized(\n    HttpMethod.Get,\n    "api/cases?..."`. Without tolerating
-  // that, this parser silently missed TEN real static routes, every one of them a list/index
-  // GET: cases, engagements, engagements/working-papers, filing-dashboard,
-  // gst-reconciliation/runs, review-queue, tasks/board, taxworker/clients, tds-health/runs and
-  // workspace/search. They were never skipped with a reason -- they were never DISCOVERED, so
-  // the "uncovered by plan: 0" line was measured against a set that already excluded them.
-  // A discovery bug is worse than a coverage gap, because it reports as completeness.
-  const pattern = /(?:Authorized|new HttpRequestMessage)\(\s*HttpMethod\.(\w+),\s*"([^"]+)"/g;
-  const seen = new Map();
-  let match;
-  while ((match = pattern.exec(text))) {
-    const method = match[1].toUpperCase();
-    const path = match[2];
-    seen.set(`${method} ${path}`, { method, path });
-  }
-  return [...seen.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return parseStaticRouteLiterals(readFileSync(sourcePath, "utf8"));
 }
 
 const staticRoutes = parseDesktopRoutes(clientPath);
@@ -122,33 +124,21 @@ const staticRoutes = parseDesktopRoutes(clientPath);
  * nothing in this pass closes. The number is the honest measure of how far the desktop-to-backend
  * coupling actually reaches, and it should go down over time rather than being hidden.
  */
+// Hole collapsing (`{Uri.EscapeDataString(runId)}` -> `{runId}`, `{Math.Clamp(limit, 1, 100)}` ->
+// `{limit}`) lives in normaliseRouteTemplate in ./desktop-route-parsers.mjs, so the key is a stable
+// route shape rather than a snapshot of the C# inside it -- otherwise it changes whenever someone
+// edits a clamp bound and every fixture bound to it silently becomes uncaptured. It also now drops
+// trailing method names, so `{Uri.EscapeDataString(id.Trim())}` keys as `{id}` and not as `{Trim}`.
 function parseInterpolatedRoutes(sourcePath) {
-  const text = readFileSync(sourcePath, "utf8");
-  const pattern = /(?:Authorized|new HttpRequestMessage)\(\s*HttpMethod\.(\w+),\s*\$"([^"]+)"/g;
-  const seen = new Map();
-  let match;
-  while ((match = pattern.exec(text))) {
-    const method = match[1].toUpperCase();
-    // Collapse `{Uri.EscapeDataString(runId)}` and `{query}` down to `{runId}` / `{query}` so the
-    // report reads as a route template rather than as C# source.
-    // Collapse every interpolated hole to its last identifier, so a template is a stable route
-    // shape rather than a snapshot of the C# inside it:
-    //   {Uri.EscapeDataString(runId)}      -> {runId}
-    //   {Math.Clamp(limit, 1, 100)}        -> {limit}
-    //   {string.Join('&', queryParts)}     -> {queryParts}
-    // Otherwise the key changes whenever someone edits a clamp bound, and every fixture bound to
-    // it silently becomes uncaptured.
-    const path = match[2].replace(/\{([^}]*)\}/g, (whole, inner) => {
-      const identifiers = String(inner).match(/[A-Za-z_][A-Za-z0-9_]*/g);
-      if (!identifiers || identifiers.length === 0) return whole;
-      return `{${identifiers[identifiers.length - 1]}}`;
-    });
-    seen.set(`${method} ${path}`, { method, path });
-  }
-  return [...seen.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return parseInterpolatedRouteLiterals(readFileSync(sourcePath, "utf8"));
 }
 
 const interpolatedRoutes = parseInterpolatedRoutes(clientPath);
+
+// Form 3, and the denominator both other forms are measured against. See the module's header for
+// why these were uncounted rather than merely uncaptured.
+const indirectRoutes = parseIndirectRoutes(readFileSync(clientPath, "utf8"));
+const allRouteLiterals = parseAllRouteLiterals(readFileSync(clientPath, "utf8"));
 
 // ─── Step 2: boot the real app in-process, exactly as tests/production-error-envelope.mjs does ──
 
@@ -1272,6 +1262,20 @@ const manifest = {
   parameterisedRoutesNotCaptured: interpolatedRoutes
     .filter((r) => !plan.has(`${r.method} ${r.path}`))
     .map((r) => `${r.method} ${r.path}`),
+  // The THIRD construction form: a literal built into a local and passed to the call by name, e.g.
+  // `var path = string.Create(culture, $"api/tasks/my-open?...")`. Neither precise parser above can
+  // see those, so until this line they were not merely uncaptured, they were UNCOUNTED -- and
+  // `api/tasks/my-open` is the Overview page's own endpoint, whose absence from the fixture set is
+  // why D13 survived a drift gate built to catch exactly that class of defect. Their verb is
+  // INFERRED from the nearest following HttpMethod, so it is reported separately from the two
+  // parsed sets rather than blended into them.
+  indirectlyConstructedRoutes: indirectRoutes.map(
+    (r) => `${r.method} ${r.path}${r.methodSource === "inferred" ? " (verb inferred)" : ""}`,
+  ),
+  // The honest denominator: every `api/...` literal in the client, whichever way it is built. The
+  // three parsers must account for all of it; tests/desktop-route-discovery-contract.mjs fails when
+  // they do not, so a fourth construction form cannot go uncounted the way the third did.
+  routeLiteralsInClient: allRouteLiterals.length,
 };
 writeFileSync(join(fixturesDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
 
@@ -1283,7 +1287,11 @@ console.log(
   `parameterised     : ${interpolatedRoutes.length} discovered, ${interpolatedWithHandler.length} captured, ` +
     `${interpolatedRoutes.length - interpolatedWithHandler.length} outstanding (see manifest)`,
 );
+console.log(
+  `indirect          : ${indirectRoutes.length} discovered (verb inferred), of ${allRouteLiterals.length} route literals in the client`,
+);
 for (const item of planless) console.log(`  UNCOVERED: ${item.method} ${item.path}`);
+for (const item of indirectRoutes) console.log(`  INDIRECT : ${item.method} ${item.path}`);
 
 await mongoose.connection.close();
 await new Promise((resolve) => server.close(resolve));
