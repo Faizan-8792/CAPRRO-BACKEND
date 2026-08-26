@@ -47,9 +47,19 @@ Connection string comes from `MONGODB_URI`; pool sizing from `MONGO_POOL_MIN` / 
 
 **Read this before you assume there is a way back.** An Atlas **M0 free tier has no backup facility
 at all** — no snapshots, no point-in-time restore, no restore-to-scratch-cluster — and a 512 MB
-storage cap. There is currently **no copy of the production database anywhere**. If a collection is
-dropped or a migration truncates one, the data is gone. That is the single largest operational risk
-in this document, it is why O4 exists, and it must be resolved before a public download.
+storage cap. That is why the dump-and-encrypt path in this document exists at all: the cluster
+itself will not save you.
+
+**Corrected 2026-08-26.** This paragraph used to end "There is currently **no copy of the production
+database anywhere**." That is no longer true and must not be quoted. A production backup has been
+taken, encrypted, copied off-host, and — crucially — **restored and verified**: 43 collections
+compared against the manifest, 0 mismatches, backend health 200 against the restored data. The full
+record is in `backup-recovery-status.md`.
+
+What remains true, and is now the real risk: **every backup so far has been run by hand.** No
+scheduled task exists yet (`schtasks /Query /TN "CAPRO nightly backup"` finds nothing). A manual
+backup proves the mechanism; a scheduled one proves the habit, and it is the habit that is there at
+3 a.m. See the `schtasks /Create` line below.
 
 **The desktop's `EncryptedCache` is not a replica and is not a backup.** It is a per-machine local
 cache of what one signed-in user last saw. It cannot reconstruct the database and no recovery plan
@@ -519,6 +529,48 @@ Do not improvise this at 1am. In order:
    suites it runs (`production-readiness-checklist`, `production-error-envelope`,
    `error-contract-invariants`, `deploy-archive-security`, `deploy-archive-boundary`) are the ones
    most likely to catch a panic-edit before it becomes a second incident.
+
+## Paid provider caps
+
+Six figures decide how much CA PRO can spend with a paid provider before it refuses. They are read
+from the environment and fall back to the defaults below, which are what production runs on today
+because none of the six variables is set.
+
+| Provider | Scope | Env var | Default |
+|---|---|---|---|
+| DeepSeek | per user, per day | `DEEPSEEK_DAILY_CALL_CAP_PER_USER` | **60** |
+| DeepSeek | per user, per month | `DEEPSEEK_MONTHLY_CALL_CAP_PER_USER` | **800** |
+| DeepSeek | all users, per day | `DEEPSEEK_GLOBAL_DAILY_CALL_CAP` | **1500** |
+| OCR.space | per user, per day | `OCR_SPACE_DAILY_CALL_CAP_PER_USER` | **25** |
+| OCR.space | per user, per month | `OCR_SPACE_MONTHLY_CALL_CAP_PER_USER` | **300** |
+| OCR.space | all users, per day | `OCR_SPACE_GLOBAL_DAILY_CALL_CAP` | **600** |
+
+**The reasoning, so a future operator can argue with it rather than guess at it.**
+
+The per-user daily caps are set at roughly a heavy but plausible day of real work — 60 AI calls is
+far more than a CA doing genuine review will make, and 25 OCR calls is more documents than one
+person scans in a day. They are not there to ration normal use. They are there so that a runaway
+loop, a stuck retry, or one compromised account cannot spend a month's budget in an afternoon.
+
+The monthly per-user caps are deliberately **not** 30x the daily figure (800, not 1800; 300, not
+750). A user who hits their daily cap every day for a month is not doing accountancy, and the
+monthly ceiling is what notices that pattern.
+
+The global daily caps are the ones that actually bound the bill. They are set above the sum of a
+realistic day's use across the current user base and well below anything that would be a surprise on
+an invoice. **They are the figures to revisit as the user count grows** — the per-user caps scale
+with users automatically, the global ones do not, so the global cap is what will start refusing real
+work first if it is left where it is.
+
+All six are enforced atomically against a compound unique index on `ProviderUsage`, so twenty
+concurrent calls at cap-minus-one produce exactly one success and nineteen refusals — proved live,
+not assumed (`tests/provider-quota-contract.mjs`, Part E). Without that index the counter is
+advisory and every concurrent call is allowed; `index-provisioning.service.js` creates it at every
+boot.
+
+**Where to see the spend.** The admin panel's Provider usage card reads
+`GET /api/super/provider-usage`, which reports today and this month per provider plus the top users
+today.
 
 ## Staging
 
