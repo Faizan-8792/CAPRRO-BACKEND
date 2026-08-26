@@ -503,7 +503,34 @@ try {
         "desktop-release-contract",
         "provider-quota-contract",
         "client-version-contract",
-        "desktop-fixture-drift-contract"
+        "desktop-fixture-drift-contract",
+        # Added 2026-08-26. These six existed in tests/ and passed, but were NEVER in this list, so a
+        # regression in any of them would have shipped silently. Found by diffing the suite files on
+        # disk (50) against the names in this array (40) -- the same class of hole as the
+        # MONGODB_URI one below: a gate that looks comprehensive because nobody counted.
+        # `removed-membership-lifecycle` and `admin-feature-flag-save-safety` are the two that matter
+        # most: the first guards the REMOVED-member story, the second guards a panel that can wipe
+        # production feature flags.
+        "admin-feature-flag-save-safety",
+        "double-click-guard-checklist",
+        "erasure-copy-parity",
+        "firm-join-sync-checklist",
+        "removed-membership-lifecycle",
+        "user-facing-error-contract"
+    )
+
+    # The other four unwired suites need a REPLICA SET, not just a mongod: they run multi-document
+    # transactions, which a standalone server refuses. They already default to
+    # 127.0.0.1:27118/...?replicaSet=rs0, so they need no override -- only a check that something is
+    # actually listening, so a machine without one reports them as skipped rather than failing a gate
+    # for an absent dependency. `cross-tenant-isolation` and the three erasure suites are the
+    # highest-consequence tests in this repository: they are what stands behind "data from one firm
+    # appeared while working in another" and behind every erasure promise the privacy policy makes.
+    $replicaSetSuites = @(
+        "cross-tenant-isolation",
+        "erasure-request-route",
+        "firm-erasure-contract",
+        "firm-erasure-e2e"
     )
     # Suites that hold EXTRA assertions behind "if (process.env.MONGODB_URI)". This runner never
     # set that variable, so those assertions had never run in a single gate execution. Measured
@@ -536,6 +563,17 @@ try {
         if ($mongoPort -ne 0) { break }
     }
 
+    # Same probe, separate port: the four transaction suites need a replica set specifically.
+    $replicaSetReachable = $false
+    try {
+        $rsProbe = New-Object System.Net.Sockets.TcpClient
+        $rsAsync = $rsProbe.BeginConnect("127.0.0.1", 27118, $null, $null)
+        if ($rsAsync.AsyncWaitHandle.WaitOne(1500) -and $rsProbe.Connected) { $replicaSetReachable = $true }
+        $rsProbe.Close()
+    }
+    catch { }
+    if ($replicaSetReachable) { $suites += $replicaSetSuites }
+
     $report.Add("")
     $report.Add("===== test suites =====")
     if ($mongoPort -ne 0) {
@@ -543,6 +581,13 @@ try {
     } else {
         $report.Add("  (no local Mongo reachable on 27117 or 27017 - the Mongo-dependent assertions in")
         $report.Add("   $($mongoScratch.Keys -join ', ') did NOT run; their printed counts are the Mongo-free subset)")
+    }
+    if ($replicaSetReachable) {
+        $report.Add("  (replica set on 127.0.0.1:27118 - the $($replicaSetSuites.Count) transaction suite(s) INCLUDED: $($replicaSetSuites -join ', '))")
+    } else {
+        $report.Add("  (no replica set on 127.0.0.1:27118 - SKIPPED, not failed: $($replicaSetSuites -join ', ').")
+        $report.Add("   These are the firm-isolation and erasure suites. A run without them is NOT a full gate;")
+        $report.Add("   start the replica set and re-run before treating this as green.)")
     }
     foreach ($suite in $suites) {
         $path = Join-Path $resolvedRepoRoot "tests\$suite.mjs"
