@@ -292,16 +292,31 @@ RTO applies instead of this section.
 **Rehearsal log** (append one entry per real rehearsal or real incident rollback; do not leave
 this list empty for a release that claims this procedure is trustworthy):
 
-The `Smoke result` column is **3 of 4 on both legs**, not 4. Read the note below before quoting
-these rows: the fourth check (an authenticated read returning 200) did not run on either leg, for
-want of a production bearer token. This line exists because the roll-forward row said “4 of 4”
-until 2026-08-26 while the paragraph under the table said the opposite — a reader skimming only
-the table would have concluded the rollback was proved for authenticated behaviour. It is not.
+The 2026-08-24 rows' `Smoke result` column is **3 of 4 on both legs**, not 4. Read the note below
+before quoting those rows: the fourth check (an authenticated read returning 200) did not run on
+either leg that day, for want of a production bearer token. This line exists because the
+roll-forward row said “4 of 4” until 2026-08-26 while the paragraph under the table said the
+opposite — a reader skimming only the table would have concluded the rollback was proved for
+authenticated behaviour. The **2026-08-27 rehearsal closed that gap**: all four checks ran and
+passed on both legs, the fourth against `GET /api/auth/me` with a real super-admin bearer token.
 
 | Date | Operator | From commit | To commit | Wall-clock | Smoke result |
 |---|---|---|---|---|---|
 | 2026-08-24 | agent (Opus 5), rehearsal | `0ea0bcb` | `10bf147` | **89 s** | 3 of 4 pass — see note |
 | 2026-08-24 | agent (Opus 5), roll-forward | `10bf147` | `0ea0bcb` | **52 s** | 3 of 4 pass — see note |
+| 2026-08-27 | agent (Fable 5), rehearsal | `e000d87` | `0a0e5dc` | **47 s** | **4 of 4 pass** |
+| 2026-08-27 | agent (Fable 5), roll-forward | `0a0e5dc` | `e000d87` | **67 s** (+ ~2.5 min to `background:ready`) | **4 of 4 pass** |
+
+**What the 2026-08-27 rehearsal did.** Both legs were confirmed by content, not by the deploy
+reporting success: the two builds differ observably only in the served `public/admin/super.js`
+(the O18 same-origin base landed in `da5c47f`), so after the rollback the live file carried the
+absolute `https://api.caprotoolkit.in/api` base exactly once, and after the roll-forward it
+carried none and the relative `"/api"` form once. `/health` uptime reset on both legs. The
+rollback target was chosen so the restored build post-dates the `94a4779` feature-flag panel fix,
+per the constraint recorded on 2026-08-26. The extension preflight
+(`chrome-extension://emimafaefblkocfndndcgghbliodhnkp` → 204 with the origin reflected) was
+re-checked after the roll-forward. Note the roll-forward's `background:ready` took ~2.5 minutes —
+inside the documented window; do not read an interim `"status":"degraded"` as a failed leg.
 
 **What that rehearsal actually did**, so the numbers above are readable rather than decorative. It
 was a real rollback against production, not a described one: the live API was moved back to the
