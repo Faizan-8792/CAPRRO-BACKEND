@@ -120,22 +120,51 @@ function featureFlagCheckbox(key) {
   return qs(`flag-${key}`);
 }
 
-// The public GET /api/app-config response always merges featureFlags over DEFAULT_FEATURE_FLAGS
-// server-side (see getAppConfig / AppConfigSchema.statics.getFeatureFlags), so every key is
-// always present here -- no per-key fallback is needed.
+// The GET /api/app-config response merges featureFlags over DEFAULT_FEATURE_FLAGS server-side
+// (see getAppConfig / AppConfigSchema.statics.getFeatureFlags), so when the call SUCCEEDS every key
+// is present and no per-key fallback is needed.
+//
+// It does not follow that a response always carries them, and that reading is what this comment
+// used to invite: an unauthenticated or expired-session GET returns the config with NO flags at
+// all. The caller therefore has to distinguish "loaded, all off" from "not loaded" before touching
+// lastFeatureFlags -- see reportFeatureFlagLoadFailure.
 function loadFeatureFlagsSection(featureFlags) {
   const flags = featureFlags || {};
   lastFeatureFlags = { ...flags };
   for (const key of FEATURE_FLAG_KEYS) {
     const box = featureFlagCheckbox(key);
-    if (box) box.checked = flags[key] === true;
+    if (box) {
+      box.checked = flags[key] === true;
+      box.disabled = false; // a previous failed load may have disabled it
+    }
+  }
+}
+
+// Reports a failed load on the card itself. Silence was half of the 2026-08-26 defect: the
+// operator had no way to tell "every feature is off" from "nothing loaded", and those two look
+// identical in a grid of unchecked boxes.
+function reportFeatureFlagLoadFailure(reason) {
+  lastFeatureFlags = null;
+  for (const key of FEATURE_FLAG_KEYS) {
+    const box = featureFlagCheckbox(key);
+    if (box) box.disabled = true;
+  }
+  const status = qs("featureFlagsStatus");
+  if (status) {
+    status.textContent =
+      `Feature flags could not be loaded (${reason}). The checkboxes above are NOT showing the ` +
+      "real state and have been disabled so they cannot be saved over it. Reload the page.";
+    status.style.color = "#b44545";
   }
 }
 
 async function loadAppConfigSection() {
   try {
     const r = await api("/app-config");
-    if (!r.ok) return;
+    if (!r.ok) {
+      reportFeatureFlagLoadFailure("the server did not return a config");
+      return;
+    }
     const c = r.config;
 
     const toggle = qs("maintenanceToggle");
@@ -151,9 +180,17 @@ async function loadAppConfigSection() {
     if (qs("welcomeBodyInput")) qs("welcomeBodyInput").value = wa.body || "";
     if (qs("welcomeEnabled")) qs("welcomeEnabled").checked = wa.enabled !== false;
 
-    loadFeatureFlagsSection(c.featureFlags);
+    // An empty or absent map is a LOAD FAILURE, not "all flags are off". An unauthenticated or
+    // expired-session GET returns exactly that, and treating it as real state is what allowed a
+    // panel showing nineteen unchecked boxes to be saved over a live configuration.
+    if (!c.featureFlags || Object.keys(c.featureFlags).length === 0) {
+      reportFeatureFlagLoadFailure("the server returned no flags");
+    } else {
+      loadFeatureFlagsSection(c.featureFlags);
+    }
   } catch (err) {
     console.warn("App config load fail:", err.message);
+    reportFeatureFlagLoadFailure(err.message || "network error");
   }
 
   // Deliberately a SEPARATE call to the super-only draft route below, NOT the public GET above --
@@ -302,6 +339,35 @@ function bindAppConfigHandlers() {
   const featureFlagsStatus = qs("featureFlagsStatus");
   if (saveFeatureFlagsBtn) {
     saveFeatureFlagsBtn.addEventListener("click", async () => {
+      // REFUSE to save when the current state was never loaded. This is the single most
+      // important line in this file, and it replaces a `!lastFeatureFlags ||` guard that did the
+      // exact opposite.
+      //
+      // What that guard did, on 2026-08-26, against production: loadAppConfigSection() returns
+      // early on `!r.ok` and swallows any throw into a console.warn, so a failed load leaves
+      // lastFeatureFlags at its initial null AND leaves all 19 checkboxes at their unchecked HTML
+      // default. The operator then sees a panel that looks like "every feature is off", flips one
+      // flag, and presses Save. `!lastFeatureFlags` was true for EVERY key, so the diff sent all
+      // nineteen -- eighteen of them false -- and the backend faithfully applied them. Twelve live
+      // features, including GST reconciliation, TDS health, notice cases and audit working papers,
+      // were switched off in production by someone who changed one checkbox.
+      //
+      // The backend was never at fault: updateFeatureFlags builds `featureFlags.<key>` dot-paths
+      // only for keys present in the body, so a true partial merge was already there. The panel
+      // sent eighteen keys it had never loaded.
+      //
+      // "I do not know the current state" must therefore mean STOP, not "write my guess".
+      if (!lastFeatureFlags) {
+        if (featureFlagsStatus) {
+          featureFlagsStatus.textContent =
+            "Not saved. The current flag values could not be loaded, so the checkboxes above are " +
+            "not showing the real state and saving them would overwrite it. Reload the page. If " +
+            "that does not help, your session has probably expired -- sign in again.";
+          featureFlagsStatus.style.color = "#b44545";
+        }
+        return;
+      }
+
       // Diff against the last-loaded/saved state so only the flags the operator actually
       // flipped are sent -- updateFeatureFlags merges per-key and leaves the rest untouched,
       // so sending all 19 on every save would be safe but needlessly wide.
@@ -309,7 +375,7 @@ function bindAppConfigHandlers() {
       for (const key of FEATURE_FLAG_KEYS) {
         const box = featureFlagCheckbox(key);
         if (!box) continue;
-        if (!lastFeatureFlags || lastFeatureFlags[key] !== box.checked) {
+        if (lastFeatureFlags[key] !== box.checked) {
           changed[key] = box.checked;
         }
       }
