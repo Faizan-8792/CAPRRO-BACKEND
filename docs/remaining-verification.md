@@ -301,7 +301,18 @@ appeared.
 
 ---
 
-## 10. Settle one contradiction: V15 is ticked but has no evidence row
+## 10. ~~Settle one contradiction: V15 is ticked but has no evidence row~~ — RESOLVED 2026-08-26
+
+**Task:** V15 · **Added and closed the same day. Nothing here is yours any more.**
+
+The audit was run rather than the row transcribed. All three of V15's bullets are met and measured:
+the script exits 1 with **exactly one** FAIL line, and it is the pre-accepted Settings mute-checkbox
+gap the bullet explicitly permits; `grep -c "Got it"` over the run output returns **0**; the
+"Read a notice: Shift+Tab" FAIL line returns **0**. Run-wide: **pages reached 25/25, forbidden tokens
+0**. `.kiro/release-evidence.md`'s V15 row now carries that run, so the ledger and the evidence file
+agree again. The app was closed by the script and confirmed gone.
+
+The original text is kept below for the record.
 
 **Task:** V15 · **Added 2026-08-26**
 
