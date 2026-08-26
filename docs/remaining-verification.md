@@ -11,6 +11,13 @@ machine, or a mailbox. Anything that could be executed has been, and is recorded
 Last updated: 2026-08-26 (second pass, same day). Ledger at the time: **65 of 115 done (56.5%)**,
 agent-completable **65 of 92 (70.7%)**, release gates **8 of 14**, protocol OK. UPDATED AGAIN 2026-08-26 evening: **65 of 116 (56.0%)**, agent-completable **65 of 92 (70.7%)**, gates **8 of 14**, protocol OK — L16 was added to the denominator, which is why the headline fell.
 
+UPDATED 2026-08-27: **82 of 133 (61.7%)**, agent-completable **78 of 107 (72.9%)**, gates **8 of
+14**, protocol OK. The owner decided the three open decisions on 2026-08-27 ("deploy the
+same-origin fix, accept O19, and apply T14 = B + C"): the CORS same-origin rule is implemented and
+pinned (15/15), the ledger's two bookkeeping rules were amended exactly as drafted, and `U5`, `R9`,
+`T14` and `O19` are now ticked on evidence that already existed. Sections **4** and **12 items
+1-3** below are therefore resolved — struck through in place rather than deleted.
+
 **Why the percentage moved down slightly rather than up.** Two tasks were added (`T13`, `V16`, both
 closed with evidence) and one was un-ticked (`R9`), because `ledger-status.ps1` had a bug that made it
 report "protocol OK" over three tasks that breached the rule it exists to enforce: its evidence scan
@@ -135,7 +142,18 @@ The filled §13 block, committed.
 
 ---
 
-## 4. Two browser checks in the admin panel
+## 4. ~~Two browser checks in the admin panel~~ — RESOLVED 2026-08-27, nothing here is yours
+
+**Every bullet of U5 and R9 has since been run for real, and both tasks are `[x]`.** U5's Save flow
+was exercised in a real browser against a local backend with a scratch database
+(`tools/drive-local-panel.mjs`, 10/10, the button actually pressed); its notify refusal paths were
+observed with zero network requests (`tools/verify-admin-desktop-release.mjs`, 22/22); R9's toggle
+and 403 bullets were executed after the `94a4779` panel-defect deploy, with the flag round-trip and
+the non-super 403 observed (a real `FIRM_ADMIN` account, plus a scratch-seeded `USER` account — no
+production identity was invented). The blocking bookkeeping question was decided by the owner on
+2026-08-27 as T14 = B + C. Evidence lives under U5 and R9 in `.kiro/finalreleasefix.md`.
+
+The original text is kept below for the record.
 
 **Tasks:** U5 and R9 — **R9 is NOT closed; corrected 2026-08-26.** It had been ticked while carrying
 its own `Not verified:` and `Gate not run:` lines, which the protocol does not allow, and only a bug in
@@ -369,7 +387,13 @@ summary lines (`pages reached`, `forbidden tokens (total)`, `failures`) plus its
 
 ---
 
-## 12. Two admin-panel actions an agent refused on purpose
+## 12. Two admin-panel actions an agent refused on purpose — items 1-3 RESOLVED 2026-08-27, only O11 remains
+
+**Items 1-3 have since been run for real** (see section 4's resolution note: U5 bullet 3 against a
+local backend and scratch database, R9 bullets 2-3 after the `94a4779` deploy with a real non-super
+identity). **Item 4 — O11's raise-`minSupportedVersion`-and-watch-a-real-desktop — is still yours**:
+it is a production write that reaches every installed client, and it needs a real desktop on screen
+to observe the "Update required" surface. The original text is kept below for the record.
 
 **Tasks:** U5 (bullet 3) · R9 (bullets 2-3) · O11
 **Added 2026-08-26.** The panel itself is now verified by machine — 30 assertions across
