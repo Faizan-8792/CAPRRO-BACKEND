@@ -204,6 +204,87 @@ if (!existsSync(EXTENSION)) {
   );
 }
 
+// ─── 5. CORS: what the served panel is actually allowed to do ───────
+//
+// A relative API base makes the panel's requests same-origin, but a browser still sends an Origin
+// header on a PATCH, and app.js's allowlist decides on that header. The allowlist names exactly
+// `https://api.caprotoolkit.in` as "the backend itself". So a panel served from ANY other host --
+// a staging deployment, a local server -- is refused by CORS on every save, even though the request
+// is same-origin by definition. Observed directly on 2026-08-26 while driving a local panel:
+// `CORS blocked for origin: http://127.0.0.1:PORT`, and the Save button's status line showed the
+// generic "We could not complete your request".
+//
+// These assertions PIN that behaviour. They are not an endorsement of it. The correct rule is
+// "allow an Origin equal to the request's own origin", which adds no cross-origin capability -- a
+// page on evil.com sends Origin: https://evil.com against Host: api.caprotoolkit.in and still fails
+// the comparison. But CORS is a security control, and an agent does not change one of those on its
+// own judgement, so the current behaviour is pinned here and the decision is raised in
+// .kiro/OWNER-TODO.md. If the owner accepts the same-origin rule, the localhost assertion below is
+// the one that must be updated, deliberately, in the same change.
+
+process.env.NODE_ENV = "production";
+process.env.JWT_SECRET = process.env.JWT_SECRET || "local-verification-only";
+process.env.MONGODB_URI =
+  process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/capro-same-origin-check";
+
+const mongoose = (await import("mongoose")).default;
+// No database is used here. Fail buffered queries fast so a probe cannot wait out the 10s default.
+mongoose.set("bufferTimeoutMS", 50);
+const { default: app } = await import("../src/app.js");
+const server = app.listen(0);
+await new Promise((resolve) => server.once("listening", resolve));
+const base = `http://127.0.0.1:${server.address().port}`;
+
+async function preflight(origin) {
+  const headers = { "Access-Control-Request-Method": "PATCH" };
+  if (origin) headers.Origin = origin;
+  const response = await fetch(`${base}/api/app-config`, { method: "OPTIONS", headers });
+  return {
+    status: response.status,
+    allowOrigin: response.headers.get("access-control-allow-origin"),
+  };
+}
+
+try {
+  const backendOrigin = await preflight("https://api.caprotoolkit.in");
+  check(
+    "the API host's own origin is allowed",
+    backendOrigin.allowOrigin === "https://api.caprotoolkit.in",
+    `Access-Control-Allow-Origin ${JSON.stringify(backendOrigin.allowOrigin)}`
+  );
+
+  const marketing = await preflight("https://caprotoolkit.in");
+  check(
+    "the marketing site origin is allowed, so the download page can read the public config",
+    marketing.allowOrigin === "https://caprotoolkit.in",
+    `Access-Control-Allow-Origin ${JSON.stringify(marketing.allowOrigin)}`
+  );
+
+  const hostile = await preflight("https://caprotoolkit.in.evil.com");
+  check(
+    "NEGATIVE CONTROL a lookalike origin is refused, so the allowlist is exact and not a prefix match",
+    hostile.allowOrigin === null,
+    `Access-Control-Allow-Origin ${JSON.stringify(hostile.allowOrigin)}`
+  );
+
+  const noOrigin = await preflight(null);
+  check(
+    "a request with no Origin at all is allowed, which is how server-to-server calls work",
+    noOrigin.allowOrigin === "*" || noOrigin.status < 400,
+    `status ${noOrigin.status}, Access-Control-Allow-Origin ${JSON.stringify(noOrigin.allowOrigin)}`
+  );
+
+  const localhost = await preflight("http://localhost:4001");
+  check(
+    "PINNED, NOT ENDORSED in production a panel served from any other host is CORS-refused on writes",
+    localhost.allowOrigin === null,
+    `Access-Control-Allow-Origin ${JSON.stringify(localhost.allowOrigin)} -- see the note above; this is the assertion to change if the owner accepts the same-origin rule`
+  );
+} finally {
+  await new Promise((resolve) => server.close(resolve));
+  try { await mongoose.disconnect(); } catch { /* never connected */ }
+}
+
 console.log("");
 console.log(`passed: ${passed}  failed: ${failed}`);
 if (failed > 0) {

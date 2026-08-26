@@ -27,7 +27,19 @@ $archiveTimeoutMs = 600000
 # suggested would have failed those loaded runs and produced a flaky gate. 900,000
 # sits above the worst observed run and still halves the bound, so a regression
 # that doubles the suite's cost is caught.
-$boundaryTimeoutMs = 900000
+#
+# RAISED 2026-08-26: 900,000 was NOT above the worst run. This suite timed out at
+# exactly 900,000ms inside the runner on a machine where it completes standalone,
+# and it invokes make-deploy-archive.ps1 dozens of times, so its cost tracks how
+# busy the box is rather than what the code does. A timeout is indistinguishable
+# from a real failure in the report, which is the worse outcome.
+#
+# The objection the paragraph above raises against a looser bound is real, and it
+# is answered by measuring instead of only bounding: every suite line now carries
+# its own elapsed time, so a suite that doubles in cost shows up as a number in
+# the log rather than being hidden by the wider cap. Compare two logs, not two
+# recollections.
+$boundaryTimeoutMs = 1500000
 
 function ConvertTo-NativeArgument {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Argument)
@@ -347,6 +359,10 @@ function Invoke-CapturedProcess {
     $outputStream = [System.IO.MemoryStream]::new()
     $errorStream = [System.IO.MemoryStream]::new()
     $started = $false
+    # Measured so the report can carry it. A cap alone only ever tells you "under the bound" or
+    # "over it"; the elapsed figure is what makes a suite that doubled in cost visible in a diff of
+    # two logs, which is the objection against ever widening a cap.
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         $processJob = New-KillOnCloseProcessJob
         $started = $process.Start()
@@ -368,12 +384,14 @@ function Invoke-CapturedProcess {
         [byte[]]$outputBytes = $outputStream.ToArray()
         [byte[]]$errorBytes = $errorStream.ToArray()
         $decoder = [System.Text.UTF8Encoding]::new($false)
+        $stopwatch.Stop()
         return [pscustomobject]@{
             ExitCode = $process.ExitCode
             StandardOutput = $decoder.GetString($outputBytes)
             StandardOutputBytes = $outputBytes
             StandardError = $decoder.GetString($errorBytes)
             StandardErrorBytes = $errorBytes
+            ElapsedMs = [int]$stopwatch.Elapsed.TotalMilliseconds
         }
     }
     finally {
@@ -409,6 +427,14 @@ function ConvertFrom-ClixmlText {
         [System.Net.WebUtility]::HtmlDecode($value)
     }
     return (($decoded -join "`n").Trim())
+}
+
+function Format-Elapsed {
+    param([AllowNull()]$Result)
+
+    if ($null -eq $Result -or $null -eq $Result.ElapsedMs) { return "" }
+    $seconds = [math]::Round($Result.ElapsedMs / 1000.0, 1)
+    return ("{0,7:0.0}s  " -f $seconds)
 }
 
 function Get-SummaryLine {
@@ -527,7 +553,7 @@ try {
                 -WorkingDirectory $resolvedRepoRoot `
                 -TimeoutMs $processTimeoutMs
             $launcherCombined = $launcherResult.StandardOutput + "`n" + $launcherResult.StandardError
-            $report.Add("  exit=$($launcherResult.ExitCode)  " + (Get-SummaryLine -Output $launcherCombined))
+            $report.Add("  exit=$($launcherResult.ExitCode)  " + (Format-Elapsed -Result $launcherResult) + (Get-SummaryLine -Output $launcherCombined))
             if ($launcherResult.ExitCode -ne 0) { $failures++ }
         }
         catch {
@@ -737,7 +763,7 @@ try {
                 -TimeoutMs $timeout `
                 -EnvironmentOverrides $suiteEnv
             $combined = $result.StandardOutput + "`n" + $result.StandardError
-            $report.Add("  " + $suite.PadRight(34) + " exit=$($result.ExitCode)  " + (Get-SummaryLine -Output $combined))
+            $report.Add("  " + $suite.PadRight(34) + " exit=$($result.ExitCode)  " + (Format-Elapsed -Result $result) + (Get-SummaryLine -Output $combined))
             if ($result.ExitCode -ne 0) { $failures++ }
         }
         catch {
@@ -762,7 +788,7 @@ try {
                 npm_config_update_notifier = "false"
             }
         $auditCombined = $auditResult.StandardOutput + "`n" + $auditResult.StandardError
-        $report.Add("  exit=$($auditResult.ExitCode)  " + (Get-SummaryLine -Output $auditCombined))
+        $report.Add("  exit=$($auditResult.ExitCode)  " + (Format-Elapsed -Result $auditResult) + (Get-SummaryLine -Output $auditCombined))
         if ($auditResult.ExitCode -ne 0) { $failures++ }
     }
     catch {
@@ -787,7 +813,7 @@ try {
                 -WorkingDirectory $resolvedRepoRoot `
                 -TimeoutMs $archiveTimeoutMs
             $archiveCombined = $archiveResult.StandardOutput + "`n" + $archiveResult.StandardError
-            $report.Add("  exit=$($archiveResult.ExitCode)  " + (Get-SummaryLine -Output $archiveCombined))
+            $report.Add("  exit=$($archiveResult.ExitCode)  " + (Format-Elapsed -Result $archiveResult) + (Get-SummaryLine -Output $archiveCombined))
             if ($archiveResult.ExitCode -ne 0) { $failures++ }
         }
         catch {
