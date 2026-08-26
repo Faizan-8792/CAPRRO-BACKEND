@@ -1,7 +1,8 @@
 // assistant.js (Admin Compliance Assistant)
 import { computePriority } from './priority-engine.js';
 
-const API_BASE = "https://api.caprotoolkit.in/api";
+// Same-origin base -- see public/admin/super.js for why this must never be absolute.
+const API_BASE = "/api";
 
 function qs(id) {
   return document.getElementById(id);

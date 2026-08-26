@@ -490,7 +490,28 @@ if (
 }
 
 $inputStream = [Console]::OpenStandardInput()
+# The parent writes exactly one byte, 67, and nothing else. But Windows PowerShell builds the
+# parent's StandardInput StreamWriter from [Console]::InputEncoding with AutoFlush on, and that
+# flush emits the encoding's PREAMBLE into this pipe before the parent's own byte. On a UTF-8
+# console - Windows 11's "Beta: use Unicode UTF-8 for worldwide language support", and what most
+# modern terminals set - the preamble is EF BB BF, so reading the first byte strictly saw 239 and
+# refused EVERY launch. Measured 2026-08-26: run-gates.ps1 reported all 50 suites, npm audit, the
+# commit-pinned archive validation and 165 node --check calls as failures with nothing whatsoever
+# wrong with any of them, and make-deploy-archive.ps1 could not build a deploy archive at all.
+# .NET Framework exposes no ProcessStartInfo.StandardInputEncoding to switch the preamble off, so
+# the handshake skips a leading byte-order mark rather than assuming the platform never inserts
+# one. Pinned by tools/contained-launcher.tests.ps1, which feeds each preamble explicitly.
 $handshake = $inputStream.ReadByte()
+$markRemainder = @()
+if ($handshake -eq 239) { $markRemainder = @(187, 191) }
+elseif ($handshake -eq 255) { $markRemainder = @(254) }
+elseif ($handshake -eq 254) { $markRemainder = @(255) }
+foreach ($expectedByte in $markRemainder) {
+    if ($inputStream.ReadByte() -ne $expectedByte) {
+        throw "contained process launch was not authorized"
+    }
+}
+if ($markRemainder.Count -gt 0) { $handshake = $inputStream.ReadByte() }
 if ($handshake -ne 67) {
     throw "contained process launch was not authorized"
 }

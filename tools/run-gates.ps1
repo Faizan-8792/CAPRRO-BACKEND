@@ -213,7 +213,28 @@ if (
 }
 
 $inputStream = [Console]::OpenStandardInput()
+# The parent writes exactly one byte, 67, and nothing else. But Windows PowerShell builds the
+# parent's StandardInput StreamWriter from [Console]::InputEncoding with AutoFlush on, and that
+# flush emits the encoding's PREAMBLE into this pipe before the parent's own byte. On a UTF-8
+# console - Windows 11's "Beta: use Unicode UTF-8 for worldwide language support", and what most
+# modern terminals set - the preamble is EF BB BF, so reading the first byte strictly saw 239 and
+# refused EVERY launch. Measured 2026-08-26: run-gates.ps1 reported all 50 suites, npm audit, the
+# commit-pinned archive validation and 165 node --check calls as failures with nothing whatsoever
+# wrong with any of them, and make-deploy-archive.ps1 could not build a deploy archive at all.
+# .NET Framework exposes no ProcessStartInfo.StandardInputEncoding to switch the preamble off, so
+# the handshake skips a leading byte-order mark rather than assuming the platform never inserts
+# one. Pinned by tools/contained-launcher.tests.ps1, which feeds each preamble explicitly.
 $handshake = $inputStream.ReadByte()
+$markRemainder = @()
+if ($handshake -eq 239) { $markRemainder = @(187, 191) }
+elseif ($handshake -eq 255) { $markRemainder = @(254) }
+elseif ($handshake -eq 254) { $markRemainder = @(255) }
+foreach ($expectedByte in $markRemainder) {
+    if ($inputStream.ReadByte() -ne $expectedByte) {
+        throw "contained process launch was not authorized"
+    }
+}
+if ($markRemainder.Count -gt 0) { $handshake = $inputStream.ReadByte() }
 if ($handshake -ne 67) {
     throw "contained process launch was not authorized"
 }
@@ -370,14 +391,42 @@ function Invoke-CapturedProcess {
     }
 }
 
+function ConvertFrom-ClixmlText {
+    # A nested Windows PowerShell writes its errors to stderr as CLIXML, not as text. Reported raw
+    # it fills the line with markup and buries the one sentence that says what went wrong - which is
+    # how a launcher failure once read as 53 unrelated gate failures. This lifts the message text
+    # out. It is deliberately a regex rather than an XML parse: the payload is often truncated, and
+    # a parser would throw on exactly the malformed input this most needs to survive.
+    param([AllowNull()][string]$Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) { return "" }
+    if ($Text -notmatch "^\s*#<\s*CLIXML") { return $Text }
+    $messages = [regex]::Matches($Text, "<S(?:\s+S=`"[^`"]*`")?>(.*?)</S>", "Singleline")
+    if ($messages.Count -eq 0) { return $Text }
+    $decoded = foreach ($message in $messages) {
+        $value = $message.Groups[1].Value
+        $value = $value -replace "_x000D_", "" -replace "_x000A_", "`n" -replace "_x0009_", " "
+        [System.Net.WebUtility]::HtmlDecode($value)
+    }
+    return (($decoded -join "`n").Trim())
+}
+
 function Get-SummaryLine {
     param([AllowNull()][string]$Output)
 
     if ([string]::IsNullOrWhiteSpace($Output)) { return "" }
-    $line = @($Output -split "`r?`n" | Where-Object {
+    $text = ConvertFrom-ClixmlText -Text $Output
+    $line = @($text -split "`r?`n" | Where-Object {
         $_ -match "\d+\s*/\s*\d+|passed|failed|PASS|FAIL|production-ready|vulnerabilit|sha256"
     } | Select-Object -Last 1)
-    return (((@($line) -join " ") -replace "\s+", " ").Trim())
+    $summary = (((@($line) -join " ") -replace "\s+", " ").Trim())
+    if (-not [string]::IsNullOrWhiteSpace($summary)) { return $summary }
+    # Nothing matched the interesting-token list. An empty summary beside a non-zero exit code tells
+    # the reader nothing, so fall back to the first line of real text - which is where an
+    # infrastructure failure, as opposed to a test failure, always states itself.
+    $first = @($text -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -First 1)
+    return (((@($first) -join " ") -replace "\s+", " ").Trim())
 }
 
 function Get-GateSummary {
@@ -422,6 +471,72 @@ try {
         throw "npm CLI was not found beside the resolved Node.js executable"
     }
 
+    # Informational only - this section can never fail the run. It exists because two separate gate
+    # defects on 2026-08-26 were both "the result depends on the operator's environment, and the log
+    # did not say what that environment was": the launcher handshake broke under a UTF-8 console
+    # ([Console]::InputEncoding preamble), and deploy-archive-boundary passed under Git Bash's GNU tar
+    # and failed under PowerShell's bsdtar. Neither was visible in the log, so both read as code
+    # failures. Recording the facts the gates actually depend on makes the NEXT such divergence
+    # visible in a diff of two logs rather than a day of bisecting.
+    $report.Add("===== environment =====")
+    function Add-EnvironmentFact {
+        param([string]$Label, [scriptblock]$Probe)
+        try {
+            $value = & $Probe
+            if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) { $value = "(none)" }
+            $report.Add("  " + $Label.PadRight(26) + ([string]$value).Trim())
+        }
+        catch {
+            $report.Add("  " + $Label.PadRight(26) + "(unavailable: " + $_.Exception.Message + ")")
+        }
+    }
+    Add-EnvironmentFact "node" { (& $nodeExecutable --version) }
+    Add-EnvironmentFact "node path" { $nodeExecutable }
+    Add-EnvironmentFact "powershell" { $PSVersionTable.PSVersion.ToString() }
+    Add-EnvironmentFact "console input encoding" {
+        [Console]::InputEncoding.WebName + " (preamble " + [Console]::InputEncoding.GetPreamble().Length + " bytes)"
+    }
+    Add-EnvironmentFact "console output encoding" { [Console]::OutputEncoding.WebName }
+    Add-EnvironmentFact "tar on PATH" {
+        $tarCommand = @(Get-Command tar -CommandType Application -All -ErrorAction SilentlyContinue)
+        if ($tarCommand.Count -eq 0) { "(not on PATH)" }
+        else { (@(& $tarCommand[0].Source --version 2>$null)[0]) + "  <- " + $tarCommand[0].Source }
+    }
+    Add-EnvironmentFact "git" { (& git --version) }
+    Add-EnvironmentFact "NODE_ENV" { $env:NODE_ENV }
+    Add-EnvironmentFact "current culture" { [System.Globalization.CultureInfo]::CurrentCulture.Name }
+    $report.Add("")
+
+    # FIRST of the real gates, deliberately. Every one below runs its child through the
+    # contained-process launcher, so when the launcher's stdin handshake breaks, all of them fail at
+    # once and each one reads like a real defect in the thing it was testing. That happened on
+    # 2026-08-26: 53 failing gates, none of them real. This section names that cause near the top of
+    # the report instead of leaving 53 misleading ones to be read as code failures.
+    $report.Add("===== contained launcher handshake =====")
+    $launcherTestPath = Join-Path $resolvedRepoRoot "tools\contained-launcher.tests.ps1"
+    if (-not (Test-Path -LiteralPath $launcherTestPath -PathType Leaf)) {
+        $report.Add("  MISSING tools\contained-launcher.tests.ps1")
+        $failures++
+    }
+    else {
+        try {
+            $launcherResult = Invoke-CapturedProcess `
+                -FilePath $powershellExecutable `
+                -Arguments @("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                    "-File", $launcherTestPath, "-RepoRoot", $resolvedRepoRoot) `
+                -WorkingDirectory $resolvedRepoRoot `
+                -TimeoutMs $processTimeoutMs
+            $launcherCombined = $launcherResult.StandardOutput + "`n" + $launcherResult.StandardError
+            $report.Add("  exit=$($launcherResult.ExitCode)  " + (Get-SummaryLine -Output $launcherCombined))
+            if ($launcherResult.ExitCode -ne 0) { $failures++ }
+        }
+        catch {
+            $report.Add("  ERROR  " + $_.Exception.Message)
+            $failures++
+        }
+    }
+
+    $report.Add("")
     $report.Add("===== node --check =====")
     $syntaxFiles = @(
         Get-ChildItem -Path (Join-Path $resolvedRepoRoot "src") -Recurse -Filter *.js -File -ErrorAction Stop
@@ -451,7 +566,12 @@ try {
                 -EnvironmentOverrides @{ NODE_OPTIONS = ""; NODE_PATH = "" }
             if ($result.ExitCode -ne 0) {
                 $badSyntax++
-                $report.Add("  SYNTAX FAIL " + $file.FullName.Substring($resolvedRepoRoot.Length + 1))
+                # The reason belongs on the line. Reported as a bare filename, a launcher failure
+                # that hits every file is indistinguishable from 165 real syntax errors, and that is
+                # exactly how one was once misread.
+                $reason = Get-SummaryLine -Output ($result.StandardError + "`n" + $result.StandardOutput)
+                if ([string]::IsNullOrWhiteSpace($reason)) { $reason = "exit=$($result.ExitCode), no output" }
+                $report.Add("  SYNTAX FAIL " + $file.FullName.Substring($resolvedRepoRoot.Length + 1) + "  " + $reason)
             }
         }
         catch {
@@ -516,7 +636,11 @@ try {
         "erasure-copy-parity",
         "firm-join-sync-checklist",
         "removed-membership-lifecycle",
-        "user-facing-error-contract"
+        "user-facing-error-contract",
+        # Registered here on the day it was added, deliberately: V17's invariant is that the runner
+        # executes as many suites as exist in tests/, so a new suite left unregistered breaks that
+        # gate rather than merely going unrun.
+        "admin-panel-same-origin"
     )
 
     # The other four unwired suites need a REPLICA SET, not just a mongod: they run multi-document

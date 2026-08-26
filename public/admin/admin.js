@@ -1,4 +1,5 @@
-const API_BASE = "https://api.caprotoolkit.in/api";
+// Same-origin base -- see public/admin/super.js for why this must never be absolute.
+const API_BASE = "/api";
 const TOKEN_KEY = 'caproadminjwt';
 let __clientsChaseLoading = false;
 let __lastHash = null; // NEW: prevents repeated hash handling

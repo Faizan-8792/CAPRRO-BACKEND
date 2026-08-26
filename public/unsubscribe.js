@@ -3,7 +3,8 @@
 // unsubscribe confirmation page. u/k/t come from the link the recipient
 // clicked in their email; this page never asks them to sign in.
 
-const API_BASE = "https://api.caprotoolkit.in/api";
+// Same-origin base -- see public/admin/super.js for why this must never be absolute.
+const API_BASE = "/api";
 
 const KIND_LABELS = {
   DAILY_PERSONAL: "Daily personal work digest",

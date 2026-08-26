@@ -67,27 +67,24 @@ function run(file, args, options = {}) {
   });
 }
 
-// This dev environment's `tar` on PATH is Git for Windows' GNU tar (MSYS), which
-// parses a Windows drive-letter path's colon as `host:path` remote-archive syntax --
-// `tar -tf C:\Users\...\file.tar` fails with "Cannot connect to C: resolve failed"
-// before ever reading the file, regardless of whether the file exists. Reproduced
-// directly, and `--force-local` was tried first and rejected: it stops the
-// remote-host parse but MSYS's own path translation then mangles the backslashes in
-// the same argument, producing a different "No such file or directory". Converting
-// to the POSIX-style path GNU tar/MSYS actually expects (`/c/Users/...`) is what
-// this same tar binary reads correctly, confirmed against a real minimal ustar
-// fixture before applying this to the real compatibility checks below. This
-// converts the ARGUMENT PASSED TO THE TEST'S OWN tar invocation only; it has no
-// effect on the production archive tooling, which never shells out to tar at all
+// The tar compatibility probes below pass a BARE FILENAME and set the child's cwd to the fixture
+// directory. They deliberately do not pass an absolute path, in either Windows or POSIX form.
+//
+// A Windows drive-letter path breaks GNU tar: it reads the colon as `host:path` remote-archive
+// syntax and fails with "Cannot connect to C: resolve failed" before reading the file, and
+// `--force-local` only trades that for MSYS mangling the backslashes. So an earlier version of this
+// file converted to the POSIX form GNU tar wants (`/c/Users/...`) - and that broke the other way:
+// `tar` on PATH is whichever binary the operator's shell resolves, and the two disagree.
+// Measured 2026-08-26 on this machine: from Git Bash `tar` is Git for Windows' GNU tar 1.35, which
+// reads `/c/Users/...`; from PowerShell - and therefore from tools/run-gates.ps1, and from CI -
+// `tar` is C:\WINDOWS\system32\tar.exe, bsdtar 3.8.4, which cannot open that form at all. The suite
+// passed in one shell and failed five checks in the other, which for a gate guarding polyglot
+// refusal in the deploy archive is worse than either result alone.
+//
+// A bare filename with cwd set has no colon and no backslashes, so there is nothing for either
+// binary to reinterpret. Verified against both: GNU tar 1.35 and bsdtar 3.8.4 each list the entry
+// and exit 0. None of this touches the production tooling, which never shells out to tar
 // (make-deploy-archive.ps1 parses tar headers itself via its own Get-TarHeader).
-function toPosixPathForTar(windowsPath) {
-  const driveMatch = /^([A-Za-z]):[\\/](.*)$/.exec(windowsPath);
-  if (!driveMatch) {
-    return windowsPath.replaceAll("\\", "/");
-  }
-  const [, drive, rest] = driveMatch;
-  return `/${drive.toLowerCase()}/${rest.replaceAll("\\", "/")}`;
-}
 
 function resultDetail(result) {
   return [result.error?.stack, result.stdout, result.stderr]
@@ -1516,9 +1513,10 @@ try {
   );
 
   const v7TarBytes = createV7TarArchive();
-  const v7TarPath = join(temporaryRoot, "valid-v7.tar");
+  const v7TarName = "valid-v7.tar";
+  const v7TarPath = join(temporaryRoot, v7TarName);
   writeFileSync(v7TarPath, v7TarBytes);
-  const v7TarCompatibility = run("tar", ["-tf", toPosixPathForTar(v7TarPath)], {
+  const v7TarCompatibility = run("tar", ["-tf", v7TarName], {
     cwd: temporaryRoot,
     timeout: 30_000,
   });
@@ -1535,11 +1533,11 @@ try {
       createModeVariantV7TarArchive(writeLeadingNulTarOctal),
     ],
   ].map(([label, bytes], index) => {
-    const variantPath = join(temporaryRoot, `valid-v7-variant-${index}.tar`);
-    writeFileSync(variantPath, bytes);
+    const variantName = `valid-v7-variant-${index}.tar`;
+    writeFileSync(join(temporaryRoot, variantName), bytes);
     return {
       bytes,
-      compatibility: run("tar", ["-tf", toPosixPathForTar(variantPath)], {
+      compatibility: run("tar", ["-tf", variantName], {
         cwd: temporaryRoot,
         timeout: 30_000,
       }),

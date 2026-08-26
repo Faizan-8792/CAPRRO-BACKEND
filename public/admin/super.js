@@ -1,6 +1,21 @@
 // public/admin/super.js — Super Admin Dashboard
 
-const API_BASE = "https://api.caprotoolkit.in/api";
+// Same-origin, and it must stay that way. This page is served by the API host itself -- app.js
+// mounts public/ and public/admin at / and /admin on api.caprotoolkit.in -- so "/api" resolves to
+// exactly the same endpoints in production that the old absolute base did. Measured 2026-08-26:
+// api.caprotoolkit.in/admin/super.html is 200 while caprotoolkit.in/admin/super.html and
+// caprotoolkit.in/api/app-config are both 404, so there is no other origin this page is served
+// from and nothing to keep an absolute base for.
+//
+// An ABSOLUTE base made every copy of this page drive PRODUCTION regardless of where it was
+// opened from: a local server, a staging host, a mirror, a file:// copy. For a panel that can
+// overwrite production feature flags and notify every installed desktop app, that is a foot-gun
+// with no upside -- and it is the reason the panel's browser gates could only ever be exercised
+// against production, which is why several of them sat unrun.
+//
+// Pinned by tests/admin-panel-same-origin.mjs. Five sibling scripts carry the same base and were
+// corrected in the same pass; see that suite for the list.
+const API_BASE = "/api";
 const TOKEN_KEY = "caproadminjwt";
 
 // ─── Auth helpers ───────────────────────────────────────────────────

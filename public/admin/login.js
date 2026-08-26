@@ -1,6 +1,7 @@
 // public/admin/login.js
 // Used by public/index.html
-const API_BASE = "https://api.caprotoolkit.in/api";
+// Same-origin base -- see public/admin/super.js for why this must never be absolute.
+const API_BASE = "/api";
 
 const TOKEN_KEY = "caproadminjwt";
 

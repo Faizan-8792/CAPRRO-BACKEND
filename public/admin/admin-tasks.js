@@ -1,6 +1,7 @@
 // admin-tasks.js
 // Task board helpers for CA PRO Firm Admin (Add Task UI + Assign dropdown + Compact cards + Expand/Collapse + Delete)
-const TASK_API_BASE ="https://api.caprotoolkit.in/api";
+// Same-origin base -- see public/admin/super.js for why this must never be absolute.
+const TASK_API_BASE = "/api";
 const TASK_TOKEN_KEY = 'caproadminjwt';
 
 function getAdminToken() {
