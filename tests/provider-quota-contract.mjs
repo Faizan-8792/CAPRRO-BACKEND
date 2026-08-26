@@ -560,6 +560,33 @@ if (process.env.MONGODB_URI) {
   ProviderUsage.updateOne = REAL_PROVIDER_USAGE_STATICS.updateOne;
   ProviderUsage.deleteMany = REAL_PROVIDER_USAGE_STATICS.deleteMany;
   await mongoose.connect(process.env.MONGODB_URI);
+
+  // Reproduce what production does at boot, BEFORE anything writes a row.
+  //
+  // src/config/db.js turns Mongoose autoIndex off in production ("index in dev, manage in prod"),
+  // and index-provisioning.service.js is what "manage in prod" means -- it walks REQUIREMENT_GROUPS
+  // and calls createIndexes() at every boot. Running this file directly never boots the app, so on
+  // a fresh database the compound unique index that E1 is entirely about simply is not there, and
+  // all 20 concurrent calls are allowed. That is a true report of the database it ran against and
+  // a false report of the code, which is the worst kind of red.
+  //
+  // Ordering matters and is the whole reason this sits above the seed: a unique index cannot be
+  // built over existing duplicates, so once a run without the index has inserted its 20 rows,
+  // every later run on that database fails to create the index too and the failure looks
+  // permanent. Provision first, then seed.
+  const providerUsageCollection = ProviderUsage.collection.collectionName;
+  await mongoose.connection.db.collection(providerUsageCollection).drop().catch(() => {});
+  const { ensureRequiredIndexes } = await import("../src/services/index-provisioning.service.js");
+  const provisioning = await ensureRequiredIndexes();
+  const providerUsageFailure = provisioning.failures.find(
+    (failure) => failure.collection === providerUsageCollection,
+  );
+  check(
+    "E-setup (LIVE MongoDB): the unique index E1 depends on was provisioned, as it is at every boot",
+    !providerUsageFailure,
+    providerUsageFailure ? providerUsageFailure.reason : "",
+  );
+
   try {
     const userId = new mongoose.Types.ObjectId();
     const provider = "DEEPSEEK";

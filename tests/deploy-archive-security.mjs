@@ -2176,9 +2176,22 @@ if (listed.status !== 0 || listed.error) {
   // run-gates.ps1 pass, not the commit that added the files. Worth noting the
   // pin is doing its job -- it is deliberately a COUNT, so a new runtime file
   // cannot enter the deploy surface without a human confirming it was scanned.
+  // Raised from 161 to 162 for src/utils/user-facing-error.js, added by the
+  // V13-P12-F2 fix (telling a message written for a user apart from the text of
+  // an accident, so exception text stops reaching a firm through a 200 OK body).
+  // Caught exactly as designed and exactly as every entry above was: not by the
+  // commit that added the file, but by running this suite -- in this case the
+  // first run of the Mongo-dependent suites after standing up a local mongod,
+  // the 23 of them having been blocked for several sessions. Confirmed clean
+  // before the pin moved, independently of this file: `make-deploy-archive.ps1
+  // -ValidateOnly` -> "JavaScript secret AST scan: PASS (162 files)". The new
+  // file holds no configuration of any kind -- it is one factory and two
+  // predicates -- so it is the least interesting possible member of the scanned
+  // set, which is precisely why the count and not a judgement call is what
+  // guards the surface.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 161 && result.status === 0,
+    files.length === 162 && result.status === 0,
     result,
   );
 }
