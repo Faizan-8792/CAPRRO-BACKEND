@@ -282,10 +282,16 @@ RTO applies instead of this section.
 **Rehearsal log** (append one entry per real rehearsal or real incident rollback; do not leave
 this list empty for a release that claims this procedure is trustworthy):
 
+The `Smoke result` column is **3 of 4 on both legs**, not 4. Read the note below before quoting
+these rows: the fourth check (an authenticated read returning 200) did not run on either leg, for
+want of a production bearer token. This line exists because the roll-forward row said “4 of 4”
+until 2026-08-26 while the paragraph under the table said the opposite — a reader skimming only
+the table would have concluded the rollback was proved for authenticated behaviour. It is not.
+
 | Date | Operator | From commit | To commit | Wall-clock | Smoke result |
 |---|---|---|---|---|---|
 | 2026-08-24 | agent (Opus 5), rehearsal | `0ea0bcb` | `10bf147` | **89 s** | 3 of 4 pass — see note |
-| 2026-08-24 | agent (Opus 5), roll-forward | `10bf147` | `0ea0bcb` | **52 s** | 4 of 4 pass — see note |
+| 2026-08-24 | agent (Opus 5), roll-forward | `10bf147` | `0ea0bcb` | **52 s** | 3 of 4 pass — see note |
 
 **What that rehearsal actually did**, so the numbers above are readable rather than decorative. It
 was a real rollback against production, not a described one: the live API was moved back to the
