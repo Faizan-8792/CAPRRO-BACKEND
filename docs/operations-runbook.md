@@ -315,13 +315,24 @@ authentication that runs before route matching, so a path that does not exist in
 still answers `401`, not `404`. Anything asserting "the new routes are live" from a 401 is asserting
 nothing.
 
-**Smoke coverage, stated honestly.** Of Deploy step 5's four checks, three ran on both legs and
-passed: `/health` (after the readiness wait), `/api/app-config` (`ok:true`, `featureFlags` present)
-and `GET /`. The fourth — an authenticated read returning `200` — was **not run**: it needs a real
-production bearer token, and this session holds none. Minting one would mean reaching into the
-production database for a user id, which is not something a rehearsal should require. Until that
-fourth check has been run on a rollback, treat this procedure as rehearsed for availability but not
-for authenticated behaviour.
+**Smoke coverage, stated honestly.** Of Deploy step 5's four checks, three ran on both legs of the
+2026-08-24 rehearsal and passed: `/health` (after the readiness wait), `/api/app-config`
+(`ok:true`, `featureFlags` present) and `GET /`. The fourth — an authenticated read returning `200`
+— was **not run** on either leg, for want of a production bearer token.
+
+**Update 2026-08-26: the fourth check is no longer unrunnable.** `tools/mint-admin-token.mjs` mints
+a real session token through the ordinary OTP login and stores it in `.env`, so an authenticated
+read is now part of any deploy's smoke. It ran on the 2026-08-26 deploy of commit `94a4779`:
+`GET /api/auth/me` -> **200**, alongside `/api/app-config` 200, `GET /` 200, and `/health` reaching
+`{"status":"ok","background":"ready"}` after 151 seconds. **Four of four.**
+
+What that does and does not close: the *capability* gap is gone, and every future deploy can smoke
+all four. The 2026-08-24 **rollback rehearsal** itself still shows 3 of 4, because that is what was
+actually observed on those two legs, and a rehearsal cannot be improved retroactively. Re-running it
+was deliberately not done on 2026-08-26: the archive it would have rolled back to contains the
+feature-flag panel defect fixed in `94a4779`, and briefly restoring a build that can wipe production
+flags — while the owner is working in the panel — is a worse trade than leaving the rehearsal at 3
+of 4 until a calmer pair of archives exists.
 
 **Prune interaction, worth knowing before an incident.** `-RetainCount` defaults to 5 and prunes by
 write time after each real build. A rollback deploys an *older* archive but does not re-create it,
