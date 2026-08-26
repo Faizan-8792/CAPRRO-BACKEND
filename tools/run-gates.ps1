@@ -505,8 +505,45 @@ try {
         "client-version-contract",
         "desktop-fixture-drift-contract"
     )
+    # Suites that hold EXTRA assertions behind "if (process.env.MONGODB_URI)". This runner never
+    # set that variable, so those assertions had never run in a single gate execution. Measured
+    # directly: provider-quota-contract reports 32/32 without it and 38/38 with it, and the six it
+    # was skipping are the quota PERSISTENCE checks -- whether a spent counter survives a restart,
+    # which is the entire point of a spend cap. A gate that prints a green 32/32 while silently
+    # omitting the six assertions that matter most is worse than one that fails.
+    #
+    # Each suite gets its OWN scratch database so two suites can never see each other's rows, and
+    # every name carries the "scratch" marker the suites' own safety guards look for before they
+    # will touch a database at all.
+    $mongoScratch = @{
+        "provider-quota-contract" = "scratch-gates-quota"
+        "data-retention-contract" = "scratch-gates-retention"
+        "desktop-release-contract" = "scratch-gates-release"
+        "terms-acceptance-contract" = "scratch-gates-terms"
+    }
+    # Probed once, not assumed. On a machine with no local Mongo the behaviour is unchanged from
+    # before -- the variable stays unset and the suites run their Mongo-free subset -- but the
+    # report says so out loud instead of presenting the smaller count as the whole suite.
+    $mongoPort = 0
+    foreach ($candidate in @(27117, 27017)) {
+        try {
+            $probe = New-Object System.Net.Sockets.TcpClient
+            $async = $probe.BeginConnect("127.0.0.1", $candidate, $null, $null)
+            if ($async.AsyncWaitHandle.WaitOne(1500) -and $probe.Connected) { $mongoPort = $candidate }
+            $probe.Close()
+        }
+        catch { }
+        if ($mongoPort -ne 0) { break }
+    }
+
     $report.Add("")
     $report.Add("===== test suites =====")
+    if ($mongoPort -ne 0) {
+        $report.Add("  (local Mongo on 127.0.0.1:$mongoPort - Mongo-dependent assertions ENABLED for $($mongoScratch.Count) suite(s))")
+    } else {
+        $report.Add("  (no local Mongo reachable on 27117 or 27017 - the Mongo-dependent assertions in")
+        $report.Add("   $($mongoScratch.Keys -join ', ') did NOT run; their printed counts are the Mongo-free subset)")
+    }
     foreach ($suite in $suites) {
         $path = Join-Path $resolvedRepoRoot "tests\$suite.mjs"
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -520,12 +557,16 @@ try {
                 "deploy-archive-boundary" { $boundaryTimeoutMs }
                 default { $processTimeoutMs }
             }
+            $suiteEnv = @{ NODE_OPTIONS = ""; NODE_PATH = "" }
+            if ($mongoPort -ne 0 -and $mongoScratch.ContainsKey($suite)) {
+                $suiteEnv["MONGODB_URI"] = "mongodb://127.0.0.1:$mongoPort/$($mongoScratch[$suite])"
+            }
             $result = Invoke-CapturedProcess `
                 -FilePath $nodeExecutable `
                 -Arguments @($path) `
                 -WorkingDirectory $resolvedRepoRoot `
                 -TimeoutMs $timeout `
-                -EnvironmentOverrides @{ NODE_OPTIONS = ""; NODE_PATH = "" }
+                -EnvironmentOverrides $suiteEnv
             $combined = $result.StandardOutput + "`n" + $result.StandardError
             $report.Add("  " + $suite.PadRight(34) + " exit=$($result.ExitCode)  " + (Get-SummaryLine -Output $combined))
             if ($result.ExitCode -ne 0) { $failures++ }

@@ -351,6 +351,15 @@ console.log("=== bullet 5: SIGKILL mid-cascade, then resume ===");
 
   let steps = 0;
   let killed = false;
+  // The child's stderr is captured rather than left to fill an undrained pipe, because the whole
+  // point of this bullet is what happens when the child dies unexpectedly -- and the first time
+  // this suite ever ran on a cold scratch database the child exited on its own with Windows code
+  // 3221226505 (0xC0000409) after 0 steps, which was undiagnosable from the suite's own output
+  // because these bytes were being discarded. Keep them.
+  let childErr = "";
+  child.stderr.on("data", (buf) => { childErr += String(buf); });
+  let exitCode = null;
+  let exitSignal = null;
   await new Promise((resolve) => {
     child.stdout.on("data", (buf) => {
       for (const line of String(buf).split("\n")) {
@@ -364,6 +373,8 @@ console.log("=== bullet 5: SIGKILL mid-cascade, then resume ===");
       }
     });
     child.on("exit", (code, signal) => {
+      exitCode = code;
+      exitSignal = signal;
       console.log(`  child exited: code=${code} signal=${signal} after ${steps} step(s)`);
       resolve();
     });
@@ -372,17 +383,33 @@ console.log("=== bullet 5: SIGKILL mid-cascade, then resume ===");
   check("KILL-was-signal", killed, `the child was SIGKILLed after ${steps} completed step(s), not asked to stop`);
 
   const partial = await getErasureReceipt("e2e-killed");
-  const done = partial.steps.filter((s) => s.status === "COMPLETED").length;
-  check(
-    "KILL-partial-durable",
-    done >= 1 && done < PINNED_FIRM_SCOPED.length,
-    `${done}/${PINNED_FIRM_SCOPED.length} steps survived the kill as durably COMPLETED`,
-  );
-  check(
-    "KILL-half-erased-visible",
-    partial.status !== "COMPLETED",
-    `status is ${partial.status} — a killed run does not read as finished`,
-  );
+  // If the kill never landed -- the child died before reaching step 5 -- then every assertion
+  // below is about a receipt that was never written, and `partial` is null. Dereferencing it threw
+  // a TypeError that aborted the whole suite mid-bullet, turning one soft failure into a stack
+  // trace and hiding the remaining assertions. A harness must end with a verdict, not a crash:
+  // report what actually happened, with the diagnostics needed to chase it, and skip the
+  // assertions that have no subject.
+  if (!partial) {
+    check(
+      "KILL-receipt-written",
+      false,
+      `no erasure receipt exists for "e2e-killed": the child exited code=${exitCode} signal=${exitSignal} ` +
+        `after ${steps} step(s) without durably recording one` +
+        (childErr.trim() ? ` — child stderr: ${childErr.trim().split("\n").slice(0, 4).join(" | ")}` : " — child stderr was empty"),
+    );
+  } else {
+    const done = partial.steps.filter((s) => s.status === "COMPLETED").length;
+    check(
+      "KILL-partial-durable",
+      done >= 1 && done < PINNED_FIRM_SCOPED.length,
+      `${done}/${PINNED_FIRM_SCOPED.length} steps survived the kill as durably COMPLETED`,
+    );
+    check(
+      "KILL-half-erased-visible",
+      partial.status !== "COMPLETED",
+      `status is ${partial.status} — a killed run does not read as finished`,
+    );
+  }
 
   // A half-erased firm really does exist at this instant. That is the state the resume must clear.
   let leftBehind = 0;

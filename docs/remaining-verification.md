@@ -8,8 +8,17 @@ what a pass looks like, and what evidence to capture.
 machine, or a mailbox. Anything that could be executed has been, and is recorded in
 `.kiro/finalreleasefix.md` against its own task.
 
-Last updated: 2026-08-26. Ledger at the time: **64 of 113 done (56.6%)**, agent-completable
-**64 of 90 (71.1%)**, release gates **8 of 14**, protocol OK.
+Last updated: 2026-08-26 (second pass, same day). Ledger at the time: **65 of 115 done (56.5%)**,
+agent-completable **65 of 92 (70.7%)**, release gates **8 of 14**, protocol OK.
+
+**Why the percentage moved down slightly rather than up.** Two tasks were added (`T13`, `V16`, both
+closed with evidence) and one was un-ticked (`R9`), because `ledger-status.ps1` had a bug that made it
+report "protocol OK" over three tasks that breached the rule it exists to enforce: its evidence scan
+stopped at the first blank line, so a caveat written into a second evidence block was invisible to it.
+Fixed, and it now has its own committed regression tests. `D10` and `V13` survived scrutiny — D10's
+caveat was a stale line for a gate since run and passed, and V13's remaining "Not verified" lines are
+mandated by its own Verify list. `R9` genuinely was not finished. The arithmetic going down here is the
+protocol working, not the product regressing.
 
 ---
 
@@ -128,7 +137,25 @@ The filled §13 block, committed.
 
 ## 4. Two browser checks in the admin panel
 
-**Task:** U5 (R9 is already closed)
+**Tasks:** U5 and R9 — **R9 is NOT closed; corrected 2026-08-26.** It had been ticked while carrying
+its own `Not verified:` and `Gate not run:` lines, which the protocol does not allow, and only a bug in
+the ledger checker hid it. It is back at `[~]` with exactly three things left, all needing you:
+
+1. **On screen:** that the 19 checkboxes' **checked state** matches `/api/app-config`. The set and the
+   order no longer need checking — confirmed against the live server without a browser: 19 live
+   `featureFlags` keys, all 19 declared in `super.js`'s `FEATURE_FLAG_KEYS`, all 19 in
+   `DEFAULT_FEATURE_FLAGS`, declaration order equal to model order, exact set match both ways.
+2. **Toggle one low-risk flag and Save**, confirming the echo changes only that key. **An agent
+   deliberately did not do this**: it is a write to production feature flags, it changes what every
+   user sees, and `R10` is the owner task that decides that state. A verification run is not a licence
+   to move it.
+3. **A non-super account gets a 403** with the card's own readable message. This needs a second
+   account: `mint-admin-token.mjs` mints only for the hardcoded super-admin address and needs an OTP
+   from your mailbox. Signing a token locally for a different identity was considered and rejected —
+   forging an authentication credential against production to test a refusal is not an agent's call,
+   even with a no-op payload.
+
+Verify bullet 4 is done: `node --check super.js` exits 0 and `grep -c featureFlags` returns 23.
 
 ### Why it is pending
 No browser exists in the agent environment — no puppeteer, no playwright, nothing. Both remaining
@@ -269,3 +296,45 @@ what the code looks like.
 ### Evidence to capture
 A photo or screenshot of the toast, and `Get-Process CaPro.Desktop` showing nothing at the moment it
 appeared.
+
+---
+
+## 10. Settle one contradiction: V15 is ticked but has no evidence row
+
+**Task:** V15 · **Added 2026-08-26**
+
+### Why it is pending
+`.kiro/finalreleasefix.md` carries `V15` as `[x]` with an evidence block, while `.kiro/release-evidence.md`
+still shows its row as `NOT RUN`. That file's own preamble settles which way to read a disagreement:
+*"A tick with no row here is a false tick."* So either the row needs filling from a real run, or V15
+needs un-ticking. It was deliberately not resolved by copying the ledger's numbers into the row, because
+`release-evidence.md` explicitly forbids transcribing a figure from another document — and its gates need
+the UIA audit driven against a rendered window, which an agent working console-only cannot do.
+
+### Steps
+Run `powershell -NoProfile -ExecutionPolicy Bypass -File apps\desktop-native\tools\ui-route-audit.ps1`
+against the unpackaged Release x64 exe with a signed-in session, and confirm the three defects V15 names
+are gone: the duplicate "Got it" accessible names on two pages, and the Shift+Tab order break on
+*Read a notice*.
+
+### Expected result
+Either a clean run that fills the row, or a FAIL that justifies moving V15 back to `[~]`.
+
+### Evidence to capture
+The audit's own summary lines (`pages reached`, `forbidden tokens (total)`, `failures`) and the exit code.
+
+---
+
+## Resolved since the last version of this file — do not redo these
+
+- **The 23 Mongo-dependent backend suites** (was blocked under `V13` as "Docker is deliberately down").
+  All 23 now run: **962 assertions, 0 failed.** The stated reason was stale twice over — Docker is up,
+  and the real blocker was that every suite defaults to port **27017** while the containers publish
+  **27117** and **27118**. No test file needed editing. Running them found two real defects, both fixed
+  under `V16`: six quota-persistence assertions that no gate run had ever executed, and a suite that
+  crashed on a null dereference instead of reporting a verdict.
+- **`D10`'s download-page gate** (was blocked on `D9` not existing). The page is live; the gate was run
+  and passed, and re-verified independently — the served page is byte-identical to the repo copy.
+- **The three `LiveBackendContractTests`**, which had been silently skipping in every run this project
+  has recorded while being counted inside a `Passed!` line. They pass against production: the real Core
+  figure is **2953/2953 with 0 skipped**, not 2950 with 3 skipped.
