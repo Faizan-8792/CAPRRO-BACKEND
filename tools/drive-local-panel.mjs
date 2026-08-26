@@ -42,23 +42,20 @@ const SHOW = process.argv.includes("--show");
 
 // WHY THIS RUNS IN DEVELOPMENT MODE, stated plainly because it is a deviation
 // ---------------------------------------------------------------------------
-// In production mode the panel cannot talk to its own server from any host but the real one. The
-// CORS allowlist in app.js:326 allows exactly `https://api.caprotoolkit.in` as "the backend itself",
-// and a browser sends an Origin header on a PATCH even when the request IS same-origin - so a panel
-// served from http://127.0.0.1:PORT gets `CORS blocked for origin: http://127.0.0.1:PORT` on Save.
-// Observed here before this note was written: the save's status line read the generic
-// "We could not complete your request" and the server logged the CORS error.
+// HISTORY: when this drive was written, the CORS allowlist named exactly
+// `https://api.caprotoolkit.in` as "the backend itself", and a browser sends an Origin header on a
+// PATCH even when the request IS same-origin - so a panel served from http://127.0.0.1:PORT got
+// `CORS blocked for origin: http://127.0.0.1:PORT` on Save, and development mode plus
+// http://localhost was the only host the panel could save from. That behaviour was pinned by
+// tests/admin-panel-same-origin.mjs and raised as O19.
 //
-// The correct fix is to allow an Origin that equals the request's own origin, which is what
-// same-origin means and adds no cross-origin capability. But that is a change to a SECURITY rule,
-// and an agent does not make those unilaterally: the current behaviour is instead PINNED by
-// tests/admin-panel-same-origin.mjs and raised for the owner in .kiro/OWNER-TODO.md.
-//
-// So this drive uses development mode and http://localhost, which app.js:345 already allows
-// (`!isProd && origin.startsWith("http://localhost")`). What that changes is error verbosity, not
-// the save path under test: updateDesktopRelease, its validator and its monotonicity guard are the
-// same code in both modes. Every API-level assertion below is issued from node with no Origin
-// header at all, so those are unaffected either way.
+// O19 was ACCEPTED by the owner on 2026-08-27: app.js now also allows an Origin equal to the
+// request's own origin, so a same-origin panel works in production mode too (asserted in
+// tests/admin-panel-same-origin.mjs). This drive KEEPS development mode anyway, deliberately: its
+// recorded runs and selectors were all captured in that mode, and what the mode changes is error
+// verbosity, not the save path under test - updateDesktopRelease, its validator and its
+// monotonicity guard are the same code in both modes. Every API-level assertion below is issued
+// from node with no Origin header at all, so those are unaffected either way.
 //
 // Set BEFORE src/app.js is imported: load-env.js runs dotenv at import time and dotenv does not
 // override a value already present, so these win over the committed .env.

@@ -207,20 +207,22 @@ if (!existsSync(EXTENSION)) {
 // ─── 5. CORS: what the served panel is actually allowed to do ───────
 //
 // A relative API base makes the panel's requests same-origin, but a browser still sends an Origin
-// header on a PATCH, and app.js's allowlist decides on that header. The allowlist names exactly
-// `https://api.caprotoolkit.in` as "the backend itself". So a panel served from ANY other host --
-// a staging deployment, a local server -- is refused by CORS on every save, even though the request
-// is same-origin by definition. Observed directly on 2026-08-26 while driving a local panel:
-// `CORS blocked for origin: http://127.0.0.1:PORT`, and the Save button's status line showed the
-// generic "We could not complete your request".
+// header on a PATCH, and app.js's allowlist decides on that header. Until 2026-08-27 the allowlist
+// named exactly `https://api.caprotoolkit.in` as "the backend itself", so a panel served from ANY
+// other host -- a staging deployment, a local server -- was refused by CORS on every save, even
+// though the request was same-origin by definition. Observed directly on 2026-08-26 while driving
+// a local panel: `CORS blocked for origin: http://127.0.0.1:PORT`.
 //
-// These assertions PIN that behaviour. They are not an endorsement of it. The correct rule is
-// "allow an Origin equal to the request's own origin", which adds no cross-origin capability -- a
-// page on evil.com sends Origin: https://evil.com against Host: api.caprotoolkit.in and still fails
-// the comparison. But CORS is a security control, and an agent does not change one of those on its
-// own judgement, so the current behaviour is pinned here and the decision is raised in
-// .kiro/OWNER-TODO.md. If the owner accepts the same-origin rule, the localhost assertion below is
-// the one that must be updated, deliberately, in the same change.
+// O19 DECISION, 2026-08-27: the owner ACCEPTED the same-origin rule ("deploy the same-origin fix,
+// accept O19"). app.js now also allows an Origin exactly equal to the request's own origin, derived
+// from the request (`req.protocol` + Host, with trust proxy set) rather than a constant. This adds
+// no cross-origin capability -- a page on evil.com sends Origin: https://evil.com against
+// Host: api.caprotoolkit.in, and a browser always sets Host from the URL it is fetching, so the two
+// can only match when the request genuinely is same-origin.
+//
+// The assertions below pin the ACCEPTED behaviour from all three directions: the request's own
+// origin is allowed; a DIFFERENT host is still refused; and the lookalike negative control still
+// proves the allowlist is exact, never a prefix match.
 
 process.env.NODE_ENV = "production";
 process.env.JWT_SECRET = process.env.JWT_SECRET || "local-verification-only";
@@ -274,11 +276,23 @@ try {
     `status ${noOrigin.status}, Access-Control-Allow-Origin ${JSON.stringify(noOrigin.allowOrigin)}`
   );
 
+  // O19 accepted 2026-08-27: a request whose Origin equals its own origin is allowed.
+  // This server IS `base`, so this is the genuinely-same-origin case the rule exists for.
+  const sameOrigin = await preflight(base);
+  check(
+    "O19 a request whose Origin equals the request's own origin is allowed",
+    sameOrigin.allowOrigin === base,
+    `Origin ${base} -> Access-Control-Allow-Origin ${JSON.stringify(sameOrigin.allowOrigin)}`
+  );
+
+  // Formerly the PINNED, NOT ENDORSED assertion. Under the accepted rule the meaning is:
+  // a DIFFERENT host is still cross-origin and still refused -- the same-origin rule
+  // compares exact scheme+host+port, it is not a "loopback is fine" widening.
   const localhost = await preflight("http://localhost:4001");
   check(
-    "PINNED, NOT ENDORSED in production a panel served from any other host is CORS-refused on writes",
+    "O19 a request whose Origin is a DIFFERENT host is still refused in production",
     localhost.allowOrigin === null,
-    `Access-Control-Allow-Origin ${JSON.stringify(localhost.allowOrigin)} -- see the note above; this is the assertion to change if the owner accepts the same-origin rule`
+    `Origin http://localhost:4001 against ${base} -> Access-Control-Allow-Origin ${JSON.stringify(localhost.allowOrigin)}`
   );
 } finally {
   await new Promise((resolve) => server.close(resolve));

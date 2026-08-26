@@ -317,13 +317,30 @@ const MARKETING_SITE_ORIGINS = Object.freeze([
 ]);
 
 app.use(
-  cors({
+  // Per-request options delegate: the same-origin rule below needs the request's own
+  // origin, which the plain `origin: (origin, cb)` form never sees.
+  cors((req, callback) => {
+    // The request's own origin, derived from the request rather than a constant.
+    // `trust proxy` is set (app.js:213), so req.protocol honours X-Forwarded-Proto.
+    const requestOrigin = `${req.protocol}://${req.get("host")}`;
+    callback(null, {
     origin: (origin, callback) => {
       // ✅ Allow same-origin / server calls
       if (!origin) return callback(null, true);
 
       // ✅ Allow backend itself
       if (origin === "https://api.caprotoolkit.in") {
+        return callback(null, true);
+      }
+
+      // ✅ Allow an Origin equal to the request's own origin (O19, owner-accepted
+      //    2026-08-27). This adds NO cross-origin capability: a page on evil.com
+      //    sends Origin: https://evil.com against Host: api.caprotoolkit.in, and a
+      //    browser always sets Host from the URL it is fetching, so the two can only
+      //    match when the request genuinely is same-origin. It exists so the admin
+      //    panel works when the whole backend is served from a staging or local
+      //    host, instead of being CORS-refused on every write.
+      if (origin === requestOrigin) {
         return callback(null, true);
       }
 
@@ -356,6 +373,7 @@ app.use(
       return callback(new Error(`CORS blocked for origin: ${origin}`));
     },
     credentials: true,
+    });
   }),
 );
 
