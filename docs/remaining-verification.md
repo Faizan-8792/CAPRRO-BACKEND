@@ -26,7 +26,36 @@ completed now that `L1` has `support@caprotoolkit.in` live (one stale `mailto:` 
 was the only gap, plus two in `ca-pro-website/index.html` and `llms.txt` found the same way).
 Section **14** below is therefore also resolved for `D5` — struck through in place.
 
-UPDATED AGAIN 2026-08-27 (owner-directive session, later pass): **97 of 140 (69.3%)**,
+UPDATED AGAIN 2026-08-27 (overnight autonomous session, final): **100 of 144 (69.4%)**,
+agent-completable **91 of 114 (79.8%)**, gates **6 of 14 must-pass** (see the correction below —
+this figure was previously printed as 8, wrongly), **protocol OK, `-CheckOnly` exit 0**.
+
+**The release-gate figure was overstating readiness and is now correct.** `ledger-status.ps1`
+incremented one counter for every `G##` line, so the two ticked SHOULD-pass conditions (`G18`,
+`G19`) were being counted toward the 14 MUST-pass. The header read "8 of 14" when the hand count of
+ticked must-pass boxes was **six**. Padding is one-way — the printed figure could never be lower
+than the truth, only higher — and the write path guards publication on `$gateMet -ge $gateMust`, so
+five available should-pass ticks could in principle have printed "MET — all 14 must-pass conditions
+met" with the clean-VM install, the update loop and the human sign-off still open. Filed and fixed
+as `T18`, with the regression test written first and proved to bite.
+
+Four tasks added and closed this pass, all found by running things rather than reading them:
+`T17` (the checker's Verify-section boundary matched the word "Verify" anywhere, reporting answered
+gates as skipped), `T18` (above), `V30` (the keyboard-accessibility gate was failing on a different
+page every run — a fixed 90 ms sleep after each keystroke instead of waiting for focus to move;
+5 of 5 clean afterwards against a 1-of-5 baseline), and `V31` (the reduced-motion/high-contrast gate
+fired ENTER without confirming the app was the OS foreground window, so it died at its first
+navigation step and the five transitions it exists to verify were never exercised). `T19` was added
+as `[o]` — PLAN.md still requires a "Signed MSIX", which no longer exists, and `G14` cannot pass
+while it stands.
+
+One correction worth carrying forward: `V30`'s sweep claimed, from reading, that
+`verify-accessibility-transitions.ps1` sends no synthetic keystrokes. It does. `V31` found that by
+running it, and `V30`'s evidence now records the sweep was wrong rather than being quietly amended.
+
+Superseded figures from the earlier pass this same day follow.
+
+UPDATED 2026-08-27 (owner-directive session, earlier pass): **97 of 140 (69.3%)**,
 agent-completable **88 of 111 (79.3%)**, gates **8 of 14**, **protocol OK — zero violations,
 `-CheckOnly` exit 0**. The "1 count nuance on O9" this paragraph previously carried turned out to
 be a defect in `ledger-status.ps1` itself rather than anything wrong with O9: it took the
