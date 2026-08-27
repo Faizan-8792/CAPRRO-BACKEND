@@ -63,7 +63,8 @@ $secretVariableNames = @(
     "GOOGLE_CLIENT_SECRET",
     "GOOGLE_DESKTOP_CLIENT_SECRET",
     "RESEND_API_KEY",
-    "DEEPSEEK_API_KEY"
+    "DEEPSEEK_API_KEY",
+    "SENTRY_DSN"
 )
 $forbiddenPathSegmentPattern = '(?i)^(?:[^/]*\.env(?:\..*)?|\.npmrc(?:\..*)?|\.?netrc(?:\..*)?|\.git-credentials(?:\..*)?|[^/]*\.(?:pem|pfx|p12|key)|(?:credentials?|secrets?)(?:\..*)?)$'
 $allowedRuntimeFilePattern = '(?i)(?:^package(?:-lock)?\.json$|\.(?:cjs|conf|config|css|gif|html|ico|ini|jpeg|jpg|js|json|md|mjs|otf|png|properties|svg|toml|ttf|txt|webp|woff2?|xml|yaml|yml)$)'

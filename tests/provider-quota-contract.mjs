@@ -301,6 +301,33 @@ function installFakeProviderUsageStore() {
   );
 }
 
+// A7 — two different users interleaved against the SAME store never share a
+// counter: reaching one user's cap must not affect the other's, and each
+// user's own count must reflect only their own calls, not the pair's total.
+{
+  const store = installFakeProviderUsageStore();
+  const userA = "a7a7a7a7a7a7a7a7a7a7a7a1";
+  const userB = "a7a7a7a7a7a7a7a7a7a7a7b2";
+  const periodKey = "2026-08-27";
+
+  await ProviderUsage.tryIncrement({ userId: userA, provider: "DEEPSEEK", periodKey, cap: 2 });
+  await ProviderUsage.tryIncrement({ userId: userA, provider: "DEEPSEEK", periodKey, cap: 2 });
+  const userAThird = await ProviderUsage.tryIncrement({
+    userId: userA, provider: "DEEPSEEK", periodKey, cap: 2,
+  });
+  check("A7: user A is refused once THEIR OWN count reaches the cap", userAThird.allowed === false);
+
+  const userBFirst = await ProviderUsage.tryIncrement({
+    userId: userB, provider: "DEEPSEEK", periodKey, cap: 2,
+  });
+  check(
+    "A7: user B, never having called before, is unaffected by user A already being at cap",
+    userBFirst.allowed === true && userBFirst.calls === 1,
+  );
+  check("A7: user A's stored count is exactly their own 2 calls, not a shared total", store.peek(userA, "DEEPSEEK", periodKey) === 2);
+  check("A7: user B's stored count is exactly their own 1 call, not a shared total", store.peek(userB, "DEEPSEEK", periodKey) === 1);
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // PART B — callDeepSeek's own quota gate (the real choke point)
 // ═══════════════════════════════════════════════════════════════════════
@@ -626,6 +653,22 @@ if (process.env.MONGODB_URI) {
       "E1 (LIVE MongoDB): the stored daily counter reads exactly the cap (2), never exceeded by the race",
       finalDoc?.calls === 2,
       `stored calls=${finalDoc?.calls}`,
+    );
+
+    // E2 — persistence survives a restart. There is no in-memory counter
+    // anywhere in this design (every count lives only in ProviderUsage), so the
+    // real proof is that a FULLY NEW connection -- torn down and rebuilt, the
+    // same thing an app process restart does to its connection pool -- reads
+    // back the same value a completely separate earlier connection wrote. If
+    // the count were ever cached in process memory instead of read from Mongo,
+    // a fresh connection with an empty cache would not see it.
+    await mongoose.disconnect();
+    await mongoose.connect(process.env.MONGODB_URI);
+    const afterReconnect = await ProviderUsage.findOne({ userId, provider, periodKey: dailyPeriodKey() });
+    check(
+      "E2 (LIVE MongoDB): the counter survives a full disconnect/reconnect (proxy for a server restart) with the same value",
+      afterReconnect?.calls === 2,
+      `stored calls after reconnect=${afterReconnect?.calls}`,
     );
 
     await ProviderUsage.deleteMany({ userId });

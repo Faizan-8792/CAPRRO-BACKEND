@@ -7,13 +7,30 @@
 
 [CmdletBinding()]
 param(
-    [string]$RepoRoot = "D:\CA-PRO-Toolkit\CA-PRO-Toolkit\capro-backend",
-    [string]$LogPath = "D:\CA-PRO-Toolkit\CA-PRO-Toolkit\capro-backend\gates.log",
+    [string]$RepoRoot,
+    [string]$LogPath,
     [string]$ArchiveOutputDirectory = "D:\CA-PRO-Toolkit",
     [switch]$SkipDeployArchiveValidation
 )
 
 $ErrorActionPreference = "Stop"
+
+# Resolved here, not as param defaults above: $PSScriptRoot is not yet bound while parameter
+# defaults are evaluated under PowerShell 5.1 -File. Previously hardcoded to the shared checkout
+# (D:\CA-PRO-Toolkit\CA-PRO-Toolkit\capro-backend), which silently ran the gates against a
+# DIFFERENT copy of the code than whichever one this script actually lives inside -- invoked from a
+# git worktree with no override, it would validate the wrong tree and report false confidence about
+# the one actually being worked on. $ArchiveOutputDirectory is deliberately NOT changed: it is the
+# shared workspace-level archive retention location (CLAUDE.md's own documented convention), meant
+# to accumulate deploy archives from every worktree/session in one place regardless of which one
+# built them, since rollback needs to find them later no matter where it runs from.
+if (-not $RepoRoot) {
+    $toolsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $RepoRoot = Split-Path -Parent $toolsDir
+}
+if (-not $LogPath) {
+    $LogPath = Join-Path $RepoRoot "gates.log"
+}
 $report = New-Object System.Collections.Generic.List[string]
 $failures = 0
 $archiveValidationSkipped = [bool]$SkipDeployArchiveValidation

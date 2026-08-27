@@ -31,17 +31,20 @@ granting the role alone. The fourth surface is the Windows desktop app, which ta
 
 ## Database
 
-**Partially supplied 2026-08-23 (PLAN.md section 39).**
+**Supplied 2026-08-23 (PLAN.md section 39), completed 2026-08-27 (owner instruction).**
 
 | Field | Value |
 |---|---|
 | Provider | MongoDB Atlas |
 | Tier | **M0 (free)** |
 | Region | Mumbai, India |
-| Backup | **none** |
-| Cluster name | *not recorded — ask the owner* |
-| Database name | *not recorded — ask the owner* |
-| RPO / RTO | *not agreed* |
+| Cluster name | **Cluster0** |
+| Database name | **test** |
+| Backup | Hostinger (`api.caprotoolkit.in` > Files > Backups), daily automated, verified good 2026-08-26 19:34, PLUS CA PRO's own application-level dump (below) scheduled separately via Windows Task Scheduler. Nominal gap between the two nightly mechanisms: ~24h. |
+| RPO / RTO | **24h / 4h** — owner-approved policy, 2026-08-27 |
+
+The M0 tier itself still has no built-in backup facility (see below) — the "Backup" row above is
+what compensates for that, not a property of the cluster.
 
 Connection string comes from `MONGODB_URI`; pool sizing from `MONGO_POOL_MIN` / `MONGO_POOL_MAX`.
 
@@ -173,6 +176,10 @@ Hostinger deploys from an uploaded archive, not from git (`tools/make-deploy-arc
 `git push` alone never changes the live API. The pre-deploy gate already exists
 (`tools/run-gates.ps1`); this section makes running it non-optional, not a new pipeline.
 
+**Every command below is run from `capro-backend/` (this repository's own root, the folder this
+file lives inside) unless stated otherwise.** `.env`, `tools/...` and every other bare path in this
+section is relative to that directory.
+
 1. **Commit everything.** `make-deploy-archive.ps1`'s archive validation is commit-pinned: it
    resolves the current `HEAD` commit, then requires `git status --porcelain=v1
    --untracked-files=no` inside `capro-backend/` to be empty, and refuses with `"tracked backend
@@ -202,11 +209,13 @@ Hostinger deploys from an uploaded archive, not from git (`tools/make-deploy-arc
    below), pruned to the 5 most recent automatically after each successful, non-`-ValidateOnly` run
    (`-RetainCount`, default 5). **The archive this run just produced is your new "current" — before
    you upload it, make a note of which archive was live until now** (the second-newest file in that
-   directory, by write time, right before this run); you will need its filename if this deploy has
-   to be rolled back.
-4. **Upload and deploy.** Two ways; prefer the first, because it is repeatable and leaves evidence.
+   directory, by write time, right before this run — list them newest-first with
+   `Get-ChildItem D:\CA-PRO-Toolkit\capro-backend_*.zip | Sort-Object LastWriteTime -Descending |
+   Select-Object -First 5 Name,LastWriteTime`); you will need its filename if this deploy has to be
+   rolled back.
+4. **Upload and deploy.** Two ways; prefer Method A, because it is repeatable and leaves evidence.
 
-   **From this machine (no panel):**
+   **Method A — from this machine (no panel):**
    ```
    # Load the token into the environment only. Never paste it on a command line or into a file.
    $env:HOSTINGER_API_TOKEN = (Select-String -Path .env -Pattern '^HOSTINGER_API_TOKEN=' |
@@ -227,11 +236,18 @@ Hostinger deploys from an uploaded archive, not from git (`tools/make-deploy-arc
    **`--node-version` is not optional in practice.** The settings endpoint infers a Node major from
    the archive and has been observed inferring **20** while production runs **22**. Deploying new
    code and a new runtime major together makes any failure ambiguous, so pin the version that is
-   already serving and change one thing at a time. Check what is running with
-   `hosting_listJsDeployments` (or the panel) before deploying if you are unsure.
+   already serving and change one thing at a time. **As of 2026-08-27, that is 22 — pass
+   `--node-version 22` unless something in this runbook has since said otherwise.** If a future
+   change genuinely needs to confirm the running version first rather than trusting this line: the
+   Hostinger MCP tool `hosting_listJsDeployments` can read it directly, but that tool exists only
+   inside a session with the Hostinger MCP server connected (the owner's own authenticated session
+   — not available to every agent by default); otherwise use the panel fallback below. **The exact
+   panel URL and click path are not yet written down anywhere in this repository** — owner-only gap,
+   since only the owner holds the Hostinger login; record it here the first time someone walks it.
 
    **Through the Hostinger panel** is the fallback if the API is unavailable: upload the same
-   archive as `capro-backend.zip`, then trigger the Node app build and restart.
+   archive as `capro-backend.zip`, then trigger the Node app build and restart. (See the URL gap
+   noted just above — until it is filled in, this fallback needs the owner at the keyboard.)
 
    Either way, expect the service to answer `/api/app-config` within seconds but `/health` to report
    `"status":"degraded"` with `"background":"initializing"` for a while after the restart — see the
@@ -244,6 +260,9 @@ Hostinger deploys from an uploaded archive, not from git (`tools/make-deploy-arc
      fetch at startup — its failure breaks every client, not just this deploy's own feature.
    - `curl -si https://api.caprotoolkit.in/` -> `200`.
    - One authenticated read with a real token (any `GET` route behind `authRequired`) -> `200`.
+     Obtain the token with `node tools/mint-admin-token.mjs` (mints a real session token through
+     the ordinary OTP login and stores it in `.env`) if `.env` does not already hold a current one;
+     then e.g. `curl -si https://api.caprotoolkit.in/api/auth/me -H "Authorization: Bearer <token>"`.
 
    All four verified live on 2026-08-22 against a deploy that had already landed:
    `GET /health` -> `200` `{"status":"ok","uptime":7973,"db":{"state":"connected","ping_ms":77},
@@ -266,7 +285,10 @@ Hostinger deploys from an uploaded archive, not from git (`tools/make-deploy-arc
    already holds duplicate rows under one of those keys, the build refuses and the collection is
    recorded in the provisioning result's `failures` list; boot continues rather than aborting, so
    this fails QUIETLY. After that deploy, confirm GST still imports rather than assuming it: commit
-   one small import, or check the boot log for a provisioning failure naming a GST collection.
+   one small import. (The provisioning result is also written to the boot log, but this repository
+   does not yet document where Hostinger/Passenger's stdout for this app actually lands — the same
+   open question O7 raised for finding a `requestId` in server logs. Until that is answered, the
+   real import is the only confirmation method that does not need log access.)
 
    `node tools/verify-live-posture.mjs` runs the health check plus the CORS and error-envelope
    checks in one pass; a clean result is `8 passed, 0 failed, 2 skipped` (the 2 skips need a
@@ -280,10 +302,19 @@ RTO applies instead of this section.
 
 1. Identify the last-known-good archive: the file noted in Deploy step 3 before this deploy (or,
    if that note was not kept, the second-newest `capro-backend_*.zip` in the output directory by
-   write time — the newest is the one just rolled back from).
-2. Re-upload that archive exactly as in Deploy step 4 — the same two commands, pointed at the
-   older file. Nothing else changes; `--remote capro-backend.zip` is always the same destination,
-   so a rollback is a normal deploy of an older archive rather than a special path.
+   write time, per the `Get-ChildItem` line in Deploy step 3 — the newest is the one just rolled
+   back from). **Copy that archive somewhere outside the output directory before doing anything
+   else.** Deploy step 3's automatic prune keeps only the 5 most recent archives on every
+   non-`-ValidateOnly` run, by write time — not "how long ago the code it holds was live" — so an
+   old rollback target can be silently deleted by later deploys before you ever need it. This is
+   not hypothetical: it is the reason a rehearsal target has to be chosen with the prune window in
+   mind (see the 2026-08-27 rehearsal note below).
+2. Re-upload that archive: the two `node tools/...` commands from Deploy step 4 Method A
+   (`hostinger-upload-file.mjs`, then `hostinger-deploy-backend.mjs --node-version 22`) — NOT the
+   `$env:HOSTINGER_API_TOKEN` line above them, which only needs re-running in a fresh shell where
+   the token is not already loaded. Point `--file` at the older archive; nothing else changes,
+   `--remote capro-backend.zip` is always the same destination, so a rollback is a normal deploy of
+   an older archive rather than a special path.
 3. Re-run the same four-item post-deploy smoke from Deploy step 5. All four must pass before the
    incident is considered contained.
 4. Record the wall-clock time this took, end to end, in this section (the next entry below) — an
@@ -564,8 +595,8 @@ because none of the six variables is set.
 
 | Provider | Scope | Env var | Default |
 |---|---|---|---|
-| DeepSeek | per user, per day | `DEEPSEEK_DAILY_CALL_CAP_PER_USER` | **60** |
-| DeepSeek | per user, per month | `DEEPSEEK_MONTHLY_CALL_CAP_PER_USER` | **800** |
+| DeepSeek | per user, per day | `DEEPSEEK_DAILY_CALL_CAP_PER_USER` | **200** |
+| DeepSeek | per user, per month | `DEEPSEEK_MONTHLY_CALL_CAP_PER_USER` | **2700** |
 | DeepSeek | all users, per day | `DEEPSEEK_GLOBAL_DAILY_CALL_CAP` | **1500** |
 | OCR.space | per user, per day | `OCR_SPACE_DAILY_CALL_CAP_PER_USER` | **25** |
 | OCR.space | per user, per month | `OCR_SPACE_MONTHLY_CALL_CAP_PER_USER` | **300** |
@@ -573,20 +604,31 @@ because none of the six variables is set.
 
 **The reasoning, so a future operator can argue with it rather than guess at it.**
 
-The per-user daily caps are set at roughly a heavy but plausible day of real work — 60 AI calls is
-far more than a CA doing genuine review will make, and 25 OCR calls is more documents than one
-person scans in a day. They are not there to ration normal use. They are there so that a runaway
-loop, a stuck retry, or one compromised account cannot spend a month's budget in an afternoon.
+**DeepSeek's per-user daily cap, 200, is an owner-set anti-abuse ceiling, not a usage estimate**
+(raised from 60 on 2026-08-27, owner instruction: the product is free, and the number should be
+generous headroom rather than a ration). A CA doing genuine review will not come close to it in a
+day — a single notice triggers only a handful of calls (refine + insights + a coverage follow-up +
+a reminder message) — so it is not there to limit normal use. It is there so a runaway loop, a
+stuck retry, or one compromised account cannot spend a month's budget in an afternoon. OCR.space's
+25/day cap is unchanged and follows the same reasoning (more documents than one person scans in a
+day).
 
-The monthly per-user caps are deliberately **not** 30x the daily figure (800, not 1800; 300, not
-750). A user who hits their daily cap every day for a month is not doing accountancy, and the
-monthly ceiling is what notices that pattern.
+The monthly per-user caps are deliberately **not** 30x the daily figure (2700, not 6000; 300, not
+750) — same ratio DeepSeek's cap has always used (~13.3x the daily figure, i.e. a sustained average
+of ~44% of the daily peak), scaled up with the 2026-08-27 daily change so raising the daily number
+did not silently make the monthly tier the only real constraint, or silently stop being one. A user
+who hits their daily cap every day for a month is not doing accountancy, and the monthly ceiling is
+what notices that pattern.
 
 The global daily caps are the ones that actually bound the bill. They are set above the sum of a
 realistic day's use across the current user base and well below anything that would be a surprise on
 an invoice. **They are the figures to revisit as the user count grows** — the per-user caps scale
 with users automatically, the global ones do not, so the global cap is what will start refusing real
-work first if it is left where it is.
+work first if it is left where it is. Concretely, after the 2026-08-27 per-user change: at the
+DeepSeek global ceiling of 1500/day, roughly 7-8 users simultaneously at the new 200/day personal
+cap would exhaust the whole app's shared daily budget for everyone else. Left as-is deliberately —
+raising it is a real recurring-cost decision on the owner's own DeepSeek bill, not a per-user
+abuse-protection one — but worth a look once the active user count approaches that range.
 
 All six are enforced atomically against a compound unique index on `ProviderUsage`, so twenty
 concurrent calls at cap-minus-one produce exactly one success and nineteen refusals — proved live,
@@ -600,11 +642,20 @@ today.
 
 ## Staging
 
-No second Hostinger app on a subdomain pointed at a scratch database exists. This is an owner
-decision (cost) that has not been recorded either way yet — until it is, `run-gates.ps1` reporting
+**Declined — owner decision, 2026-08-27.** No second Hostinger app on a subdomain pointed at a
+scratch database will be stood up. Verbatim: *"run-gates.ps1 is the sole pre-deploy gate; the
+rehearsed rollback is the compensating control."* This is a final decision, not a placeholder for
+one — do not re-raise it as an open question.
+
+Consequence, stated so a future operator does not have to re-derive it: `run-gates.ps1` reporting
 `ALL RELEASE GATES GREEN` is the *only* gate before a production deploy, which makes step 2 of the
-Deploy section load-bearing rather than advisory, and the retained last-known-good archive (kept
-automatically, 5 most recent) is the only real safety net.
+Deploy section (running it WITHOUT `-SkipDeployArchiveValidation` and requiring the green result)
+load-bearing rather than advisory. The compensating control for the risk staging would otherwise
+have covered is the rehearsed rollback procedure above — retained last-known-good archives (kept
+automatically, 5 most recent) plus a rollback that has actually been performed against production
+in both directions with all four post-deploy smoke checks passing on each leg (O9's evidence,
+.kiro/finalreleasefix.md), not merely described. A bad deploy is therefore recoverable in under two
+minutes rather than prevented before it ships; that trade is the one this decision accepts.
 
 ## Known limitation: one developer's PC
 

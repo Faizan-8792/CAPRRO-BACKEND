@@ -13,18 +13,30 @@ const DEEPSEEK_MODEL_FALLBACK =
 // O10 spend meter/cap: DeepSeek is billed per call, and callDeepSeek is the one
 // choke point every caller (classifier, insights, reminder, standard-guidance,
 // audit working papers, case AI, the super-admin self-test) funnels through, so
-// this is where the whole app's DeepSeek spend is bounded. Per-user numbers are
-// sized for a genuinely busy working day: a single notice can trigger several
-// calls (refine + insights + a coverage follow-up + a reminder message), so 60/
-// day gives headroom for a dozen-plus documents in one sitting; 800/month covers
-// sustained daily use at roughly 26/day average with room for busy-day bursts up
-// to the daily cap. The global ceiling is deliberately NOT per-user-cap x
-// expected-users -- it is a flat backstop on the owner's own DeepSeek bill that
-// stays in force no matter how many accounts sign up.
+// this is where the whole app's DeepSeek spend is bounded.
+//
+// Per-user daily cap is an owner-set anti-abuse ceiling, not a usage estimate:
+// the product is free, and 200/day is deliberately generous headroom above what
+// any real working day of drafting needs (a single notice triggers only a
+// handful of calls -- refine + insights + a coverage follow-up + a reminder
+// message) while still bounding a single compromised or scripted account.
+// Monthly keeps the SAME ratio to the daily figure this task inherited (800/60
+// = ~13.3x, i.e. a sustained average of ~44% of the daily peak): 200 * 13.3 =
+// ~2667, rounded to 2700, so raising the daily number does not silently make
+// the monthly tier the only real constraint for ordinary bursty-but-not-daily
+// use, and does not silently stop being a genuine secondary ceiling either.
+// The global ceiling is deliberately NOT per-user-cap x expected-users -- it is
+// a flat backstop on the owner's own DeepSeek bill that stays in force no
+// matter how many accounts sign up, and is intentionally left untouched here:
+// raising it is a real recurring-cost decision for the owner, not a per-user
+// abuse-protection one. At the current 1500/day global ceiling, note for the
+// owner: roughly 7-8 users simultaneously at the new 200/day personal cap would
+// exhaust the whole app's shared daily budget for everyone else -- worth a
+// look if the user base grows past that.
 const DEEPSEEK_DAILY_CALL_CAP_PER_USER =
-  Number(process.env.DEEPSEEK_DAILY_CALL_CAP_PER_USER) || 60;
+  Number(process.env.DEEPSEEK_DAILY_CALL_CAP_PER_USER) || 200;
 const DEEPSEEK_MONTHLY_CALL_CAP_PER_USER =
-  Number(process.env.DEEPSEEK_MONTHLY_CALL_CAP_PER_USER) || 800;
+  Number(process.env.DEEPSEEK_MONTHLY_CALL_CAP_PER_USER) || 2700;
 const DEEPSEEK_GLOBAL_DAILY_CALL_CAP =
   Number(process.env.DEEPSEEK_GLOBAL_DAILY_CALL_CAP) || 1500;
 
