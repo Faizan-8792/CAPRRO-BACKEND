@@ -50,6 +50,19 @@ const fixturesDir = outArgIndex !== -1 && process.argv[outArgIndex + 1]
   ? resolve(process.argv[outArgIndex + 1])
   : join(desktopRoot, "tests", "CaPro.Desktop.Core.Tests", "Fixtures");
 
+// --only <route> (repeatable; "api/tasks/my-open" or "GET api/tasks/my-open") captures just the
+// named routes and MERGES them into the existing fixture directory instead of wiping it. V24's
+// reason: a full capture re-blesses all committed fixtures against a fresh database in one
+// unattended pass, which is exactly how a real drift gets accepted as normal. --only lets a new
+// fixture be added while the committed baseline someone actually trusted stays byte-identical.
+const onlyRoutes = [];
+for (let i = 0; i < process.argv.length; i += 1) {
+  if (process.argv[i] === "--only" && process.argv[i + 1]) onlyRoutes.push(process.argv[i + 1]);
+}
+const onlyMode = onlyRoutes.length > 0;
+const isSelected = (route) =>
+  onlyRoutes.some((value) => value === `${route.method} ${route.path}` || value === route.path);
+
 mongoose.set("bufferTimeoutMS", 5_000);
 process.env.NODE_ENV = "production";
 process.env.JWT_SECRET = process.env.JWT_SECRET || "local-verification-only";
@@ -1176,6 +1189,65 @@ define("POST", "api/engagements/working-papers/{workingPaperId}/rows", async () 
   );
 });
 
+// ── Parameterised routes, batch 4: the two INDIRECTLY-constructed routes with no path parameter ──
+//
+// Form 3 (a literal built into a local, passed to the call by name), so neither precise parser sees
+// them and the run loop below has to include indirect routes with handlers explicitly. These are
+// the only two indirect routes needing no entity id in the path: `api/tasks/my-open` is the
+// Overview page's endpoint -- the route D13's defect travelled on, uncaptured, which is why the
+// drift gate could not catch it -- and `api/compliance/calendar` takes only from/to query dates.
+//
+// Each handler creates its own subject, so its fixture has the same shape whether it runs at the
+// end of a full capture or alone under --only. Dates are deliberately far from every other
+// handler's (2026-09-20, 2026-12-31): the calendar window must contain exactly what this handler
+// puts in it, in both run modes, or the drift gate reports the difference as field drift.
+
+define("GET", "api/tasks/my-open", async () => {
+  // getMyOpenTasks filters assignedTo === the caller, and no other handler assigns anything, so
+  // without an assigned task this would record the empty-list shape instead of the populated one
+  // the Overview page actually parses -- tasks[] element fields AND pagination, the exact level
+  // D13 misread.
+  const created = await call("POST", "api/tasks", {
+    body: {
+      clientName: "Fixture Client",
+      title: "Fixture my-open task",
+      dueDateISO: "2027-06-15",
+      assignedTo: String(user._id),
+    },
+  });
+  if (!created.json?.task?._id) {
+    return { skip: `could not create an assigned open task to list (HTTP ${created.status})` };
+  }
+  // page=1&limit=25: MyWorkService.LoadAsync's own defaults, the desktop's first real request.
+  return call("GET", "api/tasks/my-open?page=1&limit=25");
+});
+
+define("GET", "api/compliance/calendar", async () => {
+  // One task and one reminder inside the window, so the fixture carries both record shapes the
+  // merger emits. The task is assigned so it satisfies every workspace scope variant.
+  const task = await call("POST", "api/tasks", {
+    body: {
+      clientName: "Fixture Client",
+      title: "Fixture calendar task",
+      dueDateISO: "2027-03-10",
+      assignedTo: String(user._id),
+    },
+  });
+  const reminder = await call("POST", "api/reminders", {
+    body: { typeId: "GSTR-3B", dueDateISO: "2027-03-20", clientLabel: "Fixture Client" },
+  });
+  if (!task.json?.task?._id || !reminder.json?.reminder?._id) {
+    return {
+      skip:
+        `could not seed the calendar window (task HTTP ${task.status}, ` +
+        `reminder HTTP ${reminder.status})`,
+    };
+  }
+  // from/to are required (parseCalendarQuery refuses without them); limit=200 is
+  // WorkspaceReadService.LoadCalendarAsync's own default, matching the desktop's first request.
+  return call("GET", "api/compliance/calendar?from=2027-03-01&to=2027-03-31&limit=200");
+});
+
 // Explicitly out of reach for this pass, with the real reason recorded rather than left silent.
 // Tracked in preSkippedKeys (not just the skipped[] report list) so the "uncovered by plan"
 // check below -- which exists to catch a route the parser found that this file forgot about
@@ -1195,10 +1267,38 @@ for (const [key, reason] of [
 // tool's own development left post-api-cases-ocr.json and patch-api-digests-settings.json on
 // disk after both routes were moved to the skip list, and the C# Theory below correctly failed
 // on both, refusing to run an assertion for a route with none registered.
-if (existsSync(fixturesDir)) {
-  rmSync(fixturesDir, { recursive: true, force: true });
+//
+// EXCEPT under --only, whose whole point is that the committed fixtures stay untouched. An --only
+// run therefore requires an existing capture to merge into, and refuses to mix database classes:
+// the drift gate treats transactionsAvailable as a comparability boundary, so merging a
+// standalone-mongod capture into a replica-set baseline (or the reverse) would plant exactly the
+// false drift that field exists to prevent.
+let existingManifest = null;
+if (onlyMode) {
+  const manifestPath = join(fixturesDir, "manifest.json");
+  if (!existsSync(manifestPath)) {
+    console.error(`--only needs an existing capture to merge into; no manifest at ${manifestPath}`);
+    await mongoose.connection.close();
+    await new Promise((resolve) => server.close(resolve));
+    process.exit(1);
+  }
+  existingManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  if (existingManifest.transactionsAvailable !== usingReplicaSet) {
+    console.error(
+      `--only refused: committed fixtures were captured with transactionsAvailable=` +
+        `${existingManifest.transactionsAvailable} but this run has ${usingReplicaSet}. ` +
+        `Start the replica set (27118) and re-run rather than merging across database classes.`,
+    );
+    await mongoose.connection.close();
+    await new Promise((resolve) => server.close(resolve));
+    process.exit(1);
+  }
+} else {
+  if (existsSync(fixturesDir)) {
+    rmSync(fixturesDir, { recursive: true, force: true });
+  }
+  mkdirSync(fixturesDir, { recursive: true });
 }
-mkdirSync(fixturesDir, { recursive: true });
 
 // Static routes always; interpolated routes only where a handler exists. An interpolated route
 // with no handler is not a failure -- it is the remaining coverage gap, counted in the manifest
@@ -1208,8 +1308,18 @@ const interpolatedWithHandler = interpolatedRoutes.filter((route) =>
   plan.has(`${route.method} ${route.path}`),
 );
 
-for (const route of [...staticRoutes, ...interpolatedWithHandler]) {
+// Same rule for the indirectly-constructed routes (batch 4): only where a handler exists. The
+// discovery contract already enforces that every indirect route is at least COUNTED, so one with
+// no handler here remains a reported coverage gap rather than a silent absence.
+const indirectWithHandler = indirectRoutes.filter((route) =>
+  plan.has(`${route.method} ${route.path}`),
+);
+
+for (const route of [...staticRoutes, ...interpolatedWithHandler, ...indirectWithHandler]) {
   const key = `${route.method} ${route.path}`;
+  // Under --only, unselected routes are neither captured nor recorded as skipped: this run makes
+  // no claim about them, and the merge below leaves their committed entries exactly as they were.
+  if (onlyMode && !isSelected(route)) continue;
   if (preSkippedKeys.has(key)) continue; // already recorded once, with its real reason, above.
 
   const handler = plan.get(key);
@@ -1239,6 +1349,40 @@ const planless = staticRoutes.filter((route) => {
   const key = `${route.method} ${route.path}`;
   return !plan.has(key) && !preSkippedKeys.has(key);
 });
+
+// ── --only: merge this run's captures into the committed manifest and stop ──────────────────
+//
+// Only `captured` (and any now-stale `skipped` entry for the same route) changes. Every other
+// manifest field still describes the last FULL capture -- capturedAtUtc and backendCommitSha
+// deliberately keep saying when and against what the 62-fixture baseline was blessed, because
+// claiming this partial run re-verified all of them is precisely the lie --only exists to avoid.
+if (onlyMode) {
+  const capturedKeys = new Set(captured.map((entry) => entry.route));
+  existingManifest.captured = [
+    ...(existingManifest.captured || []).filter((entry) => !capturedKeys.has(entry.route)),
+    ...captured,
+  ];
+  existingManifest.skipped = (existingManifest.skipped || []).filter(
+    (entry) => !capturedKeys.has(entry.route),
+  );
+  writeFileSync(join(fixturesDir, "manifest.json"), JSON.stringify(existingManifest, null, 2) + "\n");
+
+  console.log(`--only requested   : ${onlyRoutes.join(", ")}`);
+  console.log(`captured           : ${captured.map((entry) => entry.route).join(", ") || "none"}`);
+  for (const item of skipped) console.log(`  SKIPPED: ${item.route} -- ${item.reason}`);
+
+  // A request that captured nothing is a mistake (a typo'd route, a handler that skipped), never
+  // a pass: fail loudly instead of leaving the fixture silently absent.
+  const missing = onlyRoutes.filter(
+    (value) =>
+      !captured.some((entry) => entry.route === value || entry.route.endsWith(` ${value}`)),
+  );
+  for (const value of missing) console.log(`  NOT CAPTURED: ${value}`);
+
+  await mongoose.connection.close();
+  await new Promise((resolve) => server.close(resolve));
+  process.exit(missing.length > 0 ? 1 : 0);
+}
 
 const commitSha = execSync("git rev-parse HEAD", { cwd: repoRoot, encoding: "utf8" }).trim();
 
@@ -1288,10 +1432,14 @@ console.log(
     `${interpolatedRoutes.length - interpolatedWithHandler.length} outstanding (see manifest)`,
 );
 console.log(
-  `indirect          : ${indirectRoutes.length} discovered (verb inferred), of ${allRouteLiterals.length} route literals in the client`,
+  `indirect          : ${indirectRoutes.length} discovered (verb inferred), ${indirectWithHandler.length} captured, ` +
+    `of ${allRouteLiterals.length} route literals in the client`,
 );
 for (const item of planless) console.log(`  UNCOVERED: ${item.method} ${item.path}`);
-for (const item of indirectRoutes) console.log(`  INDIRECT : ${item.method} ${item.path}`);
+for (const item of indirectRoutes) {
+  const status = plan.has(`${item.method} ${item.path}`) ? " (captured)" : "";
+  console.log(`  INDIRECT : ${item.method} ${item.path}${status}`);
+}
 
 await mongoose.connection.close();
 await new Promise((resolve) => server.close(resolve));
