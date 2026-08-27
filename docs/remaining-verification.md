@@ -26,13 +26,18 @@ completed now that `L1` has `support@caprotoolkit.in` live (one stale `mailto:` 
 was the only gap, plus two in `ca-pro-website/index.html` and `llms.txt` found the same way).
 Section **14** below is therefore also resolved for `D5` — struck through in place.
 
-UPDATED AGAIN 2026-08-27 (owner-directive session, this one): **96 of 139 (69.1%)**,
-agent-completable **87 of 110 (79.1%)**, gates **8 of 14**, protocol OK (1 pre-existing count
-nuance on O9, not a real caveat — see the ledger). `O9` and `O7` closed `[x]` this session (owner
+UPDATED AGAIN 2026-08-27 (owner-directive session, later pass): **97 of 140 (69.3%)**,
+agent-completable **88 of 111 (79.3%)**, gates **8 of 14**, **protocol OK — zero violations,
+`-CheckOnly` exit 0**. The "1 count nuance on O9" this paragraph previously carried turned out to
+be a defect in `ledger-status.ps1` itself rather than anything wrong with O9: it took the
+Verify-section boundary from the first `*Verify` anywhere in a task body, so evidence prose reading
+`**Verify 1 re-confirmed …**` moved the boundary into the evidence block and swallowed the
+`*Files:*` bullets, inflating the gate count. Filed and closed as `T17` with a regression test
+proved to bite first. `O9` and `O7` closed `[x]` this session (owner
 decisions recorded, evidence independently re-verified); `O10`'s DeepSeek cap raised to the
 owner's 200/day target; three new tasks added and closed (`V28` accessibility root-fix, `V29`
 tooling-portability sweep, `R17` clock-skew hardening); `O20` added (secret-rotation checklist,
-owner-required). **New owner items below, not previously in this file:** O3's credential-custody
+owner-required); `T17` added and closed (the checker fix above). **New owner items below, not previously in this file:** O3's credential-custody
 person (§ near O3's own ledger entry — deliberately not invented), R7/R11's second READ_ONLY
 account (§8 below — same account gap R7 already listed, now also confirmed for R11), O20's secret
 rotation (new — see the ledger task directly, not duplicated here since it is already a full
