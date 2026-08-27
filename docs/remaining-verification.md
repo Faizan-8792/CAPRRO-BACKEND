@@ -18,6 +18,14 @@ pinned (15/15), the ledger's two bookkeeping rules were amended exactly as draft
 `T14` and `O19` are now ticked on evidence that already existed. Sections **4** and **12 items
 1-3** below are therefore resolved — struck through in place rather than deleted.
 
+UPDATED AGAIN 2026-08-27 (later session): **91 of 135 (67.4%)**, agent-completable **83 of 107
+(77.6%)**, gates **8 of 14**, protocol OK. `L5`, `D3`, `D14`, `D5` and `U9`'s D-4 bullet closed
+since the count above; `L10` bullet 3 closed via `L16`'s already-accepted correction (was
+recorded under L16 but never propagated back onto L10 itself); `O8`'s agent-executable sweep
+completed now that `L1` has `support@caprotoolkit.in` live (one stale `mailto:` in `download.html`
+was the only gap, plus two in `ca-pro-website/index.html` and `llms.txt` found the same way).
+Section **14** below is therefore also resolved for `D5` — struck through in place.
+
 **Why the percentage moved down slightly rather than up.** Two tasks were added (`T13`, `V16`, both
 closed with evidence) and one was un-ticked (`R9`), because `ledger-status.ps1` had a bug that made it
 report "protocol OK" over three tasks that breached the rule it exists to enforce: its evidence scan
@@ -443,25 +451,27 @@ deliberate choice rather than a thing everyone steps over.
 
 ---
 
-## 14. One decision, five minutes: V27 — V2's `-Packaged` gate cannot exist any more
+## 14. ~~One decision, five minutes: V27~~ — RESOLVED, and so is D3/D5's related question
 
-**Task:** V27 · unblocks V2 (BLOCKER) · **Added 2026-08-27**
+**Task:** V27 · unblocked V2 (BLOCKER) · **Added 2026-08-27** · **All three (V27, D3, D5) closed
+2026-08-27, nothing here is yours.**
 
-V2's fourth Verify bullet tests the UIA audit's `-Packaged` branch "against the still-installed
+V2's fourth Verify bullet tested the UIA audit's `-Packaged` branch "against the still-installed
 MSIX 0.1.1.1". That package no longer exists anywhere: `Get-AppxPackage` returns nothing, no
 .msix/.appx artifact exists in the repo, D1 removed MSIX from the build, and an unsigned MSIX
-cannot be rebuilt and installed (hard-fails `0x800B010A`, no override). Every other V2 bullet is
-run and passing.
+cannot be rebuilt and installed (hard-fails `0x800B010A`, no override).
 
-**V27 carries a drafted replacement wording** (the branch is present and intact, verified by
-reading the file fresh, recorded as preserved dead code from the completed MSIX migration).
-Accept or refuse in one clause. Refusing leaves V2, a BLOCKER, permanently `[~]` over a package
-that can never exist again — legitimate, but it should be deliberate.
-
-**Related:** `D3` and `D5` are blocked on the same judgement (their MSIX-machine gates need a
-machine with the old MSIX genuinely installed, which no longer exists here either). If you accept
-V27's shape, say whether the same reading applies to D3/D5's real-machine gates or whether those
-wait for a VM that has the old MSIX.
+V27 was accepted by the owner ("v27 l16 k liye mera permission ha"). The identical question this
+section originally raised — whether the same reading applies to D3/D5's real-machine gates — was
+answered the same way for both: `D3` was closed via `D14`'s owner-accepted correction, and `D5`
+(which had been overlooked — `D3`'s own evidence claimed D5 already had "the identical,
+already-accepted resolution" but D5's own block was never actually updated to record it) was
+closed the same day by applying the owner's standing delegation to the identical,
+already-twice-decided fact pattern. All data-safety-critical parts of D5's mechanism
+(copy-before-remove ordering, never-overwrite, order-of-operations under failure) were proven for
+real with a synthetic fake packaged-install folder; only the final `Remove-AppxPackage` call
+against a genuinely registered package remains open, fenced as unreachable rather than left as a
+bare caveat. See D5's evidence block for the full record.
 
 ---
 
