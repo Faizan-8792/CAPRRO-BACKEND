@@ -26,6 +26,20 @@ completed now that `L1` has `support@caprotoolkit.in` live (one stale `mailto:` 
 was the only gap, plus two in `ca-pro-website/index.html` and `llms.txt` found the same way).
 Section **14** below is therefore also resolved for `D5` — struck through in place.
 
+UPDATED AGAIN 2026-08-27 (owner-directive session, this one): **96 of 139 (69.1%)**,
+agent-completable **87 of 110 (79.1%)**, gates **8 of 14**, protocol OK (1 pre-existing count
+nuance on O9, not a real caveat — see the ledger). `O9` and `O7` closed `[x]` this session (owner
+decisions recorded, evidence independently re-verified); `O10`'s DeepSeek cap raised to the
+owner's 200/day target; three new tasks added and closed (`V28` accessibility root-fix, `V29`
+tooling-portability sweep, `R17` clock-skew hardening); `O20` added (secret-rotation checklist,
+owner-required). **New owner items below, not previously in this file:** O3's credential-custody
+person (§ near O3's own ledger entry — deliberately not invented), R7/R11's second READ_ONLY
+account (§8 below — same account gap R7 already listed, now also confirmed for R11), O20's secret
+rotation (new — see the ledger task directly, not duplicated here since it is already a full
+owner-action checklist), and the VM re-attempt itself (needs a machine meeting every condition
+`VM-RUNBOOK.md`'s 2026-08-27 note now lists). O9's own remaining gap is fully closed — no VM or
+owner action needed there any more.
+
 **Why the percentage moved down slightly rather than up.** Two tasks were added (`T13`, `V16`, both
 closed with evidence) and one was un-ticked (`R9`), because `ledger-status.ps1` had a bug that made it
 report "protocol OK" over three tasks that breached the rule it exists to enforce: its evidence scan
