@@ -113,6 +113,10 @@ schtasks /Create /TN "CAPRO nightly backup" /SC DAILY /ST 02:30 /RL HIGHEST /RU 
 `CAPRO_BACKUP_URI` and `CAPRO_BACKUP_RECIPIENT` are already set at **Machine** level, which is what a
 SYSTEM task needs — no further setup.
 
+An agent tried this line on 2026-08-27 and got `ERROR: Access is denied.` — the agent console is
+not elevated, and `/RU SYSTEM /RL HIGHEST` needs an administrator prompt. So this genuinely needs
+your elevated console; nothing else about it is blocked.
+
 ### Expected result
 Twenty-four hours later, a **new dated archive** has appeared in
 `C:\Users\Saifullah Faizan\OneDrive\CA-PRO-Backups` without anyone running it.
@@ -436,6 +440,28 @@ The substance the bullet was reaching for is already proved against production: 
 **L16 carries a drafted replacement wording, already measured to pass.** Reply accept or refuse in one
 clause. Refusing is legitimate — it just leaves L10 permanently unmeetable, and that should be a
 deliberate choice rather than a thing everyone steps over.
+
+---
+
+## 14. One decision, five minutes: V27 — V2's `-Packaged` gate cannot exist any more
+
+**Task:** V27 · unblocks V2 (BLOCKER) · **Added 2026-08-27**
+
+V2's fourth Verify bullet tests the UIA audit's `-Packaged` branch "against the still-installed
+MSIX 0.1.1.1". That package no longer exists anywhere: `Get-AppxPackage` returns nothing, no
+.msix/.appx artifact exists in the repo, D1 removed MSIX from the build, and an unsigned MSIX
+cannot be rebuilt and installed (hard-fails `0x800B010A`, no override). Every other V2 bullet is
+run and passing.
+
+**V27 carries a drafted replacement wording** (the branch is present and intact, verified by
+reading the file fresh, recorded as preserved dead code from the completed MSIX migration).
+Accept or refuse in one clause. Refusing leaves V2, a BLOCKER, permanently `[~]` over a package
+that can never exist again — legitimate, but it should be deliberate.
+
+**Related:** `D3` and `D5` are blocked on the same judgement (their MSIX-machine gates need a
+machine with the old MSIX genuinely installed, which no longer exists here either). If you accept
+V27's shape, say whether the same reading applies to D3/D5's real-machine gates or whether those
+wait for a VM that has the old MSIX.
 
 ---
 
