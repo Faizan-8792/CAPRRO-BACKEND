@@ -5,17 +5,33 @@ const OCR_SPACE_URL = "https://api.ocr.space/parse/image";
 const OCR_MAX_BYTES = 8 * 1024 * 1024;
 const OCR_MIME_TYPES = new Set(["application/pdf", "image/png", "image/jpeg"]);
 
-// O10 spend meter/cap: OCR.space is billed per call, and extractTextWithOcrSpace
-// is the one choke point every caller funnels through (there is only one today:
-// POST /api/cases/ocr). Per-user numbers are lower than DeepSeek's because a
-// notice is typically OCR'd once (occasionally re-scanned after a bad capture):
-// 25/day comfortably covers a heavy single-day intake session; 300/month covers
-// sustained daily use. The global ceiling is a flat backstop on the owner's own
-// OCR.space bill, independent of how many accounts sign up.
-const OCR_DAILY_CALL_CAP_PER_USER =
-  Number(process.env.OCR_SPACE_DAILY_CALL_CAP_PER_USER) || 25;
-const OCR_MONTHLY_CALL_CAP_PER_USER =
-  Number(process.env.OCR_SPACE_MONTHLY_CALL_CAP_PER_USER) || 300;
+// O10 spend meter/cap. extractTextWithOcrSpace is the one choke point every caller funnels
+// through (there is only one today: POST /api/cases/ocr), so this is where OCR volume is bounded.
+//
+// OWNER POLICY, 2026-08-28, AUTHORITATIVE: **300 OCR calls per single user per WEEK.**
+// Per-user, not per-firm and not shared. The known provider allowance is 3,000 free OCR
+// requests. No rupee cost is stated anywhere, because none has been verified.
+//
+// Why the previous per-user caps were REMOVED rather than kept alongside this one. They were
+// 25/day and 300/month, and both silently contradicted the policy:
+//   * 25/day allows at most 175 in a week -- a user could never reach 300, so the stated limit
+//     would have been a number that never applied.
+//   * 300/month allows 300 in the first week and nothing for the rest of the month, so from
+//     week two the weekly cap would again never be reachable.
+// Keeping either would have meant the documented limit and the enforced limit disagreeing, which
+// is the exact defect class this codebase treats as a release blocker. The weekly cap is now the
+// single per-user control, and it is the ONLY one, so 300/week means 300/week.
+//
+// A single user therefore cannot consume unlimited OCR: the weekly tier is checked and
+// atomically incremented BEFORE the paid call, on a compound-unique-indexed counter, so
+// concurrent requests cannot race past it (proved in tests/provider-quota-contract.mjs).
+//
+// The global daily ceiling is a separate, provider-wide backstop and is deliberately left
+// unchanged -- it bounds total volume regardless of how many accounts sign up, which is a
+// different job from bounding one account. See the runbook for the arithmetic relating it to the
+// 3,000 free allowance.
+const OCR_WEEKLY_CALL_CAP_PER_USER =
+  Number(process.env.OCR_SPACE_WEEKLY_CALL_CAP_PER_USER) || 300;
 const OCR_GLOBAL_DAILY_CALL_CAP =
   Number(process.env.OCR_SPACE_GLOBAL_DAILY_CALL_CAP) || 600;
 
@@ -46,14 +62,18 @@ async function extractTextWithOcrSpace({ buffer, mimeType, fileName, consent, us
     throw httpError(500, "extractTextWithOcrSpace requires userId for provider-usage metering");
   }
   // Quota check happens BEFORE the paid call. reserveProviderCall only keeps an
-  // increment once every tier (day/month/global) clears, so a refused call is
-  // never counted, and an attempted one always is regardless of whether the
-  // fetch below ultimately succeeds.
+  // increment once every tier (here: per-user weekly, then provider-wide daily)
+  // clears, so a refused call is never counted, and an attempted one always is
+  // regardless of whether the fetch below ultimately succeeds.
+  //
+  // No dailyCapPerUser and no monthlyCapPerUser are passed, deliberately: both
+  // would bind BEFORE the owner's 300/week could ever be reached (see the policy
+  // note at the top of this file). Omitting them is what makes the documented
+  // limit and the enforced limit the same number.
   const reservation = await ProviderUsage.reserveProviderCall({
     userId,
     provider: "OCR_SPACE",
-    dailyCapPerUser: OCR_DAILY_CALL_CAP_PER_USER,
-    monthlyCapPerUser: OCR_MONTHLY_CALL_CAP_PER_USER,
+    weeklyCapPerUser: OCR_WEEKLY_CALL_CAP_PER_USER,
     globalDailyCap: OCR_GLOBAL_DAILY_CALL_CAP,
   });
   if (!reservation.allowed) {

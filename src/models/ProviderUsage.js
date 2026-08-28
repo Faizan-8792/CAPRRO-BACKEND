@@ -59,7 +59,11 @@ const ProviderUsageSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      match: /^\d{4}-\d{2}(-\d{2})?$/,
+      // Three granularities share this one field, distinguished by shape:
+      //   daily   "2026-08-28"   monthly "2026-08"   weekly "2026-W35" (ISO 8601 week)
+      // The weekly form was added 2026-08-28 for the owner's OCR policy (300 per user per
+      // WEEK). It cannot collide with the other two: a literal "W" never appears in either.
+      match: /^\d{4}-(\d{2}(-\d{2})?|W\d{2})$/,
       immutable: true,
     },
     calls: { type: Number, default: 0, min: 0 },
@@ -78,6 +82,27 @@ function dailyPeriodKey(date = new Date()) {
 
 function monthlyPeriodKey(date = new Date()) {
   return date.toISOString().slice(0, 7);
+}
+
+// ISO 8601 week key, e.g. "2026-W35". Weeks start Monday and week 1 is the week
+// containing the first Thursday, which is why this cannot be done with simple
+// arithmetic on the day-of-year: the ISO week-numbering YEAR can differ from the
+// calendar year at both ends. 2021-01-01 belongs to 2020-W53, and 2024-12-30 to
+// 2025-W01 -- both are covered by the contract suite so a "simplification" that
+// breaks them fails loudly rather than silently resetting somebody's cap early.
+//
+// UTC throughout, deliberately and for the same reason every other statutory date
+// in this codebase is UTC: a per-week quota must not reset at a different instant
+// for a user in a different timezone, and must not shift when a machine's local
+// clock changes.
+function weeklyPeriodKey(date = new Date()) {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dayNumber = d.getUTCDay() || 7; // Monday = 1 ... Sunday = 7
+  d.setUTCDate(d.getUTCDate() + 4 - dayNumber); // the Thursday that identifies this ISO week
+  const isoYear = d.getUTCFullYear();
+  const isoYearStart = new Date(Date.UTC(isoYear, 0, 1));
+  const week = Math.ceil(((d - isoYearStart) / 86400000 + 1) / 7);
+  return `${isoYear}-W${String(week).padStart(2, "0")}`;
 }
 
 // Atomically increments one (userId, provider, periodKey) counter only if it is
@@ -136,54 +161,53 @@ ProviderUsageSchema.statics.reserveProviderCall = async function reserveProvider
   userId,
   provider,
   dailyCapPerUser,
+  weeklyCapPerUser,
   monthlyCapPerUser,
   globalDailyCap,
   now = new Date(),
 }) {
   const dayKey = dailyPeriodKey(now);
+  const weekKey = weeklyPeriodKey(now);
   const monthKey = monthlyPeriodKey(now);
   const label = PROVIDER_LABELS[provider] || provider;
 
-  const perUserDay = await this.tryIncrement({
-    userId,
-    provider,
-    periodKey: dayKey,
-    cap: dailyCapPerUser,
-  });
-  if (!perUserDay.allowed) {
-    return {
-      allowed: false,
-      reason: `${label} daily quota exceeded for this account`,
-    };
-  }
-
-  const perUserMonth = await this.tryIncrement({
-    userId,
-    provider,
-    periodKey: monthKey,
-    cap: monthlyCapPerUser,
-  });
-  if (!perUserMonth.allowed) {
-    await this.releaseReservation({ userId, provider, periodKey: dayKey });
-    return {
-      allowed: false,
-      reason: `${label} monthly quota exceeded for this account`,
-    };
-  }
-
-  const global = await this.tryIncrement({
-    userId: GLOBAL_USAGE_USER_ID,
-    provider,
-    periodKey: dayKey,
-    cap: globalDailyCap,
-  });
-  if (!global.allowed) {
-    await this.releaseReservation({ userId, provider, periodKey: dayKey });
-    await this.releaseReservation({ userId, provider, periodKey: monthKey });
-    return {
-      allowed: false,
+  // Tiers are declared rather than hand-written, because the rollback is the part that gets
+  // silently wrong: every tier already reserved has to be released when a LATER tier refuses,
+  // and with four tiers the hand-written version needed a growing list of release calls copied
+  // into each branch. Here the loop releases exactly what it reserved, so a fifth tier cannot
+  // be added with a forgotten rollback.
+  //
+  // A tier whose cap is not a positive finite number is SKIPPED, not treated as zero. That is
+  // what lets one provider be metered weekly and another daily/monthly without either inheriting
+  // a cap that does not apply to it -- and it is the difference between "no weekly limit" and
+  // "a weekly limit of nothing, refuse everything".
+  const tiers = [
+    { cap: dailyCapPerUser, periodKey: dayKey, userId, reason: `${label} daily quota exceeded for this account` },
+    { cap: weeklyCapPerUser, periodKey: weekKey, userId, reason: `${label} weekly quota exceeded for this account` },
+    { cap: monthlyCapPerUser, periodKey: monthKey, userId, reason: `${label} monthly quota exceeded for this account` },
+    {
+      cap: globalDailyCap,
+      periodKey: dayKey,
+      userId: GLOBAL_USAGE_USER_ID,
       reason: `${label} provider-wide daily volume limit reached; try again tomorrow`,
-    };
+    },
+  ].filter((tier) => Number.isFinite(tier.cap) && tier.cap > 0);
+
+  const reserved = [];
+  for (const tier of tiers) {
+    const outcome = await this.tryIncrement({
+      userId: tier.userId,
+      provider,
+      periodKey: tier.periodKey,
+      cap: tier.cap,
+    });
+    if (!outcome.allowed) {
+      for (const done of reserved) {
+        await this.releaseReservation({ userId: done.userId, provider, periodKey: done.periodKey });
+      }
+      return { allowed: false, reason: tier.reason };
+    }
+    reserved.push(tier);
   }
 
   return { allowed: true };
@@ -191,5 +215,5 @@ ProviderUsageSchema.statics.reserveProviderCall = async function reserveProvider
 
 const ProviderUsage = mongoose.model("ProviderUsage", ProviderUsageSchema);
 
-export { PROVIDERS, GLOBAL_USAGE_USER_ID, dailyPeriodKey, monthlyPeriodKey };
+export { PROVIDERS, GLOBAL_USAGE_USER_ID, dailyPeriodKey, weeklyPeriodKey, monthlyPeriodKey };
 export default ProviderUsage;

@@ -524,9 +524,17 @@ reports one.** Say that plainly to whoever takes an on-call rotation.
 
 ## Support
 
-The inbound support address is **[OWNER TO COMPLETE — O8/L1]**. It is not written here as a guess;
-`SupportContact` in the desktop carries the same literal placeholder so the two cannot silently
-disagree, and the published response window is already set to **30 days**.
+The inbound support address is **`support@caprotoolkit.in`**, and the published response window is
+**30 days**.
+
+*Corrected 2026-08-28: this line still read `[OWNER TO COMPLETE — O8/L1]` long after the mailbox
+was provisioned. It was stale, not open. Verified three ways rather than assumed —
+`SupportContact.cs:40` carries `SupportAddress = "support@caprotoolkit.in"` (and `:51` the same for
+the grievance address, deliberately, since the proprietor is the grievance officer); the live
+`caprotoolkit.in/privacy.html` serves that address; and `OWNER-TODO.md`'s "already supplied" table
+records the mailbox as live. The reason the placeholder was paired with a matching one in
+`SupportContact` — so the two could not silently disagree — was sound, and it is exactly why this
+had to be fixed in both places or neither.*
 
 What a diagnostics bundle contains, so you can tell a worried user honestly: app version, Windows
 version, runtime version, whether they are signed in, whether a workspace is active, last sync
@@ -599,9 +607,16 @@ because none of the six variables is set.
 | DeepSeek | per user, per day | `DEEPSEEK_DAILY_CALL_CAP_PER_USER` | **200** |
 | DeepSeek | per user, per month | `DEEPSEEK_MONTHLY_CALL_CAP_PER_USER` | **2700** |
 | DeepSeek | all users, per day | `DEEPSEEK_GLOBAL_DAILY_CALL_CAP` | **1500** |
-| OCR.space | per user, per day | `OCR_SPACE_DAILY_CALL_CAP_PER_USER` | **25** |
-| OCR.space | per user, per month | `OCR_SPACE_MONTHLY_CALL_CAP_PER_USER` | **300** |
+| OCR.space | **per user, per WEEK** | `OCR_SPACE_WEEKLY_CALL_CAP_PER_USER` | **300** |
 | OCR.space | all users, per day | `OCR_SPACE_GLOBAL_DAILY_CALL_CAP` | **600** |
+
+**OCR is metered per user per WEEK, and only per week.** `OCR_SPACE_DAILY_CALL_CAP_PER_USER` and
+`OCR_SPACE_MONTHLY_CALL_CAP_PER_USER` no longer exist: setting either does nothing, because the
+service does not pass them. They were removed on 2026-08-28 rather than left alongside the weekly
+cap, because both silently contradicted it — 25/day allows at most 175 in a week, and 300/month
+allows 300 in week one and nothing afterwards, so under either the stated 300/week could never
+actually be reached. A documented limit that the code never applies is the defect, not the
+paperwork.
 
 **OCR is LIVE in production as of 2026-08-28 (O15, owner decision).** `OCR_SPACE_API_KEY` is set in
 the Hostinger environment — confirmed by probe, not assumed: `POST /api/cases/ocr` as the super
@@ -613,25 +628,35 @@ every signed-in user.
 **The exposure this creates, stated plainly because it is the reason O15 asked for a ceiling.**
 A-13.04 established that the OCR route has **no per-firm write gate** and that `requireFirmMember`
 cannot refuse any authenticated account — a personal firm is provisioned mid-request. So **every
-signed-in account can reach billable OCR.space spend**, bounded only by the consent flag and the
-caps above. The worst case the caps permit, per day:
+signed-in account can reach OCR.space usage**, bounded only by the consent flag and the caps above.
 
-| Bound | Calls/day | What actually stops it |
-|---|---|---|
-| One account | 25 | `OCR_SPACE_DAILY_CALL_CAP_PER_USER` |
-| One account, per month | 300 | `OCR_SPACE_MONTHLY_CALL_CAP_PER_USER` |
-| **Everyone, all accounts** | **600** | `OCR_SPACE_GLOBAL_DAILY_CALL_CAP` — this is the real ceiling on the bill |
+### OCR allowance and policy — SETTLED 2026-08-28 by the owner
 
-So the maximum OCR.space volume the deployed configuration can bill for is **600 calls/day, about
-18,000/month**, regardless of how many accounts sign up. **What that costs in rupees depends on the
-OCR.space plan this key belongs to, which is not recorded anywhere in this repository and which no
-agent can read from the provider console — [OWNER TO COMPLETE: name the OCR.space plan and its
-per-call or monthly price, so this ceiling can be stated in money rather than in calls].** Until
-that is filled in, the honest statement is the call ceiling above, not a rupee figure; inventing a
-price would be worse than leaving it open. If the plan is the free tier (25,000 requests/month at
-time of writing), the 600/day global cap sits just under it at ~18,000/month and the practical risk
-is exhausting the free quota rather than being charged — but confirm that against the actual
-account rather than trusting this parenthetical.
+| Fact | Value |
+|---|---|
+| Provider allowance | **3,000 free OCR requests** (owner-confirmed 2026-08-28) |
+| Per-user cap | **300 calls per user per WEEK** — `OCR_SPACE_WEEKLY_CALL_CAP_PER_USER` |
+| Scope of that cap | **Per user.** Not per firm, not shared, not pooled |
+| Provider-wide backstop | 600 calls/day across everyone — `OCR_SPACE_GLOBAL_DAILY_CALL_CAP` |
+| Cost in rupees | **Not stated anywhere, because none has been verified.** Do not add one |
+
+**What bounds a single user.** The weekly counter is checked and atomically incremented *before*
+the paid call, against a compound-unique index, so a user cannot exceed 300 in a week even by
+firing concurrent requests — 20 simultaneous calls at cap-minus-one yield exactly one success
+(`tests/provider-quota-contract.mjs`, Part E, run against a real replica set). The counter is keyed
+by ISO week in **UTC**, so it rolls on Monday 00:00 UTC and does not shift with a user's timezone
+or a machine's local clock. Restarts do not reset it; it lives in MongoDB, not memory.
+
+**The arithmetic the owner should know, stated in calls because calls are what is verified.**
+3,000 free requests ÷ 300 per user per week = **10 user-weeks of full-cap usage** before the free
+allowance is exhausted. One user at full tilt takes 10 weeks to spend it; ten users at full tilt
+take one week. The 600/day provider-wide backstop is *higher* than the free allowance can sustain
+(600 × 7 = 4,200 in a week), so **the global cap is not what protects the 3,000 — the per-user
+weekly cap and the number of active users are.** That is recorded as a fact rather than silently
+"fixed" by lowering the global cap: the owner set the per-user number, and changing an unrelated
+control to compensate would be exactly the kind of quiet reinterpretation this policy forbids. If
+the free allowance starts running down faster than expected, the lever to reach for is the global
+daily cap, and this paragraph is why.
 
 **The reasoning, so a future operator can argue with it rather than guess at it.**
 
@@ -640,12 +665,16 @@ account rather than trusting this parenthetical.
 generous headroom rather than a ration). A CA doing genuine review will not come close to it in a
 day — a single notice triggers only a handful of calls (refine + insights + a coverage follow-up +
 a reminder message) — so it is not there to limit normal use. It is there so a runaway loop, a
-stuck retry, or one compromised account cannot spend a month's budget in an afternoon. OCR.space's
-25/day cap is unchanged and follows the same reasoning (more documents than one person scans in a
-day).
+stuck retry, or one compromised account cannot spend a month's budget in an afternoon.
 
-The monthly per-user caps are deliberately **not** 30x the daily figure (2700, not 6000; 300, not
-750) — same ratio DeepSeek's cap has always used (~13.3x the daily figure, i.e. a sustained average
+**OCR.space is metered differently on purpose, and its number is the owner's, not an estimate.**
+It is **300 per user per WEEK** (owner decision, 2026-08-28), against a known allowance of 3,000
+free requests — see the OCR allowance table above for the full arithmetic. It has no per-user daily
+or monthly cap at all; both were removed the same day because either would have bound before
+300/week could be reached, making the stated limit unreachable. Do not "restore" them.
+
+The DeepSeek monthly per-user cap is deliberately **not** 30x the daily figure (2700, not 6000)
+— the same ratio DeepSeek's cap has always used (~13.3x the daily figure, i.e. a sustained average
 of ~44% of the daily peak), scaled up with the 2026-08-27 daily change so raising the daily number
 did not silently make the monthly tier the only real constraint, or silently stop being one. A user
 who hits their daily cap every day for a month is not doing accountancy, and the monthly ceiling is

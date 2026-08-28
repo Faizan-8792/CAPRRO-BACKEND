@@ -27,8 +27,11 @@ process.env.OCR_SPACE_API_KEY = process.env.OCR_SPACE_API_KEY || "test-key-not-u
 process.env.DEEPSEEK_DAILY_CALL_CAP_PER_USER = "2";
 process.env.DEEPSEEK_MONTHLY_CALL_CAP_PER_USER = "3";
 process.env.DEEPSEEK_GLOBAL_DAILY_CALL_CAP = "5";
-process.env.OCR_SPACE_DAILY_CALL_CAP_PER_USER = "2";
-process.env.OCR_SPACE_MONTHLY_CALL_CAP_PER_USER = "3";
+// OCR is metered PER USER PER WEEK (owner policy 2026-08-28, 300/user/week in production).
+// The daily and monthly per-user caps were removed from the OCR path because both bound before
+// 300/week could be reached; setting them here would not re-introduce them, since the service no
+// longer passes them, but they are deliberately NOT set so this file cannot imply otherwise.
+process.env.OCR_SPACE_WEEKLY_CALL_CAP_PER_USER = "2";
 process.env.OCR_SPACE_GLOBAL_DAILY_CALL_CAP = "5";
 
 const checks = [];
@@ -54,7 +57,7 @@ globalThis.fetch = async () => {
   };
 };
 
-const { default: ProviderUsage, GLOBAL_USAGE_USER_ID, dailyPeriodKey, monthlyPeriodKey } =
+const { default: ProviderUsage, GLOBAL_USAGE_USER_ID, dailyPeriodKey, weeklyPeriodKey, monthlyPeriodKey } =
   await import("../src/models/ProviderUsage.js");
 const { callDeepSeek } = await import("../src/services/deepseek-provider.service.js");
 const { extractTextWithOcrSpace } = await import("../src/services/ocr-space.service.js");
@@ -328,6 +331,144 @@ function installFakeProviderUsageStore() {
   check("A7: user B's stored count is exactly their own 1 call, not a shared total", store.peek(userB, "DEEPSEEK", periodKey) === 1);
 }
 
+// ─── PART A-WEEK — the OCR weekly tier (owner policy 2026-08-28: 300/user/week) ───
+//
+// These exist because the policy is a NUMBER THE OWNER SET, and the thing that would quietly
+// break it is not the cap itself but the period key: an off-by-one in ISO week arithmetic resets
+// somebody's allowance early or late, and nothing else in the system would notice.
+
+// AW1 — the ISO week key is correct at the boundaries, which is where week arithmetic goes wrong.
+{
+  const cases = [
+    ["2021-01-01T12:00:00Z", "2020-W53"], // a January date in the PREVIOUS ISO year
+    ["2024-12-30T12:00:00Z", "2025-W01"], // a December date in the NEXT ISO year
+    ["2019-12-30T12:00:00Z", "2020-W01"],
+    ["2017-01-01T12:00:00Z", "2016-W52"],
+    ["2026-08-24T00:00:00Z", "2026-W35"], // Monday, first instant of the week
+    ["2026-08-30T23:59:59Z", "2026-W35"], // Sunday, last instant of the SAME week
+    ["2026-08-31T00:00:00Z", "2026-W36"], // next Monday, next week
+  ];
+  let wrong = [];
+  for (const [iso, expected] of cases) {
+    const got = weeklyPeriodKey(new Date(iso));
+    if (got !== expected) wrong.push(`${iso} -> ${got} (want ${expected})`);
+  }
+  check(
+    "AW1: the ISO week key is right across year boundaries and at both ends of a week",
+    wrong.length === 0,
+    wrong.length ? wrong.join("; ") : `${cases.length} boundary cases`,
+  );
+}
+
+// AW2 — a week key is a DIFFERENT counter from the day and month keys for the same instant,
+// so the three tiers cannot collide in the unique index.
+{
+  const now = new Date("2026-08-28T12:00:00Z");
+  const keys = new Set([dailyPeriodKey(now), weeklyPeriodKey(now), monthlyPeriodKey(now)]);
+  check("AW2: day, week and month keys for one instant are three distinct counters", keys.size === 3,
+    [...keys].join(", "));
+}
+
+// AW3 — THE POLICY ITSELF: a single user is cut off at the weekly cap and cannot exceed it,
+// which is the "prevents a single user consuming unlimited OCR" requirement.
+{
+  const store = installFakeProviderUsageStore();
+  const userId = "aw3aw3aw3aw3aw3aw3aw3aw3";
+  const now = new Date("2026-08-26T09:00:00Z"); // a Wednesday
+  const weekKey = weeklyPeriodKey(now);
+
+  const first = await ProviderUsage.reserveProviderCall({
+    userId, provider: "OCR_SPACE", weeklyCapPerUser: 3, globalDailyCap: 100, now,
+  });
+  const second = await ProviderUsage.reserveProviderCall({
+    userId, provider: "OCR_SPACE", weeklyCapPerUser: 3, globalDailyCap: 100, now,
+  });
+  const third = await ProviderUsage.reserveProviderCall({
+    userId, provider: "OCR_SPACE", weeklyCapPerUser: 3, globalDailyCap: 100, now,
+  });
+  const fourth = await ProviderUsage.reserveProviderCall({
+    userId, provider: "OCR_SPACE", weeklyCapPerUser: 3, globalDailyCap: 100, now,
+  });
+
+  check("AW3: calls under the weekly cap are allowed", first.allowed && second.allowed && third.allowed);
+  check("AW3: the call OVER the weekly cap is refused, and the reason names the WEEK",
+    fourth.allowed === false && /weekly/i.test(fourth.reason), fourth.reason);
+  check("AW3: the stored weekly counter reads exactly the cap, never above it",
+    store.peek(userId, "OCR_SPACE", weekKey) === 3);
+}
+
+// AW4 — a LATER DAY IN THE SAME WEEK still counts against the same allowance. This is the one a
+// daily cap would have hidden: without it, "300 per week" silently becomes "300 per day".
+{
+  const store = installFakeProviderUsageStore();
+  const userId = "aw4aw4aw4aw4aw4aw4aw4aw4";
+  const monday = new Date("2026-08-24T09:00:00Z");
+  const friday = new Date("2026-08-28T09:00:00Z");
+
+  await ProviderUsage.reserveProviderCall({ userId, provider: "OCR_SPACE", weeklyCapPerUser: 2, globalDailyCap: 100, now: monday });
+  await ProviderUsage.reserveProviderCall({ userId, provider: "OCR_SPACE", weeklyCapPerUser: 2, globalDailyCap: 100, now: monday });
+  const laterSameWeek = await ProviderUsage.reserveProviderCall({
+    userId, provider: "OCR_SPACE", weeklyCapPerUser: 2, globalDailyCap: 100, now: friday,
+  });
+
+  check("AW4: a call on a LATER DAY of the same week is still refused once the week's cap is spent",
+    laterSameWeek.allowed === false && /weekly/i.test(laterSameWeek.reason));
+  check("AW4: Monday and Friday of one week share ONE counter, not two",
+    store.peek(userId, "OCR_SPACE", weeklyPeriodKey(monday)) === 2 &&
+    weeklyPeriodKey(monday) === weeklyPeriodKey(friday));
+}
+
+// AW5 — the NEXT week restores the allowance, and it restores on the ISO boundary (Monday),
+// not 7 days after first use.
+{
+  installFakeProviderUsageStore();
+  const userId = "aw5aw5aw5aw5aw5aw5aw5aw5";
+  const sunday = new Date("2026-08-30T23:00:00Z"); // last day of 2026-W35
+  const monday = new Date("2026-08-31T01:00:00Z"); // first day of 2026-W36
+
+  await ProviderUsage.reserveProviderCall({ userId, provider: "OCR_SPACE", weeklyCapPerUser: 1, globalDailyCap: 100, now: sunday });
+  const stillSunday = await ProviderUsage.reserveProviderCall({ userId, provider: "OCR_SPACE", weeklyCapPerUser: 1, globalDailyCap: 100, now: sunday });
+  const nextMonday = await ProviderUsage.reserveProviderCall({ userId, provider: "OCR_SPACE", weeklyCapPerUser: 1, globalDailyCap: 100, now: monday });
+
+  check("AW5: a second call on the same Sunday is refused", stillSunday.allowed === false);
+  check("AW5: the very next Monday the allowance is restored -- the week rolled on the ISO boundary",
+    nextMonday.allowed === true);
+}
+
+// AW6 — two users do not share the weekly allowance. The policy is explicitly PER USER, not
+// per firm and not shared.
+{
+  const store = installFakeProviderUsageStore();
+  const userA = "aw6aw6aw6aw6aw6aw6aw6aa1";
+  const userB = "aw6aw6aw6aw6aw6aw6aw6bb2";
+  const now = new Date("2026-08-26T09:00:00Z");
+
+  await ProviderUsage.reserveProviderCall({ userId: userA, provider: "OCR_SPACE", weeklyCapPerUser: 1, globalDailyCap: 100, now });
+  const aSecond = await ProviderUsage.reserveProviderCall({ userId: userA, provider: "OCR_SPACE", weeklyCapPerUser: 1, globalDailyCap: 100, now });
+  const bFirst = await ProviderUsage.reserveProviderCall({ userId: userB, provider: "OCR_SPACE", weeklyCapPerUser: 1, globalDailyCap: 100, now });
+
+  check("AW6: user A is refused once THEIR OWN week is spent", aSecond.allowed === false);
+  check("AW6: user B is unaffected by user A being at cap -- the cap is per user, not shared",
+    bFirst.allowed === true);
+  check("AW6: each user's weekly counter holds only their own calls",
+    store.peek(userA, "OCR_SPACE", weeklyPeriodKey(now)) === 1 &&
+    store.peek(userB, "OCR_SPACE", weeklyPeriodKey(now)) === 1);
+}
+
+// AW7 — a tier whose cap is absent is SKIPPED, not treated as a cap of zero. This is what lets
+// OCR be weekly-only while DeepSeek stays daily+monthly, and getting it wrong would refuse
+// every call rather than allowing them.
+{
+  installFakeProviderUsageStore();
+  const userId = "aw7aw7aw7aw7aw7aw7aw7aw7";
+  const now = new Date("2026-08-26T09:00:00Z");
+  const noPerUserCaps = await ProviderUsage.reserveProviderCall({
+    userId, provider: "OCR_SPACE", globalDailyCap: 5, now,
+  });
+  check("AW7: omitting every per-user cap allows the call rather than refusing it as cap-zero",
+    noPerUserCaps.allowed === true);
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // PART B — callDeepSeek's own quota gate (the real choke point)
 // ═══════════════════════════════════════════════════════════════════════
@@ -410,7 +551,7 @@ const PDF_BYTES = Buffer.from("%PDF-1.4\n%%EOF\n");
 
   const first = await extractTextWithOcrSpace(callArgs);
   const second = await extractTextWithOcrSpace(callArgs);
-  check("C1: two calls under the daily cap of 2 both succeed", !!first.text && !!second.text);
+  check("C1: two calls under the per-user WEEKLY cap of 2 both succeed", !!first.text && !!second.text);
   const countAfterTwo = fetchCallCount;
 
   let thirdError = null;
@@ -421,12 +562,51 @@ const PDF_BYTES = Buffer.from("%PDF-1.4\n%%EOF\n");
   }
 
   check(
-    "C1: the third call (over the daily cap) throws a 429 OCR_QUOTA_EXCEEDED, not a 500",
+    "C1: the third call (over the per-user WEEKLY cap) throws a 429 OCR_QUOTA_EXCEEDED, not a 500",
     thirdError?.statusCode === 429 && thirdError?.code === "OCR_QUOTA_EXCEEDED",
   );
   check(
     "C1: the refused call never reached the provider",
     fetchCallCount === countAfterTwo,
+  );
+}
+
+// C4 — THE SERVICE'S OWN WIRING, not the model's. Added after a mutation test embarrassed the
+// suite: swapping `weeklyCapPerUser:` for `dailyCapPerUser:` in ocr-space.service.js left all 49
+// checks GREEN. The weekly tests above call reserveProviderCall directly with an explicit cap, so
+// they never touch the service's wiring, and C1/C3 make all their calls on ONE day, where a daily
+// and a weekly tier are indistinguishable. A cap that is enforced per DAY while the policy,
+// documentation and UI all say per WEEK is precisely the "documented limit != enforced limit"
+// defect this file exists to prevent, and it would have shipped.
+//
+// Asserting on the period-key SHAPE the service actually reserved against catches it without
+// needing to inject a clock into the service: an ISO week key is "2026-W35", a daily key is
+// "2026-08-28", and they cannot be confused. Scoped to the real user's own rows -- the
+// provider-wide tier legitimately uses a DAILY key under the sentinel user id.
+{
+  const store = installFakeProviderUsageStore();
+  const userId = "c4c4c4c4c4c4c4c4c4c4c4c4";
+  await extractTextWithOcrSpace({
+    buffer: PDF_BYTES, mimeType: "application/pdf", fileName: "n.pdf", consent: true, userId,
+  });
+
+  const perUserReservations = store.findOneAndUpdateCalls
+    .filter((call) => String(call.filter.userId) === userId && call.filter.provider === "OCR_SPACE")
+    .map((call) => call.filter.periodKey);
+
+  const weeklyShaped = perUserReservations.filter((key) => /^\d{4}-W\d{2}$/.test(key));
+  const dailyShaped = perUserReservations.filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(key));
+  const monthlyShaped = perUserReservations.filter((key) => /^\d{4}-\d{2}$/.test(key));
+
+  check(
+    "C4: the OCR service meters the user against a WEEKLY period key (owner policy: 300/user/week)",
+    weeklyShaped.length === 1,
+    `per-user period keys reserved: ${perUserReservations.join(", ") || "(none)"}`,
+  );
+  check(
+    "C4: it does NOT also meter the user daily or monthly -- those caps would bind before 300/week could be reached",
+    dailyShaped.length === 0 && monthlyShaped.length === 0,
+    `daily=${dailyShaped.length} monthly=${monthlyShaped.length}`,
   );
 }
 
