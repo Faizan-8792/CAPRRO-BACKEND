@@ -554,11 +554,12 @@ Four external providers. Each row is: what it does, its env var, and where it is
 Spend is capped in code (O10), so a runaway loop costs calls rather than money. Defaults, all
 overridable by env var:
 
-| Cap | DeepSeek | OCR.space |
-|---|---|---|
-| Per user, per day | 60 | 25 |
-| Per user, per month | 800 | 300 |
-| Global, per day | 1500 | 600 |
+**The cap figures live in ONE place: the Observability section's table further down**, which names
+each env var beside its default. They were duplicated here as a bare summary and the copy went
+stale the moment the DeepSeek per-user caps were raised on 2026-08-27 (60 -> 200 per day,
+800 -> 2700 per month) — this table still read 60/800 while the authoritative one read 200/2700.
+A second copy of a number nobody updates is worse than no copy, so the duplicate is removed rather
+than re-synchronised. See **Observability → provider spend caps** below for the live figures.
 
 Raising a cap is an env-var change plus a redeploy, not a code change. Note the global caps are the
 real budget control — the per-user caps only stop one account from consuming everything.
@@ -601,6 +602,36 @@ because none of the six variables is set.
 | OCR.space | per user, per day | `OCR_SPACE_DAILY_CALL_CAP_PER_USER` | **25** |
 | OCR.space | per user, per month | `OCR_SPACE_MONTHLY_CALL_CAP_PER_USER` | **300** |
 | OCR.space | all users, per day | `OCR_SPACE_GLOBAL_DAILY_CALL_CAP` | **600** |
+
+**OCR is LIVE in production as of 2026-08-28 (O15, owner decision).** `OCR_SPACE_API_KEY` is set in
+the Hostinger environment — confirmed by probe, not assumed: `POST /api/cases/ocr` as the super
+admin returns `502 OCR_PROCESSING_FAILED`, which `ocr-space.service.js:86` only throws *after* the
+provider has been reached and replied, whereas an absent key throws `503 OCR_PROVIDER_UNAVAILABLE`
+at line 37 before any network call. The `noticeCases` flag is `true`, so the feature is on for
+every signed-in user.
+
+**The exposure this creates, stated plainly because it is the reason O15 asked for a ceiling.**
+A-13.04 established that the OCR route has **no per-firm write gate** and that `requireFirmMember`
+cannot refuse any authenticated account — a personal firm is provisioned mid-request. So **every
+signed-in account can reach billable OCR.space spend**, bounded only by the consent flag and the
+caps above. The worst case the caps permit, per day:
+
+| Bound | Calls/day | What actually stops it |
+|---|---|---|
+| One account | 25 | `OCR_SPACE_DAILY_CALL_CAP_PER_USER` |
+| One account, per month | 300 | `OCR_SPACE_MONTHLY_CALL_CAP_PER_USER` |
+| **Everyone, all accounts** | **600** | `OCR_SPACE_GLOBAL_DAILY_CALL_CAP` — this is the real ceiling on the bill |
+
+So the maximum OCR.space volume the deployed configuration can bill for is **600 calls/day, about
+18,000/month**, regardless of how many accounts sign up. **What that costs in rupees depends on the
+OCR.space plan this key belongs to, which is not recorded anywhere in this repository and which no
+agent can read from the provider console — [OWNER TO COMPLETE: name the OCR.space plan and its
+per-call or monthly price, so this ceiling can be stated in money rather than in calls].** Until
+that is filled in, the honest statement is the call ceiling above, not a rupee figure; inventing a
+price would be worse than leaving it open. If the plan is the free tier (25,000 requests/month at
+time of writing), the 600/day global cap sits just under it at ~18,000/month and the practical risk
+is exhausting the free quota rather than being charged — but confirm that against the actual
+account rather than trusting this parenthetical.
 
 **The reasoning, so a future operator can argue with it rather than guess at it.**
 
