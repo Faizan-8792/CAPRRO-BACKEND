@@ -2189,9 +2189,19 @@ if (listed.status !== 0 || listed.error) {
   // predicates -- so it is the least interesting possible member of the scanned
   // set, which is precisely why the count and not a judgement call is what
   // guards the surface.
+  // Raised from 162 to 163 for src/services/reminder-delivery-alert.service.js,
+  // added by T3 (.kiro/PLAN.md) -- a 15-minute scheduler that reuses T1's
+  // deliveryHealth classification and emails the owner via the existing Resend
+  // integration when the fleet-wide failed-delivery count crosses a threshold.
+  // Confirmed clean before the pin moved, independently of this file:
+  // `make-deploy-archive.ps1 -ValidateOnly` -> "JavaScript secret AST scan: PASS
+  // (163 files)". No secret, credential, or external endpoint of any kind in the
+  // new file -- it reads Reminder/AppConfig documents and calls an
+  // injected sendAlertEmail callback; the actual Resend call lives in the
+  // already-scanned email.service.js, unchanged in shape by this addition.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 162 && result.status === 0,
+    files.length === 163 && result.status === 0,
     result,
   );
 }
