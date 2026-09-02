@@ -7,8 +7,8 @@
 // over HTTPS and hashed as received, because the point is to prove what a customer would get.
 import { createHash } from "node:crypto";
 
-const EXPECTED_SHA256 = "9e2f4a8a9141a3f5b406b9d1f3b9c5846185302b92fc8efd4cb4dbf49f04855e";
-const EXPECTED_SIZE = 65681189;
+const EXPECTED_SHA256 = "1e95a06b4816fc5773c7f78f7bd34971b9e997b06ab28173f6d8f90beff4d153";
+const EXPECTED_SIZE = 65681457;
 const API = "https://api.caprotoolkit.in";
 
 let pass = 0;
