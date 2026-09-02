@@ -117,6 +117,14 @@ let passed = 0;
 let failed = 0;
 const failures = [];
 
+// Computed relative to the real clock, not a fixed literal: createEngagement rejects any
+// targetDate before startDate (which defaults to `new Date()` when the caller does not supply
+// one, as this test does not), so a hardcoded date goes stale the moment the calendar catches up
+// to it -- confirmed live here: "2026-09-01" broke this exact suite on 2026-09-02, with every
+// failures real cause being "targetDate cannot precede startDate", nothing to do with reviewer
+// authorization at all. 30 days out has no realistic way to be reached by test-run latency.
+const TARGET_DATE = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
 async function attemptCreate(reviewerUserId, mutationKeySuffix) {
   return createEngagement({
     firmId: FIRM,
@@ -129,7 +137,7 @@ async function attemptCreate(reviewerUserId, mutationKeySuffix) {
       engagementType: "STATUTORY_AUDIT",
       title: "Reviewer authorization check",
       scope: "Exercised only by this test.",
-      targetDate: "2026-09-01",
+      targetDate: TARGET_DATE,
       reviewerUserId,
     },
   });
