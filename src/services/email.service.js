@@ -361,3 +361,68 @@ export async function sendTestEmail(toEmail) {
   );
   return res;
 }
+
+/**
+ * ================================
+ * REMINDER DELIVERY-HEALTH ALERT (operational, super admin only)
+ * ================================
+ * T3 (.kiro/PLAN.md): a best-effort, rate-limited email fired by
+ * reminder-delivery-alert.service.js when the fleet-wide failed-delivery
+ * count crosses a threshold. Never sent to a client -- toEmail is always
+ * SUPER_ADMIN_EMAIL, supplied by the caller.
+ */
+export async function sendReminderDeliveryAlertEmail({
+  toEmail,
+  issueCount,
+  candidatesScanned,
+  candidatesScanTruncated,
+  generatedAt,
+}) {
+  if (!toEmail) {
+    throw new Error("sendReminderDeliveryAlertEmail: toEmail is required");
+  }
+  const generatedAtText =
+    generatedAt instanceof Date
+      ? generatedAt.toISOString()
+      : new Date(generatedAt || Date.now()).toISOString();
+  // Honest-copy rule (CLAUDE.md): the fleet scan is capped, so once it is
+  // truncated issueCount is a floor, not the true total, and must render as
+  // "N+", never as a bare N.
+  const countText = candidatesScanTruncated
+    ? `${issueCount}+`
+    : String(issueCount);
+
+  const subject = `CA PRO Toolkit — ${countText} reminders with a delivery problem`;
+  const html = `
+    <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding:16px; color:#111827;">
+      <h2 style="margin-top:0;">Reminder delivery health alert</h2>
+      <p><strong>${escapeHtml(countText)}</strong> active reminder(s) currently have an unresolved delivery problem (a failed send, an unconfirmed provider outcome, or a stale processing claim).</p>
+      <p>Candidates scanned: ${escapeHtml(String(candidatesScanned))}${candidatesScanTruncated ? " (scan capped — the real total may be higher)" : ""}</p>
+      <p>Generated at: ${escapeHtml(generatedAtText)}</p>
+      <hr style="margin:16px 0;" />
+      <p style="font-size:12px; color:#6b7280;">
+        This is a secondary signal only and takes no action. Review the full list in the
+        Super Admin panel (GET /api/super/reminder-delivery-health) before acting.
+      </p>
+    </div>
+  `;
+
+  const res = await getResend().emails.send({
+    from: FROM_EMAIL,
+    to: toEmail,
+    subject,
+    html,
+  });
+  if (res?.error) {
+    throw new Error(
+      String(
+        res.error.message || "Resend rejected reminder delivery alert email",
+      ),
+    );
+  }
+  console.log(
+    `📧 Reminder delivery alert sent to: ${toEmail}`,
+    res?.data?.id || res?.id || "",
+  );
+  return res;
+}

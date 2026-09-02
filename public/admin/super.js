@@ -704,6 +704,100 @@ async function loadProviderUsageStats() {
   }
 }
 
+// ─── Reminder Delivery Health (T2 (.kiro/PLAN.md): fleet-wide delivery-failure
+// visibility) ──────────────────────────────────────────────────────
+// One definition of "a reminder has a delivery problem" lives server-side in
+// reminder.controller.js's deliveryHealth(); this card only renders what
+// GET /api/super/reminder-delivery-health already classified.
+const REMINDER_DELIVERY_STATUS_COLORS = {
+  RETRY_SCHEDULED: "bg-warning",
+  DELIVERY_STATE_UNCONFIRMED: "bg-danger",
+  STALE_CLAIM: "bg-danger",
+  HISTORICAL_ATTEMPTS_PRESENT: "bg-secondary",
+};
+
+// dueDateISO is a statutory reminder date, not an activity timestamp -- converting it through
+// a local-timezone Date object can move it across a day boundary into a different return
+// period, so the stored UTC calendar day is read straight off the string instead.
+function formatReminderDueDateUtc(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ""));
+  if (!m) return "—";
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+function renderReminderDeliveryHealthRow(row) {
+  const issues = Array.isArray(row.issues) ? row.issues : [];
+  const lastError = issues.map((i) => i.lastError).find((e) => e) || "";
+  const statusBadge = `<span class="badge ${REMINDER_DELIVERY_STATUS_COLORS[row.status] || "bg-secondary"}">${escapeHtml(row.status || "—")}</span>`;
+  return `
+    <tr>
+      <td>${formatReminderDueDateUtc(row.dueDateISO)}</td>
+      <td>${escapeHtml(row.clientLabel || "—")}</td>
+      <td><code class="small text-break">${escapeHtml(row.firmId || "—")}</code></td>
+      <td><code class="small text-break">${escapeHtml(row.userId || "—")}</code></td>
+      <td>${statusBadge}</td>
+      <td>${escapeHtml(lastError || "—")}</td>
+    </tr>`;
+}
+
+async function loadReminderDeliveryHealthStats() {
+  const statusEl = qs("reminderDeliveryHealthStatus");
+  const bodyEl = qs("reminderDeliveryHealthBody");
+
+  try {
+    const data = await api("/super/reminder-delivery-health");
+    if (!data.ok) throw new Error("Failed to load reminder delivery health");
+    const d = data.delivery || {};
+    const sample = Array.isArray(d.sample) ? d.sample : [];
+    const truncated = !!d.candidatesScanTruncated;
+    // A truncated scan only ever proves a floor, never the real total -- rendering a bare
+    // number here would claim completeness the scan does not have.
+    const countText = truncated ? `${Number(d.issueCount) || 0}+` : String(Number(d.issueCount) || 0);
+    if (statusEl) statusEl.textContent = "";
+
+    if (bodyEl) {
+      const headline = `
+        <div style="display:flex; align-items:baseline; gap:8px; margin-bottom:10px;">
+          <div style="font-size:22px;font-weight:700;color:var(--text);">${countText}</div>
+          <div style="font-size:12px;color:var(--muted);">reminder${countText === "1" ? "" : "s"} with a delivery problem${truncated ? ` (of ${(Number(d.candidatesScanned) || 0).toLocaleString("en-IN")} scanned -- scan capped, more may exist)` : ""}</div>
+        </div>`;
+
+      let body;
+      if (!sample.length) {
+        body = truncated
+          ? `<div style="color:var(--muted);font-style:italic;font-size:12px;">No delivery issues found among the candidates scanned before the scan hit its limit -- more reminders may exist beyond it and were not checked.</div>`
+          : `<div style="color:var(--muted);font-style:italic;font-size:12px;">No delivery problems right now.</div>`;
+      } else {
+        const truncatedNote = d.sampleTruncated
+          ? `<div class="text-muted" style="font-size:11px;margin-top:6px;">Showing ${sample.length} of ${countText} -- soonest due first.</div>`
+          : "";
+        body = `
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0" style="font-size:12.5px;">
+              <thead class="table-light">
+                <tr>
+                  <th scope="col">Due date</th>
+                  <th scope="col">Client</th>
+                  <th scope="col">Firm ID</th>
+                  <th scope="col">User ID</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Last error</th>
+                </tr>
+              </thead>
+              <tbody>${sample.map(renderReminderDeliveryHealthRow).join("")}</tbody>
+            </table>
+          </div>
+          ${truncatedNote}`;
+      }
+
+      bodyEl.innerHTML = headline + body;
+    }
+  } catch (err) {
+    console.error("Reminder delivery health error:", err);
+    if (statusEl) statusEl.textContent = err.message || "Failed to load reminder delivery health.";
+  }
+}
+
 // ─── Dashboard Stats ────────────────────────────────────────────────
 async function loadDashboardStats() {
   const grid = qs("statsGrid");
@@ -1597,6 +1691,7 @@ async function initSuperPage() {
       loadAppConfigSection(),
       loadUsageStats(),
       loadProviderUsageStats(),
+      loadReminderDeliveryHealthStats(),
       loadDashboardStats(),
       loadUserDirectory(),
       loadTermsAcceptanceHistory(),

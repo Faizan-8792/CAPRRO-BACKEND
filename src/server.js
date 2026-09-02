@@ -20,6 +20,9 @@ import {
   drainDigestRecovery,
   enqueueDueDigests,
 } from "./services/digest.service.js";
+import { checkReminderDeliveryHealthAndAlert } from "./services/reminder-delivery-alert.service.js";
+import { sendReminderDeliveryAlertEmail } from "./services/email.service.js";
+import { SUPER_ADMIN_EMAIL } from "./middleware/authorization.middleware.js";
 import app, {
   setBackgroundInitializationError,
   setBackgroundReadiness,
@@ -33,6 +36,11 @@ const AUTOMATION_WORKER_INTERVAL_MS = 30 * 1000;
 // hours keeps the purge well inside its own day without adding steady load, and
 // still gives four chances a day for a tick to land if the process restarts.
 const RETENTION_SCHEDULER_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// T3 (.kiro/PLAN.md): fleet-wide reminder delivery-health alerting. Same
+// cadence as REMINDER_SCHEDULER_INTERVAL_MS -- checking more often than
+// reminders are actually processed would find nothing new. The re-alert
+// throttle itself lives in reminder-delivery-alert.service.js.
+const REMINDER_DELIVERY_ALERT_INTERVAL_MS = 15 * 60 * 1000;
 const BOOTSTRAP_RETRY_DELAY_MS = 30 * 1000;
 const AUTOMATION_WORKER_BATCH_SIZE = 5;
 const automationWorkerId = `${hostname()}:${process.pid}`;
@@ -53,6 +61,8 @@ let digestSchedulerTimer = null;
 let automationWorkerTimer = null;
 let retentionSchedulerPromise = null;
 let retentionSchedulerTimer = null;
+let reminderDeliveryAlertPromise = null;
+let reminderDeliveryAlertTimer = null;
 
 export async function completeDigestStartup({
   assertIndexes,
@@ -195,6 +205,52 @@ function runRetentionScheduler() {
   return retentionSchedulerPromise;
 }
 
+// T3 (.kiro/PLAN.md): checks the same fleet-wide delivery-problem count as
+// T2's admin panel (GET /api/super/reminder-delivery-health) and, past a
+// small threshold, emails the owner a secondary signal -- a best-effort
+// alert on top of the panel, never a replacement for it. Threshold and
+// re-alert throttle live in reminder-delivery-alert.service.js.
+function runReminderDeliveryAlertScheduler() {
+  if (shuttingDown || reminderDeliveryAlertPromise) {
+    return reminderDeliveryAlertPromise;
+  }
+  reminderDeliveryAlertPromise = checkReminderDeliveryHealthAndAlert({
+    Reminder,
+    AppConfig,
+    toEmail: SUPER_ADMIN_EMAIL,
+    sendAlertEmail: ({
+      toEmail,
+      issueCount,
+      candidatesScanned,
+      candidatesScanTruncated,
+      now,
+    }) =>
+      sendReminderDeliveryAlertEmail({
+        toEmail,
+        issueCount,
+        candidatesScanned,
+        candidatesScanTruncated,
+        generatedAt: now,
+      }),
+  })
+    .then((summary) => {
+      if (summary.alerted) {
+        console.log("[REMINDER-ALERT] Delivery-health alert sent", summary);
+      } else if (summary.reason === "SEND_FAILED") {
+        console.error("[REMINDER-ALERT] Alert email failed to send", summary);
+      }
+      return summary;
+    })
+    .catch((error) => {
+      console.error("[REMINDER-ALERT] Scheduler tick failed", error);
+      return null;
+    })
+    .finally(() => {
+      reminderDeliveryAlertPromise = null;
+    });
+  return reminderDeliveryAlertPromise;
+}
+
 function startSchedulers() {
   if (shuttingDown || schedulersStarted) return false;
   schedulersStarted = true;
@@ -214,14 +270,20 @@ function startSchedulers() {
     runRetentionScheduler,
     RETENTION_SCHEDULER_INTERVAL_MS,
   );
+  reminderDeliveryAlertTimer = setInterval(
+    runReminderDeliveryAlertScheduler,
+    REMINDER_DELIVERY_ALERT_INTERVAL_MS,
+  );
   reminderSchedulerTimer.unref();
   digestSchedulerTimer.unref();
   automationWorkerTimer.unref();
   retentionSchedulerTimer.unref();
+  reminderDeliveryAlertTimer.unref();
   runReminderScheduler();
   runDigestScheduler();
   runAutomationWorker();
   runRetentionScheduler();
+  runReminderDeliveryAlertScheduler();
   return true;
 }
 
@@ -347,6 +409,7 @@ async function gracefulShutdown(signal) {
   if (digestSchedulerTimer) clearInterval(digestSchedulerTimer);
   if (automationWorkerTimer) clearInterval(automationWorkerTimer);
   if (retentionSchedulerTimer) clearInterval(retentionSchedulerTimer);
+  if (reminderDeliveryAlertTimer) clearInterval(reminderDeliveryAlertTimer);
 
   server.close((error) => {
     if (error) console.error("HTTP server close error:", error);
@@ -377,6 +440,13 @@ async function gracefulShutdown(signal) {
     if (activeRetentionScheduler) await activeRetentionScheduler;
   } catch (error) {
     console.error("Retention scheduler shutdown error:", error.message);
+  }
+
+  try {
+    const activeReminderDeliveryAlert = reminderDeliveryAlertPromise;
+    if (activeReminderDeliveryAlert) await activeReminderDeliveryAlert;
+  } catch (error) {
+    console.error("Reminder delivery alert scheduler shutdown error:", error.message);
   }
 
   try {

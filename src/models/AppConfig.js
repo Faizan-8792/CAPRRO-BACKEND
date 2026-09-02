@@ -101,6 +101,15 @@ const AppConfigSchema = new mongoose.Schema(
       auditWorkingPapers: { type: String, trim: true, maxlength: 80, default: "" },
     },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    // T3 (.kiro/PLAN.md): durable state for
+    // reminder-delivery-alert.service.js's re-alert throttle, so a server
+    // restart does not forget the last time the owner was emailed and
+    // re-fire immediately. Scheduler bookkeeping, not user- or admin-facing
+    // configuration -- deliberately not folded into featureFlags/desktopRelease.
+    reminderDeliveryAlert: {
+      lastAlertAt: { type: Date, default: null },
+      lastAlertIssueCount: { type: Number, min: 0, default: 0 },
+    },
   },
   { timestamps: true, _id: false }
 );

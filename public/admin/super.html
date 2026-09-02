@@ -304,6 +304,15 @@
         </div>
 
         <div class="card p-3 super-admin-card mt-3">
+          <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Reminder Delivery Health</h6>
+          <p class="text-muted mb-2" style="font-size:12px;">
+            Reminders whose email delivery could not be confirmed healthy -- a retry pending, an unconfirmed delivery state, a claim gone stale, or a past failed attempt. Scans up to 5,000 reminders that have ever attempted delivery.
+          </p>
+          <div id="reminderDeliveryHealthStatus" class="text-muted small mb-2">Loading...</div>
+          <div id="reminderDeliveryHealthBody"></div>
+        </div>
+
+        <div class="card p-3 super-admin-card mt-3">
           <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Desktop Release</h6>
           <div id="desktopReleaseLive" class="text-muted small mb-2">Nothing announced yet.</div>
           <div class="row g-2">
@@ -694,6 +703,6 @@
 
     <!-- Bootstrap JS no longer needed (custom modal). Kept removed. -->
     <script src="file-tools.js"></script>
-    <script src="super.js?v=21"></script>
+    <script src="super.js?v=22"></script>
   </body>
 </html>

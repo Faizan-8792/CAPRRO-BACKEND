@@ -685,7 +685,10 @@ try {
         # gate rather than merely going unrun.
         "admin-panel-same-origin",
         "desktop-route-discovery-contract",
-        "extension-route-parity"
+        "extension-route-parity",
+        # T1/T3 (.kiro/PLAN.md), registered the day each was added per the invariant above.
+        "reminder-delivery-health-stat",
+        "reminder-delivery-alert-scheduler"
     )
 
     # The other four unwired suites need a REPLICA SET, not just a mongod: they run multi-document
