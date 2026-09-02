@@ -65,7 +65,10 @@ function deliveryAttemptView(attempt = {}) {
   };
 }
 
-function deliveryHealth(reminder, now = new Date()) {
+// Exported so super.controller.js's fleet-wide delivery-monitoring stat (T1,
+// .kiro/PLAN.md) reuses this exact definition of "delivery trouble" rather
+// than a second, possibly-diverging one.
+export function deliveryHealth(reminder, now = new Date()) {
   const staleBefore = new Date(now.getTime() - DELIVERY_LOCK_MS);
   const activeScheduleVersion = Math.max(
     1,
@@ -205,7 +208,8 @@ function getScheduleAttempt(reminder, kind, offset) {
   );
 }
 
-function getAttemptEntries(reminder) {
+// Exported for the same reason as deliveryHealth above.
+export function getAttemptEntries(reminder) {
   const attempts = reminder?.deliveryAttempts;
   if (!attempts) return [];
   if (attempts instanceof Map) return [...attempts.entries()];

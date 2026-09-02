@@ -22,6 +22,7 @@ import {
   userNeedsTombstone,
 } from "../services/erasure-classification.js";
 import { sendTestDigestNow } from "../services/digest.service.js";
+import { deliveryHealth } from "./reminder.controller.js";
 import ProviderUsage, {
   GLOBAL_USAGE_USER_ID,
   dailyPeriodKey,
@@ -203,6 +204,76 @@ export const getProviderUsageStats = async (req, res, next) => {
         today: totalsByProvider(dailyTotalsRaw),
         thisMonth: totalsByProvider(monthlyTotalsRaw),
         topUsersToday,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// 0c) T1 (.kiro/PLAN.md): fleet-wide reminder delivery-failure visibility.
+// reliableReminderDelivery's retry loop already records a per-attempt status
+// on every Reminder document (reminder.controller.js's deliveryAttempts
+// field); nothing anywhere previously aggregated that into something an
+// operator could see without opening MongoDB by hand. Reuses deliveryHealth/
+// getAttemptEntries directly from reminder.controller.js so "what counts as
+// a delivery problem" has exactly one definition, not a second one that
+// could drift from it.
+const DELIVERY_STAT_CANDIDATE_LIMIT = 5000;
+const DELIVERY_STAT_SAMPLE_LIMIT = 20;
+
+export const getReminderDeliveryHealthStats = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+
+    // Cheap pre-filter: only reminders that have ever recorded an attempt can
+    // possibly be unhealthy. deliveryAttempts defaults to {} until the first
+    // send is attempted, so this excludes reminders nobody has tried yet.
+    const candidates = await Reminder.find({
+      isActive: true,
+      deliveryAttempts: { $ne: {} },
+    })
+      .select("userId firmId typeId clientLabel dueDateISO scheduleVersion deliveryAttempts")
+      .limit(DELIVERY_STAT_CANDIDATE_LIMIT)
+      .lean();
+
+    const now = new Date();
+    const unhealthy = [];
+    for (const reminder of candidates) {
+      const health = deliveryHealth(reminder, now);
+      if (health.status !== "HEALTHY") unhealthy.push({ reminder, health });
+    }
+    unhealthy.sort(
+      (a, b) => new Date(a.reminder.dueDateISO) - new Date(b.reminder.dueDateISO)
+    );
+
+    const sample = unhealthy.slice(0, DELIVERY_STAT_SAMPLE_LIMIT).map(({ reminder, health }) => ({
+      reminderId: String(reminder._id),
+      userId: reminder.userId ? String(reminder.userId) : null,
+      firmId: reminder.firmId ? String(reminder.firmId) : null,
+      typeId: reminder.typeId || null,
+      clientLabel: reminder.clientLabel || "",
+      dueDateISO: reminder.dueDateISO || null,
+      status: health.status,
+      issueCount: health.issueCount,
+      issues: health.issues.map((issue) => ({
+        key: issue.key,
+        status: issue.status,
+        attemptCount: issue.attemptCount,
+        lastError: issue.lastError,
+        nextAttemptAt: issue.nextAttemptAt,
+      })),
+    }));
+
+    return res.json({
+      ok: true,
+      delivery: {
+        issueCount: unhealthy.length,
+        sample,
+        sampleTruncated: unhealthy.length > sample.length,
+        candidatesScanned: candidates.length,
+        candidatesScanTruncated: candidates.length === DELIVERY_STAT_CANDIDATE_LIMIT,
+        generatedAt: now.toISOString(),
       },
     });
   } catch (err) {

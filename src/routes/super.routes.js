@@ -18,6 +18,7 @@ import {
   deleteFirmForSuper,
   listErasureRequestsForSuper,
   getErasureReceiptForSuper,
+  getReminderDeliveryHealthStats,
   runSystemSelfTest,
   getSystemSelfTestRun,
   getLatestSystemSelfTestRun,
@@ -68,6 +69,14 @@ router.get("/usage-stats", getUsageStats);
 // O10: paid-provider (DeepSeek / OCR.space) call-volume meter -- backs the
 // "Provider usage" admin panel card.
 router.get("/provider-usage", requireSuperAdmin, getProviderUsageStats);
+
+// T1 (.kiro/PLAN.md): fleet-wide reminder delivery-failure visibility --
+// prerequisite for turning on reliableReminderDelivery/complianceGenerationShadow.
+router.get(
+  "/reminder-delivery-health",
+  requireSuperAdmin,
+  getReminderDeliveryHealthStats
+);
 
 // Full user directory (search, activity/role filters, pagination)
 router.get("/users", listAllUsers);
