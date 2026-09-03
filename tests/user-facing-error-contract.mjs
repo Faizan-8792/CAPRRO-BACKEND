@@ -159,10 +159,41 @@ check(
 );
 
 const gstNorm = read("services/gst-normalization.service.js");
+
+// This was pinned at exactly four tagged throws. The pin broke the first time a fifth authored
+// sentence was legitimately added, and bumping the number on each addition proves nothing about
+// any of them. What the check actually exists to catch is an authored sentence being thrown
+// UNTAGGED, where it would be replaced by generic copy and the firm would never learn what was
+// wrong with their own file. So that is what it now asserts, sentence by sentence.
+//
+// The bare `throw new Error(...)` calls in this file are deliberately left alone: "Amount must be
+// a safe integer" is an internal invariant, not something a firm is meant to read.
+const AUTHORED_GSTR3B_SENTENCES = [
+  "GSTR-3B summary contains an unsupported category",
+  "GSTR-3B category amounts must be non-negative",
+  "GSTR-3B summary requires ITC_CLAIMED or ITC_AVAILABLE rows",
+];
+
+const untagged = AUTHORED_GSTR3B_SENTENCES.filter((sentence) =>
+  new RegExp(`throw new Error\\(\\s*"?${sentence.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(gstNorm),
+);
 check(
-  "the GSTR-3B authored messages stay tagged",
-  (gstNorm.match(/throw userFacingError\(/g) || []).length === 4,
-  "the four sentences a firm reads about their own summary",
+  "no sentence a firm reads about their own summary is thrown untagged",
+  untagged.length === 0,
+  untagged.length ? `untagged: ${untagged.join("; ")}` : "all authored sentences go through userFacingError",
+);
+
+check(
+  "the GSTR-3B authored messages are still present in the code that throws them",
+  AUTHORED_GSTR3B_SENTENCES.every((sentence) => gstNorm.includes(sentence)),
+  "checked by their own words, so a rewrite that drops one is caught",
+);
+
+check(
+  "every authored throw in the GSTR-3B calculations carries the tag",
+  (gstNorm.match(/throw userFacingError\(/g) || []).length
+    >= AUTHORED_GSTR3B_SENTENCES.length,
+  `${(gstNorm.match(/throw userFacingError\(/g) || []).length} tagged throws`,
 );
 
 // ─── 4. No new sink slips in unnoticed ────────────────────────────
