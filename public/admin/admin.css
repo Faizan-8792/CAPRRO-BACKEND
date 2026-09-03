@@ -1067,3 +1067,44 @@ input:hover, textarea:hover, select:hover {
   .st-ms { grid-column: 2; }
   .st-evidence { margin-left: 0; }
 }
+
+/* =======================
+   SUPER PANEL — sortable headers + sticky head
+   -----------------------
+   The super panel's five tables rendered in whatever order the API returned,
+   with no way to reorder them, and their headers scrolled away on tables that
+   are 25 rows deep. Scoped to .super-sortable so the firm panel's tables are
+   untouched.
+   ======================= */
+th.super-sortable {
+  cursor: pointer;
+  user-select: none;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface, #fff);
+  padding-right: 22px;
+  transition: color var(--transition, 0.15s ease);
+}
+
+th.super-sortable:hover,
+th.super-sortable:focus-visible {
+  color: var(--brand, #0f5260);
+}
+
+/* The indicator is always present so the column does not change width when a
+   sort is applied, which would shift every other column sideways. */
+th.super-sortable::after {
+  content: "↕";
+  position: absolute;
+  right: 6px;
+  opacity: 0.25;
+  font-size: 11px;
+}
+
+th.super-sortable[aria-sort="ascending"]::after { content: "↑"; opacity: 1; }
+th.super-sortable[aria-sort="descending"]::after { content: "↓"; opacity: 1; }
+
+/* Only the routed section is on screen; [hidden] needs to beat Bootstrap's
+   display rules on the same element. */
+.super-page[hidden] { display: none !important; }

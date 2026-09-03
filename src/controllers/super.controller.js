@@ -634,7 +634,19 @@ export const listFirms = async (req, res, next) => {
   try {
     assertSuper(req.user);
 
-    const firms = await Firm.find({}).sort({ createdAt: -1 }).lean();
+    // Bounded deliberately. This was an unbounded Firm.find({}), so the super
+    // panel rendered every firm in the database in one shot and grew without
+    // limit as the product did - the panel's own "why is this page so long"
+    // problem starts here, not in the markup. 200 is far above the current
+    // count and is reported to the client so the panel can say plainly that
+    // it is showing a capped list rather than implying it is showing all of
+    // them.
+    const FIRM_LIST_LIMIT = 200;
+    const totalFirms = await Firm.countDocuments({});
+    const firms = await Firm.find({})
+      .sort({ createdAt: -1 })
+      .limit(FIRM_LIST_LIMIT)
+      .lean();
 
     const ownerIds = firms.map((f) => f.ownerUserId);
     const owners = await User.find({ _id: { $in: ownerIds } })
@@ -654,7 +666,18 @@ export const listFirms = async (req, res, next) => {
       owner: ownersById.get(String(firm.ownerUserId)) || null,
     }));
 
-    return res.json({ ok: true, firms: enriched });
+    // Additive keys, so an older panel that ignores them keeps working. The
+    // count is the real total, not the returned length, so the panel can say
+    // "showing 200 of 340" rather than silently presenting a truncated list
+    // as if it were complete.
+    return res.json({
+      ok: true,
+      firms: enriched,
+      totalFirms,
+      returnedFirms: enriched.length,
+      truncated: totalFirms > enriched.length,
+      limit: FIRM_LIST_LIMIT,
+    });
   } catch (err) {
     next(err);
   }

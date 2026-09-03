@@ -45,9 +45,26 @@
     </nav>
 
     <main class="container-fluid px-4 my-4 super-admin-main">
+      <!-- One section at a time. This panel used to paint all eight at once - about
+           6,500px of page - with no way to jump. The shell, the sidebar styling and
+           the mobile breakpoint already existed in admin.css for the firm panel and
+           were simply unused here. -->
+      <div class="layout">
+        <aside class="sidebar" aria-label="Super admin sections">
+          <div class="px-3 mb-2 small-label text-muted">Navigation</div>
+          <a href="#controls" class="active">App controls</a>
+          <a href="#overview">Platform overview</a>
+          <a href="#analytics">Usage analytics</a>
+          <a href="#users">User directory</a>
+          <a href="#firms">Firms &amp; access</a>
+          <a href="#approvals">Pending approvals</a>
+          <a href="#terms">Terms acceptance</a>
+          <a href="#review">Deep system review</a>
+        </aside>
+        <div class="content">
 
       <!-- DEEP SYSTEM REVIEW -->
-      <section class="mb-4" aria-labelledby="deepSystemReviewTitle">
+      <section id="page-review" class="super-page" class="mb-4" aria-labelledby="deepSystemReviewTitle">
         <div class="mb-3 d-flex align-items-start justify-content-between flex-wrap gap-3">
           <div class="st-heading-copy">
             <h1 class="h5 mb-1" id="deepSystemReviewTitle">Deep System Review</h1>
@@ -102,7 +119,7 @@
       </section>
 
       <!-- APP CONFIG (Maintenance + Welcome) -->
-      <section class="mb-4">
+      <section id="page-controls" class="super-page" class="mb-4">
         <div class="mb-3">
           <h1 class="h5 mb-1">🔧 App Controls</h1>
           <p class="text-muted mb-0 small">
@@ -361,7 +378,7 @@
       </section>
 
       <!-- USAGE ANALYTICS -->
-      <section class="mb-4">
+      <section id="page-analytics" class="super-page" class="mb-4">
         <div class="mb-3">
           <h1 class="h5 mb-1">📈 Extension Usage Analytics</h1>
           <p class="text-muted mb-0 small">
@@ -389,7 +406,7 @@
       </section>
 
       <!-- DASHBOARD STATS -->
-      <section class="mb-4">
+      <section id="page-overview" class="super-page" class="mb-4">
         <div class="mb-3">
           <h1 class="h5 mb-1">📊 Platform Overview</h1>
           <p class="text-muted mb-0 small">
@@ -425,7 +442,7 @@
       </section>
 
       <!-- USER DIRECTORY -->
-      <section class="mb-4">
+      <section id="page-users" class="super-page" class="mb-4">
         <div class="row g-3 mb-3 align-items-center">
           <div class="col">
             <h2 class="h5 mb-1">👥 User directory</h2>
@@ -506,7 +523,7 @@
       </section>
 
       <!-- TERMS ACCEPTANCE HISTORY -->
-      <section class="mb-4" aria-labelledby="termsAcceptanceTitle">
+      <section id="page-terms" class="super-page" class="mb-4" aria-labelledby="termsAcceptanceTitle">
         <div class="row g-3 mb-3 align-items-center">
           <div class="col">
             <h2 class="h5 mb-1" id="termsAcceptanceTitle">Terms acceptance history</h2>
@@ -596,7 +613,7 @@
       </section>
 
       <!-- PENDING ADMINS -->
-      <section class="mb-4">
+      <section id="page-approvals" class="super-page" class="mb-4">
         <div class="row g-3 mb-3 align-items-center">
           <div class="col">
             <h2 class="h5 mb-1">⏳ Pending Firm Admin Approvals</h2>
@@ -632,7 +649,7 @@
       </section>
 
       <!-- FIRMS / ACCESS -->
-      <section>
+      <section id="page-firms" class="super-page">
         <div class="row g-3 mb-3 align-items-center">
           <div class="col">
             <h2 class="h5 mb-1">Firms, administrators, and access</h2>
@@ -703,6 +720,6 @@
 
     <!-- Bootstrap JS no longer needed (custom modal). Kept removed. -->
     <script src="file-tools.js"></script>
-    <script src="super.js?v=22"></script>
+    <script src="super.js?v=23"></script>
   </body>
 </html>

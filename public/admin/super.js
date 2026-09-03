@@ -2320,3 +2320,162 @@ document.addEventListener("DOMContentLoaded", () => {
   const btn = qs("sendTestEmailBtn");
   if (btn) btn.addEventListener("click", sendTestEmailNow);
 });
+
+/* =========================================================================
+   Section routing and column sorting
+   -------------------------------------------------------------------------
+   This panel used to paint all eight sections at once - roughly 6,500px of
+   page, growing without limit because the firms table renders every firm in
+   the database. Nothing linked anywhere, so finding a section meant scrolling
+   past everything before it, and no table could be reordered.
+
+   The shell, the sidebar styling and the mobile breakpoint were already in
+   admin.css, written for the firm panel and unused here, so this reuses them
+   rather than inventing a second layout. The routing mirrors admin.js's
+   showPage() for the same reason: two panels behaving differently is a worse
+   outcome than either behaviour on its own.
+   ========================================================================= */
+
+const SUPER_PAGES = [
+  "controls",
+  "overview",
+  "analytics",
+  "users",
+  "firms",
+  "approvals",
+  "terms",
+  "review",
+];
+const SUPER_DEFAULT_PAGE = "controls";
+
+function superShowPage(hash) {
+  const wanted = String(hash || "").replace(/^#/, "");
+  const page = SUPER_PAGES.includes(wanted) ? wanted : SUPER_DEFAULT_PAGE;
+  for (const name of SUPER_PAGES) {
+    const el = qs(`page-${name}`);
+    if (el) el.hidden = name !== page;
+  }
+  const sidebar = document.querySelector(".sidebar");
+  if (sidebar) {
+    sidebar.querySelectorAll("a").forEach((a) => {
+      a.classList.toggle("active", a.getAttribute("href") === `#${page}`);
+      // A section that is not on screen is not the current location, and a
+      // screen reader should not be told otherwise.
+      if (a.getAttribute("href") === `#${page}`) a.setAttribute("aria-current", "page");
+      else a.removeAttribute("aria-current");
+    });
+  }
+  return page;
+}
+
+// ---------------- Column sorting ----------------
+//
+// Sorting happens on the rows already in the DOM rather than by refetching.
+// Two reasons: three of the five tables have no server-side sort to ask for,
+// and re-sorting what is on screen cannot disagree with what the user is
+// looking at. The User directory keeps its own server-side sort dropdown,
+// which stays authoritative for that table - so its headers are left alone.
+
+// A cell's text is what the user sees, so that is what is compared. Numbers,
+// money and dates are detected so "9" does not sort after "10", and a blank
+// or em-dash always sorts last regardless of direction - an empty cell is not
+// a small value, it is an absent one.
+function superSortKey(text) {
+  const raw = String(text || "").trim();
+  if (!raw || raw === "—" || raw === "-") return { empty: true, n: 0, s: "" };
+  const cleaned = raw.replace(/[₹,\s]/g, "");
+  if (/^-?\d+(\.\d+)?$/.test(cleaned)) return { empty: false, n: Number(cleaned), s: "" };
+  const parsed = Date.parse(raw);
+  if (!Number.isNaN(parsed) && /\d{4}|\d{1,2}[/-]\d{1,2}/.test(raw)) {
+    return { empty: false, n: parsed, s: "" };
+  }
+  return { empty: false, n: null, s: raw.toLowerCase() };
+}
+
+function superCompare(a, b, direction) {
+  if (a.empty && b.empty) return 0;
+  if (a.empty) return 1;
+  if (b.empty) return -1;
+  const factor = direction === "desc" ? -1 : 1;
+  if (a.n !== null && b.n !== null) return (a.n - b.n) * factor;
+  return a.s.localeCompare(b.s) * factor;
+}
+
+function superSortTable(table, columnIndex, direction) {
+  const body = table.tBodies[0];
+  if (!body) return;
+  const rows = Array.from(body.rows).filter((row) => row.cells.length > columnIndex);
+  // Rows that do not participate (an "empty" placeholder, a detail row that
+  // belongs under its parent) are left where they are rather than shuffled
+  // into the middle of real data.
+  const movable = rows.filter((row) => !row.hasAttribute("data-detail-row"));
+  if (movable.length < 2) return;
+  movable
+    .map((row) => ({ row, key: superSortKey(row.cells[columnIndex].textContent) }))
+    .sort((left, right) => superCompare(left.key, right.key, direction))
+    .forEach(({ row }) => body.appendChild(row));
+}
+
+function superMakeSortable(table) {
+  const head = table.tHead;
+  if (!head || !head.rows.length) return;
+  Array.from(head.rows[0].cells).forEach((cell, index) => {
+    // The actions column holds buttons, not data; sorting by it is meaningless.
+    if (/^\s*(actions?)\s*$/i.test(cell.textContent || "")) return;
+    cell.classList.add("super-sortable");
+    cell.setAttribute("aria-sort", "none");
+    cell.tabIndex = 0;
+    cell.setAttribute("role", "columnheader");
+    cell.title = "Sort by this column";
+    const activate = () => {
+      const current = cell.getAttribute("aria-sort");
+      const direction = current === "ascending" ? "desc" : "asc";
+      Array.from(head.rows[0].cells).forEach((other) => {
+        if (other !== cell) other.setAttribute("aria-sort", "none");
+      });
+      cell.setAttribute("aria-sort", direction === "asc" ? "ascending" : "descending");
+      superSortTable(table, index, direction);
+    };
+    cell.addEventListener("click", activate);
+    cell.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        activate();
+      }
+    });
+  });
+}
+
+function superInitSortableTables() {
+  // The User directory is excluded on purpose: it already sorts server-side
+  // across all pages, and a client-side sort of the visible 25 rows would
+  // quietly disagree with the dropdown that says how the data is ordered.
+  document.querySelectorAll("table").forEach((table) => {
+    if (table.closest("#page-users")) return;
+    if (table.dataset.superSortable === "1") return;
+    table.dataset.superSortable = "1";
+    superMakeSortable(table);
+  });
+}
+
+function superInitNavigation() {
+  if (!document.querySelector(".sidebar")) return;
+  superShowPage(window.location.hash || `#${SUPER_DEFAULT_PAGE}`);
+  window.addEventListener("hashchange", () => {
+    superShowPage(window.location.hash);
+    // Landing on a section should start at its top, not wherever the previous
+    // section happened to be scrolled to.
+    const content = document.querySelector(".content");
+    if (content) content.scrollTop = 0;
+  });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  superInitNavigation();
+  // Rows arrive from several independent loaders, so headers are wired once
+  // the first paint has settled and again on later mutations.
+  setTimeout(superInitSortableTables, 0);
+  const main = document.querySelector(".content") || document.body;
+  const observer = new MutationObserver(() => superInitSortableTables());
+  observer.observe(main, { childList: true, subtree: true });
+});
