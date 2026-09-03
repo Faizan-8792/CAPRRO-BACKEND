@@ -187,7 +187,10 @@ export async function refineAuditClassification(req, res, next) {
       return res.json({
         ok: true,
         refined: false,
-        reason: "DEEPSEEK_API_KEY not configured on server",
+        // Names the capability, not the environment variable behind it —
+        // matching the three sibling guards in this file. A client has no use
+        // for the server's configuration key names.
+        reason: "LLM not configured",
       });
     }
 

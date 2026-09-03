@@ -18,10 +18,22 @@ import {
   classifyNumericDate,
   resolveDateOrder,
 } from "./robust-normalize.service.js";
+import { shapeTable } from "./import-shape.service.js";
 import { userFacingMessage } from "../utils/user-facing-error.js";
 
-const MAX_TEXT_BYTES = 500_000;
-const MAX_ROWS = 500;
+// Sized for the file a chartered accountant actually has, not for a demo.
+// Reconciliation runs for one return period, so the unit is a single month's
+// purchase register or GSTR-2B: a few hundred rows for a small client, several
+// thousand for a busy one. The previous 500-row / 500 KB ceiling rejected any
+// real client's books outright, which made every other robustness improvement
+// upstream pointless.
+//
+// 20,000 rows at ~500 bytes each is ~10 MB of text and a few tens of MB of
+// parsed cells - comfortable for the API host, and still a hard bound rather
+// than an open door. A register larger than one period's worth is a sign the
+// wrong file was picked, so refusing it is the right answer, not a limitation.
+const MAX_TEXT_BYTES = 10_000_000;
+const MAX_ROWS = 20_000;
 const MAX_COLUMNS = 100;
 const PREVIEW_ROWS = 100;
 
@@ -166,10 +178,20 @@ function validateRequest({ kind, text, mapping, delimiter, dateOrder }) {
 
   const parsed = parseDelimited(text, selectedDelimiter);
   if (parsed.length < 2) throw new Error("Import requires a header and at least one data row");
-  const headers = parsed[0].map((header) => header.trim());
+
+  // Where the headings are, which columns are real, and what to call the ones
+  // the file did not name. This replaces three assumptions that rejected
+  // ordinary accounting exports outright: that the header is row 1, that no
+  // header cell is blank (Excel appends empty columns to almost every export),
+  // and that no two columns share a name (Tally prints "Amount" twice).
+  // Every adjustment it makes is returned to the caller as a note rather than
+  // applied silently.
+  const shaped = shapeTable(parsed);
+  const headers = shaped.headers;
+  if (!headers.length) {
+    throw new Error("Import requires a header and at least one data row");
+  }
   if (headers.length > MAX_COLUMNS) throw new Error(`Import exceeds ${MAX_COLUMNS} columns`);
-  if (headers.some((header) => !header)) throw new Error("Import contains an empty header");
-  if (new Set(headers).size !== headers.length) throw new Error("Import headers must be unique");
 
   const unknownFields = Object.keys(mapping).filter(
     (field) => !spec.allowed.includes(field)
@@ -214,14 +236,14 @@ function validateRequest({ kind, text, mapping, delimiter, dateOrder }) {
     );
   }
 
-  return { headers, normalizedKind, parsed, selectedDelimiter, spec };
+  return { headers, normalizedKind, parsed, shaped, selectedDelimiter, spec };
 }
 
 export function parseMappedImport({ kind, text, mapping, delimiter = null, dateOrder = null }) {
   const {
     headers,
     normalizedKind,
-    parsed,
+    shaped,
     selectedDelimiter,
     spec,
   } = validateRequest({ kind, text, mapping, delimiter, dateOrder });
@@ -242,8 +264,11 @@ export function parseMappedImport({ kind, text, mapping, delimiter = null, dateO
   for (const field of dateFields) {
     const sourceHeader = mapping[field];
     const columnIndex = headerIndex.get(sourceHeader);
-    parsed.slice(1).forEach((row, rowIndex) => {
-      dateEntries.push({ row: rowIndex + 2, value: cleanValue(row[columnIndex] ?? "") });
+    // Row numbers are the ones in the user's own file, so "row 42 reads as
+    // day-first" points at row 42 of their spreadsheet even when the header
+    // sat below a title block.
+    shaped.dataRows.forEach((entry) => {
+      dateEntries.push({ row: entry.sourceRow, value: cleanValue(entry.cells[columnIndex] ?? "") });
     });
   }
   const dateClassification = classifyDateColumn(dateEntries);
@@ -283,9 +308,10 @@ export function parseMappedImport({ kind, text, mapping, delimiter = null, dateO
       )
     : null;
 
-  parsed.slice(1).forEach((row, rowIndex) => {
+  shaped.dataRows.forEach((entry) => {
+    const row = entry.cells;
     const mapped = {};
-    const displayRow = rowIndex + 2;
+    const displayRow = entry.sourceRow;
     for (const [field, sourceHeader] of Object.entries(mapping)) {
       const rawValue = row[headerIndex.get(sourceHeader)] ?? "";
       if (formulaRisk(rawValue)) {
@@ -385,7 +411,20 @@ export function parseMappedImport({ kind, text, mapping, delimiter = null, dateO
       invalidRows: invalidRows.size,
       warningCount: warnings.length,
       previewRows: Math.min(normalizedRows.length, PREVIEW_ROWS),
+      // Rows that were never records: a repeated heading, a printed totals
+      // line. Counted separately from invalidRows because they are not the
+      // user's mistake, and reported rather than dropped in silence so the
+      // figures here can be tied back to the source document.
+      skippedRows: shaped.skipped.length,
       financialTotals,
+    },
+    // What had to be assumed about the file's shape before a value was read:
+    // a title block skipped, empty columns dropped, a duplicate column
+    // renamed. Additive, so an older client that ignores it is unaffected.
+    shape: {
+      headerRow: shaped.headerRowIndex + 1,
+      notes: shaped.notes,
+      skipped: shaped.skipped.slice(0, 200),
     },
     // Additive response key -- the app-config pattern this codebase already
     // relies on. An older client that does not read it keeps working exactly
