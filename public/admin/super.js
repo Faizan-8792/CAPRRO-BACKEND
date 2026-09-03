@@ -968,7 +968,16 @@ function attachPendingHandlers(tbody) {
 // ─── Firms & Plans ──────────────────────────────────────────────────
 async function loadFirms() {
   const data = await api("/super/firms");
-  return data.firms || [];
+  // The controller caps this list and reports the cap. Keep those fields: a
+  // truncated list presented as complete is how a super admin concludes a firm
+  // does not exist when it simply fell past the limit.
+  return {
+    firms: data.firms || [],
+    totalFirms: Number(data.totalFirms) || (data.firms || []).length,
+    returnedFirms: Number(data.returnedFirms) || (data.firms || []).length,
+    truncated: Boolean(data.truncated),
+    limit: Number(data.limit) || 0,
+  };
 }
 
 async function loadFirmUsers(firmId) {
@@ -1717,13 +1726,18 @@ async function initSuperPage() {
     const firmsBody = qs("firmsBody");
     const firmsStatus = qs("firmsStatus");
     try {
-      const firms = await loadFirms();
+      const firmList = await loadFirms();
+      const firms = firmList.firms;
       if (!firms.length) {
         if (firmsBody) firmsBody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No firms found.</td></tr>`;
         if (firmsStatus) firmsStatus.textContent = "";
       } else {
         if (firmsBody) { firmsBody.innerHTML = firms.map(renderFirmRow).join(""); attachFirmHandlers(); }
-        if (firmsStatus) firmsStatus.textContent = "";
+        if (firmsStatus) {
+          firmsStatus.textContent = firmList.truncated
+            ? `Showing the ${firmList.returnedFirms} most recently created firms of ${firmList.totalFirms}. Older firms are not listed.`
+            : "";
+        }
       }
     } catch (err) {
       if (firmsStatus) firmsStatus.textContent = err.message || "Failed to load firms.";
@@ -2380,15 +2394,91 @@ function superShowPage(hash) {
 // money and dates are detected so "9" does not sort after "10", and a blank
 // or em-dash always sorts last regardless of direction - an empty cell is not
 // a small value, it is an absent one.
+// Every date in this panel is rendered with toLocaleDateString()/toLocaleString(),
+// which follows the VIEWER's locale: d/m/y in India, m/d/y in the US. Date.parse
+// reads a bare numeric date as m/d/y always, so on an Indian browser "11/8/2026"
+// (11 August) sorted as 8 November, and "20/9/2026" was rejected outright as an
+// invalid month and fell through to string sorting - putting two different
+// orderings in one column. Rather than guess the order, ask the same API the
+// cells were rendered with: format a date whose parts cannot be confused and see
+// which field the browser puts first.
+const SUPER_DATE_FIELD_ORDER = (function () {
+  try {
+    // 2001-02-03: year 2001, month 2, day 3 - three values that cannot be mistaken
+    // for one another.
+    const parts = new Date(2001, 1, 3).toLocaleDateString().match(/\d+/g);
+    if (!parts || parts.length < 3) return ["d", "m", "y"];
+    const order = parts.slice(0, 3).map((part) => {
+      const value = Number(part);
+      if (value === 2001 || value === 1) return "y";
+      if (value === 2) return "m";
+      if (value === 3) return "d";
+      return "?";
+    });
+    return order.includes("?") ? ["d", "m", "y"] : order;
+  } catch (error) {
+    return ["d", "m", "y"];
+  }
+})();
+
+// A cell is treated as a date only when the WHOLE cell is one, in a shape this
+// panel actually renders. The old code accepted anything Date.parse liked that
+// merely contained four digits, which silently sorted text columns as dates.
+function superDateValue(raw) {
+  const text = String(raw).trim();
+  if (!text) return null;
+
+  // ISO - unambiguous in every locale.
+  if (/^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.test(text)) {
+    const iso = Date.parse(text);
+    return Number.isNaN(iso) ? null : iso;
+  }
+
+  // A spelled-out month is unambiguous too ("3 September 2026", "September 3, 2026").
+  if (/^(?:\d{1,2}\s+[A-Za-z]{3,}\s+\d{4}|[A-Za-z]{3,}\s+\d{1,2},?\s+\d{4})$/.test(text)) {
+    const named = Date.parse(text);
+    return Number.isNaN(named) ? null : named;
+  }
+
+  // Numeric d/m/y or m/d/y, optionally with a time - what toLocaleDateString and
+  // toLocaleString produce.
+  const match = text.match(
+    /^(\d{1,4})[/.-](\d{1,2})[/.-](\d{1,4})(?:[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap]\.?m\.?)?)?$/i
+  );
+  if (!match) return null;
+
+  const numbers = [Number(match[1]), Number(match[2]), Number(match[3])];
+  let day = null;
+  let month = null;
+  let year = null;
+  SUPER_DATE_FIELD_ORDER.forEach((field, index) => {
+    if (field === "d") day = numbers[index];
+    else if (field === "m") month = numbers[index];
+    else if (field === "y") year = numbers[index];
+  });
+  if (day === null || month === null || year === null) return null;
+  if (year < 100) year += year < 70 ? 2000 : 1900;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+  let hour = Number(match[4] || 0);
+  const minute = Number(match[5] || 0);
+  const second = Number(match[6] || 0);
+  const meridiem = String(match[7] || "").toLowerCase().replace(/\./g, "");
+  if (meridiem === "pm" && hour < 12) hour += 12;
+  if (meridiem === "am" && hour === 12) hour = 0;
+  if (hour > 23 || minute > 59 || second > 59) return null;
+
+  const stamp = new Date(year, month - 1, day, hour, minute, second).getTime();
+  return Number.isNaN(stamp) ? null : stamp;
+}
+
 function superSortKey(text) {
   const raw = String(text || "").trim();
   if (!raw || raw === "—" || raw === "-") return { empty: true, n: 0, s: "" };
   const cleaned = raw.replace(/[₹,\s]/g, "");
   if (/^-?\d+(\.\d+)?$/.test(cleaned)) return { empty: false, n: Number(cleaned), s: "" };
-  const parsed = Date.parse(raw);
-  if (!Number.isNaN(parsed) && /\d{4}|\d{1,2}[/-]\d{1,2}/.test(raw)) {
-    return { empty: false, n: parsed, s: "" };
-  }
+  const stamp = superDateValue(raw);
+  if (stamp !== null) return { empty: false, n: stamp, s: "" };
   return { empty: false, n: null, s: raw.toLowerCase() };
 }
 

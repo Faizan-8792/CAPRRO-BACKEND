@@ -690,7 +690,15 @@ try {
         "extension-route-parity",
         # T1/T3 (.kiro/PLAN.md), registered the day each was added per the invariant above.
         "reminder-delivery-health-stat",
-        "reminder-delivery-alert-scheduler"
+        "reminder-delivery-alert-scheduler",
+        # Added the day the super panel sorting bug was fixed. The panel had a sidebar
+        # router and sortable tables in production with nothing asserting either, so a
+        # date column that sorted by the American field order shipped unnoticed.
+        "super-panel-contract",
+        # Ties Core's navigation tags to the App's route catalogue. Core cannot reference App,
+        # so every Open button and empty-state action names its destination as a string that
+        # nothing verified - a renamed tag left a button that silently did nothing.
+        "desktop-navigation-contract"
     )
 
     # The other four unwired suites need a REPLICA SET, not just a mongod: they run multi-document

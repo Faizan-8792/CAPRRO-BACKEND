@@ -781,9 +781,10 @@ function controllerProjection(value, selection) {
 function controllerQuery(load) {
   let selection = "";
   let sortSpec = null;
+  let limitCount = null;
   const resolve = async () => {
     const loaded = await load();
-    const value = Array.isArray(loaded) ? [...loaded] : loaded;
+    let value = Array.isArray(loaded) ? [...loaded] : loaded;
     if (Array.isArray(value) && sortSpec) {
       for (const [field, direction] of Object.entries(sortSpec).reverse()) {
         value.sort((left, right) => {
@@ -792,11 +793,18 @@ function controllerQuery(load) {
         });
       }
     }
+    // Applied after the sort, exactly as the database would, so a limited query
+    // returns the first N of the SORTED set and a test can tell the difference.
+    if (Array.isArray(value) && limitCount !== null) value = value.slice(0, limitCount);
     return controllerProjection(value, selection);
   };
   const api = {
     select(fields) {
       selection = String(fields || "");
+      return api;
+    },
+    limit(count) {
+      limitCount = Number(count);
       return api;
     },
     sort(spec) {
@@ -1051,6 +1059,10 @@ await test("Super firm list redacts PERSONAL and legacy codes but preserves SHAR
   const outcome = await withControllerPatches(
     [
       [ControllerFirm, "find", () => controllerQuery(() => firms)],
+      // listFirms caps the list and reports the true total alongside it, so the
+      // panel can say it is showing a capped list instead of presenting the
+      // first page as the whole estate. Stub the count the same way as find.
+      [ControllerFirm, "countDocuments", async () => firms.length],
       [
         ControllerUser,
         "find",
@@ -1073,6 +1085,12 @@ await test("Super firm list redacts PERSONAL and legacy codes but preserves SHAR
   assert.equal(byId.get("firm-shared").joinCode, "SHARED1");
   assert.equal(Object.hasOwn(byId.get("firm-legacy"), "joinCode"), false);
   assert.deepEqual(firms, sourceFirms);
+  // The cap has to be visible to the caller, not just applied.
+  assert.equal(outcome.body.totalFirms, firms.length);
+  assert.equal(outcome.body.returnedFirms, firms.length);
+  assert.equal(outcome.body.truncated, false);
+  assert.equal(typeof outcome.body.limit, "number");
+  assert.ok(outcome.body.limit > 0);
 });
 
 await test("Super PERSONAL plan response omits code without deleting stored value", async () => {

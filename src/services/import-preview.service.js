@@ -35,6 +35,13 @@ import { userFacingMessage } from "../utils/user-facing-error.js";
 const MAX_TEXT_BYTES = 10_000_000;
 const MAX_ROWS = 20_000;
 const MAX_COLUMNS = 100;
+// MAX_ROWS is only tested when a newline is seen and MAX_COLUMNS only after the
+// whole file is parsed, so a body with no newline at all was parsed in full
+// before any limit applied. This bounds a single row while it is being built.
+// Deliberately far above MAX_COLUMNS: a row wider than the header is normal in
+// a messy export and is trimmed later, so this is a structural backstop, not a
+// column rule.
+const MAX_CELLS_PER_ROW = 2_000;
 const PREVIEW_ROWS = 100;
 
 const IMPORT_SPECS = Object.freeze({
@@ -84,6 +91,13 @@ function parseDelimited(text, delimiter) {
     } else if (character === delimiter && !quoted) {
       row.push(cell);
       cell = "";
+      if (row.length > MAX_CELLS_PER_ROW) {
+        throw importRequestError(
+          `Import has a row with more than ${MAX_CELLS_PER_ROW} values`,
+          "IMPORT_ROW_TOO_WIDE",
+          { maxCellsPerRow: MAX_CELLS_PER_ROW }
+        );
+      }
     } else if ((character === "\n" || character === "\r") && !quoted) {
       if (character === "\r" && text[index + 1] === "\n") index += 1;
       row.push(cell);
