@@ -78,10 +78,18 @@ const GSTR1_CATEGORIES = Object.freeze([
   "NIL_RATED",
   "ADVANCES",
   "AMENDMENT",
+  "DNR",
+  "DNUR",
 ]);
 
-/// Credit and debit notes REDUCE declared turnover, so they are subtracted rather than added.
-/// Getting this sign wrong is the single easiest way to make a turnover reconciliation lie.
+/// Only CREDIT notes reduce declared turnover. A DEBIT note under section 34(3) CGST increases
+/// the value of the supply, so it is added like any other outward supply - it has its own
+/// categories below rather than sharing the credit-note bucket.
+///
+/// Getting this sign wrong is the single easiest way to make a turnover reconciliation lie, and
+/// it lies in the worst direction: a debit note subtracted instead of added moves declared
+/// turnover by TWICE the note, and the difference then points a firm at amending a GSTR-3B that
+/// was correct all along.
 const GSTR1_NEGATIVE_CATEGORIES = Object.freeze(["CDNR", "CDNUR"]);
 
 /// Nil-rated and non-GST supplies carry no tax and are excluded from the taxable comparison,
@@ -91,6 +99,8 @@ const GSTR1_TURNOVER_CATEGORIES = Object.freeze([
   "B2C",
   "CDNR",
   "CDNUR",
+  "DNR",
+  "DNUR",
   "EXPORT",
   "ADVANCES",
   "AMENDMENT",
@@ -107,10 +117,19 @@ const GSTR1_CATEGORY_ALIASES = Object.freeze({
   "7": "B2C",
   CDNR: "CDNR",
   CREDITNOTEREGISTERED: "CDNR",
-  DEBITNOTEREGISTERED: "CDNR",
+  CREDITNOTE: "CDNR",
+  // Table 9B holds credit AND debit notes for registered recipients. A row labelled only with
+  // the table number is the section total, which the portal presents net of credit notes, so it
+  // keeps the credit-note sign. A row that names itself a DEBIT note is unambiguous and is read
+  // as one.
   "9B": "CDNR",
   CDNUR: "CDNUR",
   CREDITNOTEUNREGISTERED: "CDNUR",
+  DNR: "DNR",
+  DEBITNOTE: "DNR",
+  DEBITNOTEREGISTERED: "DNR",
+  DNUR: "DNUR",
+  DEBITNOTEUNREGISTERED: "DNUR",
   EXPORT: "EXPORT",
   EXPORTS: "EXPORT",
   EXP: "EXPORT",
@@ -125,7 +144,11 @@ const GSTR1_CATEGORY_ALIASES = Object.freeze({
   AMENDMENT: "AMENDMENT",
   AMENDED: "AMENDMENT",
   B2BA: "AMENDMENT",
-  CDNRA: "AMENDMENT",
+  // An amendment OF a credit note is still a credit note: it belongs with the sign of the
+  // section it amends, not with the generic (positive) amendment bucket.
+  CDNRA: "CDNR",
+  CDNURA: "CDNUR",
+  DNRA: "DNR",
   "9A": "AMENDMENT",
 });
 
@@ -338,6 +361,26 @@ function normalizeEcreditCategory(value) {
   return ECREDIT_CATEGORY_ALIASES[categoryToken(value)] || null;
 }
 
+/**
+ * Every label that is DATA rather than a totals footer, for one import kind.
+ *
+ * Built from the real alias tables above, never a hand-written copy, so a category added there is
+ * automatically protected here. import-shape.service.js strips rows whose first cell reads as a
+ * totals line ("Total", "Opening Balance", "Closing Balance"), which is right for an invoice
+ * register and catastrophic for an electronic credit ledger, whose rows carry exactly those words.
+ */
+function summaryRowDataLabels(kind) {
+  const source =
+    kind === "ECREDIT_LEDGER"
+      ? [...ECREDIT_CATEGORIES, ...Object.keys(ECREDIT_CATEGORY_ALIASES)]
+      : kind === "GSTR1_SUMMARY"
+        ? [...GSTR1_CATEGORIES, ...Object.keys(GSTR1_CATEGORY_ALIASES)]
+        : kind === "GSTR3B_SUMMARY"
+          ? [...GSTR3B_CATEGORIES, ...Object.keys(GSTR3B_CATEGORY_ALIASES)]
+          : [];
+  return source;
+}
+
 /// True for a GSTR-3B row that belongs to Table 3.1 rather than Table 4.
 function isGstr3bOutwardCategory(category) {
   return GSTR3B_OUTWARD_CATEGORIES.includes(category);
@@ -517,12 +560,30 @@ function calculateCreditLedgerBalance(rows) {
 
   const hasMovement = opening.length > 0 || credits.length > 0 || debits.length > 0;
 
+  // The credit the ledger RECEIVED in this period, kept separate from the closing balance.
+  //
+  // These answer different questions and must not be confused. The closing balance is a STOCK: it
+  // carries forward whatever was already sitting in the ledger and is reduced by every utilisation
+  // in the period. The credit received is a FLOW, and it is the only figure that can be compared
+  // with the ITC a return claimed. Comparing a claim against the closing balance lets a brought-
+  // forward opening balance cancel a real shortfall - a firm claiming 45,000 whose ledger received
+  // only 20,000 reads as agreeing, if 25,000 was carried in - and raises a false exception against
+  // every firm that lawfully utilised credit during the month.
+  const credited = emptyTotals();
+  for (const field of TAX_MINOR_FIELDS) credited[field] = sum(credits, field);
+
+  const movement = {
+    credited: withTotalTax(credited),
+    hasCreditMovement: credits.length > 0,
+  };
+
   if (!stated.length) {
     if (!hasMovement) return null;
     return {
       closing: withTotalTax(computed),
       basis: "COMPUTED_FROM_MOVEMENT",
       statedDiffers: false,
+      ...movement,
     };
   }
 
@@ -539,6 +600,7 @@ function calculateCreditLedgerBalance(rows) {
     basis: "STATED_IN_FILE",
     statedDiffers,
     computed: hasMovement ? withTotalTax(computed) : null,
+    ...movement,
   };
 }
 
@@ -757,6 +819,7 @@ function isValidPeriod(value) {
 export {
   ECREDIT_CATEGORIES,
   GST_IMPORT_SPECS,
+  summaryRowDataLabels,
   GSTR1_CATEGORIES,
   GSTR3B_CATEGORIES,
   GSTR3B_OUTWARD_CATEGORIES,

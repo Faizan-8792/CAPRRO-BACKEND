@@ -1,4 +1,6 @@
-import ImportBatch from "../models/ImportBatch.js";
+import ImportBatch, {
+  GST_GENERATION_SAFE_NORMALIZATION_VERSIONS,
+} from "../models/ImportBatch.js";
 import ImportRow from "../models/ImportRow.js";
 // Imported rather than re-listed: a kind added to the model but forgotten here would be a GST
 // import that silently escapes the identity readiness scan.
@@ -84,7 +86,6 @@ const FORBIDDEN_INDEX_SPECS = Object.freeze([
   },
 ]);
 
-const GST_IMPORT_NORMALIZATION_VERSION = "gst-import-v2";
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/i;
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const OPERATION_ID_PATTERN = /^[a-f0-9]{64}$/;
@@ -508,7 +509,7 @@ async function findUnsafeLegacyDocuments({ reconciliation }) {
           invalidStringPattern("importFingerprint", SHA256_HEX_PATTERN),
           invalidStringPattern("sourceHash", SHA256_HEX_PATTERN),
           invalidStringPattern("activeImportGeneration", UUID_PATTERN),
-          { normalizationVersion: { $ne: GST_IMPORT_NORMALIZATION_VERSION } },
+          { normalizationVersion: { $nin: GST_GENERATION_SAFE_NORMALIZATION_VERSIONS } },
           invalidObjectId("firmId"),
           invalidObjectId("clientId"),
           invalidStringPattern("gstin", GSTIN_PATTERN),

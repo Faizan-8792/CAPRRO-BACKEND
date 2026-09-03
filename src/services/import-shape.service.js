@@ -167,7 +167,7 @@ export function normalizeHeaderRow(rawHeaders) {
 // is not a record. It is reported rather than dropped in silence: a register
 // whose totals row vanished without mention is one a reviewer cannot tie back
 // to the source document.
-export function classifyNonDataRow(row, headers) {
+export function classifyNonDataRow(row, headers, dataRowLabels = new Set()) {
   const cells = (Array.isArray(row) ? row : []).map((cell) => String(cell ?? "").trim());
   const filled = cells.filter((cell) => cell !== "");
   if (!filled.length) return "EMPTY";
@@ -202,14 +202,29 @@ export function classifyNonDataRow(row, headers) {
   const hasGstin = cells.some((cell) =>
     /^\d{2}[A-Z]{5}\d{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/i.test(cell),
   );
-  if (!hasGstin && TOTALS_LABELS.has(compare(filled[0]))) return "TOTALS";
+  const label = compare(filled[0]);
+
+  // A label that IS this kind's own data must never be read as a totals footer.
+  //
+  // An electronic credit ledger's rows are literally "Opening Balance", "Credit", "Debit" and
+  // "Closing Balance" - and two of those are in TOTALS_LABELS above, because in an invoice
+  // register they really are a footer. Stripping them from a LEDGER silently removed the opening
+  // balance from every ledger import: the closing balance then came out as credits minus debits,
+  // and the credit reconciliation reported a wrong difference against the ITC claimed, with
+  // nothing on screen to say a row had been dropped.
+  //
+  // The caller supplies this set because only the caller knows the kind. The default empty set
+  // leaves the invoice-register behaviour exactly as it was.
+  if (dataRowLabels.has(label)) return null;
+
+  if (!hasGstin && TOTALS_LABELS.has(label)) return "TOTALS";
   return null;
 }
 
 // Applies the shape decisions to a parsed grid. Returns the header names, the
 // data rows padded to the header width, and the notes describing every
 // adjustment made.
-export function shapeTable(rows) {
+export function shapeTable(rows, { dataRowLabels = new Set() } = {}) {
   const grid = Array.isArray(rows) ? rows : [];
   const headerRowIndex = findHeaderRow(grid);
   const { headers, keptColumns, notes } = normalizeHeaderRow(grid[headerRowIndex] || []);
@@ -223,7 +238,7 @@ export function shapeTable(rows) {
   for (let index = headerRowIndex + 1; index < grid.length; index += 1) {
     const row = (grid[index] || []).slice(0, keptColumns);
     while (row.length < keptColumns) row.push("");
-    const nonData = classifyNonDataRow(row, headers);
+    const nonData = classifyNonDataRow(row, headers, dataRowLabels);
     if (nonData) {
       // Source row numbers stay 1-based against the original file so a
       // message about "row 42" means row 42 in the user's spreadsheet.
@@ -236,4 +251,6 @@ export function shapeTable(rows) {
   return { headerRowIndex, headers, dataRows, skipped, notes };
 }
 
-export { ALL_SYNONYMS, MAX_HEADER_SEARCH_ROWS };
+// compare is exported so callers build their label sets with the SAME normalisation this file
+// compares against. A caller that lower-cased by hand would silently fail to match.
+export { ALL_SYNONYMS, MAX_HEADER_SEARCH_ROWS, compare as normalizeRowLabel };

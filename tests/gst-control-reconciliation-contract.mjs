@@ -23,6 +23,10 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 
 import { GST_IMPORT_KINDS } from "../src/models/ImportRow.js";
+import {
+  GST_GENERATION_SAFE_NORMALIZATION_VERSIONS,
+  GST_IMPORT_NORMALIZATION_VERSION,
+} from "../src/models/ImportBatch.js";
 import { fingerprintForRun } from "../src/services/gst-reconciliation.service.js";
 import {
   GST_IMPORT_SPECS,
@@ -39,7 +43,10 @@ import {
   buildMappingFromHeaders,
   resolveHeaderField,
 } from "../src/services/robust-normalize.service.js";
-import { suggestImportMapping } from "../src/services/import-preview.service.js";
+import {
+  previewImport,
+  suggestImportMapping,
+} from "../src/services/import-preview.service.js";
 
 // The create controller strips any field not on its allowlist, so the allowlist is read from the
 // controller itself rather than trusted.
@@ -831,6 +838,228 @@ check(
     desktopPage.includes('"COMPUTED_FROM_MOVEMENT"')
       && extensionJs.includes('"COMPUTED_FROM_MOVEMENT"'),
     "desktop and extension",
+  );
+}
+
+
+// ─── the two defects end-to-end testing found, pinned ─────────────
+
+// DEFECT 1: a ledger's own rows read as a totals footer.
+//
+// import-shape strips a row whose first cell is a totals label - "Total", "Opening Balance",
+// "Closing Balance". That is right for an invoice register and wrong for an electronic credit
+// ledger, whose rows carry exactly those words. Every ledger import silently lost its opening
+// balance, so the closing balance came out as credits minus debits, and the credit reconciliation
+// reported a wrong difference against the ITC claimed with nothing on screen to say a row had gone.
+{
+  const LEDGER_MAPPING = { category: "Category", igst: "IGST", cgst: "CGST", sgst: "SGST", cess: "Cess" };
+  const ledger = previewImport({
+    kind: "ECREDIT_LEDGER",
+    text: [
+      "Category,IGST,CGST,SGST,Cess",
+      "OPENING_BALANCE,5000.00,0,0,0",
+      "CREDIT,18000.00,0,0,0",
+      "DEBIT,20000.00,0,0,0",
+      "CLOSING_BALANCE,3000.00,0,0,0",
+    ].join("\n"),
+    mapping: LEDGER_MAPPING,
+    delimiter: ",",
+  });
+  check(
+    "a credit ledger keeps its OPENING and CLOSING balance rows",
+    ledger.shape.skipped.length === 0 && ledger.summary.validRows === 4,
+    ledger.shape.skipped.length
+      ? `dropped ${JSON.stringify(ledger.shape.skipped)}`
+      : `${ledger.summary.validRows} rows kept`,
+  );
+
+  // The figures those rows produce. 5,000 + 18,000 - 20,000 = 3,000, which is what the file also
+  // states, so the stated figure is used and nothing is flagged as contradictory.
+  const balance = calculateCreditLedgerBalance(ledger.rows.map((r) => r.values));
+  check(
+    "and the opening balance actually reaches the closing figure",
+    balance.closing.igstMinor === 3_000_00 && balance.statedDiffers === false,
+    `closing ${balance.closing.igstMinor} (want 300000), statedDiffers ${balance.statedDiffers}`,
+  );
+
+  // The other half of the contract: a purchase register's trailing "Total" line is still a footer
+  // and must still be stripped, so the fix did not simply disable the feature.
+  const register = previewImport({
+    kind: "GST_PURCHASE",
+    text: [
+      "Supplier GSTIN,Recipient GSTIN,Invoice Number,Document Date,Document Type,Taxable Value,IGST,CGST,SGST,Cess",
+      "27AAAAA0000A1Z5,27BBBBB0000B1Z5,INV-1,2026-04-05,Invoice,10000.00,1800.00,0,0,0",
+      "Total,,,,,10000.00,1800.00,0,0,0",
+    ].join("\n"),
+    mapping: {
+      supplierGstin: "Supplier GSTIN", recipientGstin: "Recipient GSTIN",
+      invoiceNumber: "Invoice Number", documentDate: "Document Date",
+      documentType: "Document Type", taxableValue: "Taxable Value",
+      igst: "IGST", cgst: "CGST", sgst: "SGST", cess: "Cess",
+    },
+    delimiter: ",",
+  });
+  check(
+    "a purchase register's trailing Total line is still stripped",
+    register.shape.skipped.some((entry) => entry.reason === "TOTALS")
+      && register.summary.validRows === 1,
+    `${JSON.stringify(register.shape.skipped)}, ${register.summary.validRows} valid row(s)`,
+  );
+}
+
+// DEFECT 2: two copies of the normalization version, drifted apart.
+//
+// gst-import.service.js STAMPS a version on every GST batch; gst-storage-readiness.service.js
+// SCANS for batches that do not carry a safe one. They held separate constants of the same name,
+// and the copies diverged: the writer moved to v3 while the scanner still demanded v2, so every
+// batch the current importer wrote was flagged as unmigrated legacy data.
+//
+// That scan is NOT firm-scoped, and it gates import commits, run creation, the generation job,
+// item listing and run locking. One such batch would therefore have refused GST with a 503 for
+// EVERY firm on the deployment. Production held only v2 rows, so it still worked - and the next
+// import anyone made would have broken it.
+{
+  check(
+    "the version the importer stamps is one the readiness scan treats as safe",
+    GST_GENERATION_SAFE_NORMALIZATION_VERSIONS.includes(GST_IMPORT_NORMALIZATION_VERSION),
+    `writer stamps ${GST_IMPORT_NORMALIZATION_VERSION}; safe set [${GST_GENERATION_SAFE_NORMALIZATION_VERSIONS.join(", ")}]`,
+  );
+
+  // Pinned by SOURCE as well as by value: reintroducing a private copy in either service is the
+  // exact shape of the original defect, and would pass the check above right up until the next
+  // version bump silently drifted them apart again.
+  const importSource = readFileSync(
+    new URL("../src/services/gst-import.service.js", import.meta.url), "utf8",
+  );
+  const readinessSource = readFileSync(
+    new URL("../src/services/gst-storage-readiness.service.js", import.meta.url), "utf8",
+  );
+  const modelSource = readFileSync(
+    new URL("../src/models/ImportBatch.js", import.meta.url), "utf8",
+  );
+
+  check(
+    "neither service declares its own copy of the normalization version",
+    !/const GST_IMPORT_NORMALIZATION_VERSION\s*=/.test(importSource)
+      && !/const GST_IMPORT_NORMALIZATION_VERSION\s*=/.test(readinessSource),
+    "both import it from the model",
+  );
+  check(
+    "the readiness scan tests membership of the safe set, not equality with one version",
+    readinessSource.includes("$nin: GST_GENERATION_SAFE_NORMALIZATION_VERSIONS"),
+    "a $ne against a single version condemns every batch written after the next bump",
+  );
+  check(
+    "the version literals are declared once, in the model both services already import",
+    /"gst-import-v\d+"/.test(modelSource)
+      && !/["']gst-import-v\d+["']/.test(importSource)
+      && !/["']gst-import-v\d+["']/.test(readinessSource),
+    "one declaration, no copies",
+  );
+}
+
+
+// ─── defects adversarial review found, pinned ─────────────────────
+
+// A DEBIT note increases the value of a supply under section 34(3) CGST; only a CREDIT note
+// reduces it. Both were mapped to the same bucket and subtracted, so a debit note moved declared
+// turnover by TWICE its value and the difference pointed a firm at amending a correct GSTR-3B.
+{
+  const row = (category, taxable, igst) => ({
+    summaryCategory: category,
+    taxableValueMinor: taxable,
+    igstMinor: igst,
+    cgstMinor: 0,
+    sgstMinor: 0,
+    cessMinor: 0,
+  });
+  const base = row("B2B", 10_00_000_00, 1_80_000_00);
+
+  const withDebitNote = calculateGstr1Outward([base, row("Debit Note Registered", 50_000_00, 9_000_00)]);
+  check(
+    "a GSTR-1 debit note is ADDED to declared turnover",
+    withDebitNote.taxableValueMinor === 10_50_000_00 && withDebitNote.igstMinor === 1_89_000_00,
+    `taxable ${withDebitNote.taxableValueMinor} (want ${10_50_000_00}), igst ${withDebitNote.igstMinor}`,
+  );
+
+  const withCreditNote = calculateGstr1Outward([base, row("Credit Note Registered", 50_000_00, 9_000_00)]);
+  check(
+    "a GSTR-1 credit note is still SUBTRACTED",
+    withCreditNote.taxableValueMinor === 9_50_000_00 && withCreditNote.igstMinor === 1_71_000_00,
+    `taxable ${withCreditNote.taxableValueMinor} (want ${9_50_000_00}), igst ${withCreditNote.igstMinor}`,
+  );
+
+  // The two must not collapse onto each other. A single bucket for both is the original defect.
+  check(
+    "a debit note and a credit note of the same value move turnover in opposite directions",
+    withDebitNote.taxableValueMinor - base.taxableValueMinor
+      === -(withCreditNote.taxableValueMinor - base.taxableValueMinor),
+    `+${withDebitNote.taxableValueMinor - base.taxableValueMinor} vs ${withCreditNote.taxableValueMinor - base.taxableValueMinor}`,
+  );
+
+  check(
+    "an amended credit note keeps the credit-note sign rather than joining the amendment bucket",
+    normalizeGstr1Category("CDNRA") === "CDNR",
+    normalizeGstr1Category("CDNRA"),
+  );
+}
+
+// The credit ledger's CLOSING balance is a stock: it carries the opening balance forward and is
+// reduced by every lawful utilisation. The credit RECEIVED is a flow, and only a flow can be
+// compared with a period's ITC claim. Comparing against the stock let a brought-forward balance
+// cancel a real shortfall, and turned ordinary utilisation into a false exception.
+{
+  const row = (category, igst) => ({
+    summaryCategory: category,
+    igstMinor: igst,
+    cgstMinor: 0,
+    sgstMinor: 0,
+    cessMinor: 0,
+  });
+
+  // The reviewer's case. 25,000 carried in, only 20,000 received this period. A 45,000 claim
+  // equals the CLOSING balance exactly, so comparing against that reported "agrees" on a
+  // 25,000 shortfall.
+  const carried = calculateCreditLedgerBalance([
+    row("OPENING_BALANCE", 25_000_00),
+    row("CREDIT", 20_000_00),
+  ]);
+  check(
+    "the credit RECEIVED is reported separately from the closing balance",
+    carried.credited.igstMinor === 20_000_00 && carried.closing.igstMinor === 45_000_00,
+    `received ${carried.credited.igstMinor} (want ${20_000_00}), closing ${carried.closing.igstMinor} (want ${45_000_00})`,
+  );
+  check(
+    "a claim equal to the closing balance is NOT equal to what the ledger received",
+    carried.closing.igstMinor !== carried.credited.igstMinor,
+    "the two figures are distinguishable, so the comparison cannot silently use the wrong one",
+  );
+
+  // Utilisation must not read as a shortfall. The ledger received exactly what was claimed; that
+  // 30,000 was then spent is not a reconciliation exception.
+  const utilised = calculateCreditLedgerBalance([
+    row("OPENING_BALANCE", 10_000_00),
+    row("CREDIT", 45_000_00),
+    row("DEBIT", 30_000_00),
+  ]);
+  check(
+    "lawful utilisation reduces the closing balance but not the credit received",
+    utilised.credited.igstMinor === 45_000_00 && utilised.closing.igstMinor === 25_000_00,
+    `received ${utilised.credited.igstMinor} (want ${45_000_00}), closing ${utilised.closing.igstMinor}`,
+  );
+
+  // A ledger that states only a balance carries no movement, so it cannot say what was received.
+  // That must be reported as un-comparable rather than answered with the stock figure.
+  const statedOnly = calculateCreditLedgerBalance([row("CLOSING_BALANCE", 45_000_00)]);
+  check(
+    "a ledger stating only a balance reports no credit movement",
+    statedOnly.hasCreditMovement === false && statedOnly.credited.igstMinor === 0,
+    `hasCreditMovement ${statedOnly.hasCreditMovement}`,
+  );
+  check(
+    "a ledger listing credit entries reports that it has movement",
+    carried.hasCreditMovement === true,
+    `hasCreditMovement ${carried.hasCreditMovement}`,
   );
 }
 

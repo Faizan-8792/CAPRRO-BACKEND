@@ -6,7 +6,9 @@ import {
 } from "node:crypto";
 import mongoose from "mongoose";
 import Client from "../models/Client.js";
-import ImportBatch from "../models/ImportBatch.js";
+import ImportBatch, {
+  GST_IMPORT_NORMALIZATION_VERSION,
+} from "../models/ImportBatch.js";
 import ImportRow, { GST_IMPORT_KINDS } from "../models/ImportRow.js";
 import { parseMappedImport } from "./import-preview.service.js";
 import { safeRecordActivity } from "./activity.service.js";
@@ -24,7 +26,6 @@ import { userFacingMessage } from "../utils/user-facing-error.js";
 // re-submission of the same file, because its fingerprint no longer matches
 // one computed with a dateOrder value. That is the honest consequence of
 // closing the date-swap gap, not a bug -- see .kiro/finalreleasefix.md C3.
-const GST_IMPORT_NORMALIZATION_VERSION = "gst-import-v3";
 const GST_IMPORT_PROCESSING_LEASE_MS = 10 * 60 * 1000;
 
 function serviceError(message, statusCode = 400, details = null, code = "") {

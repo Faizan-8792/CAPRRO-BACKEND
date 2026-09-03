@@ -4,6 +4,7 @@ import {
   addSafeIntegers,
   calculateGstr3bControlTotals,
   normalizeGstImportRow,
+  summaryRowDataLabels,
 } from "./gst-normalization.service.js";
 import {
   TDS_IMPORT_KINDS,
@@ -19,7 +20,14 @@ import {
   resolveDateOrder,
   buildMappingFromHeaders,
 } from "./robust-normalize.service.js";
-import { shapeTable } from "./import-shape.service.js";
+import { shapeTable, normalizeRowLabel } from "./import-shape.service.js";
+
+// A summary or ledger file names its rows with the very words a register uses for its totals
+// footer. Handing the shaper this kind's own vocabulary is what stops "Opening Balance" being
+// stripped out of an electronic credit ledger as though it were a printed total.
+function dataRowLabelsForKind(kind) {
+  return new Set(summaryRowDataLabels(kind).map(normalizeRowLabel));
+}
 import { userFacingMessage } from "../utils/user-facing-error.js";
 
 // Sized for the file a chartered accountant actually has, not for a demo.
@@ -258,7 +266,7 @@ function validateRequest({ kind, text, mapping, delimiter, dateOrder }) {
   // and that no two columns share a name (Tally prints "Amount" twice).
   // Every adjustment it makes is returned to the caller as a note rather than
   // applied silently.
-  const shaped = shapeTable(parsed);
+  const shaped = shapeTable(parsed, { dataRowLabels: dataRowLabelsForKind(normalizedKind) });
   const headers = shaped.headers;
   if (!headers.length) {
     throw new Error("Import requires a header and at least one data row");
@@ -564,7 +572,7 @@ export function suggestImportMapping({ kind, text, delimiter = null }) {
 
   // The same reshaping the preview applies, so the headers proposed here are the headers the
   // preview will actually see. Reading parsed[0] instead would map a title block.
-  const shaped = shapeTable(parsed);
+  const shaped = shapeTable(parsed, { dataRowLabels: dataRowLabelsForKind(normalizedKind) });
   const headers = shaped.headers || [];
 
   const suggestedMapping = buildMappingFromHeaders(headers, normalizedKind);
@@ -576,7 +584,11 @@ export function suggestImportMapping({ kind, text, delimiter = null }) {
   return {
     kind: normalizedKind,
     delimiter: selectedDelimiter,
-    headerRow: shaped.headerRow ?? 0,
+    // shapeTable returns headerRowIndex, not headerRow. Reading the wrong name made this always
+    // report 0, contradicting the preview - which reports the same file as starting at row 3 when
+    // a title block precedes the headings. Same +1 as the preview, for the same reason: a person
+    // counts their spreadsheet rows from 1.
+    headerRow: shaped.headerRowIndex + 1,
     headers,
     suggestedMapping,
     // Named rather than silently dropped: a column CA PRO does not recognise is exactly the thing

@@ -3264,7 +3264,15 @@ export async function getGstr3bControl({ firmId, runId }) {
     adjustedEligible,
     claimedGstr3b: claimed,
     difference,
-    hasImportedGstr3b: Boolean(stableRun.sourceImports.gstr3bBatchId),
+    // Whether the ITC HALF of a GSTR-3B was imported, which is not the same as whether a GSTR-3B
+    // batch is attached. A return whose Table 3.1 was imported for the turnover comparison and
+    // whose Table 4 was not is a legitimate file - this change is what made it one - and for the
+    // ITC comparison it is exactly as un-imported as no file at all.
+    //
+    // Reading the batch id here instead reported "imported", left claimedGstr3b at zeros, and so
+    // rendered the WHOLE reviewed credit as a shortfall with no bar saying why. claimedBasis
+    // already carries the answer, so it is the single source for it.
+    hasImportedGstr3b: claimedBasis !== "NOT_IMPORTED",
 
     // ---- the two comparisons the ITC control never covered ----
     //
@@ -3272,7 +3280,9 @@ export async function getGstr3bControl({ firmId, runId }) {
     // difference, and whether each source was actually imported. A section whose sources are
     // absent reports available:false rather than zeroes, so a screen can say "not imported" and
     // never present an un-run comparison as a clean one.
-    turnover: buildTurnoverControl(gstr1Outward, gstr3bOutward),
+    turnover: buildTurnoverControl(gstr1Outward, gstr3bOutward, {
+      hasGstr1Batch: Boolean(stableRun.sourceImports.gstr1BatchId),
+    }),
     creditLedger: buildCreditLedgerControl(claimed, claimedBasis, creditLedger),
   };
 }
@@ -3285,7 +3295,7 @@ export async function getGstr3bControl({ firmId, runId }) {
  * not carried into the summary return. A NEGATIVE difference means the summary return declared
  * more than the invoice-level return supports.
  */
-function buildTurnoverControl(gstr1Outward, gstr3bOutward) {
+function buildTurnoverControl(gstr1Outward, gstr3bOutward, { hasGstr1Batch = false } = {}) {
   const available = Boolean(gstr1Outward && gstr3bOutward);
   const fields = ["taxableValueMinor", ...TAX_HEAD_FIELDS];
   const zero = Object.fromEntries(fields.map((field) => [field, 0]));
@@ -3303,7 +3313,13 @@ function buildTurnoverControl(gstr1Outward, gstr3bOutward) {
   return {
     available,
     basis: "GSTR-1 declared outward supply vs GSTR-3B Table 3.1, taxable and zero-rated only.",
-    hasImportedGstr1: Boolean(gstr1Outward),
+    // Whether a GSTR-1 was IMPORTED, which is not the same as whether it produced turnover. A
+    // firm whose only supplies are nil-rated or exempt files a real GSTR-1 that contributes
+    // nothing to this comparison; deriving the flag from the calculation told them to import a
+    // file they had already imported.
+    hasImportedGstr1: hasGstr1Batch || Boolean(gstr1Outward),
+    // The distinction the message needs: imported, but with nothing turnover-bearing in it.
+    gstr1HasTurnoverRows: Boolean(gstr1Outward),
     hasImportedGstr3bOutward: Boolean(gstr3bOutward),
     gstr1: gstr1Outward,
     gstr3b: gstr3bOutward,
@@ -3315,35 +3331,60 @@ function buildTurnoverControl(gstr1Outward, gstr3bOutward) {
 }
 
 /**
- * ITC claimed in GSTR-3B against what the electronic credit ledger actually moved.
+ * ITC claimed in GSTR-3B against the credit the electronic credit ledger received.
  *
- * difference = claimed minus ledger closing balance movement, per head. This is the third of the
+ * difference = claimed minus the period's CREDIT movement, per head. This is the third of the
  * three reconciliations a CA runs on a period, and the one that catches credit taken in the return
  * that the ledger never received.
+ *
+ * A POSITIVE difference means more was claimed than the ledger received. A NEGATIVE difference
+ * means the ledger received credit the return did not claim.
  */
 function buildCreditLedgerControl(claimed, claimedBasis, creditLedger) {
-  const available = Boolean(creditLedger && claimedBasis !== "NOT_IMPORTED");
   const zero = Object.fromEntries(TAX_HEAD_FIELDS.map((field) => [field, 0]));
-  const ledgerClosing = creditLedger?.closing || zero;
+
+  // Compared against the credit the ledger RECEIVED in the period, not its closing balance.
+  //
+  // The closing balance is a stock: it carries forward whatever was already in the ledger and is
+  // reduced by every lawful utilisation. Subtracting it from a period's ITC claim mixes a stock
+  // with a flow, and gets the answer wrong in both directions. A firm claiming 45,000 whose ledger
+  // received only 20,000 read as AGREEING when 25,000 had been carried forward - the exact
+  // shortfall this control exists to catch, reported as clean. And any firm that utilised credit
+  // during the month drew a difference that was nothing but its own utilisation.
+  const credited = creditLedger?.credited || zero;
+  const hasClaim = claimedBasis !== "NOT_IMPORTED";
+
+  // A ledger that states only a closing balance carries no movement, so it cannot say what was
+  // received. That is reported as un-comparable rather than answered with the stock figure.
+  const available = Boolean(creditLedger?.hasCreditMovement && hasClaim);
 
   const difference = {};
   for (const field of TAX_HEAD_FIELDS) {
     difference[field] = safeMinor(
-      Number(claimed[field] || 0) - Number(ledgerClosing[field] || 0),
+      Number(claimed[field] || 0) - Number(credited[field] || 0),
       `Credit ledger difference ${field}`,
     );
   }
 
   return {
     available,
-    basis: "GSTR-3B ITC claimed vs the electronic credit ledger's closing balance.",
+    basis:
+      "GSTR-3B ITC claimed vs the credit the electronic credit ledger received in this period. "
+      + "The closing balance is shown for context and is not what the claim is compared against, "
+      + "because it carries the opening balance forward and is reduced by utilisation.",
     hasImportedLedger: Boolean(creditLedger),
+    // Distinguished from hasImportedLedger so a screen can say WHICH of the two is missing: a
+    // ledger nobody imported, or one that states a balance without the movements behind it.
+    hasCreditMovement: Boolean(creditLedger?.hasCreditMovement),
+    hasClaimedItc: hasClaim,
     ledgerBasis: creditLedger?.basis || "NOT_IMPORTED",
     // A file that states a closing balance AND the movements that should produce it, where the
     // two disagree, is reported rather than silently resolved in favour of either.
     ledgerStatedDiffersFromMovement: Boolean(creditLedger?.statedDiffers),
     claimedGstr3b: claimed,
-    ledgerClosing: creditLedger ? ledgerClosing : null,
+    ledgerCredited: creditLedger ? credited : null,
+    // Context only. Kept in the payload because a reviewer wants to see it, never compared.
+    ledgerClosing: creditLedger?.closing || null,
     difference: available ? difference : null,
     agrees: available ? TAX_HEAD_FIELDS.every((field) => difference[field] === 0) : null,
   };

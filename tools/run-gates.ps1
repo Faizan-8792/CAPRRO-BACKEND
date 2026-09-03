@@ -702,7 +702,8 @@ try {
         # The three reconciliations one GST period needs - books vs 2B (already covered by
         # gst-match-rule-contract), GSTR-1 vs GSTR-3B turnover, and ITC vs the credit ledger -
         # plus the header resolver that finally reaches production. Mutation-tested.
-        "gst-control-reconciliation-contract"
+        "gst-control-reconciliation-contract",
+        "gst-reconciliation-e2e"
     )
 
     # The other four unwired suites need a REPLICA SET, not just a mongod: they run multi-document
@@ -733,6 +734,7 @@ try {
         "data-retention-contract" = "scratch-gates-retention"
         "desktop-release-contract" = "scratch-gates-release"
         "terms-acceptance-contract" = "scratch-gates-terms"
+        "gst-reconciliation-e2e" = "scratch-gates-gst-e2e"
     }
     # Probed once, not assumed. On a machine with no local Mongo the behaviour is unchanged from
     # before -- the variable stays unset and the suites run their Mongo-free subset -- but the
