@@ -643,6 +643,7 @@ try {
         "case-ocr-route-behaviour",
         "error-contract-invariants",
         "gst-owner-authorization-contract",
+        "gst-match-rule-contract",
         "import-date-order-contract",
         "gstr2b-amount-contract",
         "audit-insights-grounding",
