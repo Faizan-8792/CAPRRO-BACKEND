@@ -422,7 +422,13 @@ app.use((req, res, next) => {
 // Express rejects the body first, the user gets an opaque 413 instead of that
 // service's own sentence telling them what to do about their file. The two
 // limits have to move together.
-app.use("/api/imports", express.json({ limit: "12mb" }));
+// 24mb, not 12mb, and the gap is deliberate. The parser refuses text over 10,000,000 bytes with a
+// sentence explaining what to do; express.json refuses first with a bare 413 that explains nothing.
+// A 12mb envelope does not actually clear a 10mb text once JSON escaping is counted - a quote costs
+// two characters and a control character costs six - so a register the parser would have accepted
+// could still be rejected by the transport, with the wrong message. 24mb leaves the parser as the
+// thing that decides, which is the whole point of a route-scoped limit.
+app.use("/api/imports", express.json({ limit: "24mb" }));
 app.use(express.json({ limit: "1mb" }));
 // A mail client's automatic RFC 8058 one-click unsubscribe POST sends
 // Content-Type: application/x-www-form-urlencoded with a fixed body of

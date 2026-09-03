@@ -310,9 +310,13 @@ if (importLimitMatch && maxTextMatch) {
   const routeLimit = megabytes(importLimitMatch[1]);
   const parserLimit = Number(maxTextMatch[1].replace(/_/g, ""));
   check(
-    "the route limit clears the parser ceiling, so the parser is what refuses an oversized file",
-    routeLimit !== null && routeLimit > parserLimit,
-    `route ${routeLimit} bytes vs parser ${parserLimit} bytes`,
+    "the route limit clears the parser ceiling with room for JSON escaping, so the parser is what refuses an oversized file",
+    // Not merely greater. The body is JSON, and escaping inflates the text it carries - a quote
+    // costs two characters, a control character six - so a route limit only slightly above the
+    // parser ceiling still 413s a file the parser would have accepted, with a bare status instead
+    // of the parser's explanation. Twice the ceiling covers any realistic register.
+    routeLimit !== null && routeLimit >= parserLimit * 2,
+    `route ${routeLimit} bytes vs parser ${parserLimit} bytes (needs >= ${parserLimit * 2})`,
   );
 }
 
