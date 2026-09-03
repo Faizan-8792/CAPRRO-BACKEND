@@ -15,6 +15,7 @@
 //
 // Run: node tests/import-shape-contract.mjs
 
+import { readFile } from "node:fs/promises";
 import {
   classifyNonDataRow,
   findHeaderRow,
@@ -267,6 +268,60 @@ check(
 check(
   "an empty grid produces no data rows and does not throw",
   shapeTable([]).dataRows.length === 0 && shapeTable(null).dataRows.length === 0,
+);
+
+// ─── The import body limit must clear the parser's own ceiling ────
+//
+// These two numbers live in different files and must move together. If
+// express.json rejects first, the user gets a bare 413 instead of the parser's
+// sentence explaining what to do about their file - and the raised row limit
+// is unreachable, so the feature looks broken for exactly the large registers
+// it was raised for. This was a real defect: MAX_TEXT_BYTES went to 10 MB
+// while every route was still capped at 1 MB.
+
+const appSource = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
+const previewSource = await readFile(
+  new URL("../src/services/import-preview.service.js", import.meta.url),
+  "utf8",
+);
+
+function megabytes(value) {
+  const match = /^(\d+(?:\.\d+)?)\s*mb$/i.exec(String(value || "").trim());
+  return match ? Number(match[1]) * 1024 * 1024 : null;
+}
+
+const importLimitMatch = /app\.use\(\s*"\/api\/imports"\s*,\s*express\.json\(\{\s*limit:\s*"([^"]+)"/.exec(
+  appSource,
+);
+check(
+  "the import routes get their own express.json limit",
+  Boolean(importLimitMatch),
+  importLimitMatch ? `limit ${importLimitMatch[1]}` : "no route-scoped parser found in app.js",
+);
+
+const maxTextMatch = /const MAX_TEXT_BYTES = ([\d_]+);/.exec(previewSource);
+check(
+  "the parser states its own byte ceiling",
+  Boolean(maxTextMatch),
+  maxTextMatch ? `MAX_TEXT_BYTES ${maxTextMatch[1]}` : "not found",
+);
+
+if (importLimitMatch && maxTextMatch) {
+  const routeLimit = megabytes(importLimitMatch[1]);
+  const parserLimit = Number(maxTextMatch[1].replace(/_/g, ""));
+  check(
+    "the route limit clears the parser ceiling, so the parser is what refuses an oversized file",
+    routeLimit !== null && routeLimit > parserLimit,
+    `route ${routeLimit} bytes vs parser ${parserLimit} bytes`,
+  );
+}
+
+// The larger ceiling must not leak to every other route.
+const globalLimitMatch = /app\.use\(express\.json\(\{\s*limit:\s*"([^"]+)"/.exec(appSource);
+check(
+  "the rest of the app keeps its small body limit",
+  Boolean(globalLimitMatch) && megabytes(globalLimitMatch[1]) <= 1024 * 1024,
+  globalLimitMatch ? `global limit ${globalLimitMatch[1]}` : "no global parser found",
 );
 
 // ─── Report ───────────────────────────────────────────────────────

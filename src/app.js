@@ -412,6 +412,17 @@ app.use((req, res, next) => {
   next();
 });
 
+// An import posts a whole spreadsheet as a JSON string, and a real client's
+// monthly purchase register runs to several megabytes - far past anything
+// another route has business sending. This parser is mounted first and only
+// on the import paths, so a register can be large without every endpoint in
+// the app also accepting a 10 MB body.
+//
+// Deliberately kept above MAX_TEXT_BYTES in import-preview.service.js: if
+// Express rejects the body first, the user gets an opaque 413 instead of that
+// service's own sentence telling them what to do about their file. The two
+// limits have to move together.
+app.use("/api/imports", express.json({ limit: "12mb" }));
 app.use(express.json({ limit: "1mb" }));
 // A mail client's automatic RFC 8058 one-click unsubscribe POST sends
 // Content-Type: application/x-www-form-urlencoded with a fixed body of
