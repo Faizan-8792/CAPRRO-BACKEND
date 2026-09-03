@@ -21,65 +21,27 @@
 // robust-normalize.service.js; this module only decides which cells are the
 // headings and which are the data.
 
-// A heading names a field; a data cell holds a value. These are the words
-// real registers use for the fields this product imports, lowercased and
-// stripped of punctuation before comparison.
-const HEADER_SYNONYMS = Object.freeze({
-  supplierGstin: [
-    "supplier gstin",
-    "gstin of supplier",
-    "gstin",
-    "gst no",
-    "gstin uin",
-    "gstin of the supplier",
-    "party gstin",
-    "vendor gstin",
-    "supplier gst number",
-  ],
-  recipientGstin: ["recipient gstin", "gstin of recipient", "our gstin", "buyer gstin"],
-  invoiceNumber: [
-    "invoice number",
-    "invoice no",
-    "inv no",
-    "invoice",
-    "bill no",
-    "bill number",
-    "document number",
-    "doc no",
-    "voucher no",
-    "reference no",
-  ],
-  documentDate: [
-    "invoice date",
-    "document date",
-    "date",
-    "bill date",
-    "inv date",
-    "doc date",
-    "voucher date",
-  ],
-  documentType: ["document type", "doc type", "type", "voucher type", "nature of document"],
-  taxableValue: [
-    "taxable value",
-    "taxable amount",
-    "assessable value",
-    "value",
-    "net amount",
-    "basic amount",
-    "gross value",
-  ],
-  igst: ["igst", "igst amount", "integrated tax", "i tax", "igst amt"],
-  cgst: ["cgst", "cgst amount", "central tax", "c tax", "cgst amt"],
-  sgst: ["sgst", "sgst amount", "state tax", "utgst", "s tax", "sgst utgst", "sgst amt"],
-  cess: ["cess", "cess amount", "cess amt"],
-  totalTax: ["total tax", "tax amount", "total gst", "gst amount"],
-  placeOfSupply: ["place of supply", "pos", "supply state"],
-  reverseCharge: ["reverse charge", "rcm", "reverse charge applicable"],
-  category: ["category", "particulars", "description", "itc category", "nature"],
-});
+import { HEADER_SYNONYMS } from "./robust-normalize.service.js";
 
+// A heading names a field; a data cell holds a value. The words real files use
+// for those fields are already catalogued once, per import kind, in
+// robust-normalize.service.js — reused here rather than copied, so a synonym
+// added for column mapping is also a synonym this recogniser knows, and the
+// two can never drift apart.
+//
+// Flattened across every kind on purpose: deciding WHICH row is the heading
+// row does not need to know whether the file is GST or TDS, and a shared list
+// means a TDS challan register gets the same header detection as a GST
+// purchase register for free.
 const ALL_SYNONYMS = Object.freeze(
-  Array.from(new Set(Object.values(HEADER_SYNONYMS).flat())),
+  Array.from(
+    new Set(
+      Object.values(HEADER_SYNONYMS)
+        .flatMap((fieldsForKind) => Object.values(fieldsForKind))
+        .flat()
+        .map((synonym) => String(synonym).toLowerCase()),
+    ),
+  ),
 );
 
 // How far into a file to look for the heading row. A preamble longer than
@@ -274,4 +236,4 @@ export function shapeTable(rows) {
   return { headerRowIndex, headers, dataRows, skipped, notes };
 }
 
-export { HEADER_SYNONYMS, MAX_HEADER_SEARCH_ROWS };
+export { ALL_SYNONYMS, MAX_HEADER_SEARCH_ROWS };
