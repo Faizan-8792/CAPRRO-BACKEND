@@ -92,11 +92,24 @@ check(
     : "unreadable",
 );
 
+// The GST portal is the one origin besides the shared backend the extension
+// may reach, and it is here because the owner decided it: the WOP GSTR
+// Downloader was built as an explicit, recorded exception to PLAN.md rule 11
+// ("does not scrape government portals"), and it necessarily talks to
+// gst.gov.in with the taxpayer's own session.
+//
+// This stays an EXACT allow-list of two rather than becoming a prefix or a
+// length check, because the value of this contract is that a third origin
+// cannot appear without someone deliberately editing this line. The point was
+// never "exactly one host"; it was "no host we did not agree to".
+const ALLOWED_HOST_PERMISSIONS = [`${SHARED_ORIGIN}/*`, "https://*.gst.gov.in/*"];
+
 check(
-  "extension host_permissions allow only the shared backend",
+  "extension host_permissions allow only the shared backend and the GST portal",
   Array.isArray(manifest?.host_permissions) &&
-    manifest.host_permissions.length === 1 &&
-    manifest.host_permissions[0] === `${SHARED_ORIGIN}/*`,
+    manifest.host_permissions.length === ALLOWED_HOST_PERMISSIONS.length &&
+    [...manifest.host_permissions].sort().join(",") ===
+      [...ALLOWED_HOST_PERMISSIONS].sort().join(","),
   manifest?.host_permissions
     ? manifest.host_permissions.join(", ")
     : "host_permissions missing",

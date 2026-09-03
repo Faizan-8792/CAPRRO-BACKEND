@@ -2199,9 +2199,22 @@ if (listed.status !== 0 || listed.error) {
   // new file -- it reads Reminder/AppConfig documents and calls an
   // injected sendAlertEmail callback; the actual Resend call lives in the
   // already-scanned email.service.js, unchanged in shape by this addition.
+  // Raised from 163 to 164 for src/services/import-shape.service.js, added so
+  // an uploaded register's shape is settled before any value is read from it:
+  // which row is the header, which columns are real, which rows are not
+  // records. Caught exactly as designed and exactly as every entry above was
+  // -- not by the commit that added the file, but by a full run-gates.ps1
+  // pass, in this case while a deploy was being staged, which the pin
+  // correctly refused. Confirmed clean before the pin moved, independently of
+  // this file: `make-deploy-archive.ps1 -ValidateOnly` -> "JavaScript secret
+  // AST scan: PASS (164 files)". The new file holds no secret, credential,
+  // configuration or external endpoint of any kind -- it is pure table
+  // geometry over an array of arrays, and it takes its one dictionary from
+  // the already-scanned robust-normalize.service.js rather than carrying a
+  // copy, so it adds no new data to the scanned surface either.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 163 && result.status === 0,
+    files.length === 164 && result.status === 0,
     result,
   );
 }
