@@ -137,26 +137,59 @@ check(
 // A page can pass a target string straight to Empty()/FromView(). Those are collected here
 // so a typo cannot silently produce a state with no button.
 
+// Every shape a destination is written in, across BOTH layers.
+//
+// This scraper started narrower and gave false assurance because of it: it matched
+// `emptyActionTarget: "x"` and `... ? "x" : null`, but not `... ? null : "x"` (the null-first
+// ternary), and its positional matcher required the call to end `))` so it missed a target in a
+// static property ending `);`. Three real destinations - engagements, intake and taskboard - were
+// therefore never validated at all, and a typo in any of them would have passed this test. The
+// count assertion below is what turns that class of miss into a failure rather than a silent pass.
+const TARGET_PATTERNS = [
+  // emptyActionTarget: "x"   |   ? "x" : null   |   ? null : "x"
+  /emptyActionTarget:\s*(?:[^,;)]*?\?\s*(?:null\s*:\s*)?)?"([a-z0-9]+)"/g,
+  // emptyActionTarget: cond ? "a" : "b"  - capture the second arm too
+  /emptyActionTarget:\s*[^,;)]*?\?\s*"[a-z0-9]+"\s*:\s*"([a-z0-9]+)"/g,
+];
+
 const inlineTargets = new Set();
-const viewsDir = join(DESKTOP, "CaPro.Desktop.App", "Views");
 const { readdirSync } = await import("node:fs");
-for (const file of readdirSync(viewsDir).filter((f) => f.endsWith(".xaml.cs"))) {
-  const text = readFileSync(join(viewsDir, file), "utf8");
-  for (const m of text.matchAll(/emptyActionTarget:\s*(?:[^,)]*\?\s*null\s*:\s*)?"([a-z0-9]+)"/g)) {
-    inlineTargets.add(m[1]);
+
+function collectTargets(text) {
+  for (const pattern of TARGET_PATTERNS) {
+    for (const m of text.matchAll(pattern)) inlineTargets.add(m[1]);
   }
-  // Empty(title, next, "Label", "target") - the fourth argument.
-  for (const m of text.matchAll(/SurfaceState\.Empty\(\s*(?:[^()]|\([^()]*\))*?"([a-z0-9]+)"\s*\)\s*\)/g)) {
-    if (navigable.has(m[1]) || declaredTargets.has(m[1])) inlineTargets.add(m[1]);
+  // A positional SurfaceState.Empty(title, next, "Label", "target"), however the call is
+  // terminated - `));` inside a method, `);` in a static property initialiser. The candidate is
+  // only accepted when it looks like a route tag, so ordinary copy is not swept up.
+  for (const m of text.matchAll(/SurfaceState\.Empty\(([\s\S]{0,900}?)\)\s*[);]/g)) {
+    const literals = [...m[1].matchAll(/"([a-z0-9]+)"/g)].map((x) => x[1]);
+    for (const candidate of literals) {
+      if (navigable.has(candidate) || declaredTargets.has(candidate)) inlineTargets.add(candidate);
+    }
   }
 }
-const policyDir = join(DESKTOP, "CaPro.Desktop.Core", "Presentation");
-for (const file of readdirSync(policyDir).filter((f) => f.endsWith(".cs"))) {
-  const text = readFileSync(join(policyDir, file), "utf8");
-  for (const m of text.matchAll(/emptyActionTarget:\s*"([a-z0-9]+)"/g)) inlineTargets.add(m[1]);
+
+for (const dir of [
+  join(DESKTOP, "CaPro.Desktop.App", "Views"),
+  join(DESKTOP, "CaPro.Desktop.Core", "Presentation"),
+]) {
+  for (const file of readdirSync(dir).filter((f) => f.endsWith(".cs"))) {
+    collectTargets(readFileSync(join(dir, file), "utf8"));
+  }
 }
 
 check("surfaces name destinations inline", inlineTargets.size >= 1, [...inlineTargets].join(", ") || "(none)");
+
+// The scraper must keep finding what the app actually ships. A regex that quietly stops matching
+// turns every check below it into a check of nothing - which is exactly what happened before.
+const EXPECTED_TARGETS = ["engagements", "gstrecon", "importlookup", "intake", "taskboard", "taxwork", "tds", "workspaces"];
+const notScraped = EXPECTED_TARGETS.filter((tag) => !inlineTargets.has(tag));
+check(
+  "the scraper finds every destination the app is known to use",
+  notScraped.length === 0,
+  notScraped.length ? `not found by the scraper: ${notScraped.join(", ")}` : `${inlineTargets.size} found`,
+);
 
 const badInline = [...inlineTargets].filter((tag) => !navigable.has(tag) || !declaredTargets.has(tag));
 check(
@@ -170,6 +203,50 @@ check(
 check(
   "SurfaceState actually enforces the target allow-list it documents",
   /SurfaceActionTargets\.IsKnown\(target\)/.test(surfaceStateSource),
+  ""
+);
+
+// --- a resolvable tag is not enough; the navigation has to happen ---
+//
+// The tag allow-list above proves a destination EXISTS. It does not prove clicking gets you
+// there. NavigateTo worked by assigning Navigation.SelectedItem, and WinUI raises no
+// SelectionChanged when the item assigned is the one already selected - which is exactly the
+// case on a CHILD page, because TDS checks, reconciliation lines, run controls and working
+// papers have no pane item of their own and the pane is still highlighting their section. So
+// every "open the section this belongs to" button on a child page was an enabled control that
+// did nothing, and the allow-list test passed the whole time.
+
+const mainWindowSource = readFileSync(
+  join(DESKTOP, "CaPro.Desktop.App", "MainWindow.xaml.cs"),
+  "utf8"
+);
+
+const navigateToBody = mainWindowSource.slice(
+  mainWindowSource.indexOf("internal void NavigateTo(string tag)")
+);
+const navigateToEnd = navigateToBody.indexOf("\n    }\n");
+const navigateTo = navigateToEnd > 0 ? navigateToBody.slice(0, navigateToEnd) : navigateToBody;
+
+check(
+  "NavigateTo exists and is reachable from a page",
+  navigateTo.length > 0 && navigateTo.indexOf("Navigation.SelectedItem") >= 0,
+  ""
+);
+
+check(
+  "NavigateTo still navigates when the section is ALREADY selected",
+  /ReferenceEquals\(Navigation\.SelectedItem, item\)/.test(navigateTo)
+    && /NavigateToTagAsync\(tag\)/.test(navigateTo),
+  navigateTo.indexOf("ReferenceEquals") >= 0
+    ? "handles the already-selected case"
+    : "assigning SelectedItem alone - a child page's button would do nothing",
+);
+
+check(
+  "the navigation body is shared, so the unsaved-text guard applies to both paths",
+  /private async Task NavigateToTagAsync\(string tag\)/.test(mainWindowSource)
+    && /await NavigateToTagAsync\(tag\)/.test(mainWindowSource)
+    && /ConfirmLeavingDirtyPageAsync/.test(mainWindowSource),
   ""
 );
 check(
