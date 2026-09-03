@@ -763,6 +763,77 @@ check(
   );
 }
 
+
+// ─── the clients string-match the ledger basis, so pin it ─────────
+
+// Both the desktop and the extension label a closing balance "(computed from movements)" by
+// comparing ledgerBasis against a literal. Renaming that literal on the server would not fail any
+// build: both clients would simply stop labelling, and a firm would read a balance CA PRO worked
+// out itself as one the portal stated. The string is therefore pinned to the value the calculation
+// actually produces, from a real ledger of each shape.
+{
+  const ledgerRow = (category, igst) => ({
+    summaryCategory: category,
+    igstMinor: igst,
+    cgstMinor: 0,
+    sgstMinor: 0,
+    cessMinor: 0,
+  });
+
+  const computed = calculateCreditLedgerBalance([
+    ledgerRow("OPENING_BALANCE", 100_000),
+    ledgerRow("CREDIT", 50_000),
+    ledgerRow("DEBIT", 20_000),
+  ]);
+  check(
+    "a ledger with only movements reports COMPUTED_FROM_MOVEMENT, the literal both clients match",
+    computed.basis === "COMPUTED_FROM_MOVEMENT" && computed.closing.igstMinor === 130_000,
+    `${computed.basis}, igst ${computed.closing.igstMinor}`,
+  );
+
+  const statedOnly = calculateCreditLedgerBalance([ledgerRow("CLOSING_BALANCE", 130_000)]);
+  check(
+    "a ledger that states its closing balance reports STATED_IN_FILE",
+    statedOnly.basis === "STATED_IN_FILE" && statedOnly.statedDiffers === false,
+    `${statedOnly.basis}, statedDiffers ${statedOnly.statedDiffers}`,
+  );
+
+  // The stated figure wins, and the disagreement is reported rather than resolved.
+  const contradicting = calculateCreditLedgerBalance([
+    ledgerRow("OPENING_BALANCE", 100_000),
+    ledgerRow("CREDIT", 50_000),
+    ledgerRow("DEBIT", 20_000),
+    ledgerRow("CLOSING_BALANCE", 999_999),
+  ]);
+  check(
+    "a stated balance its own movements do not produce is flagged, and the stated figure is used",
+    contradicting.basis === "STATED_IN_FILE"
+      && contradicting.statedDiffers === true
+      && contradicting.closing.igstMinor === 999_999
+      && contradicting.computed.igstMinor === 130_000,
+    `stated ${contradicting.closing.igstMinor} vs computed ${contradicting.computed.igstMinor}`,
+  );
+
+  // Both clients are read for the literal, so a rename on either side is caught here too.
+  const desktopPage = readFileSync(
+    new URL(
+      "../../apps/desktop-native/src/CaPro.Desktop.App/Views/GstRunControlPage.xaml.cs",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const extensionJs = readFileSync(
+    new URL("../../audit-nlp-extension/workspace.js", import.meta.url),
+    "utf8",
+  );
+  check(
+    "both clients match the same literal the server emits",
+    desktopPage.includes('"COMPUTED_FROM_MOVEMENT"')
+      && extensionJs.includes('"COMPUTED_FROM_MOVEMENT"'),
+    "desktop and extension",
+  );
+}
+
 // ─── report ───────────────────────────────────────────────────────
 
 let passed = 0;
