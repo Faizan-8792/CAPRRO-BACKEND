@@ -21,14 +21,137 @@ const GSTR3B_CATEGORY_ALIASES = Object.freeze({
   ITCINELIGIBLE: "ITC_INELIGIBLE",
   INELIGIBLEITC: "ITC_INELIGIBLE",
   "4D": "ITC_INELIGIBLE",
+
+  // Table 3.1 - what the return DECLARES as outward supply, as against the Table 4 ITC rows
+  // above. Both halves live in the same summary file because that is how the portal's own PDF
+  // is laid out: one return, two halves. Keeping them in one import kind is what lets a single
+  // GSTR-3B upload serve the ITC reconciliation AND the turnover reconciliation, instead of
+  // asking a firm to upload the same return twice under two names.
+  OUTWARDTAXABLE: "OUTWARD_TAXABLE",
+  OUTWARDTAXABLESUPPLIES: "OUTWARD_TAXABLE",
+  TAXABLEOUTWARD: "OUTWARD_TAXABLE",
+  "31A": "OUTWARD_TAXABLE",
+  OUTWARDZERORATED: "OUTWARD_ZERO_RATED",
+  ZERORATED: "OUTWARD_ZERO_RATED",
+  ZERORATEDSUPPLIES: "OUTWARD_ZERO_RATED",
+  "31B": "OUTWARD_ZERO_RATED",
+  OUTWARDNILEXEMPT: "OUTWARD_NIL_EXEMPT",
+  NILRATEDEXEMPT: "OUTWARD_NIL_EXEMPT",
+  "31C": "OUTWARD_NIL_EXEMPT",
+  INWARDREVERSECHARGE: "INWARD_REVERSE_CHARGE",
+  REVERSECHARGEINWARD: "INWARD_REVERSE_CHARGE",
+  "31D": "INWARD_REVERSE_CHARGE",
+  OUTWARDNONGST: "OUTWARD_NON_GST",
+  NONGSTOUTWARD: "OUTWARD_NON_GST",
+  "31E": "OUTWARD_NON_GST",
 });
+
+/// The Table 3.1 half. Separated so the ITC arithmetic can ignore it by name rather than by luck.
+const GSTR3B_OUTWARD_CATEGORIES = Object.freeze([
+  "OUTWARD_TAXABLE",
+  "OUTWARD_ZERO_RATED",
+  "OUTWARD_NIL_EXEMPT",
+  "OUTWARD_NON_GST",
+  "INWARD_REVERSE_CHARGE",
+]);
+
+/// Only these count as turnover declared in GSTR-3B. Nil/exempt and non-GST carry no tax and are
+/// not part of the comparison against GSTR-1's taxable outward supply; inward reverse charge is
+/// not outward supply at all.
+const GSTR3B_TURNOVER_CATEGORIES = Object.freeze(["OUTWARD_TAXABLE", "OUTWARD_ZERO_RATED"]);
 
 const GSTR3B_CATEGORIES = Object.freeze([
   "ITC_CLAIMED",
   "ITC_AVAILABLE",
   "ITC_REVERSED",
   "ITC_INELIGIBLE",
+  ...GSTR3B_OUTWARD_CATEGORIES,
 ]);
+
+/// GSTR-1 outward supply sections, named as the return itself names them.
+const GSTR1_CATEGORIES = Object.freeze([
+  "B2B",
+  "B2C",
+  "CDNR",
+  "CDNUR",
+  "EXPORT",
+  "NIL_RATED",
+  "ADVANCES",
+  "AMENDMENT",
+]);
+
+/// Credit and debit notes REDUCE declared turnover, so they are subtracted rather than added.
+/// Getting this sign wrong is the single easiest way to make a turnover reconciliation lie.
+const GSTR1_NEGATIVE_CATEGORIES = Object.freeze(["CDNR", "CDNUR"]);
+
+/// Nil-rated and non-GST supplies carry no tax and are excluded from the taxable comparison,
+/// matching the GSTR-3B side, which compares Table 3.1(a) and 3.1(b) only.
+const GSTR1_TURNOVER_CATEGORIES = Object.freeze([
+  "B2B",
+  "B2C",
+  "CDNR",
+  "CDNUR",
+  "EXPORT",
+  "ADVANCES",
+  "AMENDMENT",
+]);
+
+const GSTR1_CATEGORY_ALIASES = Object.freeze({
+  B2B: "B2B",
+  B2BINVOICES: "B2B",
+  "4A": "B2B",
+  B2C: "B2C",
+  B2CS: "B2C",
+  B2CL: "B2C",
+  B2COTHERS: "B2C",
+  "7": "B2C",
+  CDNR: "CDNR",
+  CREDITNOTEREGISTERED: "CDNR",
+  DEBITNOTEREGISTERED: "CDNR",
+  "9B": "CDNR",
+  CDNUR: "CDNUR",
+  CREDITNOTEUNREGISTERED: "CDNUR",
+  EXPORT: "EXPORT",
+  EXPORTS: "EXPORT",
+  EXP: "EXPORT",
+  "6A": "EXPORT",
+  NILRATED: "NIL_RATED",
+  NILEXEMPTNONGST: "NIL_RATED",
+  EXEMPTED: "NIL_RATED",
+  "8": "NIL_RATED",
+  ADVANCES: "ADVANCES",
+  ADVANCERECEIVED: "ADVANCES",
+  "11A": "ADVANCES",
+  AMENDMENT: "AMENDMENT",
+  AMENDED: "AMENDMENT",
+  B2BA: "AMENDMENT",
+  CDNRA: "AMENDMENT",
+  "9A": "AMENDMENT",
+});
+
+/// Electronic credit ledger movement, as the portal's ledger download presents it.
+const ECREDIT_CATEGORIES = Object.freeze([
+  "OPENING_BALANCE",
+  "CREDIT",
+  "DEBIT",
+  "CLOSING_BALANCE",
+]);
+
+const ECREDIT_CATEGORY_ALIASES = Object.freeze({
+  OPENINGBALANCE: "OPENING_BALANCE",
+  OPENING: "OPENING_BALANCE",
+  BALANCEBROUGHTFORWARD: "OPENING_BALANCE",
+  CREDIT: "CREDIT",
+  CREDITED: "CREDIT",
+  ITCCREDITED: "CREDIT",
+  DEBIT: "DEBIT",
+  DEBITED: "DEBIT",
+  ITCUTILISED: "DEBIT",
+  ITCUTILIZED: "DEBIT",
+  CLOSINGBALANCE: "CLOSING_BALANCE",
+  CLOSING: "CLOSING_BALANCE",
+  BALANCE: "CLOSING_BALANCE",
+});
 
 const GST_IMPORT_SPECS = Object.freeze({
   GST_PURCHASE: {
@@ -90,6 +213,18 @@ const GST_IMPORT_SPECS = Object.freeze({
     ],
   },
   GSTR3B_SUMMARY: {
+    // taxableValue is ALLOWED but not required: a Table 4 ITC row has no taxable value, while a
+    // Table 3.1 outward row is meaningless without one. Requiring it would refuse every ITC-only
+    // file that imports correctly today.
+    required: ["category", "igst", "cgst", "sgst", "cess"],
+    allowed: ["category", "taxableValue", "igst", "cgst", "sgst", "cess", "totalTax"],
+  },
+  GSTR1_SUMMARY: {
+    required: ["category", "taxableValue", "igst", "cgst", "sgst", "cess"],
+    allowed: ["category", "taxableValue", "igst", "cgst", "sgst", "cess", "totalTax"],
+  },
+  ECREDIT_LEDGER: {
+    // A ledger movement is tax only - there is no taxable value in a credit ledger.
     required: ["category", "igst", "cgst", "sgst", "cess"],
     allowed: ["category", "igst", "cgst", "sgst", "cess", "totalTax"],
   },
@@ -185,11 +320,27 @@ function addSafeIntegers(values) {
   return total;
 }
 
-function normalizeGstr3bCategory(value) {
-  const normalized = cleanText(value, 80)
+function categoryToken(value) {
+  return cleanText(value, 80)
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "");
-  return GSTR3B_CATEGORY_ALIASES[normalized] || null;
+}
+
+function normalizeGstr3bCategory(value) {
+  return GSTR3B_CATEGORY_ALIASES[categoryToken(value)] || null;
+}
+
+function normalizeGstr1Category(value) {
+  return GSTR1_CATEGORY_ALIASES[categoryToken(value)] || null;
+}
+
+function normalizeEcreditCategory(value) {
+  return ECREDIT_CATEGORY_ALIASES[categoryToken(value)] || null;
+}
+
+/// True for a GSTR-3B row that belongs to Table 3.1 rather than Table 4.
+function isGstr3bOutwardCategory(category) {
+  return GSTR3B_OUTWARD_CATEGORIES.includes(category);
 }
 
 function calculateGstr3bClaimed(rows) {
@@ -217,7 +368,7 @@ function calculateGstr3bClaimed(rows) {
     );
   }
   if (!claimedRows.length && !availableRows.length) {
-    throw userFacingError("GSTR-3B summary requires ITC_CLAIMED or ITC_AVAILABLE rows");
+    throw userFacingError(NO_ITC_ROWS_MESSAGE);
   }
 
   const fields = ["igstMinor", "cgstMinor", "sgstMinor", "cessMinor"];
@@ -233,6 +384,200 @@ function calculateGstr3bClaimed(rows) {
   }
   result.totalTaxMinor = addSafeIntegers(fields.map((field) => result[field]));
   return { claimed: result, basis };
+}
+
+const TAX_MINOR_FIELDS = Object.freeze(["igstMinor", "cgstMinor", "sgstMinor", "cessMinor"]);
+
+function plainRow(source) {
+  return typeof source?.toObject === "function" ? source.toObject() : source;
+}
+
+function emptyTotals() {
+  return {
+    taxableValueMinor: 0,
+    igstMinor: 0,
+    cgstMinor: 0,
+    sgstMinor: 0,
+    cessMinor: 0,
+    totalTaxMinor: 0,
+  };
+}
+
+function withTotalTax(totals) {
+  return {
+    ...totals,
+    totalTaxMinor: addSafeIntegers(TAX_MINOR_FIELDS.map((field) => totals[field] || 0)),
+  };
+}
+
+/**
+ * Outward supply declared in GSTR-3B Table 3.1, or null when the file carries no Table 3.1 rows.
+ *
+ * Only taxable and zero-rated supplies count. Nil-rated, exempt and non-GST supplies carry no tax
+ * and are excluded on both sides of the comparison; inward reverse charge is not outward supply at
+ * all, and adding it would inflate declared turnover by the value of a firm's own purchases.
+ *
+ * Returns null rather than zeroes for an ITC-only return, so the caller can tell "this return
+ * declared nothing" apart from "this return's outward half was never imported".
+ */
+function calculateGstr3bOutward(rows) {
+  const outwardRows = [];
+  for (const source of rows || []) {
+    const row = plainRow(source);
+    const category = normalizeGstr3bCategory(row?.summaryCategory);
+    if (category && GSTR3B_TURNOVER_CATEGORIES.includes(category)) outwardRows.push(row);
+  }
+
+  if (!outwardRows.length) return null;
+
+  const totals = emptyTotals();
+  totals.taxableValueMinor = addSafeIntegers(
+    outwardRows.map((row) => Number(row?.taxableValueMinor || 0))
+  );
+  for (const field of TAX_MINOR_FIELDS) {
+    totals[field] = addSafeIntegers(outwardRows.map((row) => Number(row?.[field] || 0)));
+  }
+  return withTotalTax(totals);
+}
+
+/**
+ * Outward supply declared in GSTR-1, or null when no turnover-bearing section was imported.
+ *
+ * Credit and debit notes are SUBTRACTED. They arrive as positive amounts under a CDNR/CDNUR
+ * category, because that is how the return states them, and the reduction is applied here from
+ * the category rather than expected as a negative in the file. Doing it the other way round is
+ * the easiest way to make a turnover reconciliation lie by twice the value of every credit note.
+ */
+function calculateGstr1Outward(rows) {
+  const relevant = [];
+  for (const source of rows || []) {
+    const row = plainRow(source);
+    const category = normalizeGstr1Category(row?.summaryCategory);
+    if (category && GSTR1_TURNOVER_CATEGORIES.includes(category)) {
+      relevant.push({ row, category });
+    }
+  }
+
+  if (!relevant.length) return null;
+
+  const signed = (row, category, field) => {
+    const value = Number(row?.[field] || 0);
+    return GSTR1_NEGATIVE_CATEGORIES.includes(category) ? -value : value;
+  };
+
+  const totals = emptyTotals();
+  totals.taxableValueMinor = addSafeIntegers(
+    relevant.map(({ row, category }) => signed(row, category, "taxableValueMinor"))
+  );
+  for (const field of TAX_MINOR_FIELDS) {
+    totals[field] = addSafeIntegers(
+      relevant.map(({ row, category }) => signed(row, category, field))
+    );
+  }
+  return withTotalTax(totals);
+}
+
+/**
+ * The electronic credit ledger's closing balance, or null when no ledger was imported.
+ *
+ * A file may state the closing balance outright, or state opening plus movements. Both are
+ * accepted, and a stated closing balance WINS over a computed one: the portal's own figure is the
+ * authority, and quietly preferring our arithmetic over the government's would be the wrong way
+ * round. When both are present and they disagree, the disagreement is reported rather than hidden.
+ */
+function calculateCreditLedgerBalance(rows) {
+  const buckets = new Map(ECREDIT_CATEGORIES.map((category) => [category, []]));
+  let sawAny = false;
+
+  for (const source of rows || []) {
+    const row = plainRow(source);
+    const category = normalizeEcreditCategory(row?.summaryCategory);
+    if (!category) continue;
+    sawAny = true;
+    buckets.get(category).push(row);
+  }
+
+  if (!sawAny) return null;
+
+  const sum = (list, field) => addSafeIntegers(list.map((row) => Number(row?.[field] || 0)));
+
+  const stated = buckets.get("CLOSING_BALANCE");
+  const opening = buckets.get("OPENING_BALANCE");
+  const credits = buckets.get("CREDIT");
+  const debits = buckets.get("DEBIT");
+
+  const computed = emptyTotals();
+  for (const field of TAX_MINOR_FIELDS) {
+    computed[field] = addSafeIntegers([
+      sum(opening, field),
+      sum(credits, field),
+      -sum(debits, field),
+    ]);
+  }
+
+  const hasMovement = opening.length > 0 || credits.length > 0 || debits.length > 0;
+
+  if (!stated.length) {
+    if (!hasMovement) return null;
+    return {
+      closing: withTotalTax(computed),
+      basis: "COMPUTED_FROM_MOVEMENT",
+      statedDiffers: false,
+    };
+  }
+
+  const statedTotals = emptyTotals();
+  for (const field of TAX_MINOR_FIELDS) {
+    statedTotals[field] = sum(stated, field);
+  }
+
+  const statedDiffers =
+    hasMovement && TAX_MINOR_FIELDS.some((field) => statedTotals[field] !== computed[field]);
+
+  return {
+    closing: withTotalTax(statedTotals),
+    basis: "STATED_IN_FILE",
+    statedDiffers,
+    computed: hasMovement ? withTotalTax(computed) : null,
+  };
+}
+
+/**
+ * Reads a GSTR-3B summary for BOTH halves, and refuses only when neither half is present.
+ *
+ * The import path used to call calculateGstr3bClaimed directly, which throws unless Table 4 ITC
+ * rows exist. Once Table 3.1 rows became importable that would have rejected an outward-only
+ * return - a perfectly valid file - with a message about ITC that its uploader could do nothing
+ * about.
+ */
+const NO_ITC_ROWS_MESSAGE = "GSTR-3B summary requires ITC_CLAIMED or ITC_AVAILABLE rows";
+
+function calculateGstr3bControlTotals(rows) {
+  let claimed = null;
+  let claimedBasis = null;
+  let missingItcRows = false;
+
+  try {
+    const itc = calculateGstr3bClaimed(rows);
+    claimed = itc.claimed;
+    claimedBasis = itc.basis;
+  } catch (error) {
+    // ONLY "there are no ITC rows" may be tolerated, and only because an outward-only return is
+    // a legitimate file. Every other complaint - an unsupported category, a negative amount, net
+    // ITC mixed with gross - is a defect in the file itself and must still stop the import,
+    // whether or not Table 3.1 happens to be readable. Swallowing those would let a return with a
+    // bad ITC row import silently and then reconcile against a figure nobody checked.
+    if (error?.message !== NO_ITC_ROWS_MESSAGE) throw error;
+    missingItcRows = true;
+  }
+
+  const outward = calculateGstr3bOutward(rows);
+
+  if (missingItcRows && !outward) {
+    throw userFacingError(NO_ITC_ROWS_MESSAGE);
+  }
+
+  return { claimed, claimedBasis, outward };
 }
 
 function normalizeGstImportRow(kind, input, { dateOrder } = {}) {
@@ -289,7 +634,54 @@ function normalizeGstImportRow(kind, input, { dateOrder } = {}) {
     return {
       values: {
         summaryCategory: summaryCategory || "",
-        taxableValueMinor: 0,
+        // Carried now rather than zeroed. A Table 3.1 outward row's whole point is its taxable
+        // value, and discarding it made the turnover half of the return unreadable. Table 4 ITC
+        // rows still arrive with none, so this is 0 for them exactly as before.
+        taxableValueMinor: money.taxableValue || 0,
+        igstMinor: money.igst || 0,
+        cgstMinor: money.cgst || 0,
+        sgstMinor: money.sgst || 0,
+        cessMinor: money.cess || 0,
+        totalTaxMinor: computedTotal,
+      },
+      errors,
+      warnings,
+    };
+  }
+
+  if (kind === "GSTR1_SUMMARY" || kind === "ECREDIT_LEDGER") {
+    const isLedger = kind === "ECREDIT_LEDGER";
+    const summaryCategory = isLedger
+      ? normalizeEcreditCategory(input.category)
+      : normalizeGstr1Category(input.category);
+
+    if (!summaryCategory) {
+      addError(
+        "category",
+        isLedger ? "INVALID_ECREDIT_CATEGORY" : "INVALID_GSTR1_CATEGORY",
+        `Category must be one of ${(isLedger ? ECREDIT_CATEGORIES : GSTR1_CATEGORIES).join(", ")}`
+      );
+    }
+
+    // Non-negative for the same reason GSTR-3B rows are: a credit note reduces turnover through
+    // its CATEGORY, not through a negative amount. A file that encodes the reduction twice - a
+    // CDNR row carrying a negative value - would be added back in and silently overstate turnover.
+    for (const field of ["taxableValue", "igst", "cgst", "sgst", "cess"]) {
+      if (Number(money[field] || 0) < 0) {
+        addError(
+          field,
+          isLedger ? "NEGATIVE_ECREDIT_AMOUNT" : "NEGATIVE_GSTR1_AMOUNT",
+          isLedger
+            ? "Credit ledger amounts must be non-negative"
+            : "GSTR-1 category amounts must be non-negative; a credit note reduces turnover through its category"
+        );
+      }
+    }
+
+    return {
+      values: {
+        summaryCategory: summaryCategory || "",
+        taxableValueMinor: isLedger ? 0 : money.taxableValue || 0,
         igstMinor: money.igst || 0,
         cgstMinor: money.cgst || 0,
         sgstMinor: money.sgst || 0,
@@ -363,12 +755,19 @@ function isValidPeriod(value) {
 }
 
 export {
+  ECREDIT_CATEGORIES,
   GST_IMPORT_SPECS,
+  GSTR1_CATEGORIES,
   GSTR3B_CATEGORIES,
+  GSTR3B_OUTWARD_CATEGORIES,
   GSTIN_PATTERN,
   PERIOD_PATTERN,
   addSafeIntegers,
+  calculateCreditLedgerBalance,
+  calculateGstr1Outward,
   calculateGstr3bClaimed,
+  calculateGstr3bControlTotals,
+  calculateGstr3bOutward,
   cleanText,
   dateDifferenceDays,
   formatMoneyMinor,
@@ -377,8 +776,11 @@ export {
   normalizeDocumentDate,
   normalizeDocumentType,
   normalizeGstImportRow,
+  normalizeEcreditCategory,
+  normalizeGstr1Category,
   normalizeGstr3bCategory,
   normalizeGstin,
+  isGstr3bOutwardCategory,
   normalizeInvoiceNumber,
   parseMoneyMinor,
 };

@@ -20,6 +20,8 @@ const CREATE_FIELDS = new Set([
   "booksBatchId",
   "portalBatchId",
   "gstr3bBatchId",
+  "gstr1BatchId",
+  "creditLedgerBatchId",
   "revisionOf",
   "roundingToleranceMinor",
   "dateToleranceDays",

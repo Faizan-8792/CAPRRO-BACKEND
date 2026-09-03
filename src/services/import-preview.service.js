@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import {
   GST_IMPORT_SPECS,
   addSafeIntegers,
-  calculateGstr3bClaimed,
+  calculateGstr3bControlTotals,
   normalizeGstImportRow,
 } from "./gst-normalization.service.js";
 import {
@@ -17,6 +17,7 @@ import {
   classifyDateColumn,
   classifyNumericDate,
   resolveDateOrder,
+  buildMappingFromHeaders,
 } from "./robust-normalize.service.js";
 import { shapeTable } from "./import-shape.service.js";
 import { userFacingMessage } from "../utils/user-facing-error.js";
@@ -65,12 +66,69 @@ const IMPORT_SPECS = Object.freeze({
   ...TDS_IMPORT_SPECS,
 });
 
+// How many lines the delimiter vote looks at. Enough to see past any title block a
+// Tally/Busy/Zoho export prints above the real headings, and bounded so a huge file costs nothing.
+const DELIMITER_SAMPLE_LINES = 25;
+
+/**
+ * Picks the delimiter by looking at the SHAPE OF THE WHOLE SAMPLE, not just line 1.
+ *
+ * The previous version read only the first line. That is wrong for exactly the files this importer
+ * exists to accept: an accounting export prints a company name and a period caption above the
+ * headings, and those lines contain no delimiter at all. With every candidate scoring zero the
+ * sort was a no-op and the file was parsed as TAB-delimited - one column per line - so a perfectly
+ * ordinary comma-separated register arrived as a single unnamed column and every required field
+ * came back unmapped.
+ *
+ * Voting instead on how many lines AGREE on a column count is what makes a title block harmless:
+ * the caption lines disagree with everything, the real table agrees with itself, and the delimiter
+ * that produces the largest agreeing block wins.
+ */
 function detectDelimiter(text) {
-  const firstLine = String(text).split(/\r?\n/, 1)[0] || "";
+  const lines = String(text)
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== "")
+    .slice(0, DELIMITER_SAMPLE_LINES);
+
+  if (!lines.length) return ",";
+
   const candidates = ["\t", ",", ";"];
-  return candidates.sort(
-    (left, right) => firstLine.split(right).length - firstLine.split(left).length
-  )[0];
+  let best = ",";
+  let bestScore = -1;
+
+  for (const candidate of candidates) {
+    // Count columns per line, ignoring quoted sections so a comma inside "Acme, Mumbai" does not
+    // vote for the comma.
+    const counts = new Map();
+    for (const line of lines) {
+      let columns = 1;
+      let quoted = false;
+      for (const character of line) {
+        if (character === '"') quoted = !quoted;
+        else if (character === candidate && !quoted) columns += 1;
+      }
+      if (columns > 1) counts.set(columns, (counts.get(columns) || 0) + 1);
+    }
+
+    // The score is the size of the largest group of lines sharing one column count, tie-broken by
+    // how many columns that is - a real table beats a caption that happens to hold one comma.
+    let agreeing = 0;
+    let width = 0;
+    for (const [columns, lineCount] of counts) {
+      if (lineCount > agreeing || (lineCount === agreeing && columns > width)) {
+        agreeing = lineCount;
+        width = columns;
+      }
+    }
+
+    const score = agreeing * 1000 + width;
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+
+  return best;
 }
 
 function parseDelimited(text, delimiter) {
@@ -372,7 +430,7 @@ export function parseMappedImport({ kind, text, mapping, delimiter = null, dateO
   let gstr3bControl = null;
   if (normalizedKind === "GSTR3B_SUMMARY" && errors.length === 0) {
     try {
-      gstr3bControl = calculateGstr3bClaimed(
+      gstr3bControl = calculateGstr3bControlTotals(
         normalizedRows.map((row) => row.values)
       );
     } catch (error) {
@@ -399,8 +457,10 @@ export function parseMappedImport({ kind, text, mapping, delimiter = null, dateO
     ? null
     : isTdsImport
       ? summarizeTdsRows(normalizedKind, validRows)
-      : normalizedKind === "GSTR3B_SUMMARY" && gstr3bControl
+      : normalizedKind === "GSTR3B_SUMMARY" && gstr3bControl?.claimed
         ? {
+            // The ITC half has no taxable value; the outward half's taxable value is reported
+            // separately in the control, so the preview total stays the ITC figure it always was.
             taxableValueMinor: 0,
             ...gstr3bControl.claimed,
           }
@@ -466,6 +526,67 @@ export function previewImport(input) {
   return {
     ...parsed,
     rows: parsed.rows.slice(0, PREVIEW_ROWS),
+  };
+}
+
+/**
+ * Reads a file's header row and proposes which column is which, without importing anything.
+ *
+ * WHY THIS EXISTS. buildMappingFromHeaders and its synonym dictionaries have been in this codebase
+ * for a long time and were called by NOTHING except a self-test, while both clients rolled their
+ * own weaker guess and a person re-mapped every column by hand on every file. This is the
+ * production path for that resolver: exact synonym, then token containment, then a one-edit
+ * fallback, over the header row shapeTable identifies - so a Tally or Busy export with a title
+ * block above the real headings is read from the right line rather than from row 1.
+ *
+ * It PROPOSES. Nothing is imported and nothing is committed, and the caller overrides any field it
+ * disagrees with - which is why a merely probable proposal is useful here, where the same guess
+ * applied silently at commit time would not be.
+ */
+export function suggestImportMapping({ kind, text, delimiter = null }) {
+  const normalizedKind = String(kind || "").toUpperCase();
+  const spec = IMPORT_SPECS[normalizedKind];
+  if (!spec) throw new Error(`Unsupported preview kind: ${normalizedKind || "missing"}`);
+  if (typeof text !== "string" || !text.trim()) {
+    throw new Error("Delimited import text is required");
+  }
+  if (Buffer.byteLength(text, "utf8") > MAX_TEXT_BYTES) {
+    throw new Error(`Import exceeds ${MAX_TEXT_BYTES} bytes`);
+  }
+
+  const selectedDelimiter = delimiter || detectDelimiter(text);
+  if (![",", ";", "\t"].includes(selectedDelimiter)) {
+    throw new Error("Delimiter must be comma, semicolon, or tab");
+  }
+
+  const parsed = parseDelimited(text, selectedDelimiter);
+  if (!parsed.length) throw new Error("Import requires a header and at least one data row");
+
+  // The same reshaping the preview applies, so the headers proposed here are the headers the
+  // preview will actually see. Reading parsed[0] instead would map a title block.
+  const shaped = shapeTable(parsed);
+  const headers = shaped.headers || [];
+
+  const suggestedMapping = buildMappingFromHeaders(headers, normalizedKind);
+  const mappedHeaders = new Set(Object.values(suggestedMapping));
+
+  const required = spec.required || [];
+  const missingRequired = required.filter((field) => !suggestedMapping[field]);
+
+  return {
+    kind: normalizedKind,
+    delimiter: selectedDelimiter,
+    headerRow: shaped.headerRow ?? 0,
+    headers,
+    suggestedMapping,
+    // Named rather than silently dropped: a column CA PRO does not recognise is exactly the thing
+    // a person needs to see and map by hand.
+    unmappedHeaders: headers.filter((header) => header && !mappedHeaders.has(header)),
+    missingRequired,
+    // A proposal is only usable when every required field found a column. Stating it here means
+    // the client does not have to re-derive the same conclusion from the two lists above.
+    complete: missingRequired.length === 0,
+    notes: shaped.notes || [],
   };
 }
 

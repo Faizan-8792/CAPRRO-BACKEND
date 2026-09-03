@@ -12,7 +12,7 @@ import { parseMappedImport } from "./import-preview.service.js";
 import { safeRecordActivity } from "./activity.service.js";
 import { assertGstStorageIndexes } from "./gst-storage-readiness.service.js";
 import {
-  calculateGstr3bClaimed,
+  calculateGstr3bControlTotals,
   isValidGstin,
   isValidPeriod,
   normalizeGstin,
@@ -354,7 +354,7 @@ export async function commitGstImport({
   let gstr3bControl = null;
   if (normalizedKind === "GSTR3B_SUMMARY") {
     try {
-      gstr3bControl = calculateGstr3bClaimed(parsed.rows.map((row) => row.values));
+      gstr3bControl = calculateGstr3bControlTotals(parsed.rows.map((row) => row.values));
     } catch (error) {
       throw serviceError(
       // V13-P12-F2. INVALID_GSTR3B_SUMMARY is not on PUBLIC_ERROR_CODES, so production
@@ -366,7 +366,10 @@ export async function commitGstImport({
     );
     }
   }
-  const committedTaxMinor = gstr3bControl
+  // claimed is null for an OUTWARD-ONLY GSTR-3B, which is now a legitimate file: a return whose
+  // Table 3.1 was imported for the turnover reconciliation and whose Table 4 was not. Falling back
+  // to the parsed totals there records the tax the file actually carried rather than crashing.
+  const committedTaxMinor = gstr3bControl?.claimed
     ? gstr3bControl.claimed.totalTaxMinor
     : parsed.summary.financialTotals?.totalTaxMinor || 0;
   await assertGstStorageIndexes();
@@ -540,7 +543,7 @@ export async function commitGstImport({
           totalTaxMinor: committedTaxMinor,
           errorSummary: {
             warnings: parsed.warnings.slice(0, 100),
-            ...(gstr3bControl ? { gstr3bBasis: gstr3bControl.basis } : {}),
+            ...(gstr3bControl?.claimedBasis ? { gstr3bBasis: gstr3bControl.claimedBasis } : {}),
           },
           completedAt: completionTime,
         },
@@ -567,7 +570,7 @@ export async function commitGstImport({
         totalTaxMinor: committedTaxMinor,
         importFingerprint,
         dateOrder: parsed.dateOrder.resolved || "NOT_APPLICABLE",
-        gstr3bBasis: gstr3bControl?.basis || null,
+        gstr3bBasis: gstr3bControl?.claimedBasis || null,
       },
     });
 

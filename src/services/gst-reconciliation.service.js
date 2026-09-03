@@ -22,7 +22,9 @@ import { recordActivity, safeRecordActivity } from "./activity.service.js";
 import { assertGstStorageIndexes } from "./gst-storage-readiness.service.js";
 import {
   addSafeIntegers,
-  calculateGstr3bClaimed,
+  calculateCreditLedgerBalance,
+  calculateGstr1Outward,
+  calculateGstr3bControlTotals,
   dateDifferenceDays,
   formatMoneyMinor,
   isValidGstin,
@@ -210,6 +212,12 @@ function serializeRun(document, { includeRecoveryCommand = false } = {}) {
       gstr3bBatchId: run.sourceImports.gstr3bBatchId
         ? String(run.sourceImports.gstr3bBatchId)
         : null,
+      gstr1BatchId: run.sourceImports.gstr1BatchId
+        ? String(run.sourceImports.gstr1BatchId)
+        : null,
+      creditLedgerBatchId: run.sourceImports.creditLedgerBatchId
+        ? String(run.sourceImports.creditLedgerBatchId)
+        : null,
     },
     matchingConfig: run.matchingConfig,
     priorPeriodAdjustment: run.priorPeriodAdjustment,
@@ -285,6 +293,8 @@ function fingerprintForRun({
   booksBatchId,
   portalBatchId,
   gstr3bBatchId,
+  gstr1BatchId,
+  creditLedgerBatchId,
   matchingConfig,
   priorPeriodAdjustment,
   assignedTo,
@@ -302,6 +312,19 @@ function fingerprintForRun({
     priorPeriodAdjustment,
     assignedTo: assignedTo ? String(assignedTo) : null,
     parentRunId: parentRunId ? String(parentRunId) : null,
+
+    // Appended, and ONLY when set. The fingerprint is the idempotency key behind a unique
+    // {firmId, sourceFingerprint, revision} index: two runs that hash alike are treated as one
+    // create being retried. Without these, a run created WITH a GSTR-1 attached would collide with
+    // an earlier run over the same books and portal batches and be replayed as that run, silently
+    // discarding the source the person had just chosen.
+    //
+    // Conditional rather than always-present so that every fingerprint written before these
+    // sources existed still hashes to exactly the same value. Making them unconditional nulls
+    // would change the hash of every run in the field, and a create retried across the deploy
+    // would produce a duplicate run instead of replaying the original.
+    ...(gstr1BatchId ? { gstr1BatchId: String(gstr1BatchId) } : {}),
+    ...(creditLedgerBatchId ? { creditLedgerBatchId: String(creditLedgerBatchId) } : {}),
   });
   return createHash("sha256").update(source).digest("hex");
 }
@@ -414,6 +437,8 @@ export async function createReconciliationRun({
   booksBatchId,
   portalBatchId,
   gstr3bBatchId = null,
+  gstr1BatchId = null,
+  creditLedgerBatchId = null,
   revisionOf = null,
   roundingToleranceMinor = DEFAULT_ROUNDING_TOLERANCE_MINOR,
   dateToleranceDays = DEFAULT_DATE_TOLERANCE_DAYS,
@@ -426,6 +451,8 @@ export async function createReconciliationRun({
   assertObjectId(booksBatchId, "Purchase Register batch");
   assertObjectId(portalBatchId, "GSTR-2B batch");
   if (gstr3bBatchId) assertObjectId(gstr3bBatchId, "GSTR-3B batch");
+  if (gstr1BatchId) assertObjectId(gstr1BatchId, "GSTR-1 batch");
+  if (creditLedgerBatchId) assertObjectId(creditLedgerBatchId, "Credit ledger batch");
   if (revisionOf) assertObjectId(revisionOf, "Parent run");
   if (assignedTo) assertObjectId(assignedTo, "Assignee");
 
@@ -459,9 +486,13 @@ export async function createReconciliationRun({
   const clientExists = await Client.exists({ _id: clientId, firmId });
   if (!clientExists) throw serviceError("Client not found in active firm", 404);
 
-  const requestedBatchIds = [booksBatchId, portalBatchId, gstr3bBatchId].filter(
-    Boolean,
-  );
+  const requestedBatchIds = [
+    booksBatchId,
+    portalBatchId,
+    gstr3bBatchId,
+    gstr1BatchId,
+    creditLedgerBatchId,
+  ].filter(Boolean);
   const batches = await ImportBatch.find({
     _id: { $in: requestedBatchIds },
     firmId,
@@ -488,6 +519,27 @@ export async function createReconciliationRun({
       gstin: normalizedGstin,
       period,
       kind: "GSTR3B_SUMMARY",
+    });
+  }
+  // Same firm, same client, same GSTIN, same period as every other source. A turnover
+  // reconciliation against another period would compare two unrelated returns and call the
+  // difference an exception.
+  if (gstr1BatchId) {
+    validateBatchContext(byId.get(String(gstr1BatchId)), {
+      firmId,
+      clientId,
+      gstin: normalizedGstin,
+      period,
+      kind: "GSTR1_SUMMARY",
+    });
+  }
+  if (creditLedgerBatchId) {
+    validateBatchContext(byId.get(String(creditLedgerBatchId)), {
+      firmId,
+      clientId,
+      gstin: normalizedGstin,
+      period,
+      kind: "ECREDIT_LEDGER",
     });
   }
 
@@ -533,6 +585,8 @@ export async function createReconciliationRun({
     booksBatchId,
     portalBatchId,
     gstr3bBatchId,
+    gstr1BatchId,
+    creditLedgerBatchId,
     matchingConfig,
     priorPeriodAdjustment: adjustment,
     assignedTo: effectiveAssignedTo,
@@ -584,6 +638,8 @@ export async function createReconciliationRun({
           booksBatchId,
           portalBatchId,
           gstr3bBatchId: gstr3bBatchId || null,
+          gstr1BatchId: gstr1BatchId || null,
+          creditLedgerBatchId: creditLedgerBatchId || null,
         },
         rootRunId: effectiveRootRunId,
         parentRunId,
@@ -3049,6 +3105,7 @@ export async function getGstr3bControl({ firmId, runId }) {
 
   let claimed = Object.fromEntries(TAX_HEAD_FIELDS.map((field) => [field, 0]));
   let claimedBasis = "NOT_IMPORTED";
+  let gstr3bOutward = null;
   if (run.sourceImports.gstr3bBatchId) {
     const batch = await ImportBatch.findOne({
       _id: run.sourceImports.gstr3bBatchId,
@@ -3071,14 +3128,80 @@ export async function getGstr3bControl({ firmId, runId }) {
       importGeneration: batch.activeImportGeneration,
     }).lean();
     try {
-      const calculated = calculateGstr3bClaimed(rows);
-      claimed = calculated.claimed;
-      claimedBasis = calculated.basis;
+      const calculated = calculateGstr3bControlTotals(rows);
+      if (calculated.claimed) {
+        claimed = calculated.claimed;
+        claimedBasis = calculated.claimedBasis;
+      }
+      // The SAME rows read for their other half. Table 3.1 is the outward supply the return
+      // declares, and it is what GSTR-1 is compared against - so one GSTR-3B upload serves both
+      // comparisons and costs one query, not two.
+      gstr3bOutward = calculated.outward;
     } catch (error) {
       throw serviceError(
         `GSTR-3B control input is invalid: ${error.message}`,
         409,
       );
+    }
+  }
+
+  // ---- GSTR-1 outward supply, for the turnover comparison ----
+  let gstr1Outward = null;
+  if (run.sourceImports.gstr1BatchId) {
+    const batch = await ImportBatch.findOne({
+      _id: run.sourceImports.gstr1BatchId,
+      firmId,
+      kind: "GSTR1_SUMMARY",
+      status: "COMPLETED",
+    }).lean();
+    validateBatchContext(batch, {
+      firmId,
+      clientId: run.clientId,
+      gstin: run.gstin,
+      period: run.period,
+      kind: "GSTR1_SUMMARY",
+    });
+    const rows = await ImportRow.find({
+      firmId,
+      clientId: run.clientId,
+      batchId: batch._id,
+      kind: "GSTR1_SUMMARY",
+      importGeneration: batch.activeImportGeneration,
+    }).lean();
+    try {
+      gstr1Outward = calculateGstr1Outward(rows);
+    } catch (error) {
+      throw serviceError(`GSTR-1 control input is invalid: ${error.message}`, 409);
+    }
+  }
+
+  // ---- electronic credit ledger, for the ledger comparison ----
+  let creditLedger = null;
+  if (run.sourceImports.creditLedgerBatchId) {
+    const batch = await ImportBatch.findOne({
+      _id: run.sourceImports.creditLedgerBatchId,
+      firmId,
+      kind: "ECREDIT_LEDGER",
+      status: "COMPLETED",
+    }).lean();
+    validateBatchContext(batch, {
+      firmId,
+      clientId: run.clientId,
+      gstin: run.gstin,
+      period: run.period,
+      kind: "ECREDIT_LEDGER",
+    });
+    const rows = await ImportRow.find({
+      firmId,
+      clientId: run.clientId,
+      batchId: batch._id,
+      kind: "ECREDIT_LEDGER",
+      importGeneration: batch.activeImportGeneration,
+    }).lean();
+    try {
+      creditLedger = calculateCreditLedgerBalance(rows);
+    } catch (error) {
+      throw serviceError(`Credit ledger control input is invalid: ${error.message}`, 409);
     }
   }
 
@@ -3142,6 +3265,87 @@ export async function getGstr3bControl({ firmId, runId }) {
     claimedGstr3b: claimed,
     difference,
     hasImportedGstr3b: Boolean(stableRun.sourceImports.gstr3bBatchId),
+
+    // ---- the two comparisons the ITC control never covered ----
+    //
+    // Both are stated the same way as the ITC one above: the two sides, their per-head
+    // difference, and whether each source was actually imported. A section whose sources are
+    // absent reports available:false rather than zeroes, so a screen can say "not imported" and
+    // never present an un-run comparison as a clean one.
+    turnover: buildTurnoverControl(gstr1Outward, gstr3bOutward),
+    creditLedger: buildCreditLedgerControl(claimed, claimedBasis, creditLedger),
+  };
+}
+
+/**
+ * GSTR-1 declared outward supply against GSTR-3B Table 3.1, per tax head and on taxable value.
+ *
+ * The sign convention is stated rather than assumed: difference = GSTR-1 minus GSTR-3B. A
+ * POSITIVE difference means more was declared in GSTR-1 than in GSTR-3B - supplies invoiced but
+ * not carried into the summary return. A NEGATIVE difference means the summary return declared
+ * more than the invoice-level return supports.
+ */
+function buildTurnoverControl(gstr1Outward, gstr3bOutward) {
+  const available = Boolean(gstr1Outward && gstr3bOutward);
+  const fields = ["taxableValueMinor", ...TAX_HEAD_FIELDS];
+  const zero = Object.fromEntries(fields.map((field) => [field, 0]));
+
+  const left = gstr1Outward || zero;
+  const right = gstr3bOutward || zero;
+  const difference = {};
+  for (const field of fields) {
+    difference[field] = safeMinor(
+      Number(left[field] || 0) - Number(right[field] || 0),
+      `Turnover difference ${field}`,
+    );
+  }
+
+  return {
+    available,
+    basis: "GSTR-1 declared outward supply vs GSTR-3B Table 3.1, taxable and zero-rated only.",
+    hasImportedGstr1: Boolean(gstr1Outward),
+    hasImportedGstr3bOutward: Boolean(gstr3bOutward),
+    gstr1: gstr1Outward,
+    gstr3b: gstr3bOutward,
+    difference: available ? difference : null,
+    // Only meaningful when both sides exist; null keeps a screen from rendering "agreed" for a
+    // comparison that never happened.
+    agrees: available ? fields.every((field) => difference[field] === 0) : null,
+  };
+}
+
+/**
+ * ITC claimed in GSTR-3B against what the electronic credit ledger actually moved.
+ *
+ * difference = claimed minus ledger closing balance movement, per head. This is the third of the
+ * three reconciliations a CA runs on a period, and the one that catches credit taken in the return
+ * that the ledger never received.
+ */
+function buildCreditLedgerControl(claimed, claimedBasis, creditLedger) {
+  const available = Boolean(creditLedger && claimedBasis !== "NOT_IMPORTED");
+  const zero = Object.fromEntries(TAX_HEAD_FIELDS.map((field) => [field, 0]));
+  const ledgerClosing = creditLedger?.closing || zero;
+
+  const difference = {};
+  for (const field of TAX_HEAD_FIELDS) {
+    difference[field] = safeMinor(
+      Number(claimed[field] || 0) - Number(ledgerClosing[field] || 0),
+      `Credit ledger difference ${field}`,
+    );
+  }
+
+  return {
+    available,
+    basis: "GSTR-3B ITC claimed vs the electronic credit ledger's closing balance.",
+    hasImportedLedger: Boolean(creditLedger),
+    ledgerBasis: creditLedger?.basis || "NOT_IMPORTED",
+    // A file that states a closing balance AND the movements that should produce it, where the
+    // two disagree, is reported rather than silently resolved in favour of either.
+    ledgerStatedDiffersFromMovement: Boolean(creditLedger?.statedDiffers),
+    claimedGstr3b: claimed,
+    ledgerClosing: creditLedger ? ledgerClosing : null,
+    difference: available ? difference : null,
+    agrees: available ? TAX_HEAD_FIELDS.every((field) => difference[field] === 0) : null,
   };
 }
 

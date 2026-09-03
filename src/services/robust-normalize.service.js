@@ -64,6 +64,10 @@ const DATE_FIELDS_BY_KIND = Object.freeze({
   GST_PURCHASE: ["documentDate"],
   GSTR2B: ["documentDate"],
   GSTR3B_SUMMARY: [],
+  // A summary or ledger row is identified by its category, not by a date. The period comes
+  // from the import itself.
+  GSTR1_SUMMARY: [],
+  ECREDIT_LEDGER: [],
   TDS_DEDUCTIONS: ["transactionDate"],
   TDS_CHALLANS: ["challanDate"],
   TDS_STATEMENTS: ["filedDate"],
@@ -350,6 +354,43 @@ const HEADER_SYNONYMS = Object.freeze({
     cess: ["cess", "cess amount", "cess amt", "gst cess"],
     totalTax: ["total tax", "tax amount", "total gst", "gst amount", "tax total"],
   },
+  // The summary returns - GSTR-3B, GSTR-1 and the electronic credit ledger - are shaped
+  // category-then-amounts rather than one-invoice-per-row, so they need their own dictionary.
+  // Sharing the invoice one would try to resolve "Nature of Supply" against "invoice number".
+  GST_SUMMARY: {
+    category: [
+      "category",
+      "nature of supply",
+      "description",
+      "particulars",
+      "section",
+      "table",
+      "head",
+      "type",
+      "supply type",
+      "itc details",
+      "details",
+    ],
+    taxableValue: ["taxable value", "taxable amount", "taxable", "total taxable value", "value of supplies", "turnover", "taxable val"],
+    igst: ["igst", "igst amount", "integrated tax", "integrated tax amount", "igst amt", "i gst"],
+    cgst: ["cgst", "cgst amount", "central tax", "central tax amount", "cgst amt", "c gst"],
+    sgst: ["sgst", "sgst amount", "state tax", "state ut tax", "state utgst tax", "state ut tax amount", "sgst utgst", "sgst amt", "s gst", "utgst"],
+    cess: ["cess", "cess amount", "cess amt", "gst cess"],
+    totalTax: ["total tax", "tax amount", "total gst", "gst amount", "tax total"],
+  },
+  CLIENTS: {
+    name: ["name", "client name", "party name", "trade name", "legal name", "customer name"],
+    clientCode: ["client code", "code", "client id", "party code"],
+    entityType: ["entity type", "constitution", "type", "entity"],
+    gstin: ["gstin", "gst number", "gstin number", "gst no", "gstn"],
+    pan: ["pan", "pan number", "pan no"],
+    tan: ["tan", "tan number", "tan no"],
+    contactPerson: ["contact person", "contact", "person", "contact name"],
+    phone: ["phone", "mobile", "phone number", "contact number", "mobile no"],
+    email: ["email", "email address", "e mail", "mail"],
+    tags: ["tags", "labels", "groups"],
+    notes: ["notes", "remarks", "comment", "comments"],
+  },
   TDS_DEDUCTIONS: {
     transactionDate: ["transaction date", "date of payment", "payment date", "date", "txn date", "date of credit", "credit date"],
     amountPaid: ["amount paid", "paid amount", "amount", "gross amount", "payment", "amount credited", "amount of payment"],
@@ -406,10 +447,30 @@ function levenshtein(a, b, max = 2) {
   return prev[b.length];
 }
 
-// Resolve a raw column header to a canonical field for a given import kind.
-// Exact synonym match first, then token-subset containment, then near (<=1 edit).
-function resolveHeaderField(header, kind) {
-  const dict = HEADER_SYNONYMS[kind];
+// Which synonym dictionary an IMPORT KIND uses.
+//
+// Callers pass the kind they actually have - "GST_PURCHASE", "GSTR3B_SUMMARY" - rather than having
+// to know which dictionary it shares. Passing a dictionary name straight through still works, so
+// the existing self-test caller that passes "GST" is unaffected.
+const KIND_DICTIONARIES = Object.freeze({
+  GST_PURCHASE: "GST",
+  GSTR2B: "GST",
+  GSTR3B_SUMMARY: "GST_SUMMARY",
+  GSTR1_SUMMARY: "GST_SUMMARY",
+  ECREDIT_LEDGER: "GST_SUMMARY",
+  CLIENTS: "CLIENTS",
+});
+
+function dictionaryForKind(kind) {
+  const key = KIND_DICTIONARIES[kind] || kind;
+  return HEADER_SYNONYMS[key] || null;
+}
+
+// Score one header against one dictionary. Exact synonym first, then token-subset containment,
+// then near (<=1 edit). Returns the winning field AND its score, because the score is what lets a
+// caller choose between two headers competing for the same field.
+function scoreHeaderField(header, kind) {
+  const dict = dictionaryForKind(kind);
   if (!dict) return null;
   const tok = headerToken(header);
   if (!tok) return null;
@@ -430,16 +491,35 @@ function resolveHeaderField(header, kind) {
       if (score > bestScore) { bestScore = score; best = field; }
     }
   }
-  return best;
+  return best === null ? null : { field: best, score: bestScore };
 }
 
-// Build a field->sourceHeader mapping object from a header row for a kind.
+// Resolve a raw column header to a canonical field for a given import kind.
+function resolveHeaderField(header, kind) {
+  return scoreHeaderField(header, kind)?.field ?? null;
+}
+
+/**
+ * Build a field -> sourceHeader mapping from a header row.
+ *
+ * When two headers resolve to the same field the BEST-SCORING one wins, not the leftmost. A real
+ * register frequently carries both "Date" and "Invoice Date"; taking the first would map the
+ * document date to whichever the export happened to put first, and a wrong date column silently
+ * changes which return period an invoice falls in.
+ */
 function buildMappingFromHeaders(headers, kind) {
-  const mapping = {};
-  for (const header of headers) {
-    const field = resolveHeaderField(header, kind);
-    if (field && !mapping[field]) mapping[field] = header;
+  const best = new Map();
+  for (const header of headers || []) {
+    const resolved = scoreHeaderField(header, kind);
+    if (!resolved) continue;
+    const incumbent = best.get(resolved.field);
+    if (!incumbent || resolved.score > incumbent.score) {
+      best.set(resolved.field, { header, score: resolved.score });
+    }
   }
+
+  const mapping = {};
+  for (const [field, { header }] of best) mapping[field] = header;
   return mapping;
 }
 
@@ -508,6 +588,8 @@ export {
   HEADER_SYNONYMS,
   aliasLookup,
   buildMappingFromHeaders,
+  dictionaryForKind,
+  scoreHeaderField,
   classifyDateColumn,
   classifyNumericDate,
   labelKey,

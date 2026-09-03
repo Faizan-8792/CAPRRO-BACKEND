@@ -4,6 +4,11 @@ const GST_IMPORT_KINDS = Object.freeze([
   "GST_PURCHASE",
   "GSTR2B",
   "GSTR3B_SUMMARY",
+  // Both are summary rows shaped exactly like GSTR3B_SUMMARY - a category and its amounts - so
+  // they share this collection and its summaryCategory field rather than needing a schema of
+  // their own. GSTR-1 carries a taxable value; the credit ledger does not.
+  "GSTR1_SUMMARY",
+  "ECREDIT_LEDGER",
 ]);
 
 const WarningSchema = new mongoose.Schema(

@@ -4,6 +4,7 @@ import {
   commitMappedTdsImport,
   convertGstr2bImport,
   previewMappedImport,
+  suggestImportMappingForFile,
   showGstImportBatch,
   showGstImportErrors,
   showTdsImportBatch,
@@ -37,6 +38,9 @@ function requireImportPreviewFeature(req, res, next) {
 
 router.use(authRequiredWithoutUsageTracking, requireFirmMember, requireFirmWriteAccess);
 router.post("/preview", requireImportPreviewFeature, previewMappedImport);
+// Same feature gate and the same firm-write authorization as a preview: it reads a file the
+// caller supplied and returns nothing about any stored record, but it is still import work.
+router.post("/suggest-mapping", requireImportPreviewFeature, suggestImportMappingForFile);
 router.post("/gstr2b/convert", requireGstReconciliation, convertGstr2bImport);
 router.post("/:sourceHash/tds-commit", requireTdsHealth, commitMappedTdsImport);
 router.get("/tds/:id/errors", requireTdsHealth, showTdsImportErrors);

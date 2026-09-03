@@ -698,7 +698,11 @@ try {
         # Ties Core's navigation tags to the App's route catalogue. Core cannot reference App,
         # so every Open button and empty-state action names its destination as a string that
         # nothing verified - a renamed tag left a button that silently did nothing.
-        "desktop-navigation-contract"
+        "desktop-navigation-contract",
+        # The three reconciliations one GST period needs - books vs 2B (already covered by
+        # gst-match-rule-contract), GSTR-1 vs GSTR-3B turnover, and ITC vs the credit ledger -
+        # plus the header resolver that finally reaches production. Mutation-tested.
+        "gst-control-reconciliation-contract"
     )
 
     # The other four unwired suites need a REPLICA SET, not just a mongod: they run multi-document

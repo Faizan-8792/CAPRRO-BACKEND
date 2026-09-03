@@ -1,5 +1,8 @@
 import ImportBatch from "../models/ImportBatch.js";
 import ImportRow from "../models/ImportRow.js";
+// Imported rather than re-listed: a kind added to the model but forgotten here would be a GST
+// import that silently escapes the identity readiness scan.
+import { GST_IMPORT_KINDS } from "../models/ImportRow.js";
 import ReconciliationItem from "../models/ReconciliationItem.js";
 import ReconciliationRun from "../models/ReconciliationRun.js";
 
@@ -81,7 +84,6 @@ const FORBIDDEN_INDEX_SPECS = Object.freeze([
   },
 ]);
 
-const GST_IMPORT_KINDS = ["GST_PURCHASE", "GSTR2B", "GSTR3B_SUMMARY"];
 const GST_IMPORT_NORMALIZATION_VERSION = "gst-import-v2";
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/i;
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
