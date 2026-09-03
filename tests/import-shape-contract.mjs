@@ -270,6 +270,36 @@ check(
   shapeTable([]).dataRows.length === 0 && shapeTable(null).dataRows.length === 0,
 );
 
+// ─── The desktop client's ceiling must equal the server's ─────────
+//
+// Nothing checked this, and the two drifted 20x apart: the parser accepted
+// 10,000,000 bytes while the desktop app refused at 500,000 and told the user
+// "split it and import each part" - advice that was never true of the server,
+// only of a constant nobody had revisited. A register the backend would have
+// imported perfectly well was turned away by the client, and no test noticed
+// because each side only ever asserted its own number.
+//
+// Client-side refusal is not the problem: refusing early saves the user a long
+// upload that would fail anyway. Refusing at a DIFFERENT number is the problem,
+// because then the two disagree about what is importable and only one of them
+// is telling the user the truth.
+
+const clientImportSource = await readFile(
+  new URL(
+    "../../apps/desktop-native/src/CaPro.Desktop.Core/Models/ImportWrites.cs",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
+const clientLimitMatch = /public const int MaxTextBytes\s*=\s*([\d_]+)\s*;/.exec(clientImportSource);
+const clientLimit = clientLimitMatch ? Number(clientLimitMatch[1].replace(/_/g, "")) : null;
+check(
+  "the desktop client states its own import ceiling",
+  clientLimit !== null && clientLimit > 0,
+  clientLimitMatch ? `MaxTextBytes ${clientLimitMatch[1]}` : "MaxTextBytes not found in ImportWrites.cs",
+);
+
 // ─── The import body limit must clear the parser's own ceiling ────
 //
 // These two numbers live in different files and must move together. If
@@ -317,6 +347,14 @@ if (importLimitMatch && maxTextMatch) {
     // of the parser's explanation. Twice the ceiling covers any realistic register.
     routeLimit !== null && routeLimit >= parserLimit * 2,
     `route ${routeLimit} bytes vs parser ${parserLimit} bytes (needs >= ${parserLimit * 2})`,
+  );
+
+  // The check this file existed without. See the note above: these two are what the user is
+  // told, and if they disagree only one of them is true.
+  check(
+    "the desktop client refuses at exactly the same size the server does",
+    clientLimit !== null && clientLimit === parserLimit,
+    `client ${clientLimit} bytes vs server ${parserLimit} bytes`,
   );
 }
 
