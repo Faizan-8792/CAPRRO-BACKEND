@@ -489,6 +489,23 @@ define("POST", "api/app-config/dismiss-welcome", async () =>
 define("PATCH", "api/digests/preferences", async () =>
   call("PATCH", "api/digests/preferences", { body: { dailyEnabled: true, weeklyEnabled: true } }),
 );
+// The two bulk actions, and between them they capture both shapes worth pinning.
+//
+// Reminders answers deactivated:1 - it switches off the single manual reminder the plan above
+// seeds. Digests answers updated:0, because this firm has no delivered digest, and that is the
+// case most worth having on record: a bulk action over an empty set must be a SUCCESS with a
+// count, never a 404. The desktop reads its count out of these exact envelopes and reports a
+// missing one as a server error rather than as silent success.
+//
+// Both run late enough that no later capture depends on the reminder still being active; the
+// drift gate re-captures the whole plan in order, so a dependency would show up as drift.
+define("POST", "api/reminders/deactivate-all", async () =>
+  call("POST", "api/reminders/deactivate-all"),
+);
+
+define("POST", "api/digests/inbox/read-all", async () =>
+  call("POST", "api/digests/inbox/read-all"),
+);
 
 // L12: the desktop's erasure-request write. Captured with requestErasure:false deliberately --
 // withdrawing a request that was never made is a no-op, so the capture leaves no state behind and
