@@ -651,6 +651,7 @@ try {
         "audit-coverage-gate-contract",
         "audit-finding-guard-contract",
         "audit-contradiction-contract",
+        "audit-injection-contract",
         "audit-insights-grounding",
         "audit-insights-accuracy-speed",
         "audit-insights-coverage-and-discipline",

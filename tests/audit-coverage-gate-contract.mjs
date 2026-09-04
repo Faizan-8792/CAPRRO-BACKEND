@@ -21,6 +21,7 @@ import {
   computeCoverage,
   buildCoverageLedger,
 } from "../src/services/audit-coverage.service.js";
+import { buildContradictionInsights } from "../src/services/audit-contradiction.service.js";
 
 let passed = 0;
 let failed = 0;
@@ -162,6 +163,38 @@ check("a tagged document still measures by its own refs", () => {
   ]);
   assert.equal(coverage.uncoveredCount, 1);
   assert.equal(coverage.uncovered[0].label, "C-3");
+});
+
+// ── deterministic findings must earn coverage credit too ──────────────────
+
+check("a deterministic finding covers the matters it is about", () => {
+  // Found by live verification, not by any local test. The controller measured coverage against
+  // the MODEL's findings only, so a document whose first matters carried a contradiction finding
+  // and a numerical finding was still told "the following were not reviewed: 1, 2, 3". The
+  // response contradicted itself - the exact failure AA-03 exists to report - in the one finding
+  // whose entire purpose is to be trustworthy about what was and was not covered.
+  const text = `
+1. Management has confirmed that there are no related parties requiring disclosure.
+2. The shareholders schedule shows a director's spouse owns 12% of the equity.
+3. Statutory dues of Rs 48 lakh were outstanding for more than six months at the year end.
+`;
+  const contradictions = buildContradictionInsights(text);
+  assert.equal(contradictions.length, 1, "the fixture must produce a contradiction to be a test");
+
+  const bare = computeCoverage(text, []);
+  assert.equal(bare.uncoveredCount, 3, "with no findings at all, nothing is covered");
+
+  const withDeterministic = computeCoverage(text, contradictions);
+  assert.ok(
+    withDeterministic.coveredCount >= 1,
+    "the contradiction's evidence quote comes verbatim from matter 1, so matter 1 is addressed",
+  );
+  assert.ok(
+    !withDeterministic.uncovered.some((unit) => unit.label === "1"),
+    `matter 1 has a finding about it and must not be listed as unreviewed: ${JSON.stringify(
+      withDeterministic.uncovered.map((u) => u.label),
+    )}`,
+  );
 });
 
 // ── it must not cry wolf ───────────────────────────────────────────────────
