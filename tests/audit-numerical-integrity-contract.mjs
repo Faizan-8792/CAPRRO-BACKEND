@@ -19,6 +19,7 @@ import {
   findNumericalInconsistencies,
   buildNumericalIntegrityInsights,
 } from "../src/services/audit-numerical-integrity.service.js";
+import { guardFinding } from "../src/services/audit-finding-guard.service.js";
 
 let passed = 0;
 let failed = 0;
@@ -243,6 +244,20 @@ check("the insight matches the shape the audit controller already emits", () => 
   }
   assert.equal(typeof insight.amountMinor, "number", "amountMinor is integer paise");
   assert.ok(Number.isInteger(insight.amountMinor), "money never touches a float");
+});
+
+check("the numerical finding is a confirmed fact, never a confirmed misstatement", () => {
+  // AA-04 cross-check. The difference is arithmetic - anyone with a calculator reaches the same
+  // answer - so the finding is a fact about the document. Whether the accounts are wrong is a
+  // conclusion only a person can reach, and the status must not pre-empt it.
+  const insights = buildNumericalIntegrityInsights(TEST_5_TEXT);
+  assert.ok(insights.length > 0, "Test 5 must still produce a finding");
+  for (const insight of insights) {
+    assert.equal(insight.deterministic, true, "the finding is deterministic and must say so");
+    const status = guardFinding(insight).status;
+    assert.equal(status, "CONFIRMED_FACT", `expected CONFIRMED_FACT, got ${status}`);
+    assert.notEqual(status, "CONFIRMED_MISSTATEMENT");
+  }
 });
 
 // ── report ────────────────────────────────────────────────────────────────

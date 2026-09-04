@@ -319,6 +319,9 @@ export function buildContradictionInsights(text) {
     nextAction:
       "Put both statements side by side, identify which is supported by evidence on file, and " +
       "document the resolution. Do not carry both forward.",
+    // AA-04. That both statements appear in the document is checkable by reading it, so the
+    // finding is a confirmed fact. Which of the two is TRUE remains open, and the detail says so.
+    deterministic: true,
     amountMinor: null,
     workingPaperRef: null,
     contradiction: item,

@@ -400,11 +400,12 @@ check("the contradiction finding passes the AA-04 guard unchanged", () => {
         [],
         `detail over-concludes: ${insight.detail}`,
       );
-      assert.equal(
-        guardFinding(insight),
-        insight,
-        "the guard must return the identical object, having found nothing to soften",
-      );
+      // The guard adds AA-04's mandatory status to every finding, so identity is the wrong
+      // assertion. That nothing ELSE moved is the stronger one.
+      const guarded = { ...guardFinding(insight) };
+      delete guarded.status;
+      assert.deepEqual(guarded, insight, "the guard found nothing to soften, so nothing changed");
+      assert.ok(guardFinding(insight).status, "the mandatory status is present");
     }
   }
 });
@@ -418,6 +419,20 @@ check("the cited standard is a real one, so AA-26 has nothing to replace", () =>
       insight.standard,
       `${insight.standard} was replaced, so it is not in the known families`,
     );
+  }
+});
+
+check("the contradiction finding is a confirmed fact, never a confirmed misstatement", () => {
+  // AA-04 cross-check. That both statements appear in the document is checkable by reading it, so
+  // the finding is a fact. Which of the two is true stays open - and the status must not suggest
+  // otherwise, because CONFIRMED_MISSTATEMENT is the one category this product may never assign.
+  for (const testCase of MANDATE_CASES) {
+    for (const insight of buildContradictionInsights(testCase.text)) {
+      assert.equal(insight.deterministic, true, "the finding is deterministic and must say so");
+      const status = guardFinding(insight).status;
+      assert.equal(status, "CONFIRMED_FACT", `expected CONFIRMED_FACT, got ${status}`);
+      assert.notEqual(status, "CONFIRMED_MISSTATEMENT");
+    }
   }
 });
 

@@ -278,6 +278,11 @@ export function buildNumericalIntegrityInsights(text) {
       "Obtain the underlying listing, agree it to the stated figure, and identify every item " +
       "making up the difference. Do not treat either figure as the population until they agree " +
       "or the difference is explained.",
+    // AA-04. This finding is arithmetic: anyone with a calculator reaches the same answer, so
+    // it is a fact about the document rather than a judgement about the accounts. That earns
+    // CONFIRMED_FACT and still, deliberately, not CONFIRMED_MISSTATEMENT - whether the accounts
+    // are wrong is a conclusion only a person can reach.
+    deterministic: true,
     amountMinor: item.differencePaise,
     workingPaperRef: null,
   }));

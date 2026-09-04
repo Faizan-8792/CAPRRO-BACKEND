@@ -17,16 +17,107 @@
 
 /**
  * Statuses a finding may carry. AA-04: these are not interchangeable, and collapsing them is the
- * defect. Ordered weakest to strongest claim about the client.
+ * defect. Suspicious is not wrong. A shared employee bank account, an early supplier payment taken
+ * at a discount, a related-party transaction and a late journal entry are all *indicators* - each
+ * has an innocent explanation that is more common than the guilty one - and a product that reports
+ * them as findings of fact puts an assertion in a working paper that the evidence cannot carry.
+ *
+ * The six names are the ledger's. INFORMATION_GAP is a seventh, added because AA-01's coverage
+ * declaration is genuinely none of the others: it is a statement about the review, not the client.
  */
 export const FINDING_STATUS = Object.freeze({
   INFORMATION_GAP: "INFORMATION_GAP",
+  CONFIRMED_FACT: "CONFIRMED_FACT",
   RISK_INDICATOR: "RISK_INDICATOR",
   CONTROL_DEFICIENCY: "CONTROL_DEFICIENCY",
   POTENTIAL_MISSTATEMENT: "POTENTIAL_MISSTATEMENT",
   POTENTIAL_FRAUD_INDICATOR: "POTENTIAL_FRAUD_INDICATOR",
   CONFIRMED_MISSTATEMENT: "CONFIRMED_MISSTATEMENT",
 });
+
+/**
+ * Statuses this product may never assign on its own.
+ *
+ * CONFIRMED_MISSTATEMENT is a conclusion only a person can reach, after evidence. Nothing in this
+ * pipeline - model or deterministic - is entitled to it, so it is unreachable by construction
+ * rather than merely discouraged in a prompt. An auditor can set it in their own working paper;
+ * the product cannot set it for them.
+ */
+export const STATUSES_THE_PRODUCT_MAY_NOT_ASSIGN = Object.freeze([
+  FINDING_STATUS.CONFIRMED_MISSTATEMENT,
+]);
+
+/** Fraud-adjacent subject matter. An indicator, never a conclusion - see AA-23. */
+const FRAUD_INDICATOR_CUES = [
+  /\bfraud|\bmisappropriat|\bdiversion of funds\b|\bfictitious\b/i,
+  /\bmanagement\s+overrides?\b|\bcircumvent/i,
+  /\bshared\s+(?:bank\s+)?account\b|\bemployee[^.]{0,30}\bbank\s+account\b/i,
+  /\bround[- ]?trip|\bcircular\s+(?:transaction|trading)\b/i,
+  /\bbackdated?\b|\bpost[- ]?dated\b/i,
+];
+
+/** Subject matter that is about a control rather than a balance. */
+const CONTROL_CUES = [
+  /\bsegregation\s+of\s+duties\b/i,
+  /\bcontrols?\b[^.]{0,40}\b(?:not|weak|absent|missing|ineffective|deficien)/i,
+  /\b(?:approval|authorisation|authorization)\b[^.]{0,40}\b(?:not|without|missing|absent)\b/i,
+  /\bno\s+(?:maker[- ]checker|dual\s+control|independent\s+review)\b/i,
+  /\bnot\s+(?:independently\s+)?reviewed\b/i,
+];
+
+/** Subject matter that is about what the reviewer could not see. */
+const INFORMATION_GAP_CUES = [
+  /\bwere\s+not\s+reviewed\b/i,
+  /\bnot\s+yet\s+reviewed\b/i,
+  /\b(?:could\s+not|unable\s+to)\s+(?:be\s+)?(?:produce|produced|obtain|obtained|locate|verify)/i,
+  /\bnot\s+(?:made\s+)?available\b/i,
+  /\bmissing\s+(?:information|evidence|documentation)\b/i,
+];
+
+/**
+ * Assigns the weakest status the finding's own text can support.
+ *
+ * The direction of the default matters. Defaulting to RISK_INDICATOR means a finding this cannot
+ * classify understates its claim rather than overstating it, and understating is recoverable - an
+ * auditor reading "risk indicator" can upgrade it once they have the evidence, whereas nobody
+ * re-reads a working paper to downgrade a conclusion they already believed.
+ */
+export function classifyFindingStatus(finding) {
+  if (!finding || typeof finding !== "object") return FINDING_STATUS.RISK_INDICATOR;
+
+  const text = RENDERED_FIELDS.map((field) => finding[field] ?? "")
+    .join(" ")
+    .trim();
+
+  if (INFORMATION_GAP_CUES.some((cue) => cue.test(text))) {
+    return FINDING_STATUS.INFORMATION_GAP;
+  }
+  if (FRAUD_INDICATOR_CUES.some((cue) => cue.test(text))) {
+    // An indicator. The name carries the qualification so the status cannot be read as a verdict.
+    return FINDING_STATUS.POTENTIAL_FRAUD_INDICATOR;
+  }
+  if (CONTROL_CUES.some((cue) => cue.test(text))) {
+    return FINDING_STATUS.CONTROL_DEFICIENCY;
+  }
+  // A deterministic arithmetic difference IS a fact about the document - it is checkable by anyone
+  // with a calculator and does not depend on judgement. It is still not a misstatement, which is a
+  // conclusion about the accounts rather than about the arithmetic.
+  if (finding.deterministic === true) return FINDING_STATUS.CONFIRMED_FACT;
+
+  return FINDING_STATUS.RISK_INDICATOR;
+}
+
+/**
+ * Whether a status is one this product is allowed to have put there.
+ *
+ * Exported so a caller - or a test - can assert the invariant rather than trusting it.
+ */
+export function isStatusPermitted(status) {
+  return (
+    Object.values(FINDING_STATUS).includes(status) &&
+    !STATUSES_THE_PRODUCT_MAY_NOT_ASSIGN.includes(status)
+  );
+}
 
 /**
  * Every field of a finding that a person actually reads. AA-02's mutation run found an
@@ -220,14 +311,19 @@ export function guardFinding(finding) {
     guarded[field] = "Requires verification against the applicable reporting framework";
   }
 
-  if (notes.length === 0) return finding;
-
-  // A finding that had to be downgraded cannot also claim to be a confirmed misstatement.
-  if (guarded.status === FINDING_STATUS.CONFIRMED_MISSTATEMENT) {
-    guarded.status = FINDING_STATUS.POTENTIAL_MISSTATEMENT;
+  // AA-04. The status is MANDATORY, not optional, so every finding leaves here carrying an
+  // explicit claim about how strong a claim it is. A missing status is the defect: it lets a
+  // reader supply their own reading, and readers supply the strong one.
+  //
+  // An incoming status is honoured only if the product is entitled to it. A CONFIRMED_MISSTATEMENT
+  // arriving from anywhere - a model, a caller, a future code path - is replaced rather than
+  // trusted, which is what makes the prohibition structural instead of advisory.
+  if (!isStatusPermitted(guarded.status)) {
+    guarded.status = classifyFindingStatus(guarded);
   }
 
-  guarded.guard = { downgraded: notes };
+  if (notes.length > 0) guarded.guard = { downgraded: notes };
+
   return guarded;
 }
 

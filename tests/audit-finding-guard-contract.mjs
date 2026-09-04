@@ -20,11 +20,29 @@ import assert from "node:assert/strict";
 import {
   FINDING_STATUS,
   RENDERED_FIELDS,
+  STATUSES_THE_PRODUCT_MAY_NOT_ASSIGN,
+  classifyFindingStatus,
   findOverConclusions,
   findUnknownStandardReferences,
   guardFinding,
   guardFindings,
+  isStatusPermitted,
 } from "../src/services/audit-finding-guard.service.js";
+
+/**
+ * The guard adds a mandatory status to every finding, so object identity is the wrong assertion.
+ * Checking that nothing ELSE moved is the stronger statement: it catches a guard that quietly
+ * rewords a finding it had no business touching, which identity would also catch, and additionally
+ * pins that the status really is the only addition.
+ */
+function assertUnchangedExceptStatus(actual, expected) {
+  const stripped = { ...actual };
+  delete stripped.status;
+  const baseline = { ...expected };
+  delete baseline.status;
+  assert.deepEqual(stripped, baseline);
+  assert.ok(isStatusPermitted(actual.status), `status ${actual.status} is not permitted`);
+}
 
 let passed = 0;
 let failed = 0;
@@ -149,21 +167,26 @@ check("the downgrade is recorded rather than applied invisibly", () => {
   }
 });
 
-check("a guarded finding can no longer claim to be a confirmed misstatement", () => {
+check("a confirmed misstatement is never honoured, wherever it arrives from", () => {
+  // The prohibition is structural, not advisory: a CONFIRMED_MISSTATEMENT arriving from a model, a
+  // caller or a future code path is replaced rather than trusted.
   const guarded = guardFinding({
     status: FINDING_STATUS.CONFIRMED_MISSTATEMENT,
     detail: "Revenue is overstated by Rs 40 lakh.",
   });
-  assert.equal(guarded.status, FINDING_STATUS.POTENTIAL_MISSTATEMENT);
+  assert.notEqual(guarded.status, FINDING_STATUS.CONFIRMED_MISSTATEMENT);
+  assert.ok(isStatusPermitted(guarded.status), `${guarded.status} is not a permitted status`);
 });
 
-check("a clean finding is returned untouched, object identity included", () => {
+check("a clean finding keeps every word, and gains only the mandatory status", () => {
   const clean = {
     title: "Reconcile the population before testing it",
     detail: "The four components sum to Rs 4.60 lakh against a stated total of Rs 2.86 lakh.",
     standard: "SA 500",
   };
-  assert.equal(guardFinding(clean), clean, "no allocation, no guard note, nothing changed");
+  const guarded = guardFinding(clean);
+  assertUnchangedExceptStatus(guarded, clean);
+  assert.equal(guarded.guard, undefined, "nothing was softened, so nothing is recorded");
 });
 
 check("the guard drops nothing and preserves order", () => {
@@ -187,6 +210,271 @@ check("malformed input never throws", () => {
   assert.deepEqual(guardFindings("not a list"), []);
   assert.deepEqual(findOverConclusions(null), []);
   assert.deepEqual(findUnknownStandardReferences(undefined), []);
+});
+
+// ── AA-04: the status is mandatory and mutually exclusive ─────────────────
+
+check("every finding leaves the guard carrying a status", () => {
+  // A missing status is the defect, not a neutral default. It lets the reader supply their own
+  // reading, and readers supply the strong one.
+  const findings = [
+    { title: "Something" },
+    { detail: "Trade receivables of Rs 2.80 crore were circularised." },
+    { title: "Parts of this document were not reviewed" },
+    {},
+  ];
+  for (const guarded of guardFindings(findings)) {
+    assert.ok(guarded.status, "a finding without a status is the defect");
+    assert.ok(isStatusPermitted(guarded.status), `${guarded.status} is not permitted`);
+  }
+});
+
+check("the statuses are mutually exclusive and the classifier returns exactly one", () => {
+  const values = Object.values(FINDING_STATUS);
+  assert.equal(new Set(values).size, values.length, "no two names share a value");
+  for (const fixture of [{ title: "x" }, { detail: "no segregation of duties" }, {}]) {
+    const status = classifyFindingStatus(fixture);
+    assert.equal(typeof status, "string");
+    assert.ok(values.includes(status), `${status} is not in the enum`);
+  }
+});
+
+check("the product may never assign a confirmed misstatement", () => {
+  // Structural, not advisory. The classifier must be incapable of producing it, so the guarantee
+  // does not depend on a prompt or on anyone's discipline.
+  assert.deepEqual(STATUSES_THE_PRODUCT_MAY_NOT_ASSIGN, [FINDING_STATUS.CONFIRMED_MISSTATEMENT]);
+  assert.equal(isStatusPermitted(FINDING_STATUS.CONFIRMED_MISSTATEMENT), false);
+  assert.equal(isStatusPermitted("SOMETHING_INVENTED"), false);
+
+  // Whatever the classifier is shown, it never reaches for the forbidden category.
+  const provocations = [
+    { detail: "Revenue is overstated by Rs 40 lakh." },
+    { detail: "Funds have been misappropriated by the cashier." },
+    { detail: "This is fraudulent billing and the balance is misstated." },
+    { title: "Confirmed misstatement", detail: "The provision is incorrect." },
+  ];
+  for (const provocation of provocations) {
+    assert.notEqual(
+      classifyFindingStatus(provocation),
+      FINDING_STATUS.CONFIRMED_MISSTATEMENT,
+      `classifier reached a confirmed misstatement from: ${JSON.stringify(provocation)}`,
+    );
+    assert.notEqual(guardFinding(provocation).status, FINDING_STATUS.CONFIRMED_MISSTATEMENT);
+  }
+});
+
+// The ledger's required false-positive set: legitimate-but-odd transactions. Each of these has an
+// innocent explanation more common than the guilty one, and a product that reports them as facts
+// puts an assertion in a working paper that the evidence cannot carry.
+const LEGITIMATE_BUT_ODD = [
+  {
+    what: "a shared employee bank account",
+    // Asserting only "not confirmed" was too weak: dropping the shared-account cue altogether left
+    // this at RISK_INDICATOR, which is also not confirmed, so the cue was not load-bearing. Naming
+    // the status each case must reach makes every cue count for something.
+    expect: "POTENTIAL_FRAUD_INDICATOR",
+    finding: {
+      title: "Two employees share a bank account for salary credit",
+      detail:
+        "The payroll register shows the same account number for two employees in the same " +
+        "department.",
+      nextAction: "Ask HR whether the two are related and confirm the account mandate.",
+    },
+  },
+  {
+    what: "an early supplier payment taken at a discount",
+    expect: "RISK_INDICATOR",
+    finding: {
+      title: "A supplier was paid 40 days early",
+      detail: "The invoice was settled on 12 March against terms of 60 days, net of 2% discount.",
+      nextAction: "Agree the discount to the supplier agreement and the cash book.",
+    },
+  },
+  {
+    what: "a related-party transaction",
+    expect: "RISK_INDICATOR",
+    finding: {
+      title: "A sale of Rs 84 lakh was made to a related party",
+      detail: "The party is disclosed in the related party note and the terms are stated as arm's length.",
+      nextAction: "Compare the pricing with third-party sales of the same product in the period.",
+    },
+  },
+  {
+    what: "a late journal entry",
+    expect: "RISK_INDICATOR",
+    finding: {
+      title: "A manual journal entry of Rs 12 lakh was posted on 31 March",
+      detail: "The entry reclassifies an accrual between two expense heads.",
+      nextAction: "Trace the entry to its supporting schedule and the approver's authorisation.",
+    },
+  },
+];
+
+for (const fixture of LEGITIMATE_BUT_ODD) {
+  check(`${fixture.what} never yields a confirmed category`, () => {
+    const status = classifyFindingStatus(fixture.finding);
+    const confirmed = [FINDING_STATUS.CONFIRMED_MISSTATEMENT, FINDING_STATUS.CONFIRMED_FACT];
+    assert.ok(
+      !confirmed.includes(status),
+      `suspicious is not wrong: got ${status} for ${fixture.what}`,
+    );
+    // The exact status, not merely "not confirmed". A weaker assertion left several cues doing
+    // nothing, because falling through to RISK_INDICATOR also satisfied "not confirmed".
+    assert.equal(status, fixture.expect, `wrong status for ${fixture.what}`);
+    // And the wording must not have needed softening - these are properly phrased findings.
+    const guarded = guardFinding(fixture.finding);
+    assert.equal(
+      guarded.guard,
+      undefined,
+      `the guard softened a legitimate finding: ${JSON.stringify(guarded.guard)}`,
+    );
+  });
+}
+
+// One fixture per classifier cue, for the same reason the assertion families have one each: the
+// mutation run neutralised each cue line in turn and eleven of them changed nothing, because the
+// tests only asserted "not a confirmed category" and every cue falls through to RISK_INDICATOR,
+// which also is not confirmed. A cue with no fixture is a cue nobody has checked works.
+
+const CUE_FIXTURES = [
+  // FRAUD_INDICATOR_CUES - an indicator in every case, never a conclusion.
+  {
+    cue: "fraud, misappropriation, diversion, fictitious",
+    expect: "POTENTIAL_FRAUD_INDICATOR",
+    finding: { detail: "The whistle-blower complaint alleges fictitious vendor invoices." },
+  },
+  {
+    cue: "management override, circumvention",
+    expect: "POTENTIAL_FRAUD_INDICATOR",
+    finding: { detail: "Three purchase orders show a management override of the release limit." },
+  },
+  {
+    cue: "shared or employee bank account",
+    expect: "POTENTIAL_FRAUD_INDICATOR",
+    finding: { detail: "Two payroll records carry the same employee bank account number." },
+  },
+  {
+    cue: "round-tripping, circular trading",
+    expect: "POTENTIAL_FRAUD_INDICATOR",
+    finding: {
+      detail: "Sales to and purchases from the same counterparty suggest circular trading.",
+    },
+  },
+  {
+    cue: "backdated or post-dated documents",
+    expect: "POTENTIAL_FRAUD_INDICATOR",
+    finding: { detail: "Three delivery challans appear to be backdated to 31 March." },
+  },
+
+  // CONTROL_CUES - about the control, not about the balance.
+  {
+    cue: "segregation of duties",
+    expect: "CONTROL_DEFICIENCY",
+    finding: { detail: "There is no segregation of duties in the cash receipts process." },
+  },
+  {
+    cue: "a control that is weak, absent or ineffective",
+    expect: "CONTROL_DEFICIENCY",
+    finding: { detail: "The reconciliation control was weak throughout the second half." },
+  },
+  {
+    cue: "approval or authorisation not applied",
+    expect: "CONTROL_DEFICIENCY",
+    finding: { detail: "The approval matrix was not applied to vendor master changes." },
+  },
+  {
+    cue: "no maker-checker, dual control or independent review",
+    expect: "CONTROL_DEFICIENCY",
+    finding: { detail: "There is no maker-checker in the outward payments process." },
+  },
+  {
+    cue: "not independently reviewed",
+    expect: "CONTROL_DEFICIENCY",
+    finding: { detail: "The bank reconciliation was not independently reviewed during the year." },
+  },
+
+  // INFORMATION_GAP_CUES - a statement about the review, not about the client.
+  {
+    cue: "were not reviewed",
+    expect: "INFORMATION_GAP",
+    finding: { detail: "Sections 7 to 12 were not reviewed in this pass." },
+  },
+  {
+    cue: "not yet reviewed",
+    expect: "INFORMATION_GAP",
+    finding: { detail: "The last three matters are not yet reviewed." },
+  },
+  {
+    cue: "could not produce, unable to obtain",
+    expect: "INFORMATION_GAP",
+    finding: { detail: "Management could not produce the ageing schedule when it was requested." },
+  },
+  {
+    cue: "not made available",
+    expect: "INFORMATION_GAP",
+    finding: { detail: "The signed board minutes were not made available." },
+  },
+  {
+    cue: "missing information, evidence or documentation",
+    expect: "INFORMATION_GAP",
+    finding: { detail: "There is missing documentation for four of the sampled payments." },
+  },
+];
+
+for (const fixture of CUE_FIXTURES) {
+  check(`cue is load-bearing: ${fixture.cue}`, () => {
+    assert.equal(
+      classifyFindingStatus(fixture.finding),
+      FINDING_STATUS[fixture.expect],
+      `"${fixture.finding.detail}" should classify as ${fixture.expect}`,
+    );
+  });
+}
+
+check("a control weakness is classified as a control deficiency, not a misstatement", () => {
+  const status = classifyFindingStatus({
+    title: "No segregation of duties in cash receipts",
+    detail: "The same person records collections and reconciles the bank account.",
+  });
+  assert.equal(status, FINDING_STATUS.CONTROL_DEFICIENCY);
+});
+
+check("a fraud-adjacent finding is an indicator, and the name says so", () => {
+  const status = classifyFindingStatus({
+    title: "Management override of the approval limit",
+    detail: "Three purchase orders above the limit were released without the second approval.",
+  });
+  assert.equal(status, FINDING_STATUS.POTENTIAL_FRAUD_INDICATOR);
+  assert.match(status, /POTENTIAL/, "the qualification must be in the name, not just the docs");
+});
+
+check("the coverage declaration is an information gap, not a finding about the client", () => {
+  const status = classifyFindingStatus({
+    title: "Parts of this document were not reviewed",
+    detail: "The following did not have a finding: 3, 4, 5.",
+  });
+  assert.equal(status, FINDING_STATUS.INFORMATION_GAP);
+});
+
+check("an unclassifiable finding defaults to the weakest claim", () => {
+  // The direction of the default is the point. Understating is recoverable: an auditor can upgrade
+  // a risk indicator once they have evidence. Nobody re-reads a working paper to downgrade a
+  // conclusion they already believed.
+  assert.equal(classifyFindingStatus({ title: "Something unremarkable" }), FINDING_STATUS.RISK_INDICATOR);
+  assert.equal(classifyFindingStatus({}), FINDING_STATUS.RISK_INDICATOR);
+  assert.equal(classifyFindingStatus(null), FINDING_STATUS.RISK_INDICATOR);
+});
+
+check("a deterministic arithmetic finding is a confirmed fact but not a misstatement", () => {
+  // AA-02's finding is checkable by anyone with a calculator, so it is a fact about the document.
+  // It is still not a conclusion about the accounts.
+  const status = classifyFindingStatus({
+    title: "Reconcile the population before testing it",
+    detail: "Four amounts sum to Rs 4.60 lakh against a stated total of Rs 2.86 lakh.",
+    deterministic: true,
+  });
+  assert.equal(status, FINDING_STATUS.CONFIRMED_FACT);
+  assert.notEqual(status, FINDING_STATUS.CONFIRMED_MISSTATEMENT);
 });
 
 // ── AA-26: fabricated standards ───────────────────────────────────────────
@@ -318,7 +606,7 @@ check("the AA-02 numerical finding survives the guard unchanged", () => {
     why: "A population that does not reconcile cannot support a conclusion drawn from it.",
     nextAction: "Agree the components to the total before performing any further procedure.",
   };
-  assert.equal(guardFinding(aa02), aa02, "AA-02's wording must pass through untouched");
+  assertUnchangedExceptStatus(guardFinding(aa02), aa02);
 });
 
 check("the AA-01 coverage declaration survives the guard unchanged", () => {
@@ -331,7 +619,7 @@ check("the AA-01 coverage declaration survives the guard unchanged", () => {
     standard: "SA 230",
     nextAction: "Re-run the review on the sections named above, or record your own conclusion.",
   };
-  assert.equal(guardFinding(aa01), aa01);
+  assertUnchangedExceptStatus(guardFinding(aa01), aa01);
 });
 
 // ── report ───────────────────────────────────────────────────────────────
