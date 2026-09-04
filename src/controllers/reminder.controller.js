@@ -782,6 +782,55 @@ export async function getTodayReminders(req, res) {
   }
 }
 
+
+// ---- DEACTIVATE EVERY MANUAL REMINDER ----
+
+/**
+ * Turns off every reminder the caller could have turned off one at a time.
+ *
+ * There is no DELETE route for reminders and this does not add one. "Delete" here means what it
+ * has always meant in this controller - `isActive: false` - so a bulk action cannot destroy
+ * anything a single action would only have hidden, and the delivery history on each row survives
+ * for the audit trail.
+ *
+ * Three parts of the filter are load-bearing:
+ *
+ *   - `reminderVisibilityFilter` is reused verbatim, so "all" means exactly the set GET / already
+ *     returns to this caller. A firm admin turns off the firm's; anyone else turns off their own.
+ *     Building a different filter here is how a bulk action ends up reaching further than the
+ *     per-row one it replaces.
+ *   - `source: "MANUAL"` is the bulk equivalent of rejectCaseProjectionMutation. A reminder
+ *     projected from a case, a compliance rule or an engagement is not the user's to switch off,
+ *     and the single-row path already answers 409 for one. Excluding them here skips them quietly
+ *     instead of failing the whole call over rows the person never meant to touch.
+ *   - `isActive: true` keeps the count honest. Without it the reply would claim to have changed
+ *     rows that were already off.
+ *
+ * scheduleVersion and firedOffsets are deliberately untouched. updateReminder bumps those only
+ * when the SCHEDULE changes, and switching a reminder off is not a schedule change.
+ */
+export async function deactivateAllReminders(req, res) {
+  try {
+    const filter = {
+      ...reminderVisibilityFilter(req.user),
+      isActive: true,
+      source: "MANUAL",
+    };
+
+    const result = await Reminder.updateMany(filter, { $set: { isActive: false } });
+
+    // 200 with zero, never 404. "There was nothing to switch off" is a successful outcome for a
+    // bulk action, unlike the single-row path where a missing id is a real error.
+    return res.json({
+      ok: true,
+      deactivated: Number(result?.modifiedCount || 0),
+    });
+  } catch (err) {
+    console.error("Deactivate all reminders error:", err);
+    return res.status(500).json({ error: "Failed to turn off reminders" });
+  }
+}
+
 // ---- UPDATE REMINDER ----
 
 export async function updateReminder(req, res) {

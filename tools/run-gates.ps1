@@ -703,7 +703,10 @@ try {
         # gst-match-rule-contract), GSTR-1 vs GSTR-3B turnover, and ITC vs the credit ledger -
         # plus the header resolver that finally reaches production. Mutation-tested.
         "gst-control-reconciliation-contract",
-        "gst-reconciliation-e2e"
+        "gst-reconciliation-e2e",
+        # The two bulk actions, proved against a real database: each must reach exactly the rows
+        # its per-row equivalent would have reached, and no further.
+        "bulk-actions-e2e"
     )
 
     # The other four unwired suites need a REPLICA SET, not just a mongod: they run multi-document
@@ -735,6 +738,7 @@ try {
         "desktop-release-contract" = "scratch-gates-release"
         "terms-acceptance-contract" = "scratch-gates-terms"
         "gst-reconciliation-e2e" = "scratch-gates-gst-e2e"
+        "bulk-actions-e2e" = "scratch-gates-bulk"
     }
     # Probed once, not assumed. On a machine with no local Mongo the behaviour is unchanged from
     # before -- the variable stays unset and the suites run their Mongo-free subset -- but the

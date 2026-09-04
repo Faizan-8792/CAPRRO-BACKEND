@@ -2,6 +2,7 @@ import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import {
   getDigestInbox,
+  readAllDigestInboxItems,
   getDigestPreview,
   getDigestUnsubscribePreview,
   patchDigestPreferences,
@@ -58,5 +59,11 @@ router.get(
 );
 router.get("/inbox", getDigestInbox);
 router.post("/inbox/:deliveryId/read", readDigestInboxItem);
+
+// Mark the whole inbox read in one call. No extra middleware on purpose: a bulk action must not
+// be gated more tightly than the per-row action it saves the person repeating, and the service
+// applies the same recipient and weekly-authorisation narrowing that the single-row path does.
+// "read-all" cannot be captured by :deliveryId - that route ends in /read and this one does not.
+router.post("/inbox/read-all", readAllDigestInboxItems);
 
 export default router;

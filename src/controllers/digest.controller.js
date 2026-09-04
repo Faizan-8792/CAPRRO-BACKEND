@@ -3,6 +3,7 @@ import {
   applyDigestUnsubscribe,
   getDigestPreferences,
   listDigestInbox,
+  markAllDigestsRead,
   markDigestRead,
   previewDigest,
   previewDigestUnsubscribe,
@@ -107,6 +108,18 @@ export async function readDigestInboxItem(req, res, next) {
       firmId: req.user.firmId,
     });
     return res.json({ ok: true, digest });
+  } catch (error) {
+    return handleDigestError(error, req, res, next);
+  }
+}
+
+export async function readAllDigestInboxItems(req, res, next) {
+  try {
+    const digests = await markAllDigestsRead({
+      userId: actorId(req),
+      firmId: req.user.firmId,
+    });
+    return res.json({ ok: true, digests });
   } catch (error) {
     return handleDigestError(error, req, res, next);
   }

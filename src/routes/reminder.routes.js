@@ -12,6 +12,7 @@ import {
   listReminders,
   getTodayReminders,
   updateReminder,
+  deactivateAllReminders,
   resolveReminderDeliveryAttempt,
 } from "../controllers/reminder.controller.js";
 
@@ -37,6 +38,14 @@ router.post(
   requireFirmAdmin,
   resolveReminderDeliveryAttempt,
 );
+
+// Turn off every manual reminder this caller can see, in one call.
+//
+// Above the :id route only for readability - a literal segment cannot be captured by :id, since
+// this is a POST and that is a PATCH. It carries the router-wide guard and nothing more: a bulk
+// action must not be gated more tightly than the per-row action it saves the person repeating,
+// and reminderVisibilityFilter already scopes it to what they could reach one at a time.
+router.post("/deactivate-all", deactivateAllReminders);
 
 // Update / deactivate reminder
 router.patch("/:id", updateReminder);

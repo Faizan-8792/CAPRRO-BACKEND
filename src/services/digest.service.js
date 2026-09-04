@@ -4683,6 +4683,49 @@ export async function markDigestRead({ deliveryId, userId, firmId }) {
   return { id: String(delivery._id), inAppState: delivery.inApp.state };
 }
 
+
+/**
+ * Marks every digest this caller can see, and has not already read, as read.
+ *
+ * Two clauses carry the authorization and neither may be simplified away:
+ *
+ *   - `recipientUserId: userId`. A digest delivery belongs to one recipient. Marking read is
+ *     personal, never firm-wide, and dropping this would let one member clear a colleague's inbox.
+ *   - the `weeklyAuthorized ? {} : { kind: DAILY_KIND }` narrowing, exactly as markDigestRead
+ *     applies it. Without it a member who is not allowed to see the weekly firm digest would
+ *     silently mark rows read that they were never shown.
+ *
+ * Filtered on AVAILABLE only, unlike the single-row path which accepts AVAILABLE or READ. Sweeping
+ * rows that are already read would overwrite each one's original readAt with today's date, quietly
+ * rewriting when the person actually read it.
+ */
+export async function markAllDigestsRead({ userId, firmId }) {
+  const { weeklyAuthorized } = await requireActiveDigestAccess({
+    userId,
+    firmId,
+  });
+
+  const result = await DigestDelivery.updateMany(
+    combineQueryFilters(
+      strictObjectIdFilter({ firmId, recipientUserId: userId }),
+      {
+        "inApp.state": "AVAILABLE",
+        ...(weeklyAuthorized ? {} : { kind: DAILY_KIND }),
+      },
+    ),
+    {
+      $set: {
+        "inApp.state": "READ",
+        "inApp.readAt": new Date(),
+      },
+    },
+  );
+
+  // Zero is a success here. An inbox with nothing unread is the state the caller asked for, not a
+  // missing record, so this does not throw the 404 the single-row path throws.
+  return { updated: Number(result?.modifiedCount || 0) };
+}
+
 export {
   DAILY_KIND,
   DIGEST_AUTHORITY_DEFER_MS,
