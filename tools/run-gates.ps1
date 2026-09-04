@@ -649,6 +649,7 @@ try {
         "gstr2b-amount-contract",
         "audit-numerical-integrity-contract",
         "audit-coverage-gate-contract",
+        "audit-finding-guard-contract",
         "audit-insights-grounding",
         "audit-insights-accuracy-speed",
         "audit-insights-coverage-and-discipline",

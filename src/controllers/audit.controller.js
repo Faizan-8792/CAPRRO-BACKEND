@@ -10,6 +10,7 @@ import {
 import { AUDIT_TOPIC_REFERENCE } from "../data/audit-topic-reference.js";
 import { buildNumericalIntegrityInsights } from "../services/audit-numerical-integrity.service.js";
 import { buildCoverageLedger } from "../services/audit-coverage.service.js";
+import { guardFindings } from "../services/audit-finding-guard.service.js";
 
 function safeStr(v, max = 4000) {
   return String(v ?? "").slice(0, max);
@@ -1671,7 +1672,12 @@ export async function generateInsights(req, res, next) {
     return res.json({
       ok: true,
       generated: true,
-      insights: [
+      // AA-04 and AA-26. The guard runs LAST, over everything the response carries: the
+      // model's findings, the mandatory procedures, the deterministic numerical finding and the
+      // coverage declaration. Placing it here rather than beside the model call is deliberate -
+      // anything added to this list in future is covered without anyone remembering to opt in,
+      // and no path exists that reaches the reader without passing through it.
+      insights: guardFindings([
         // AA-02 (.kiro/audit-assistance-defects.md). Deterministic and model-free, and it leads
         // for a reason: a population that does not reconcile has to be settled before any
         // procedure performed on it means anything. Listing it below the procedures would invite
@@ -1690,7 +1696,7 @@ export async function generateInsights(req, res, next) {
         // room under it. The one finding that must never be dropped for space is the notice that
         // something was dropped, and coverage is measured against the model's own evidenced
         // findings, so a matter nobody addressed is named rather than passed over in silence.
-        .concat(coverageLedger.findings),
+        .concat(coverageLedger.findings)),
       // The ledger itself travels with the response so a client can show the count rather than
       // inferring completeness from the absence of a warning.
       coverage: {
