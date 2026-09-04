@@ -2212,9 +2212,23 @@ if (listed.status !== 0 || listed.error) {
   // geometry over an array of arrays, and it takes its one dictionary from
   // the already-scanned robust-normalize.service.js rather than carrying a
   // copy, so it adds no new data to the scanned surface either.
+  // Raised from 164 to 165 for src/services/audit-numerical-integrity.service.js,
+  // added to close AA-02 (.kiro/audit-assistance-defects.md): it reconciles the
+  // itemised amounts in submitted audit text against a stated aggregate, so a
+  // population that does not add up is flagged before any procedure is
+  // performed on it. Caught exactly as designed and exactly as every entry
+  // above was -- not by the commit that added the file, but by a full
+  // run-gates.ps1 pass immediately afterwards, which the pin correctly refused.
+  // Confirmed clean before the pin moved, independently of this file:
+  // `make-deploy-archive.ps1 -ValidateOnly` -> "JavaScript secret AST scan:
+  // PASS (165 files)". The new file holds no secret, credential, configuration
+  // or external endpoint of any kind -- it is arithmetic and regular
+  // expressions over a string, reads no environment variable and makes no
+  // network or database call, so it adds nothing to the scanned surface beyond
+  // its own arithmetic.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 164 && result.status === 0,
+    files.length === 165 && result.status === 0,
     result,
   );
 }
