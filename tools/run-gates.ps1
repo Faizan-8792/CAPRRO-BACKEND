@@ -647,6 +647,7 @@ try {
         "import-shape-contract",
         "import-date-order-contract",
         "gstr2b-amount-contract",
+        "audit-numerical-integrity-contract",
         "audit-insights-grounding",
         "audit-insights-accuracy-speed",
         "audit-insights-coverage-and-discipline",

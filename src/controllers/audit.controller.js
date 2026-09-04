@@ -8,6 +8,7 @@ import {
   wasJsonTruncated,
 } from "../services/deepseek-provider.service.js";
 import { AUDIT_TOPIC_REFERENCE } from "../data/audit-topic-reference.js";
+import { buildNumericalIntegrityInsights } from "../services/audit-numerical-integrity.service.js";
 
 function safeStr(v, max = 4000) {
   return String(v ?? "").slice(0, max);
@@ -1666,6 +1667,11 @@ export async function generateInsights(req, res, next) {
       ok: true,
       generated: true,
       insights: [
+        // AA-02 (.kiro/audit-assistance-defects.md). Deterministic and model-free, and it leads
+        // for a reason: a population that does not reconcile has to be settled before any
+        // procedure performed on it means anything. Listing it below the procedures would invite
+        // testing the wrong population first, which is exactly what happened in the review.
+        ...buildNumericalIntegrityInsights(rawText),
         ...buildMandatoryProcedures(
           rawText,
           topicLabel,
