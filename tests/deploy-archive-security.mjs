@@ -2226,9 +2226,27 @@ if (listed.status !== 0 || listed.error) {
   // expressions over a string, reads no environment variable and makes no
   // network or database call, so it adds nothing to the scanned surface beyond
   // its own arithmetic.
+  // Raised from 165 to 168 for three services added to close AA-01, AA-03 and
+  // AA-04/AA-26 (.kiro/audit-assistance-defects.md):
+  // src/services/audit-coverage.service.js accounts for which parts of a
+  // submitted document a review actually reached, so an incomplete answer
+  // cannot ship silently; src/services/audit-contradiction.service.js finds
+  // statements in one document that cannot both hold, and quotes both rather
+  // than resolving the conflict; src/services/audit-finding-guard.service.js
+  // stops a finding asserting a misstatement and stops a fabricated standard
+  // reference reaching the reader. Caught exactly as designed and exactly as
+  // every entry above was -- not by the commits that added the files, but by
+  // the full run-gates.ps1 pass immediately afterwards, which the pin
+  // correctly refused. Confirmed clean before the pin moved, independently of
+  // this file: `make-deploy-archive.ps1 -ValidateOnly` -> "JavaScript secret
+  // AST scan: PASS (168 files)". None of the three holds a secret, credential,
+  // configuration value or external endpoint: all three are regular
+  // expressions and string arithmetic over text passed in by the caller, none
+  // reads an environment variable, and none makes a network or database call,
+  // so they add nothing to the scanned surface beyond their own logic.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 165 && result.status === 0,
+    files.length === 168 && result.status === 0,
     result,
   );
 }
