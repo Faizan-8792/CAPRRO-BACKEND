@@ -2244,9 +2244,19 @@ if (listed.status !== 0 || listed.error) {
   // expressions and string arithmetic over text passed in by the caller, none
   // reads an environment variable, and none makes a network or database call,
   // so they add nothing to the scanned surface beyond their own logic.
+  // Raised from 168 to 169 for src/services/audit-injection.service.js, added to close the
+  // injection half of AA-06 (.kiro/audit-assistance-defects.md): it finds text inside a
+  // submitted document that is addressed to the review tool rather than describing the
+  // client, and reports it rather than filtering it out, because a working paper carrying
+  // directions to an automated reviewer is itself evidence about the engagement. Caught by
+  // the pin exactly as the four entries above were. Confirmed clean before the pin moved,
+  // independently of this file: `make-deploy-archive.ps1 -ValidateOnly` -> "JavaScript
+  // secret AST scan: PASS (169 files)". The file is regular expressions over a string
+  // passed in by the caller; it reads no environment variable, makes no network or
+  // database call, and holds no secret, credential, configuration value or endpoint.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 168 && result.status === 0,
+    files.length === 169 && result.status === 0,
     result,
   );
 }
