@@ -197,6 +197,43 @@ check("a deterministic finding covers the matters it is about", () => {
   );
 });
 
+check("an elided evidence quote still credits the matters it quotes", () => {
+  // Found by diagnosing a live response rather than by any local test. A model reasoning across
+  // two passages joins them in one quote: "first passage ... second passage". That joined string
+  // exists nowhere in the document, so a single containment test could never place it and the
+  // finding earned no coverage credit at all - which is how a live response came to name matters
+  // as unreviewed directly above findings about them.
+  //
+  // Each fragment is still verbatim, so each is checked separately. This only ever ADDS credit,
+  // and only for text the document actually contains.
+  const elided = finding(
+    "Inventory at three locations totals Rs 4.20 crore ... plant capitalised on 15 March 2026",
+  );
+  const coverage = computeCoverage(TEST_3_SHAPE, [elided]);
+  assert.equal(coverage.coveredCount, 2, "both quoted matters are addressed by this one finding");
+  assert.ok(!coverage.uncovered.some((u) => u.label === "1"));
+  assert.ok(!coverage.uncovered.some((u) => u.label === "2"));
+
+  // The unicode ellipsis and the bracketed form are the other two shapes models produce.
+  for (const join of ["…", "[...]"]) {
+    const other = computeCoverage(TEST_3_SHAPE, [
+      finding(
+        `Inventory at three locations totals Rs 4.20 crore ${join} plant capitalised on 15 March 2026`,
+      ),
+    ]);
+    assert.equal(other.coveredCount, 2, `the "${join}" form must split too`);
+  }
+});
+
+check("splitting on an ellipsis never credits a unit for text the document lacks", () => {
+  // The safety side of the same change: fragments are still matched against the document's own
+  // units, so an invented quote earns nothing however it is punctuated.
+  const coverage = computeCoverage(TEST_3_SHAPE, [
+    finding("a sentence that appears nowhere ... another sentence that appears nowhere either"),
+  ]);
+  assert.equal(coverage.coveredCount, 0);
+});
+
 // ── it must not cry wolf ───────────────────────────────────────────────────
 
 check("headings with no audit substance are not counted against coverage", () => {

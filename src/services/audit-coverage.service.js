@@ -75,6 +75,18 @@ const UNIT_OPENERS = [
 
 const WORKING_PAPER_REF_PATTERN = /\[WP Ref:\s*([^\]]+)\]/gi;
 
+/**
+ * How a model joins two separate passages inside one evidence quote: "first passage ... second
+ * passage". The joined string exists nowhere in the document, so it must be split before any
+ * containment test.
+ *
+ * Defined here as a named constant rather than written inline, because writing it inline through a
+ * shell is how it first shipped with every backslash eaten - the "s" and "." lost their escapes,
+ * "." then matched any character, ordinary quotes were split into fragments, and eight tests failed
+ * at once. Standing rule 8 in .kiro/audit-assistance-defects.md: write regexes with an editor.
+ */
+const ELIDED_QUOTE_JOIN = /\s*(?:\.\.\.|…|\[\s*\.\.\.\s*\])\s*/;
+
 /** Whether a unit's own text makes it worth accounting for. */
 function isMaterialUnit(text) {
   if (text.trim().length < MIN_UNIT_TEXT_LENGTH) return false;
@@ -210,15 +222,28 @@ export function computeCoverage(text, insights) {
         break;
       }
 
-      const evidence = normalise(finding?.evidence);
-      if (evidence.length < 12) continue; // too short to locate anything
+      // An evidence quote may be ELIDED: the model joins two passages it is reasoning across with
+      // an ellipsis, as in "Management has confirmed there are no related parties ... The
+      // shareholders schedule shows a director's spouse owns 12%". Such a string exists nowhere in
+      // the document as one span, so a single containment test can never place it, and the finding
+      // earned no coverage credit at all - which is how a live response came to name matters as
+      // unreviewed directly above findings about them.
+      //
+      // Each fragment is still a verbatim quote, so each is checked separately and any one of them
+      // landing in a unit is enough. This only ever ADDS credit, and only for text the document
+      // actually contains; it cannot credit a unit for an invented quote.
+      const fragments = normalise(finding?.evidence)
+        .split(ELIDED_QUOTE_JOIN)
+        .map((part) => part.trim())
+        .filter((part) => part.length >= 12);
+      if (fragments.length === 0) continue; // too short to locate anything
 
       // Containment in a unit IS the grounding check. Every unit's text is a slice of the
       // submitted document, so a quote found inside a unit is necessarily found in the document -
       // an earlier version tested both and the document-level test could never fail on its own.
       // Mutation testing exposed it as dead logic rather than defence in depth, and dead logic in
       // a gate is a liability: it reads like a safeguard and guarantees nothing.
-      if (unitText.includes(evidence)) {
+      if (fragments.some((fragment) => unitText.includes(fragment))) {
         coveredIds.add(unit.id);
         break;
       }
