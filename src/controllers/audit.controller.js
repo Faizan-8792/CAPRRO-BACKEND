@@ -13,6 +13,7 @@ import { buildCoverageLedger } from "../services/audit-coverage.service.js";
 import { guardFindings } from "../services/audit-finding-guard.service.js";
 import { buildContradictionInsights } from "../services/audit-contradiction.service.js";
 import { buildInjectionInsights } from "../services/audit-injection.service.js";
+import { buildMaterialityGuidance } from "../services/audit-materiality.service.js";
 
 function safeStr(v, max = 4000) {
   return String(v ?? "").slice(0, max);
@@ -543,12 +544,34 @@ function buildMandatoryProcedures(
   evidencedInsights = [],
 ) {
   const statedMateriality = extractStatedMateriality(rawText);
+
+  // AA-07. The stated-materiality branch is unchanged: when the working paper states a figure, the
+  // existing deterministic extraction already says something specific about it.
+  //
+  // The OTHER branch was the defect. "Determine materiality and performance materiality for this
+  // area and document the basis for sample size and item selection" would read identically on a
+  // blank page - it told an auditor to do the thing they already knew they must do, and said
+  // nothing about the figures sitting in front of both of them. Where the document supplies
+  // quantitative bases, they are now named with their amounts, with what makes each one suitable,
+  // and with precisely which inputs are still missing. It never names a percentage: choosing a
+  // benchmark and a rate depends on the entity, its users and the engagement partner, and an
+  // invented number would be copied into a file and relied on.
+  const materialityGuidance = statedMateriality ? null : buildMaterialityGuidance(rawText);
+
   const materialityDetail = statedMateriality
     ? `This working paper states overall materiality as Rs ${formatRupeesForSentence(statedMateriality)}. Confirm performance materiality is documented separately (typically a proportion of the overall figure, not the same number) and use it, not the overall figure, as the basis for sample size and item selection.`
-    : "Determine materiality and performance materiality for this area and document the basis for sample size and item selection.";
+    : materialityGuidance
+      ? materialityGuidance.detail
+      // Still the old wording when the document supplies nothing to work with. With no figure and
+      // no base, there is nothing specific to say, and saying something specific anyway would be
+      // the invention this whole defect is about.
+      : "Determine materiality and performance materiality for this area and document the basis for sample size and item selection.";
+
   const materialityNextAction = statedMateriality
     ? "Confirm the performance materiality figure is documented, then record the sample basis before testing individual items."
-    : "Record the materiality figure and sample basis in the working paper before testing individual items.";
+    : materialityGuidance
+      ? materialityGuidance.nextAction
+      : "Record the materiality figure and sample basis in the working paper before testing individual items.";
 
   const areaLabel =
     typeof topicLabel === "string" && topicLabel.trim().length > 0
@@ -557,6 +580,11 @@ function buildMandatoryProcedures(
 
   const procedures = [
     {
+      // The title is deliberately UNCHANGED. AA-07 is about the detail being a placeholder that
+      // would read identically on a blank page, not about the title, and two existing suites
+      // identify this mandatory procedure by its exact title in order to separate mandatory from
+      // model-derived findings. Retitling it broke both of them for no defect-related gain - the
+      // kind of unnecessary rewrite of working machinery the ledger warns against.
       title: "Determine materiality and sample basis",
       detail: materialityDetail,
       risk: "medium",
