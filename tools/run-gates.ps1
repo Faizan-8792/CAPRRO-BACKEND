@@ -648,6 +648,7 @@ try {
         "import-date-order-contract",
         "gstr2b-amount-contract",
         "audit-numerical-integrity-contract",
+        "audit-coverage-gate-contract",
         "audit-insights-grounding",
         "audit-insights-accuracy-speed",
         "audit-insights-coverage-and-discipline",

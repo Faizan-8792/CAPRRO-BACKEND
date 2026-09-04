@@ -9,6 +9,7 @@ import {
 } from "../services/deepseek-provider.service.js";
 import { AUDIT_TOPIC_REFERENCE } from "../data/audit-topic-reference.js";
 import { buildNumericalIntegrityInsights } from "../services/audit-numerical-integrity.service.js";
+import { buildCoverageLedger } from "../services/audit-coverage.service.js";
 
 function safeStr(v, max = 4000) {
   return String(v ?? "").slice(0, max);
@@ -1663,6 +1664,10 @@ export async function generateInsights(req, res, next) {
       ...coveragePassInsights,
     ];
 
+    // AA-01. Computed once, before the response, so the appended declaration and the reported
+    // counts come from a single measurement rather than two that could disagree.
+    const coverageLedger = buildCoverageLedger(rawText, allEvidencedInsights);
+
     return res.json({
       ok: true,
       generated: true,
@@ -1679,7 +1684,21 @@ export async function generateInsights(req, res, next) {
           allEvidencedInsights,
         ),
         ...allEvidencedInsights,
-      ].slice(0, MAX_TOTAL_INSIGHTS),
+      ]
+        .slice(0, MAX_TOTAL_INSIGHTS)
+        // AA-01. The coverage declaration is APPENDED after the ceiling rather than competing for
+        // room under it. The one finding that must never be dropped for space is the notice that
+        // something was dropped, and coverage is measured against the model's own evidenced
+        // findings, so a matter nobody addressed is named rather than passed over in silence.
+        .concat(coverageLedger.findings),
+      // The ledger itself travels with the response so a client can show the count rather than
+      // inferring completeness from the absence of a warning.
+      coverage: {
+        unitsIdentified: coverageLedger.coverage.unitCount,
+        unitsAddressed: coverageLedger.coverage.coveredCount,
+        unitsUnaddressed: coverageLedger.coverage.uncoveredCount,
+        complete: coverageLedger.complete,
+      },
       ...(partial || coveragePartial ? { partial: true } : {}),
     });
   } catch (err) {
