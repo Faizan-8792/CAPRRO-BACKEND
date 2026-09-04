@@ -8,8 +8,8 @@ function deepFreeze(value) {
 }
 
 const termsDocument = {
-  version: "2026-08-23",
-  effectiveDate: "2026-08-23",
+  version: "2026-09-04",
+  effectiveDate: "2026-09-04",
   title: "Terms & Conditions",
   summary:
     "Review these terms before signing in. CA PRO Toolkit supports professional review and organisation; it does not file, submit, approve, or replace professional judgment.",
@@ -63,6 +63,26 @@ const termsDocument = {
         "You retain ownership of the data and content you submit. You grant us the limited rights needed to operate the Service, such as storing, processing, and displaying your content to you and your authorised firm members. Our handling of personal data is described in the Privacy Policy.",
       ],
       bullets: [],
+    },
+    {
+      // Added 2026-09-04. These are the precautions the desktop app used to repeat as thirteen
+      // separate dismissible bars, one per screen. Stating them here, in the document a person
+      // reads and accepts before signing in, is what lets the app stop repeating them - so the
+      // wording has to be specific enough to stand on its own. "Third-party AI providers" in
+      // section 8 was true but told nobody what actually leaves their machine.
+      heading: "6A. What leaves your device, and what does not",
+      paragraphs: [
+        "This section describes what the Service sends outside your device when you use a model-assisted or text-reading feature. Accepting these Terms is your consent to that processing. You can withdraw it at any time: in the Windows app, Settings carries a Model-assisted review switch, and turning it off stops text being sent for suggestions while the rest of the Service keeps working.",
+      ],
+      bullets: [
+        "Text you submit for review is sent to our server and on to a third-party AI language model. GSTIN, PAN, email addresses, Aadhaar numbers and phone numbers are masked before it leaves. Names, amounts, addresses and invoice numbers are NOT masked. Do not submit content you are unwilling to send outside your firm.",
+        "A document or notice you ask the Service to read is processed the same way, by a third-party service, to convert it into text.",
+        "File text is extracted on your own device first where the feature allows it, and source files are not retained after processing.",
+        "The Windows app keeps a local, encrypted copy of what it last read so you can keep reading it without a connection. Its Security page lists what that copy holds and lets you remove it.",
+        "The Service does not file, submit, pay, or e-sign anything on a government portal. Where a record reads \"filed\", a person filed it elsewhere and recorded that fact here.",
+        "Recording a decision, disposition, or follow-up updates our own record only. The Service contacts no supplier, client, or authority on your behalf; drafts it produces are yours to send yourself.",
+        "Anything produced with model assistance is a draft for your review, never a conclusion, an approval, or a professional opinion. Extracted dates, amounts and sections stay unconfirmed until a person confirms them.",
+      ],
     },
     {
       heading: "7. Intellectual property",

@@ -180,8 +180,15 @@ try {
     // Pinned deliberately so a text edit cannot move the document without someone updating this
     // line. Bumped 2026-08-01 -> 2026-08-23 by L13, which named the counterparty, named Kolkata as
     // the forum, replaced the personal contact address, and added section 17 (grievance officer).
-    assert.equal(CURRENT_TERMS.version, "2026-08-23");
-    assert.equal(CURRENT_TERMS.effectiveDate, "2026-08-23");
+    // Bumped 2026-08-23 -> 2026-09-04 to add section 6A, which states what actually leaves the
+    // device: that submitted text reaches a third-party language model, which identifiers are
+    // masked before it does and which are NOT, that the Service files nothing and contacts nobody,
+    // and that model output is a draft. The desktop app used to repeat those points as thirteen
+    // separate dismissible bars; stating them in the accepted document is what lets it stop. The
+    // version had to move so every existing user reads them, which is exactly what pinning it here
+    // is for.
+    assert.equal(CURRENT_TERMS.version, "2026-09-04");
+    assert.equal(CURRENT_TERMS.effectiveDate, "2026-09-04");
     assert.equal(Object.isFrozen(CURRENT_TERMS), true);
     assert.equal(Object.isFrozen(CURRENT_TERMS.sections), true);
   });
