@@ -11,6 +11,7 @@ import { AUDIT_TOPIC_REFERENCE } from "../data/audit-topic-reference.js";
 import { buildNumericalIntegrityInsights } from "../services/audit-numerical-integrity.service.js";
 import { buildCoverageLedger } from "../services/audit-coverage.service.js";
 import { guardFindings } from "../services/audit-finding-guard.service.js";
+import { buildContradictionInsights } from "../services/audit-contradiction.service.js";
 
 function safeStr(v, max = 4000) {
   return String(v ?? "").slice(0, max);
@@ -1683,6 +1684,12 @@ export async function generateInsights(req, res, next) {
         // procedure performed on it means anything. Listing it below the procedures would invite
         // testing the wrong population first, which is exactly what happened in the review.
         ...buildNumericalIntegrityInsights(rawText),
+        // AA-03. Also deterministic, and placed high for the same reason: a document that
+        // contradicts itself has already supplied both halves of the finding, so it needs no
+        // further evidence to be worth acting on. It states the conflict and refuses to resolve
+        // it - which one is true is a question for evidence, and choosing here would delete the
+        // most useful thing on the page.
+        ...buildContradictionInsights(rawText),
         ...buildMandatoryProcedures(
           rawText,
           topicLabel,
