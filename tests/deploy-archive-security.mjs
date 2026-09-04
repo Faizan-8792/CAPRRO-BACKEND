@@ -2244,6 +2244,15 @@ if (listed.status !== 0 || listed.error) {
   // expressions and string arithmetic over text passed in by the caller, none
   // reads an environment variable, and none makes a network or database call,
   // so they add nothing to the scanned surface beyond their own logic.
+  // Raised from 169 to 170 for src/services/audit-materiality.service.js, added to close
+  // AA-07: it names the quantitative bases a document supplies with their figures and the
+  // inputs still missing before a materiality figure can be set, replacing a placeholder
+  // that would have read identically on a blank page. It never names a percentage.
+  // Confirmed clean before the pin moved, independently of this file:
+  // `make-deploy-archive.ps1 -ValidateOnly` -> "JavaScript secret AST scan: PASS (170
+  // files)". It is regular expressions and arithmetic over a caller-supplied string,
+  // reads no environment variable, makes no network or database call, and reuses the
+  // already-scanned amount parser rather than carrying its own copy.
   // Raised from 168 to 169 for src/services/audit-injection.service.js, added to close the
   // injection half of AA-06 (.kiro/audit-assistance-defects.md): it finds text inside a
   // submitted document that is addressed to the review tool rather than describing the
@@ -2256,7 +2265,7 @@ if (listed.status !== 0 || listed.error) {
   // database call, and holds no secret, credential, configuration value or endpoint.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 169 && result.status === 0,
+    files.length === 170 && result.status === 0,
     result,
   );
 }
