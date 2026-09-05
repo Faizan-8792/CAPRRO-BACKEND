@@ -663,6 +663,22 @@ check("every finding carries a subsequent-event classification field", () => {
   }
 });
 
+check("every response carries a cross-issue link list", () => {
+  // AA-18. Owed on every path, including the ones with no findings, where it is honestly empty -
+  // the same reason the coverage object and the register are owed there.
+  for (const { path, state } of RESPONSES) {
+    assert.ok(
+      Array.isArray(state.body.crossIssueLinks),
+      `${path} carries no crossIssueLinks list`,
+    );
+    for (const link of state.body.crossIssueLinks) {
+      assert.notEqual(link.fromIndex, link.toIndex, `${path}: a finding is linked to itself`);
+      assert.ok(link.because?.length > 30, `${path}: a link does not say why`);
+      assert.ok(link.then?.length > 20, `${path}: a link does not say what to do about the pair`);
+    }
+  }
+});
+
 check("the flat shape the shipped clients read is never removed", () => {
   // The desktop reads Title, Detail, Risk, Standard, Evidence, Why, NextAction; the extension reads
   // the same wire shape. Adding the structured object must not have quietly replaced any of them.

@@ -86,6 +86,8 @@ const SCHEMA_THE_CALLER_ASKED_FOR = [
   "fraudTriangle",
   "estimateFramework",
   "alternativeProcedures",
+  // AA-11 / AA-12 joined the schema.
+  "stratification",
 ];
 
 check("every section the caller's schema asked for is present", () => {

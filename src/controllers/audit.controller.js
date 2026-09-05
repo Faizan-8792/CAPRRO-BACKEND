@@ -16,6 +16,7 @@ import { buildInjectionInsights } from "../services/audit-injection.service.js";
 import { buildMaterialityGuidance } from "../services/audit-materiality.service.js";
 import { withStructure } from "../services/audit-finding-model.service.js";
 import { buildMisstatementRegister } from "../services/audit-aggregation.service.js";
+import { findCrossIssueLinks } from "../services/audit-linking.service.js";
 
 function safeStr(v, max = 4000) {
   return String(v ?? "").slice(0, max);
@@ -706,6 +707,11 @@ function assembleInsightsBody({
     // and exceeds-materiality are reported separately, because the interesting case is when both
     // are true at once.
     misstatementRegister: buildMisstatementRegister(insights, statedMaterialityPaise),
+    // AA-18. A covenant breach in one finding and going concern in another are the same problem
+    // seen twice. Computed across the whole list because that is the only place the connection
+    // exists, and each link states its direction, its reason and what to do about the pair - a
+    // link that says only "these are related" leaves the reader where they started.
+    crossIssueLinks: findCrossIssueLinks(insights),
     // AA-01. Present on EVERY response, including the ones that produce no findings at all. A
     // response with no findings and no coverage object is indistinguishable from a complete review
     // that found nothing, and that is the exact silence this defect is about. Where nothing was
@@ -745,6 +751,9 @@ function coverageOnlyBody(rawText) {
     // honest register is an empty one totalling zero, not a missing key. The response invariants
     // caught this omission before it shipped.
     misstatementRegister: buildMisstatementRegister([], null),
+    // Owed here too: a client reading it would otherwise get undefined on exactly the paths where
+    // nothing was examined. With no findings there are no links, which is an empty list.
+    crossIssueLinks: [],
   };
 }
 

@@ -26,6 +26,7 @@ import {
   classifySubsequentEvent,
   findQualitativeMateriality,
 } from "./audit-aggregation.service.js";
+import { buildStratificationPlan } from "./audit-linking.service.js";
 import {
   assessFraudTriangle,
   buildAlternativeProcedures,
@@ -67,6 +68,7 @@ export const STRUCTURED_SECTIONS = Object.freeze([
   "fraudTriangle",
   "estimateFramework",
   "alternativeProcedures",
+  "stratification",
 ]);
 
 /** The assertions an audit procedure can be directed at. */
@@ -554,6 +556,12 @@ export function toStructuredFinding(flat) {
   // AA-25. What to do when the confirmation does not come back, ending where it has to end: an
   // unanswered confirmation that leaves no trace is indistinguishable from one never sent.
   structured.alternativeProcedures = buildAlternativeProcedures(subject);
+
+  // AA-11 / AA-12. Where the document's own wording divides the population, each stratum with the
+  // reason it carries different risk and the approach that follows. Null when the text names no
+  // sub-population: inventing strata would tell an auditor the population divides in a way the
+  // document never said.
+  structured.stratification = buildStratificationPlan(subject);
 
   return structured;
 }
