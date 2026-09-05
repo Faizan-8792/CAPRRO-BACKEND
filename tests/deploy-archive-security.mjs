@@ -2244,6 +2244,13 @@ if (listed.status !== 0 || listed.error) {
   // expressions and string arithmetic over text passed in by the caller, none
   // reads an environment variable, and none makes a network or database call,
   // so they add nothing to the scanned surface beyond their own logic.
+  // Raised from 173 to 174 for src/services/audit-linking.service.js, added to close
+  // AA-11, AA-12 and AA-18: it names the sub-populations a document's own wording
+  // divides, with the residual stated explicitly, and links findings that are the same
+  // problem seen twice. Confirmed clean before the pin moved, independently of this
+  // file: `make-deploy-archive.ps1 -ValidateOnly` -> "JavaScript secret AST scan: PASS
+  // (174 files)". Pattern matching over caller-supplied text; no environment variable,
+  // no network or database call, no secret, credential, configuration value or endpoint.
   // Raised from 172 to 173 for src/services/audit-reasoning.service.js, added to
   // close AA-05, AA-15, AA-23, AA-24 and AA-25: it supplies the question that must be
   // answered before a treatment follows, the escalation ladder for a refusal, the fraud
@@ -2291,7 +2298,7 @@ if (listed.status !== 0 || listed.error) {
   // database call, and holds no secret, credential, configuration value or endpoint.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 173 && result.status === 0,
+    files.length === 174 && result.status === 0,
     result,
   );
 }
