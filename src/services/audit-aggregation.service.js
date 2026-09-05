@@ -26,14 +26,24 @@ export const SUBSEQUENT_EVENT = Object.freeze({
 /**
  * Text that says IN WORDS that an event falls after the reporting date.
  *
- * "in April" and "in May" survive only as a last-resort fallback for a document that states no
- * reporting date at all, where an Indian 31 March year-end is the overwhelming default. They are
- * no longer the main route, and must not be: hardcoding two month names meant an event in June,
- * July or August was not recognised as a subsequent event at all. On a schedule of nine events
- * spanning May to August, seven were invisible - not misclassified, never seen.
+ * April and May survive only as a last-resort fallback for a document that states no reporting
+ * date at all, where an Indian 31 March year-end is the overwhelming default. They are no longer
+ * the main route, and must not be: hardcoding two month names meant an event in June, July or
+ * August was not recognised as a subsequent event at all. On a schedule of nine events spanning
+ * May to August, seven were invisible - not misclassified, never seen.
+ *
+ * The two months stay capped on purpose rather than extended to every month after March. For an
+ * Indian financial year running 1 April to 31 March, October is INSIDE the year under audit, not
+ * after it - so "any month after March" would be wrong, not merely loose. April and May are the
+ * window between a March year end and the date a report is normally signed.
+ *
+ * AA-34: the month is now recognised however the date is WRITTEN. Requiring the preposition "in"
+ * meant "On 12 April the customer returned goods" - the ordinary way a date appears in an audit
+ * document - was not recognised, while "In April the customer returned goods" was. The shapes
+ * below are date shapes, not one preposition: a temporal preposition, a day number, or a year.
  */
 const SUBSEQUENT_WINDOW =
-  /\bsubsequent(?:ly)? to the (?:year|reporting|balance sheet)[\s-]?(?:end|date)\b|\bafter the (?:year|reporting|balance sheet)[\s-]?(?:end|date)\b|\bpost[\s-]?(?:year|balance sheet)[\s-]?(?:end|date)\b|\bsubsequent event\b|\bin April\b|\bin May\b/i;
+  /\bsubsequent(?:ly)? to the (?:year|reporting|balance sheet)[\s-]?(?:end|date)\b|\bafter the (?:year|reporting|balance sheet)[\s-]?(?:end|date)\b|\bpost[\s-]?(?:year|balance sheet)[\s-]?(?:end|date)\b|\bsubsequent event\b|\b(?:on|in|during|by|dated|until|till)\s+(?:the\s+)?(?:\d{1,2}(?:st|nd|rd|th)?\s+)?(?:April|May)\b|\b\d{1,2}(?:st|nd|rd|th)?\s+(?:April|May)\b|\b(?:April|May)\s+\d{1,2}(?:st|nd|rd|th)?\b|\b(?:April|May)\s+\d{4}\b/i;
 
 const MONTH_NAMES = [
   "january",

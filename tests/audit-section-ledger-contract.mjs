@@ -34,8 +34,10 @@ import {
 } from "../src/services/audit-coverage.service.js";
 import {
   buildSubsequentEventRegister,
+  classifySubsequentEvent,
   findReportingDate,
 } from "../src/services/audit-aggregation.service.js";
+import { deriveSampling } from "../src/services/audit-finding-model.service.js";
 
 let passed = 0;
 let failed = 0;
@@ -352,6 +354,79 @@ check("a document with no subsequent events gets no register rather than an empt
     "2. Trade receivables are Rs 3.00 crore.",
   ].join("\n");
   assert.equal(buildSubsequentEventRegister(extractDocumentSections(plain), plain), null);
+});
+
+// ── AA-34: the fallback month is recognised however the date is written ───
+//
+// Found by running the owner's own Test #6 OUTPUT file through production. "In April the customer
+// returned goods" was recognised and "On 12 April the customer returned goods" was not, because
+// the no-year-end fallback required the preposition "in" to sit immediately before the month. A
+// date written the ordinary way was invisible - the same one-surface-form brittleness as AA-32's
+// hardcoded months, one level down.
+
+check("a fallback month is recognised however the date is written", () => {
+  // No stated reporting date in any of these, so only the fallback can reach them. Every one is
+  // the same event written the way a real document writes a date.
+  const forms = [
+    "On 12 April the customer returned Rs 9.8 lakh of goods.",
+    "In April the customer returned Rs 9.8 lakh of goods.",
+    "The return occurred on 12 April 2026.",
+    "12 April 2026 - the customer returned the goods.",
+    "April 2026 saw the customer return the goods.",
+  ];
+  for (const text of forms) {
+    const verdict = classifySubsequentEvent(text);
+    assert.notEqual(
+      verdict.classification,
+      null,
+      `not recognised as a subsequent event: ${text}`,
+    );
+  }
+});
+
+check("the fallback still refuses text that names no post-March date", () => {
+  // The over-block half. A month inside the year under audit, or no date at all, must stay out -
+  // for an Indian financial year running 1 April to 31 March, March is IN the year, not after it.
+  for (const text of [
+    "Revenue for the year is Rs 12 crore.",
+    "The March invoice was settled in full.",
+    "The company operates from April premises leased in 2019.",
+  ]) {
+    assert.equal(
+      classifySubsequentEvent(text).classification,
+      null,
+      `wrongly treated as a subsequent event: ${text}`,
+    );
+  }
+});
+
+// ── AA-35: a population size written as a word ────────────────────────────
+
+check("a population size written as a word is read", () => {
+  // "five disputed receivable balances totalling Rs 86 lakh" is how an audit file says it at least
+  // as often as "5", and reading it as null left the product with no view on whether five items
+  // should be tested in full rather than sampled.
+  assert.equal(deriveSampling("five disputed receivable balances totaling Rs 86 lakh").populationSize, 5);
+  assert.equal(deriveSampling("seventeen journal entries posted at the year end").populationSize, 17);
+  assert.equal(deriveSampling("twenty items were selected").populationSize, 20);
+
+  // Digits keep working, including the AA-33 case with a qualifier in the way.
+  assert.equal(deriveSampling("61 manual journal entries posted after the year end").populationSize, 61);
+});
+
+check("a small worded population is reported as test-in-full, not sampled", () => {
+  // The point of reading the number at all. Five items is not a sampling problem.
+  const sampling = deriveSampling("five disputed receivable balances totaling Rs 86 lakh");
+  assert.equal(sampling.applicable, false, "sampling was proposed for a population of five");
+  assert.match(sampling.basis, /Testing all of them/i);
+});
+
+check("a word that is not a count does not become a population", () => {
+  // The over-block half again. Without the population noun there is no population, whatever
+  // numbers appear nearby.
+  assert.equal(deriveSampling("a five-year plan was approved").populationSize, null);
+  assert.equal(deriveSampling("Inventory is stated at Rs 44.60 crore of inventory items").populationSize, null);
+  assert.equal(deriveSampling("the four directors signed the accounts").populationSize, null);
 });
 
 // ── report ────────────────────────────────────────────────────────────────

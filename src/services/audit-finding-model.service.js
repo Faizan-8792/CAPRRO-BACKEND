@@ -240,8 +240,42 @@ export function deriveEvidenceRank(evidenceText) {
 // The lookahead keeps scale words out of the gap, so "Rs 44.60 crore of inventory items" cannot be
 // read as a population of 60. Without it the fix would trade a missed population for an invented
 // one, which is the worse error of the two.
-const POPULATION_SIZE =
-  /\b(\d{1,5})\s+(?:(?!lakhs?|lacs?|crores?|thousand|million|billion)[A-Za-z-]+\s+){0,3}(?:journal entr|entries|items|invoices|vouchers|transactions|balances|samples)/i;
+//
+// AA-34/AA-35: the count may also be written as a WORD. "five disputed receivable balances
+// totalling Rs 86 lakh" is how an audit file says it at least as often as "5", and reading it as
+// null meant the product had no view on whether five items should be tested in full. Bounded at
+// twenty on purpose: past that, documents use digits, and a longer list of words would be
+// guesswork rather than recognition.
+const NUMBER_WORDS = Object.freeze({
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  thirteen: 13,
+  fourteen: 14,
+  fifteen: 15,
+  sixteen: 16,
+  seventeen: 17,
+  eighteen: 18,
+  nineteen: 19,
+  twenty: 20,
+});
+
+const POPULATION_NOUNS =
+  "journal entr|entries|items|invoices|vouchers|transactions|balances|samples";
+
+const POPULATION_SIZE = new RegExp(
+  `\\b(\\d{1,5}|${Object.keys(NUMBER_WORDS).join("|")})\\s+(?:(?!lakhs?|lacs?|crores?|thousand|million|billion)[A-Za-z-]+\\s+){0,3}(?:${POPULATION_NOUNS})`,
+  "i",
+);
 // No closing \b: these are STEMS, and "journal entr" followed by \b cannot match "journal entries".
 // That is the fifth time this one bug class has bitten in this project - see standing rule 6 in
 // .kiro/audit-assistance-defects.md - and it was caught here by a fixture, again, rather than by
@@ -260,7 +294,13 @@ const WHOLE_POPULATION_CUE =
 export function deriveSampling(text) {
   const value = typeof text === "string" ? text : "";
   const match = POPULATION_SIZE.exec(value);
-  const population = match ? Number(match[1]) : null;
+  // The count may be digits or a word; a word is resolved through NUMBER_WORDS rather than being
+  // coerced, because Number("five") is NaN and NaN would silently become "no population stated".
+  const raw = match ? match[1] : null;
+  const population =
+    raw === null
+      ? null
+      : (NUMBER_WORDS[raw.toLowerCase()] ?? (Number.isFinite(Number(raw)) ? Number(raw) : null));
 
   if (population === null) {
     return {
