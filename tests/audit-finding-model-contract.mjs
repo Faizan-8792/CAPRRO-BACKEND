@@ -80,6 +80,12 @@ const SCHEMA_THE_CALLER_ASKED_FOR = [
   // is a deliberate edit here rather than something the code under test does silently.
   "subsequentEvent",
   "qualitativeMateriality",
+  // AA-05, AA-15, AA-23, AA-24 and AA-25 joined the schema. Listed explicitly, like every other
+  // section, so growing it stays a deliberate edit here.
+  "precedentQuestions",
+  "fraudTriangle",
+  "estimateFramework",
+  "alternativeProcedures",
 ];
 
 check("every section the caller's schema asked for is present", () => {

@@ -27,6 +27,13 @@ import {
   findQualitativeMateriality,
 } from "./audit-aggregation.service.js";
 import {
+  assessFraudTriangle,
+  buildAlternativeProcedures,
+  buildEscalationPath,
+  buildEstimateFramework,
+  findPrecedentQuestions,
+} from "./audit-reasoning.service.js";
+import {
   FINDING_STATUS,
   classifyFindingStatus,
   isStatusPermitted,
@@ -56,6 +63,10 @@ export const STRUCTURED_SECTIONS = Object.freeze([
   "priority",
   "subsequentEvent",
   "qualitativeMateriality",
+  "precedentQuestions",
+  "fraudTriangle",
+  "estimateFramework",
+  "alternativeProcedures",
 ]);
 
 /** The assertions an audit procedure can be directed at. */
@@ -522,6 +533,27 @@ export function toStructuredFinding(flat) {
   // AA-17. Why this item survives a purely quantitative filter. An empty list is the honest answer
   // for an ordinary difference; if everything were qualitatively material, nothing would be.
   structured.qualitativeMateriality = findQualitativeMateriality(subject);
+
+  // AA-05. The question that must be answered BEFORE any treatment follows, plus the comparability
+  // factors without which the tempting conclusion is unsupported. Empty when the document raises no
+  // such trap - producing one for every mention of depreciation would bury the cases that matter.
+  structured.precedentQuestions = findPrecedentQuestions(subject);
+
+  // AA-15. The full ladder, in order, whenever the text records a refusal. Returning the whole
+  // ladder is what stops a refusal reading as an automatic qualification.
+  structured.escalation = buildEscalationPath(subject);
+
+  // AA-23. Which legs of the fraud triangle the text actually supports, and - the useful half -
+  // which it does not. Never a score: "two of three" would be read as a probability.
+  structured.fraudTriangle = assessFraudTriangle(subject);
+
+  // AA-24. The eight questions an accounting estimate has to answer, in full. The one most often
+  // skipped is historical accuracy, which is the one that catches a method wrong for years.
+  structured.estimateFramework = buildEstimateFramework(subject);
+
+  // AA-25. What to do when the confirmation does not come back, ending where it has to end: an
+  // unanswered confirmation that leaves no trace is indistinguishable from one never sent.
+  structured.alternativeProcedures = buildAlternativeProcedures(subject);
 
   return structured;
 }
