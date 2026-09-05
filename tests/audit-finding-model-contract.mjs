@@ -28,6 +28,8 @@ import {
   PRIORITY,
   SUFFICIENCY,
   deriveProcedureParts,
+  WORKING_PAPER_STATUS,
+  STATUS_ONLY_A_PERSON_MAY_SET,
 } from "../src/services/audit-finding-model.service.js";
 
 let passed = 0;
@@ -581,6 +583,145 @@ check("an ordinary finding takes its triage from its risk rating", () => {
   assert.equal(toStructuredFinding({ title: "a", detail: "b", risk: "high" }).priority, PRIORITY.HIGH);
   assert.equal(toStructuredFinding({ title: "a", detail: "b", risk: "low" }).priority, PRIORITY.LOW);
   assert.equal(toStructuredFinding({ title: "a", detail: "b", risk: "medium" }).priority, PRIORITY.MEDIUM);
+});
+
+// ── AA-27: audit status, not model confidence ─────────────────────────────
+
+check("the seven working-paper statuses the ledger asks for all exist", () => {
+  // Written out here rather than read from the code, for the same reason the schema list is: a test
+  // must not take its expectations from the thing it tests.
+  const EXPECTED = [
+    "AI DRAFT",
+    "EVIDENCE PENDING",
+    "AUDITOR REVIEW REQUIRED",
+    "POTENTIAL MISSTATEMENT",
+    "FRAUD INDICATOR \u2014 NOT A CONCLUSION",
+    "PARTNER ATTENTION",
+    "CONCLUDED BY AUDITOR",
+  ];
+  assert.deepEqual([...Object.values(WORKING_PAPER_STATUS)].sort(), [...EXPECTED].sort());
+});
+
+check("the fraud status carries its own qualification in the label", () => {
+  // This is the status most likely to be read as a verdict, so the label says what it is not.
+  assert.match(WORKING_PAPER_STATUS.FRAUD_INDICATOR, /NOT A CONCLUSION/);
+});
+
+check("the product can never mark its own output concluded", () => {
+  // The AA-04 principle applied to the UI: only a person can say they have finished with a matter,
+  // and a tool that marks its own output concluded has removed the step that made it safe.
+  assert.equal(STATUS_ONLY_A_PERSON_MAY_SET, WORKING_PAPER_STATUS.CONCLUDED_BY_AUDITOR);
+  const provocations = [
+    {
+      title: "Agree the balance",
+      detail: "Agree the balance to the confirmation received directly from the bank.",
+      evidence: "confirmation received directly from the bank",
+      nextAction: "Done.",
+    },
+    { title: "Concluded", detail: "This matter is concluded by the auditor.", evidence: "concluded" },
+    { title: "x", detail: "y" },
+    {},
+  ];
+  for (const p of provocations) {
+    assert.notEqual(
+      toStructuredFinding(p).workingPaperStatus,
+      WORKING_PAPER_STATUS.CONCLUDED_BY_AUDITOR,
+      `the product concluded for the auditor: ${JSON.stringify(p).slice(0, 60)}`,
+    );
+  }
+});
+
+const STATUS_FIXTURES = [
+  {
+    expect: "FRAUD_INDICATOR",
+    finding: {
+      title: "Management override of the approval limit",
+      detail: "Orders were released without the second approval.",
+      risk: "low",
+    },
+  },
+  {
+    expect: "EVIDENCE_PENDING",
+    finding: {
+      title: "Parts of this document were not reviewed",
+      detail: "Matters 3, 4 and 5 were not reviewed.",
+    },
+  },
+  {
+    expect: "PARTNER_ATTENTION",
+    finding: {
+      title: "A sale of Rs 4 crore to a related party",
+      detail: "The terms are stated as arm's length.",
+      risk: "medium",
+      evidence: "the purchase ledger",
+    },
+  },
+  {
+    expect: "AI_DRAFT",
+    finding: {
+      title: "Agree the closing balance",
+      detail: "Agree the closing balance to the confirmation received directly from the bank.",
+      risk: "medium",
+      evidence: "A confirmation received directly from the bank",
+      nextAction: "If it disagrees, quantify the difference.",
+      standard: "SA 505",
+    },
+  },
+];
+
+for (const fixture of STATUS_FIXTURES) {
+  check(`working-paper status is load-bearing: ${fixture.expect}`, () => {
+    assert.equal(
+      toStructuredFinding(fixture.finding).workingPaperStatus,
+      WORKING_PAPER_STATUS[fixture.expect],
+      `expected ${fixture.expect}`,
+    );
+  });
+}
+
+check("an information gap is EVIDENCE PENDING even when its quote is rankable", () => {
+  // Without this fixture the information-gap branch changed no answer, because every gap in the
+  // other fixtures had no evidence at all and reached the same status through sufficiency. A gap
+  // whose quote mentions a schedule ranks as a client document, which would otherwise downgrade it
+  // to "auditor review required" - and an area nobody could get evidence for is not merely one
+  // awaiting review.
+  const structured = toStructuredFinding({
+    title: "The ageing schedule could not be produced",
+    detail: "Management could not produce the ageing schedule when it was requested.",
+    evidence: "could not produce the ageing schedule",
+    risk: "medium",
+  });
+  assert.equal(structured.risk.status, "INFORMATION_GAP");
+  assert.equal(structured.evidence.rank, EVIDENCE_RANK.INTERNAL_DOCUMENT);
+  assert.equal(structured.workingPaperStatus, WORKING_PAPER_STATUS.EVIDENCE_PENDING);
+});
+
+check("insufficient evidence is EVIDENCE PENDING even when nothing is missing", () => {
+  // The other unreached branch: a finding resting only on management's word is insufficient
+  // without being an information gap, and it must not present as a finished draft.
+  const structured = toStructuredFinding({
+    title: "Confirm the position stated by management",
+    detail: "Corroborate the position with something obtained outside the company.",
+    evidence: "Management has confirmed the position",
+    risk: "medium",
+    standard: "SA 580",
+    nextAction: "Obtain corroboration.",
+  });
+  assert.equal(structured.evidence.sufficiency.level, SUFFICIENCY.INSUFFICIENT);
+  assert.notEqual(structured.risk.status, "INFORMATION_GAP");
+  assert.equal(structured.workingPaperStatus, WORKING_PAPER_STATUS.EVIDENCE_PENDING);
+});
+
+check("a partially evidenced finding asks for review rather than passing as a draft", () => {
+  const structured = toStructuredFinding({
+    title: "Agree the balance",
+    detail: "Agree the balance to the purchase ledger.",
+    risk: "medium",
+    evidence: "the purchase ledger",
+    nextAction: "Record the outcome.",
+    standard: "SA 500",
+  });
+  assert.equal(structured.workingPaperStatus, WORKING_PAPER_STATUS.AUDITOR_REVIEW_REQUIRED);
 });
 
 check("malformed input never throws", () => {

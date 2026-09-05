@@ -427,6 +427,65 @@ export function deriveProcedureParts(instruction) {
   return parts;
 }
 
+// ── AA-27: what a reader is looking at, as distinct from how sure the tool is ──
+
+/**
+ * The status a working paper shows. These describe the AUDIT state of a finding, not the model's
+ * confidence in it, and conflating the two is the defect: a card that says only "AI generated"
+ * tells a reader nothing about whether the matter is settled, and a card that looks settled
+ * because the prose is fluent is worse.
+ */
+export const WORKING_PAPER_STATUS = Object.freeze({
+  AI_DRAFT: "AI DRAFT",
+  EVIDENCE_PENDING: "EVIDENCE PENDING",
+  AUDITOR_REVIEW_REQUIRED: "AUDITOR REVIEW REQUIRED",
+  POTENTIAL_MISSTATEMENT: "POTENTIAL MISSTATEMENT",
+  FRAUD_INDICATOR: "FRAUD INDICATOR — NOT A CONCLUSION",
+  PARTNER_ATTENTION: "PARTNER ATTENTION",
+  CONCLUDED_BY_AUDITOR: "CONCLUDED BY AUDITOR",
+});
+
+/**
+ * The one status this product may never set.
+ *
+ * "Concluded by auditor" is a statement that a person has finished with the matter. Nothing in this
+ * pipeline can know that, and a tool that marks its own output concluded has removed the only step
+ * that made it safe. Unreachable by construction, exactly as CONFIRMED_MISSTATEMENT is in AA-04.
+ */
+export const STATUS_ONLY_A_PERSON_MAY_SET = WORKING_PAPER_STATUS.CONCLUDED_BY_AUDITOR;
+
+/**
+ * Derives the working-paper status from what the finding actually is.
+ *
+ * Ordered most serious first, because a finding can satisfy several and the reader needs the one
+ * that changes what they do next. A fraud indicator carries its own qualification in the label -
+ * "NOT A CONCLUSION" - because that is the status most likely to be read as a verdict.
+ */
+export function deriveWorkingPaperStatus({ status, priority, sufficiency, qualitative }) {
+  if (status === FINDING_STATUS.POTENTIAL_FRAUD_INDICATOR) {
+    return WORKING_PAPER_STATUS.FRAUD_INDICATOR;
+  }
+  // No `priority === CRITICAL` branch. It was unreachable: derivePriority returns CRITICAL only
+  // for POTENTIAL_FRAUD_INDICATOR, which the branch above has already returned on, so it could
+  // never change an answer. A mutation proved it, and it is deleted rather than propped up with a
+  // test that cannot fail - standing rule 9. Qualitative materiality below is what actually
+  // routes a matter to the partner.
+  if (status === FINDING_STATUS.POTENTIAL_MISSTATEMENT) {
+    return WORKING_PAPER_STATUS.POTENTIAL_MISSTATEMENT;
+  }
+  // A matter that is qualitatively material needs a person to look at it whatever its size, so it
+  // outranks the ordinary evidence states below.
+  if (Array.isArray(qualitative) && qualitative.length > 0) {
+    return WORKING_PAPER_STATUS.PARTNER_ATTENTION;
+  }
+  if (status === FINDING_STATUS.INFORMATION_GAP) return WORKING_PAPER_STATUS.EVIDENCE_PENDING;
+  if (sufficiency === SUFFICIENCY.INSUFFICIENT) return WORKING_PAPER_STATUS.EVIDENCE_PENDING;
+  if (sufficiency === SUFFICIENCY.PARTIALLY_SUFFICIENT) {
+    return WORKING_PAPER_STATUS.AUDITOR_REVIEW_REQUIRED;
+  }
+  return WORKING_PAPER_STATUS.AI_DRAFT;
+}
+
 // ── the object itself ──────────────────────────────────────────────────────
 
 /**
@@ -498,8 +557,8 @@ export function toStructuredFinding(flat) {
         ? { present: true, basis: flat.title ?? null }
         : { present: false, basis: null },
     escalation: null,
-    workingPaperStatus:
-      status === FINDING_STATUS.INFORMATION_GAP ? "EVIDENCE PENDING" : "AI DRAFT",
+    // AA-27. Assigned below, once priority, sufficiency and qualitative materiality exist.
+    workingPaperStatus: null,
     missingInformation: [],
   };
 
@@ -562,6 +621,17 @@ export function toStructuredFinding(flat) {
   // sub-population: inventing strata would tell an auditor the population divides in a way the
   // document never said.
   structured.stratification = buildStratificationPlan(subject);
+
+  // AA-27. Derived last, because it depends on the priority, the sufficiency and the qualitative
+  // grounds computed above. CONCLUDED BY AUDITOR is never among the possible answers: only a person
+  // can say they have finished with a matter, and a tool that marks its own output concluded has
+  // removed the step that made it safe.
+  structured.workingPaperStatus = deriveWorkingPaperStatus({
+    status,
+    priority: structured.priority,
+    sufficiency: structured.evidence.sufficiency?.level,
+    qualitative: structured.qualitativeMateriality,
+  });
 
   return structured;
 }
