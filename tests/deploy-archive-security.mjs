@@ -2244,6 +2244,15 @@ if (listed.status !== 0 || listed.error) {
   // expressions and string arithmetic over text passed in by the caller, none
   // reads an environment variable, and none makes a network or database call,
   // so they add nothing to the scanned surface beyond their own logic.
+  // Raised from 170 to 171 for src/services/audit-finding-model.service.js, added
+  // to close AA-09: it builds the structured finding object the caller's schema
+  // asked for and renders the reader-facing text back out of it, so a finding is
+  // data rather than a paragraph. Confirmed clean before the pin moved,
+  // independently of this file: `make-deploy-archive.ps1 -ValidateOnly` ->
+  // "JavaScript secret AST scan: PASS (171 files)". It is pattern matching and
+  // object construction over values passed in by the caller; it reads no
+  // environment variable, makes no network or database call, and holds no secret,
+  // credential, configuration value or endpoint.
   // Raised from 169 to 170 for src/services/audit-materiality.service.js, added to close
   // AA-07: it names the quantitative bases a document supplies with their figures and the
   // inputs still missing before a materiality figure can be set, replacing a placeholder
@@ -2265,7 +2274,7 @@ if (listed.status !== 0 || listed.error) {
   // database call, and holds no secret, credential, configuration value or endpoint.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 170 && result.status === 0,
+    files.length === 171 && result.status === 0,
     result,
   );
 }
