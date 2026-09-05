@@ -263,6 +263,116 @@ for (const text of NON_ADJUSTING_FIXTURES) {
   });
 }
 
+// ── AA-13's own acceptance condition: a 30-case mixed fixture set ─────────
+//
+// The ledger's row does not stop at "carries the three-way classification". It says, verbatim:
+// "A 30-case mixed fixture set measures accuracy." Thirty cases, mixed across all three answers,
+// with the accuracy stated rather than implied.
+//
+// MIXED means the set must contain cases the classifier can get wrong in both directions - an
+// adjusting event mistaken for a disclosure matter changes a note when it should change a number,
+// and a non-adjusting event mistaken for an adjusting one changes a number that should not move.
+// Ten of each, and the ten UNCLEAR cases are the ones that matter most: each is a real
+// post-reporting-date event whose underlying condition date the text simply does not establish,
+// and guessing on any of them would put a confident wrong figure in the accounts.
+
+const MIXED_THIRTY = [
+  // ADJUSTING - the event is evidence of a condition that already existed at the reporting date.
+  { expect: "ADJUSTING", text: "Subsequent to the year end the customer was admitted to insolvency proceedings." },
+  { expect: "ADJUSTING", text: "After the year end the court delivered its judgment on the claim outstanding at 31 March." },
+  { expect: "ADJUSTING", text: "After the year end the parties settled the dispute out of court." },
+  { expect: "ADJUSTING", text: "After the year end the company negotiated a settlement of the warranty claim." },
+  { expect: "ADJUSTING", text: "After the year end the inventory was sold below cost, establishing realisable value." },
+  { expect: "ADJUSTING", text: "Subsequent to the year end the determination of the director's bonus was completed." },
+  { expect: "ADJUSTING", text: "Subsequent to the year end a fraud was discovered in the purchase cycle." },
+  { expect: "ADJUSTING", text: "After the year end the receivable from Orion Traders was written off as irrecoverable." },
+  { expect: "ADJUSTING", text: "Post year-end the debtor was declared bankrupt by the tribunal." },
+  { expect: "ADJUSTING", text: "After the balance sheet date the litigation pending at year end was decided against the company." },
+
+  // NON_ADJUSTING - the condition arose after the reporting date; a note may change, the figures do not.
+  { expect: "NON_ADJUSTING", text: "After the year end a flood damaged the plant." },
+  { expect: "NON_ADJUSTING", text: "Subsequent to the year end the company announced a restructuring plan." },
+  { expect: "NON_ADJUSTING", text: "After the year end a rights issue was completed." },
+  { expect: "NON_ADJUSTING", text: "Subsequent to the year end a new borrowing facility was taken." },
+  { expect: "NON_ADJUSTING", text: "After the year end a change in tax rate was notified by the government." },
+  { expect: "NON_ADJUSTING", text: "Subsequent to the year end a strike halted production at the Pune unit." },
+  { expect: "NON_ADJUSTING", text: "After the year end the company acquired a majority stake in a competitor." },
+  { expect: "NON_ADJUSTING", text: "Subsequent to the year end a fire destroyed the finished goods warehouse." },
+  { expect: "NON_ADJUSTING", text: "After the year end the board declared a dividend for the year under audit." },
+  { expect: "NON_ADJUSTING", text: "Subsequent to the year end the company entered into a long-term supply contract." },
+
+  // UNCLEAR - a real post-reporting-date event whose underlying condition date the text does not
+  // establish. Guessing either way would be a confident wrong answer, so the honest one is to name
+  // the two dates that settle it.
+  { expect: "UNCLEAR", text: "Subsequent to the year end the largest distributor reduced its committed order book." },
+  { expect: "UNCLEAR", text: "After the year end the company completed an acquisition and the earlier claim was settled by the court." },
+  { expect: "UNCLEAR", text: "Subsequent to the year end the key supplier changed its credit terms." },
+  { expect: "UNCLEAR", text: "After the year end two members of senior management resigned." },
+  { expect: "UNCLEAR", text: "Subsequent to the year end the regulator commenced an inspection of the branch." },
+  { expect: "UNCLEAR", text: "After the year end the company revised its sales forecast downward." },
+  { expect: "UNCLEAR", text: "Subsequent to the year end a customer disputed an invoice raised in March." },
+  { expect: "UNCLEAR", text: "After the year end the bank requested additional security against the facility." },
+  { expect: "UNCLEAR", text: "Subsequent to the year end the ERP migration was completed at the head office." },
+  { expect: "UNCLEAR", text: "After the year end an employee raised a grievance about payroll deductions." },
+];
+
+check("AA-13's 30-case mixed fixture set is genuinely thirty, and genuinely mixed", () => {
+  assert.equal(MIXED_THIRTY.length, 30, "the ledger asks for thirty cases");
+  const counts = MIXED_THIRTY.reduce((acc, c) => {
+    acc[c.expect] = (acc[c.expect] ?? 0) + 1;
+    return acc;
+  }, {});
+  // "Mixed" is not satisfied by twenty-eight easy cases and two hard ones.
+  assert.equal(counts.ADJUSTING, 10);
+  assert.equal(counts.NON_ADJUSTING, 10);
+  assert.equal(counts.UNCLEAR, 10);
+  assert.equal(
+    new Set(MIXED_THIRTY.map((c) => c.text)).size,
+    30,
+    "thirty distinct cases, not one repeated",
+  );
+});
+
+check("AA-13 classification accuracy over the 30-case set is measured and stated", () => {
+  const wrong = [];
+  for (const testCase of MIXED_THIRTY) {
+    const got = classifySubsequentEvent(testCase.text).classification;
+    if (got !== SUBSEQUENT_EVENT[testCase.expect]) {
+      wrong.push({ text: testCase.text, expected: testCase.expect, got });
+    }
+  }
+  const correct = MIXED_THIRTY.length - wrong.length;
+  const accuracy = ((correct / MIXED_THIRTY.length) * 100).toFixed(1);
+  // Stated, per the ledger's "measures accuracy", rather than only asserted.
+  console.log(`       AA-13 classification accuracy: ${correct}/${MIXED_THIRTY.length} (${accuracy}%)`);
+  assert.deepEqual(
+    wrong,
+    [],
+    `misclassified ${wrong.length} of 30: ${JSON.stringify(wrong, null, 1)}`,
+  );
+});
+
+check("every case in the mixed set is recognised as a subsequent event at all", () => {
+  // A case the window pattern does not even see would be scored as a pass for the wrong reason if
+  // its expected answer happened to be UNCLEAR, so the window is checked separately.
+  for (const testCase of MIXED_THIRTY) {
+    assert.notEqual(
+      classifySubsequentEvent(testCase.text).classification,
+      SUBSEQUENT_EVENT.NOT_A_SUBSEQUENT_EVENT,
+      `not recognised as post-reporting-date at all: "${testCase.text}"`,
+    );
+  }
+});
+
+check("every UNCLEAR case asks for the two dates that would settle it", () => {
+  // The whole reason UNCLEAR is a first-class answer rather than a shrug.
+  for (const testCase of MIXED_THIRTY.filter((c) => c.expect === "UNCLEAR")) {
+    const result = classifySubsequentEvent(testCase.text);
+    assert.match(result.action, /date the underlying condition arose/i, testCase.text);
+    assert.match(result.action, /approved/i, testCase.text);
+  }
+});
+
 // ── report ────────────────────────────────────────────────────────────────
 
 console.log(`\nResult: ${passed} passed, ${failed} failed (out of ${passed + failed})`);

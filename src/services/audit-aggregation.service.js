@@ -57,7 +57,11 @@ const ADJUSTING_CUES = [
 const NON_ADJUSTING_CUES = [
   /\b(?:fire|flood|earthquake|cyclone|accident)\b/i,
   /\b(?:acquisition|acquired|merger|amalgamation|takeover)\b/i,
-  /\b(?:share issue|rights issue|bonus issue|buy[- ]?back|dividend declared)\b/i,
+  // Both word orders occur in real prose: "dividend declared" and "declared a dividend". A
+  // dividend declared after the reporting date is a textbook non-adjusting event, and requiring
+  // adjacency in one direction only missed it. Sixth time this adjacency class has bitten here,
+  // and again a fixture found it rather than anyone reading the pattern.
+  /\b(?:share|rights|bonus)\s+issue\b|\bbuy[- ]?back\b|\bdividend\b[^.]{0,25}\bdeclar|\bdeclar\w*\b[^.]{0,25}\bdividend\b/i,
   /\b(?:new|fresh)\s+(?:borrowing|loan|facility)\b/i,
   /\b(?:announced|commenced|launched|entered into)\b[^.]{0,60}\b(?:plan|expansion|restructuring|contract)\b/i,
   /\bchange in (?:law|regulation|tax rate)\b/i,
