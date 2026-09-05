@@ -621,6 +621,48 @@ check("no risk statement is the generic one AA-19 exists to replace", () => {
   }
 });
 
+check("every response carries a cumulative misstatement register", () => {
+  // AA-16 as an invariant. The total is only visible across findings, so it must exist on every
+  // path - including the ones that produce no findings, where it is honestly zero.
+  for (const { path, state } of RESPONSES) {
+    const register = state.body.misstatementRegister;
+    assert.ok(register, `${path} carries no misstatement register`);
+    assert.equal(typeof register.totalMinor, "number");
+    assert.ok(Array.isArray(register.items));
+    assert.equal(
+      register.items.reduce((sum, i) => sum + i.amountMinor, 0),
+      register.totalMinor,
+      `${path}: the register total does not equal its own items`,
+    );
+    // With no threshold set, the answer is null - never a reassuring false.
+    if (register.materialityPaise === null) {
+      assert.equal(register.exceedsMateriality, null, `${path} judged materiality without a figure`);
+    }
+  }
+});
+
+check("every finding carries a subsequent-event classification field", () => {
+  // AA-13. Null means "not a subsequent event", which is different from an unclassified one.
+  const VALID = ["ADJUSTING", "NON_ADJUSTING", "UNCLEAR", null];
+  for (const { path, state } of RESPONSES) {
+    for (const finding of state.body.insights ?? []) {
+      const se = finding.structured.subsequentEvent;
+      assert.ok(se, `${path}: "${finding.title}" has no subsequentEvent section`);
+      assert.ok(
+        VALID.includes(se.classification),
+        `${path}: "${finding.title}" has classification ${se.classification}`,
+      );
+      if (se.classification === "UNCLEAR") {
+        assert.match(
+          se.action,
+          /date the underlying condition arose/i,
+          "an unclear event must ask the question that settles it",
+        );
+      }
+    }
+  }
+});
+
 check("the flat shape the shipped clients read is never removed", () => {
   // The desktop reads Title, Detail, Risk, Standard, Evidence, Why, NextAction; the extension reads
   // the same wire shape. Adding the structured object must not have quietly replaced any of them.

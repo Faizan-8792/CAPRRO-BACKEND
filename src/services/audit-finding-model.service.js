@@ -23,6 +23,10 @@
 // than less.
 
 import {
+  classifySubsequentEvent,
+  findQualitativeMateriality,
+} from "./audit-aggregation.service.js";
+import {
   FINDING_STATUS,
   classifyFindingStatus,
   isStatusPermitted,
@@ -50,6 +54,8 @@ export const STRUCTURED_SECTIONS = Object.freeze([
   "workingPaperStatus",
   "missingInformation",
   "priority",
+  "subsequentEvent",
+  "qualitativeMateriality",
 ]);
 
 /** The assertions an audit procedure can be directed at. */
@@ -507,6 +513,15 @@ export function toStructuredFinding(flat) {
   structured.risk.statementImpact = riskParts.statementImpact;
   structured.risk.auditConsequence = riskParts.auditConsequence;
   structured.priority = derivePriority(status, structured.risk.level);
+
+  // AA-13. Where the finding concerns a post-reporting-date event, the three-way classification
+  // that decides whether the FIGURES change or only a note does. Null when the finding is not
+  // about a subsequent event at all, rather than a fourth pseudo-category.
+  structured.subsequentEvent = classifySubsequentEvent(subject);
+
+  // AA-17. Why this item survives a purely quantitative filter. An empty list is the honest answer
+  // for an ordinary difference; if everything were qualitatively material, nothing would be.
+  structured.qualitativeMateriality = findQualitativeMateriality(subject);
 
   return structured;
 }

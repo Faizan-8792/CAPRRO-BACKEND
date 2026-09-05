@@ -15,6 +15,7 @@ import { buildContradictionInsights } from "../services/audit-contradiction.serv
 import { buildInjectionInsights } from "../services/audit-injection.service.js";
 import { buildMaterialityGuidance } from "../services/audit-materiality.service.js";
 import { withStructure } from "../services/audit-finding-model.service.js";
+import { buildMisstatementRegister } from "../services/audit-aggregation.service.js";
 
 function safeStr(v, max = 4000) {
   return String(v ?? "").slice(0, max);
@@ -651,6 +652,14 @@ function assembleInsightsBody({
   evidencedInsights = [],
   includeMandatory = true,
 }) {
+  // AA-16 needs a threshold to compare its total against. extractStatedMateriality is the same
+  // deterministic reader the mandatory-procedures block already uses; null when the document sets
+  // no figure, which the register reports as null rather than as "immaterial".
+  const statedMaterialityRupees = extractStatedMateriality(rawText);
+  const statedMaterialityPaise =
+    Number.isFinite(statedMaterialityRupees) && statedMaterialityRupees > 0
+      ? Math.round(statedMaterialityRupees * 100)
+      : null;
   // Deterministic and model-free. Computed once and used BOTH for the coverage measurement and for
   // the returned list, because measuring one array and returning another is precisely how the live
   // response came to name matters as unreviewed directly above findings about them.
@@ -691,6 +700,12 @@ function assembleInsightsBody({
 
   return {
     insights,
+    // AA-16. Five items of Rs 10L, Rs 15L, Rs 3L, Rs 4.6L and Rs 2.3L are each unremarkable and
+    // together are Rs 34.9L. Nothing that looks at one finding can ever see that, so the total is
+    // computed across all of them and travels with the response. Individually-below-materiality
+    // and exceeds-materiality are reported separately, because the interesting case is when both
+    // are true at once.
+    misstatementRegister: buildMisstatementRegister(insights, statedMaterialityPaise),
     // AA-01. Present on EVERY response, including the ones that produce no findings at all. A
     // response with no findings and no coverage object is indistinguishable from a complete review
     // that found nothing, and that is the exact silence this defect is about. Where nothing was
@@ -724,6 +739,12 @@ function coverageOnlyBody(rawText) {
       unitsUnaddressed: coverage.unitCount,
       complete: false,
     },
+    // AA-16. The register is owed here too. Omitting it on the failure paths is the same shape of
+    // inconsistency as the coverage object being absent on them: a client reading the register
+    // would get undefined on exactly the paths where nothing was examined. With no findings the
+    // honest register is an empty one totalling zero, not a missing key. The response invariants
+    // caught this omission before it shipped.
+    misstatementRegister: buildMisstatementRegister([], null),
   };
 }
 

@@ -76,6 +76,10 @@ const SCHEMA_THE_CALLER_ASKED_FOR = [
   // AA-22 added triage to the schema. Listed here explicitly so growing the schema is a deliberate
   // edit to this file rather than something that happens silently in the code under test.
   "priority",
+  // AA-13 and AA-17 joined the schema. Listed explicitly, like every other section, so growing it
+  // is a deliberate edit here rather than something the code under test does silently.
+  "subsequentEvent",
+  "qualitativeMateriality",
 ];
 
 check("every section the caller's schema asked for is present", () => {

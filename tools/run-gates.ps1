@@ -655,6 +655,7 @@ try {
         "audit-materiality-contract",
         "audit-response-invariants",
         "audit-finding-model-contract",
+        "audit-aggregation-contract",
         "audit-insights-grounding",
         "audit-insights-accuracy-speed",
         "audit-insights-coverage-and-discipline",
