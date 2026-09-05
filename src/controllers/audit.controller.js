@@ -9,13 +9,23 @@ import {
 } from "../services/deepseek-provider.service.js";
 import { AUDIT_TOPIC_REFERENCE } from "../data/audit-topic-reference.js";
 import { buildNumericalIntegrityInsights } from "../services/audit-numerical-integrity.service.js";
-import { buildCoverageLedger, computeCoverage } from "../services/audit-coverage.service.js";
+import {
+  buildCoverageLedger,
+  buildSectionLedger,
+  computeCoverage,
+  extractDocumentSections,
+} from "../services/audit-coverage.service.js";
 import { guardFindings } from "../services/audit-finding-guard.service.js";
 import { buildContradictionInsights } from "../services/audit-contradiction.service.js";
-import { buildInjectionInsights } from "../services/audit-injection.service.js";
+import {
+  buildInjectionInsights,
+  findInstructionSpans,
+  isOnlyInsideInstructions,
+} from "../services/audit-injection.service.js";
 import { buildMaterialityGuidance } from "../services/audit-materiality.service.js";
 import { withStructure } from "../services/audit-finding-model.service.js";
-import { buildMisstatementRegister } from "../services/audit-aggregation.service.js";
+import {
+  buildSubsequentEventRegister, buildMisstatementRegister } from "../services/audit-aggregation.service.js";
 import { findCrossIssueLinks } from "../services/audit-linking.service.js";
 
 function safeStr(v, max = 4000) {
@@ -722,6 +732,17 @@ function assembleInsightsBody({
       unitsUnaddressed: coverageLedger.coverage.uncoveredCount,
       complete: coverageLedger.complete,
     },
+    // AA-31. A DIFFERENT question from coverage above, and both are owed. Coverage counts matters
+    // that call for attention; this counts sections of the document, and every one of them carries
+    // a disposition. A 41-section memorandum whose ten keyword-free sections were dropped before
+    // the reader saw them reported "31 of 31 addressed" - which reads as complete. Null when the
+    // document has no structure to enumerate, never an invented "1 section".
+    sections: buildSectionLedger(rawText, insights, findCrossIssueLinks(insights)),
+    // AA-13 / AA-32. Built from the DOCUMENT, not from the findings. classifySubsequentEvent was
+    // only ever reached through a finding, so an event the model did not write about was never
+    // classified at all - a schedule of nine could produce two classifications and seven silences,
+    // and a reader cannot tell a silence from a clean event.
+    subsequentEvents: buildSubsequentEventRegister(extractDocumentSections(rawText), rawText),
   };
 }
 
@@ -754,6 +775,12 @@ function coverageOnlyBody(rawText) {
     // Owed here too: a client reading it would otherwise get undefined on exactly the paths where
     // nothing was examined. With no findings there are no links, which is an empty list.
     crossIssueLinks: [],
+    // AA-31. Owed on the failure paths for the same reason the coverage object is: the sections
+    // can be enumerated without a model, and a reader is entitled to know the document has fifty
+    // of them and that none were reached.
+    sections: buildSectionLedger(rawText, [], []),
+    // Owed on the failure paths too: classifying subsequent events needs no model.
+    subsequentEvents: buildSubsequentEventRegister(extractDocumentSections(rawText), rawText),
   };
 }
 
@@ -1163,7 +1190,12 @@ function splitEvidenceFragments(evidence) {
 // all. The overall length bound is checked against what is actually kept,
 // not the model's original submission, so trimming a partly-fabricated
 // evidence string down to its real portion cannot itself trip the ceiling.
-function resolveGroundedEvidence(evidence, sentTextNormalized) {
+// instructionSpans (AA-30) are the parts of the submitted text that address
+// the reviewer rather than describe the client. A fragment lifted from one of
+// them is present in the submission and is still not evidence: the reviewer's
+// own instructions cannot corroborate a finding about the client's accounts.
+// Passed in already computed, in the coordinates of sentTextNormalized.
+function resolveGroundedEvidence(evidence, sentTextNormalized, instructionSpans = []) {
   const fragments = splitEvidenceFragments(evidence);
   const kept = fragments.filter((fragment) => {
     if (fragment.length < MIN_EVIDENCE_LENGTH) return false;
@@ -1171,7 +1203,12 @@ function resolveGroundedEvidence(evidence, sentTextNormalized) {
     // but the fragment itself - what gets displayed - keeps its own
     // original quote characters untouched.
     const comparable = normalizeQuotesForComparison(fragment).toLowerCase();
-    return sentTextNormalized.includes(comparable);
+    if (!sentTextNormalized.includes(comparable)) return false;
+    // Present, but present only inside the instructions. Rejected here rather
+    // than stripped later, so a finding whose ONLY support is the preamble
+    // fails grounding entirely instead of being shown with the quote removed
+    // and the conclusion kept.
+    return !isOnlyInsideInstructions(comparable, sentTextNormalized, instructionSpans);
   });
   if (kept.length === 0) return null;
 
@@ -1516,6 +1553,13 @@ function validateAndFilterInsights(
   const seenTitles = new Set(options.excludeTitles ?? []);
   const accepted = [];
 
+  // AA-30. Computed HERE rather than at the call sites on purpose: every
+  // response path that admits a model finding goes through this function, so
+  // computing it here makes the provenance rule impossible for a path to
+  // skip. Two passes over the same text recompute it, which costs one regex
+  // sweep of a capped string and removes a whole class of "one path forgot".
+  const instructionSpans = findInstructionSpans(sentTextNormalized);
+
   for (const item of rawItems) {
     if (!item || typeof item !== "object") continue;
     if (accepted.length >= maxAccepted) break;
@@ -1529,7 +1573,11 @@ function validateAndFilterInsights(
     if (seenTitles.has(normalizedTitle)) continue;
     if (!isImperativeDetail(detail)) continue;
 
-    const resolved = resolveGroundedEvidence(evidence, sentTextNormalized);
+    const resolved = resolveGroundedEvidence(
+      evidence,
+      sentTextNormalized,
+      instructionSpans,
+    );
     if (resolved === null) continue;
 
     seenTitles.add(normalizedTitle);

@@ -57,6 +57,7 @@ export const STRUCTURED_SECTIONS = Object.freeze([
   "evidence",
   "sampling",
   "accountingImplication",
+  "accountingGuidance",
   "fraudIndicator",
   "escalation",
   "workingPaperStatus",
@@ -230,7 +231,17 @@ export function deriveEvidenceRank(evidenceText) {
 
 // ── AA-11 / AA-12: whether sampling is even the right instrument ────────────
 
-const POPULATION_SIZE = /\b(\d{1,5})\s+(?:journal entr|entries|items|invoices|vouchers|transactions|balances|samples)/i;
+// Up to three qualifying words may sit between the count and the noun. "61 MANUAL journal entries"
+// is how anyone would write it, and requiring adjacency read the population size as null - so the
+// product produced a stratification plan for a population whose size it claimed not to know, and
+// said nothing about whether 61 items should be tested in full. Eighth instance of this adjacency
+// class in this project; standing rules 6 and 13.
+//
+// The lookahead keeps scale words out of the gap, so "Rs 44.60 crore of inventory items" cannot be
+// read as a population of 60. Without it the fix would trade a missed population for an invented
+// one, which is the worse error of the two.
+const POPULATION_SIZE =
+  /\b(\d{1,5})\s+(?:(?!lakhs?|lacs?|crores?|thousand|million|billion)[A-Za-z-]+\s+){0,3}(?:journal entr|entries|items|invoices|vouchers|transactions|balances|samples)/i;
 // No closing \b: these are STEMS, and "journal entr" followed by \b cannot match "journal entries".
 // That is the fifth time this one bug class has bitten in this project - see standing rule 6 in
 // .kiro/audit-assistance-defects.md - and it was caught here by a fixture, again, rather than by
@@ -552,6 +563,12 @@ export function toStructuredFinding(flat) {
     accountingImplication: standards.accounting
       ? `Recognition or measurement is governed by ${standards.accounting}; confirm the treatment against it.`
       : null,
+    // AA-33. A DIFFERENT question from the auditing standard beside it: that one says how the work
+    // is done, this says how the matter must be recorded or disclosed. Derived from the subject
+    // rather than read from what the model cited, because a finding correctly citing SA 240 named
+    // no accounting framework at all and a reviewer asking "which standard governs this" got
+    // nothing.
+    accountingGuidance: deriveAccountingGuidance(subject),
     fraudIndicator:
       status === FINDING_STATUS.POTENTIAL_FRAUD_INDICATOR
         ? { present: true, basis: flat.title ?? null }
@@ -713,4 +730,138 @@ export function validateStructuredFinding(structured) {
 export function withStructure(flat) {
   const structured = toStructuredFinding(flat);
   return structured ? { ...flat, structured } : flat;
+}
+
+// ── AA-33: which accounting or reporting framework governs the matter ──────
+//
+// The output contract owes a reviewer two different things about standards, and only one existed:
+//
+//   AUDITING STANDARD          how the work is to be done       (SA 240, SA 500, SA 560)
+//   ACCOUNTING / REPORTING     how the matter is to be recorded  (Ind AS 2, Section 135, MSMED)
+//     GUIDANCE                 or disclosed
+//
+// `accountingImplication` was derived from splitStandards, which reads only what the MODEL wrote in
+// its `standard` field. On a finding citing SA 240 - an auditing standard, correctly - there was no
+// accounting reference at all, so a reviewer asking "and which accounting standard governs this"
+// got nothing.
+//
+// Derived from the SUBJECT rather than taken from the model, for the same reason assertions are
+// (AA-08): a model produces a plausible-looking accounting reference for anything, and a confident
+// wrong one is worse than none. Every reference below is real and is checked against this list by
+// the contract, so this can never become the route by which a fabricated standard reaches a reader
+// (AA-26).
+
+const ACCOUNTING_GUIDANCE_MAP = [
+  {
+    cue: /\binventor|\bstock\b|\bslow[- ]moving\b|\bnet realisable value\b|\bWIP\b/i,
+    reference: "Ind AS 2 / AS 2 (Inventories)",
+    why: "measurement at the lower of cost and net realisable value, and what the write-down must reflect",
+  },
+  {
+    cue: /\bprovision|\bcontingent\b|\blitigation\b|\blegal claim\b|\bdispute\b|\bdemand\b/i,
+    reference: "Ind AS 37 / AS 29 (Provisions, Contingent Liabilities and Contingent Assets)",
+    why: "whether the obligation is recognised, disclosed, or neither, and on what evidence",
+  },
+  {
+    cue: /\brevenue\b|\bbill[- ]and[- ]hold\b|\bsales\b|\bperformance obligation\b/i,
+    reference: "Ind AS 115 / AS 9 (Revenue)",
+    why: "when control transfers, and whether the recognition point is supported",
+  },
+  {
+    cue: /\bborrowing cost|\bcapitalis|\bcapitaliz|\bCWIP\b|\bcapital work in progress\b/i,
+    reference: "Ind AS 23 / AS 16 (Borrowing Costs)",
+    why: "which costs qualify for capitalisation, over what period, and at what rate",
+  },
+  {
+    cue: /\bproperty, plant|\bfixed asset|\bdepreciat|\buseful life\b|\brevalu/i,
+    reference: "Ind AS 16 / AS 10 (Property, Plant and Equipment)",
+    why: "recognition, depreciation and the basis of any revaluation",
+  },
+  {
+    cue: /\bsubsequent\b|\bafter the (?:year|reporting)[- ]end\b|\bpost[- ]year[- ]end\b/i,
+    reference: "Ind AS 10 / AS 4 (Events after the Reporting Period)",
+    why: "whether the event adjusts the figures or is disclosed",
+  },
+  {
+    cue: /\brelated part|\bdirector'?s? (?:spouse|relative)\b|\barm'?s length\b/i,
+    reference: "Ind AS 24 / AS 18 (Related Party Disclosures)",
+    why: "which relationships and transactions must be disclosed, whether or not a price was charged",
+  },
+  {
+    cue: /\bdeferred tax\b|\bunabsorbed depreciation\b|\btax (?:asset|liability)\b/i,
+    reference: "Ind AS 12 / AS 22 (Income Taxes)",
+    why: "whether convincing evidence of future taxable profit supports the asset",
+  },
+  {
+    cue: /\bgratuity\b|\bemployee benefit|\bactuarial\b|\bleave encashment\b|\bbonus\b/i,
+    reference: "Ind AS 19 / AS 15 (Employee Benefits)",
+    why: "the assumptions the obligation is measured on, and who reviewed them",
+  },
+  {
+    cue: /\bforeign currency\b|\bclosing rate\b|\bexchange (?:rate|difference)\b|\brestated at\b/i,
+    reference: "Ind AS 21 / AS 11 (Effects of Changes in Foreign Exchange Rates)",
+    why: "which items are restated at the closing rate and where the difference goes",
+  },
+  {
+    cue: /\blease\b|\bright[- ]of[- ]use\b/i,
+    reference: "Ind AS 116 / AS 19 (Leases)",
+    why: "recognition of the right-of-use asset and the lease liability",
+  },
+  {
+    cue: /\bexpected credit loss\b|\bECL\b|\bpast due\b|\bimpair/i,
+    reference: "Ind AS 109 (Financial Instruments)",
+    why: "the impairment model applied and the basis of the loss allowance",
+  },
+  {
+    cue: /\bsegment\b/i,
+    reference: "Ind AS 108 / AS 17 (Operating Segments)",
+    why: "which segments are reportable and what must be disclosed for each",
+  },
+  {
+    cue: /\bCSR\b|\bcorporate social responsibility\b/i,
+    reference: "Section 135 of the Companies Act 2013 and the CSR Rules",
+    why: "the obligation for the year, the shortfall, and the transfer the Act requires",
+  },
+  {
+    cue: /\bMSME\b|\bmicro and small\b|\bMSMED\b/i,
+    reference: "the MSMED Act 2006 with Schedule III disclosure",
+    why: "the interest that accrues by operation of law and the disclosure it requires",
+  },
+  {
+    cue: /\bgoing concern\b/i,
+    reference: "Ind AS 1 / AS 1 (Presentation of Financial Statements)",
+    why: "whether the going concern basis remains appropriate and what must be disclosed if doubt exists",
+  },
+  {
+    cue: /\bprior period\b|\bcomparatives?\b|\brestat(?:ed|ement)\b|\bchange in (?:accounting )?polic/i,
+    reference: "Ind AS 8 / AS 5 (Accounting Policies, Changes in Accounting Estimates and Errors)",
+    why: "whether this is a change in policy, an estimate or an error, and what each requires",
+  },
+];
+
+/** Every reference this module is allowed to emit, so a fabricated one cannot slip in. */
+export const ACCOUNTING_GUIDANCE_REFERENCES = Object.freeze(
+  ACCOUNTING_GUIDANCE_MAP.map((entry) => entry.reference),
+);
+
+/**
+ * The accounting or reporting framework that governs the matter, or null.
+ *
+ * Null is a real answer and the right one for a finding about how the AUDIT was performed - a
+ * refusal to provide a listing raises no accounting question at all, and inventing a reference for
+ * it would be noise a reviewer has to check and discard.
+ */
+export function deriveAccountingGuidance(subject) {
+  const value = typeof subject === "string" ? subject : "";
+  if (value.trim().length === 0) return null;
+
+  const hit = ACCOUNTING_GUIDANCE_MAP.find((entry) => entry.cue.test(value));
+  if (!hit) return null;
+
+  return {
+    reference: hit.reference,
+    // What the reference is needed FOR. A bare citation tells a reviewer to go and read a standard;
+    // this tells them which question in it they are answering.
+    question: hit.why,
+  };
 }

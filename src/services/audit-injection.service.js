@@ -103,6 +103,180 @@ const quotable = (value) => {
   return text.length <= 200 ? text : `${text.slice(0, 197)}...`;
 };
 
+// ── provenance: which parts of the submission are instructions, not evidence ──
+//
+// AA-30. A submission is not one undifferentiated body of client facts. It usually contains at
+// least two provenances mixed together: text describing the entity, and text addressed to whoever
+// or whatever is doing the review. Evidence grounding had no representation of that difference, so
+// a quotation lifted from the task preamble - "Analyze this entire document as an AI audit
+// assistant" - grounded exactly as well as a sentence about the client's borrowings, and a finding
+// could be built on the reviewer's own instructions.
+//
+// That is not a variant of AA-06. AA-06 asks whether the document contains an instruction and
+// reports it as a fact about the document, which is the right treatment and is unchanged. AA-30
+// asks a different question - may this span be QUOTED AS CLIENT EVIDENCE - and the answer is no
+// even when the instruction is entirely benign and no attack at all.
+//
+// The two signals below are deliberately structural rather than phrase-matching, and each is
+// independently sufficient, so neither carries the fix alone.
+
+/**
+ * Verbs that name the act of reviewing rather than an act performed on the entity. Used only to
+ * recognise an IMPERATIVE OPENING, never anywhere in a sentence: "the review identified three
+ * matters" is a description and must stay evidence.
+ */
+const ANALYSIS_VERBS =
+  /^(?:please\s+|kindly\s+|now\s+)*(?:analy[sz]e|review|examine|assess|evaluate|identify|list|summari[sz]e|produce|generate|prepare|output|respond|answer|explain|quantify|flag|highlight|extract|act|read|study|scan|check|find|tell|give|show|describe|go\s+through|go\s+over|look\s+at|look\s+through|walk\s+through|point\s+out|set\s+out|be\s+\w+|use\s+\w+)\b/i;
+
+/** Second person, or a first-person object - either way the sentence is addressing somebody. */
+const ADDRESSES_A_READER = /\byou\b|\byour\b|\byourself\b|\b(?:tell|give|show|send)\s+me\b|\bfor\s+me\b/i;
+
+/**
+ * The submission referred to as the thing being examined. Adjectives are allowed between the
+ * determiner and the noun ("the attached file", "this entire document"), because requiring them to
+ * be adjacent is exactly how the first version of this rule failed a reworded request.
+ */
+const NAMES_THE_SUBMISSION =
+  /\b(?:this|that|these|those|the)\s+(?:\w+\s+){0,2}(?:documents?|texts?|files?|papers?|memos?|memoranda?|memorandum|reports?|contents?|materials?|submissions?|attachments?|enclosures?|pdfs?|extracts?|notes?)\b|\b(?:the\s+)?(?:attached|enclosed|foregoing)\b|\b(?:below|above|following)\b/i;
+
+/** The assistant referred to as the thing doing the examining. */
+const NAMES_THE_ASSISTANT =
+  /\bas\s+an?\s+(?:ai|assistant|language\s+model|audit\s+assistant|chartered\s+accountant|auditor)\b|\byou\s+are\s+(?:a|an|the)\b|\byour\s+(?:response|answer|output|analysis|task|role|job|instructions?)\b/i;
+
+/**
+ * Whether a sentence is directed at the reviewer about the act of reviewing THIS submission.
+ *
+ * Both halves are required, and that pairing is the whole design. "Test the 17 journal entries
+ * posted at the year end" is an imperative naming an analysis-shaped verb, but its object is the
+ * client's records rather than the submission, so it stays evidence - which it must, because a
+ * review memo is largely made of such lines and they are genuine content.
+ */
+function directsTheReviewOfThisSubmission(sentence) {
+  const trimmed = sentence.trim();
+  if (trimmed.length === 0) return false;
+
+  const addressed = ADDRESSES_A_READER.test(trimmed) || ANALYSIS_VERBS.test(trimmed);
+  if (!addressed) return false;
+
+  return NAMES_THE_SUBMISSION.test(trimmed) || NAMES_THE_ASSISTANT.test(trimmed);
+}
+
+/**
+ * Signal 2: a heading that opens an instruction block, which then runs to the next blank line.
+ *
+ * Needed because instructions arrive as BLOCKS. Only the first sentence of a preamble names the
+ * document; the ones after it ("Identify every risk, quantify every exposure, and produce a
+ * complete working paper") name nothing, and signal 1 alone would leave them quotable. A heading
+ * is recognised by its shape - a short line, no sentence-ending punctuation, naming the block as
+ * direction rather than description - not by any one phrase.
+ */
+const INSTRUCTION_HEADING =
+  /^[ \t]*[^.!?\n]{0,60}\b(?:instructions?|prompt|directive|task|system|guidelines?|rules?)\b[^.!?\n]{0,30}[ \t]*$/i;
+
+/** The sentence around an index, so a span covers a readable unit rather than a fragment. */
+function sentenceSpanAround(text, index, matchLength) {
+  const start = Math.max(0, text.lastIndexOf(".", index) + 1);
+  const endDot = text.indexOf(".", index + matchLength);
+  const end = endDot === -1 ? text.length : endDot + 1;
+  return { start, end };
+}
+
+/** Overlapping or touching spans merged, so callers can test membership with one pass. */
+function mergeSpans(spans) {
+  const sorted = [...spans].sort((a, b) => a.start - b.start);
+  const merged = [];
+  for (const span of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && span.start <= last.end) {
+      last.end = Math.max(last.end, span.end);
+      continue;
+    }
+    merged.push({ ...span });
+  }
+  return merged;
+}
+
+/**
+ * Every span of the text that is an instruction to the reviewer rather than a fact about the
+ * client, as `[{ start, end }]` in the coordinates of the text passed in.
+ *
+ * A superset of what {@link findEmbeddedInstructions} reports, and reported to nobody: this exists
+ * to be subtracted from the evidence a finding may quote. Benign task preambles are included on
+ * purpose - the question here is provenance, not hostility.
+ */
+export function findInstructionSpans(text) {
+  if (typeof text !== "string" || text.length === 0) return [];
+
+  const spans = [];
+
+  // Every occurrence of every adversarial family - not one per family as the reporting path does,
+  // because a second injection later in the document is a second span of non-evidence.
+  for (const family of INSTRUCTION_FAMILIES) {
+    for (const pattern of family.patterns) {
+      const all = new RegExp(pattern.source, `${pattern.flags.replace(/g/g, "")}g`);
+      let match;
+      while ((match = all.exec(text)) !== null) {
+        const span = sentenceSpanAround(text, match.index, match[0].length);
+        const sentence = text.slice(span.start, span.end);
+        if (family.unless && family.unless.test(sentence)) continue;
+        spans.push(span);
+        if (match.index === all.lastIndex) all.lastIndex += 1;
+      }
+    }
+  }
+
+  // Sentences that direct the analysis of this document.
+  const sentencePattern = /[^.!?]+[.!?]?/g;
+  let sentenceMatch;
+  while ((sentenceMatch = sentencePattern.exec(text)) !== null) {
+    const sentence = sentenceMatch[0];
+    if (sentence.trim().length === 0) continue;
+    if (directsTheReviewOfThisSubmission(sentence)) {
+      spans.push({ start: sentenceMatch.index, end: sentenceMatch.index + sentence.length });
+    }
+    if (sentenceMatch.index === sentencePattern.lastIndex) sentencePattern.lastIndex += 1;
+  }
+
+  // Instruction headings, each opening a block that ends at the next blank line.
+  const lines = text.split("\n");
+  let offset = 0;
+  for (const line of lines) {
+    if (INSTRUCTION_HEADING.test(line) && line.trim().length > 0) {
+      const blankLine = text.slice(offset).search(/\n[ \t]*\n/);
+      const end = blankLine === -1 ? text.length : offset + blankLine;
+      spans.push({ start: offset, end });
+    }
+    offset += line.length + 1;
+  }
+
+  return mergeSpans(spans);
+}
+
+/**
+ * Whether every occurrence of a fragment in the text falls inside instruction spans.
+ *
+ * The test is deliberately "every occurrence", not "the first one". A phrase that appears both in
+ * the preamble and in the body is genuinely present in the client's own text, and refusing it
+ * would lose real evidence to a coincidence of wording.
+ */
+export function isOnlyInsideInstructions(fragment, text, spans) {
+  if (!Array.isArray(spans) || spans.length === 0) return false;
+  if (typeof fragment !== "string" || fragment.length === 0) return false;
+
+  let from = 0;
+  let seenAnywhere = false;
+  for (;;) {
+    const at = text.indexOf(fragment, from);
+    if (at === -1) break;
+    seenAnywhere = true;
+    const end = at + fragment.length;
+    const inside = spans.some((span) => at >= span.start && end <= span.end);
+    if (!inside) return false;
+    from = at + 1;
+  }
+  return seenAnywhere;
+}
+
 /**
  * Every embedded instruction in the text, with the phrase that matched and where it sits.
  *

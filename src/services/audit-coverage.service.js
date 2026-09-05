@@ -67,8 +67,17 @@ const UNIT_OPENERS = [
   { kind: "numbered", pattern: /^[ \t]*(\d{1,3})\s*[.)\-:]\s+\S/ },
   // "Section 5", "Note 12", "Para 3", "Item 7", "Matter 4"
   { kind: "labelled", pattern: /^[ \t]*((?:section|note|para(?:graph)?|item|matter|point|clause)\s+\d{1,3})\b/i },
-  // "(a)" / "a)" lettered clauses
-  { kind: "lettered", pattern: /^[ \t]*\(?([a-z])\)\s+\S/ },
+  // "(a)" / "a)" / "A." / "b." lettered clauses.
+  //
+  // Uppercase and the full stop were both missing, and the cost was not theoretical: a schedule of
+  // nine subsequent events written "A." to "I." matched nothing, so not one of them became a unit.
+  // They were absorbed into the span of whatever numbered section preceded them - the last unit
+  // runs to end of text - and a reviewer was told nothing about any of them.
+  //
+  // The looser pattern can also match an initial ("R. K. Sharma is a director"), so a lettered
+  // opener is only honoured when the document contains at least two of them. Two is a list; one is
+  // a name.
+  { kind: "lettered", pattern: /^[ \t]*\(?([A-Za-z])[.)]\s+\S/, needsCompany: true },
   // Bulleted lines
   { kind: "bullet", pattern: /^[ \t]*[-*•–]\s+\S/ },
 ];
@@ -86,6 +95,38 @@ const WORKING_PAPER_REF_PATTERN = /\[WP Ref:\s*([^\]]+)\]/gi;
  * at once. Standing rule 8 in .kiro/audit-assistance-defects.md: write regexes with an editor.
  */
 const ELIDED_QUOTE_JOIN = /\s*(?:\.\.\.|…|\[\s*\.\.\.\s*\])\s*/;
+
+/**
+ * Every structural section opening in the document, in order.
+ *
+ * Shared by the coverage units and the section ledger so the two can never disagree about where a
+ * section begins - which they would, sooner or later, if each found its own.
+ */
+function structuralStarts(text) {
+  const lines = text.split(/\r?\n/);
+  const starts = [];
+  let offset = 0;
+  for (const line of lines) {
+    for (const opener of UNIT_OPENERS) {
+      const m = line.match(opener.pattern);
+      if (m) {
+        starts.push({
+          kind: opener.kind,
+          label: String(m[1] ?? "").trim(),
+          start: offset,
+          needsCompany: opener.needsCompany === true,
+        });
+        break;
+      }
+    }
+    offset += line.length + 1;
+  }
+
+  // A lettered opener that stands alone is far more likely an initial than a list. Dropped as a
+  // group, because "at least two" is a property of the kind, not of any one line.
+  const letteredCount = starts.filter((s) => s.needsCompany).length;
+  return letteredCount >= 2 ? starts : starts.filter((s) => !s.needsCompany);
+}
 
 /** Whether a unit's own text makes it worth accounting for. */
 function isMaterialUnit(text) {
@@ -131,19 +172,7 @@ export function extractAddressableUnits(text) {
   }
 
   // 2. Structural openers, line by line.
-  const lines = text.split(/\r?\n/);
-  const starts = [];
-  let offset = 0;
-  for (const line of lines) {
-    for (const opener of UNIT_OPENERS) {
-      const m = line.match(opener.pattern);
-      if (m) {
-        starts.push({ kind: opener.kind, label: String(m[1] ?? "").trim(), start: offset });
-        break;
-      }
-    }
-    offset += line.length + 1;
-  }
+  const starts = structuralStarts(text);
 
   if (starts.length >= 2) {
     return starts
@@ -317,5 +346,182 @@ export function buildCoverageLedger(text, insights) {
         workingPaperRef: null,
       },
     ],
+  };
+}
+
+// ── AA-31: every section of the document accounted for ────────────────────
+//
+// THE DEFECT
+// Coverage counts MATTERS - units carrying a monetary amount or audit-relevant subject matter -
+// and drops everything else before the reader ever sees it. On a 41-section memorandum that
+// reported 31 units and said nothing at all about the other ten, and the ten were not filler:
+// "segment disclosures were not prepared for the year", "IT general controls over the ERP were
+// not tested by management", "the board minutes were not made available", "interest under the
+// MSMED Act has not been computed". Every one of them is a real audit matter. They were dropped
+// because they contain no rupee figure and no keyword.
+//
+// That is silent incompleteness, which is the failure this whole module exists to prevent, and
+// AA-01's own numbers could not reveal it: 31 of 31 addressed reads as complete.
+//
+// WHY THIS IS SEPARATE FROM COVERAGE RATHER THAN A CHANGE TO IT
+// "Matters that call for attention" and "sections of this document" are different questions and a
+// reader needs both. Widening the coverage units to all 41 would answer the second by destroying
+// the first - every narrative sentence would become an unaddressed matter and the declaration
+// would cry wolf. So coverage is unchanged and the section ledger is additive: a count of matters
+// is never offered as a substitute for a count of sections.
+
+/** The dispositions a section may carry. Every section gets exactly one; there is no "unknown". */
+export const SECTION_DISPOSITION = Object.freeze({
+  COVERED: "covered",
+  CONNECTED: "connected",
+  INFORMATION_GAP: "information gap",
+  CONTROL_DEFICIENCY: "control deficiency",
+  POTENTIAL_ISSUE: "potential issue",
+  NO_FURTHER_WORK: "no further work",
+});
+
+/**
+ * Something the auditor asked for and did not get. The distinction from a control deficiency is
+ * real and worth keeping: a gap is closed by obtaining a document, a deficiency by the client
+ * fixing how it operates, and they land on different people.
+ */
+const INFORMATION_GAP_CUES = [
+  /\b(?:not|never)\s+(?:made\s+)?(?:available|provided|furnished|produced|obtained|received|supplied|shared)\b/i,
+  /\b(?:could\s+not|unable\s+to|failed\s+to|did\s+not)\s+(?:produce|provide|furnish|supply|obtain|locate|trace|substantiate)\b/i,
+  /\b(?:refused|declined)\s+to\s+(?:provide|furnish|supply|give|share)\b/i,
+  /\b(?:no|without)\s+(?:supporting\s+)?(?:evidence|documentation|confirmation|listing|records?|backup)\b/i,
+  /\b(?:awaited|pending\s+receipt|yet\s+to\s+be\s+(?:received|provided))\b/i,
+];
+
+/**
+ * Something the client should have been doing and was not. Deliberately about the OPERATION of a
+ * control - performed, tested, reviewed, approved, reconciled, documented, disclosed - rather than
+ * about any amount.
+ */
+const CONTROL_DEFICIENCY_CUES = [
+  /\b(?:not|never)\s+(?:been\s+)?(?:tested|reviewed|approved|authorised|authorized|reconciled|documented|disclosed|prepared|performed|computed|restated|updated|signed|covered)\b/i,
+  /\b(?:no|without)\s+(?:disclosure|approval|authorisation|authorization|documentation|second\s+approval|review)\b/i,
+  /\b(?:was|were|has\s+been|have\s+been)\s+(?:changed|bypassed|overridden|circumvented)\b/i,
+  /\bdid\s+not\s+(?:cover|test|review|reconcile|operate)\b/i,
+];
+
+/**
+ * Every structural section of the document with its text, whether or not it looks material.
+ *
+ * Exported so other deterministic services can account for the document SECTION BY SECTION rather
+ * than finding by finding. That distinction is the recurring root cause in this area: anything
+ * driven by the findings can only describe what the model happened to write about, and is silent
+ * about the rest.
+ */
+export function extractDocumentSections(text) {
+  if (typeof text !== "string" || text.trim().length === 0) return [];
+  const starts = structuralStarts(text);
+  if (starts.length < 2) return [];
+  return starts.map((start, index) => {
+    const end = index + 1 < starts.length ? starts[index + 1].start : text.length;
+    return {
+      label: sectionLabel(start, index),
+      kind: start.kind,
+      start: start.start,
+      end,
+      text: text.slice(start.start, end),
+    };
+  });
+}
+
+/** The label a reader would use for a section, from its opener. */
+const sectionLabel = (start, index) => {
+  if (start.kind === "numbered") return `section ${start.label}`;
+  if (start.kind === "lettered") return `item ${start.label}`;
+  if (start.kind === "labelled") return start.label;
+  return `section ${index + 1}`;
+};
+
+/**
+ * Every structural section of the document with exactly one disposition each.
+ *
+ * Returns null when the document has no structural sections at all - an unstructured note has
+ * nothing to enumerate, and inventing "1 section" for it would be a worse answer than none.
+ *
+ * Precedence is deliberate. `covered` outranks everything, because the question a reader is
+ * actually asking is "did the review address this"; the other labels then describe what was NOT
+ * addressed and what kind of thing it is, which is the part they have to act on.
+ */
+export function buildSectionLedger(text, insights = [], links = []) {
+  if (typeof text !== "string" || text.trim().length === 0) return null;
+
+  const starts = structuralStarts(text);
+  if (starts.length < 2) return null;
+
+  const normalisedText = normalise(text);
+  const coveredRanges = [];
+  for (const insight of insights) {
+    for (const fragment of String(insight?.evidence ?? "").split(ELIDED_QUOTE_JOIN)) {
+      const needle = normalise(fragment);
+      if (needle.length < 12) continue;
+      const at = normalisedText.indexOf(needle);
+      if (at !== -1) coveredRanges.push({ at, to: at + needle.length });
+    }
+  }
+
+  // The link ends, by title, so a section named on either end of a cross-issue link is reported as
+  // connected rather than as an isolated matter.
+  const linkedTitles = new Set();
+  for (const link of links) {
+    for (const key of ["fromTitle", "toTitle"]) {
+      const value = String(link?.[key] ?? "").trim().toLowerCase();
+      if (value) linkedTitles.add(value);
+    }
+  }
+  const linkedRanges = [];
+  for (const insight of insights) {
+    if (!linkedTitles.has(String(insight?.title ?? "").trim().toLowerCase())) continue;
+    for (const fragment of String(insight?.evidence ?? "").split(ELIDED_QUOTE_JOIN)) {
+      const needle = normalise(fragment);
+      if (needle.length < 12) continue;
+      const at = normalisedText.indexOf(needle);
+      if (at !== -1) linkedRanges.push({ at, to: at + needle.length });
+    }
+  }
+
+  const items = starts.map((start, index) => {
+    const end = index + 1 < starts.length ? starts[index + 1].start : text.length;
+    const body = text.slice(start.start, end);
+
+    // Positions are compared in the normalised text, so the section bounds are normalised too.
+    const from = normalise(text.slice(0, start.start)).length;
+    const to = from + normalise(body).length;
+    const touches = (ranges) => ranges.some((r) => r.at >= from - 1 && r.at <= to);
+
+    let disposition;
+    if (touches(coveredRanges)) {
+      disposition = touches(linkedRanges)
+        ? SECTION_DISPOSITION.CONNECTED
+        : SECTION_DISPOSITION.COVERED;
+    } else if (INFORMATION_GAP_CUES.some((cue) => cue.test(body))) {
+      disposition = SECTION_DISPOSITION.INFORMATION_GAP;
+    } else if (CONTROL_DEFICIENCY_CUES.some((cue) => cue.test(body))) {
+      disposition = SECTION_DISPOSITION.CONTROL_DEFICIENCY;
+    } else if (isMaterialUnit(body)) {
+      disposition = SECTION_DISPOSITION.POTENTIAL_ISSUE;
+    } else {
+      disposition = SECTION_DISPOSITION.NO_FURTHER_WORK;
+    }
+
+    return { label: sectionLabel(start, index), kind: start.kind, disposition };
+  });
+
+  const byDisposition = {};
+  for (const value of Object.values(SECTION_DISPOSITION)) byDisposition[value] = 0;
+  for (const item of items) byDisposition[item.disposition] += 1;
+
+  return {
+    total: items.length,
+    // Equal to total by construction, and reported anyway: a reader is entitled to see the two
+    // numbers agree rather than take it on trust, and a future change that starts dropping
+    // sections will show up here as a difference instead of as silence.
+    classified: items.filter((item) => item.disposition).length,
+    byDisposition,
+    items,
   };
 }

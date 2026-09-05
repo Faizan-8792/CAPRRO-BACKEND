@@ -162,8 +162,68 @@ function aggregateCueBefore(text, amountIndex) {
 }
 
 /**
+ * A sentence ending inside the span between two amounts.
+ *
+ * Deliberately requires the terminator to be FOLLOWED by whitespace, because the amounts
+ * themselves have already been consumed by the time this looks at the gap - so the "." in
+ * "Rs 2.10 lakh" is never inside this span. What is inside it is text like ", " (a list) or
+ * ". Trade payables include " (a different subject).
+ */
+const SENTENCE_END_BETWEEN = /[.;!?]\s|\n\s*\n/;
+
+/**
+ * A line that opens a new numbered or lettered item: "12.", "(12)", "A.", "iv)".
+ *
+ * Bullets are deliberately NOT here. A number or letter marks a distinct enumerated section of a
+ * memorandum - section 12 is about payables and section 13 about borrowings, and their figures
+ * have nothing to do with each other. A bullet marks a member of the list it hangs under, which
+ * is exactly the case this must not break.
+ */
+const ENUMERATED_ITEM_START = /(?:^|\n)[ \t]*(?:\(?\d{1,3}[.)]|\(?[A-Za-z][.)])[ \t]+/;
+
+/**
+ * Whether a population boundary sits between two positions - that is, whether two amounts belong
+ * to different populations and must never be added together.
+ *
+ * WHY THIS EXISTS
+ * Runs used to be grouped by PROXIMITY alone: any three amounts within 400 characters, none
+ * carrying an aggregate cue, became "an itemised list". On a 41-section audit memorandum that
+ * swept 24 unrelated figures - revenue, receivables, capital work in progress, inventory,
+ * payables, borrowings, gratuity, related-party sales, deferred tax, contingent liabilities, CSR -
+ * into a single "population" of Rs 1,034.46 crore and reconciled it against the Rs 2.86 lakh of
+ * unsupported reimbursement claims in section 33, reporting a Rs 1,034.43 crore difference that
+ * does not exist.
+ *
+ * That is worse than missing a finding. A fabricated reconciliation sends a reviewer looking for a
+ * difference that was never there, and it destroyed the one real reconciliation in the document:
+ * the runaway run swallowed section 33's four itemised claims, so the genuine finding never
+ * appeared at all.
+ *
+ * THE RULE
+ * Amounts may be added together only when they are itemised members of the same explicitly
+ * identified population. Two independent, individually sufficient signals of a different
+ * population:
+ *
+ *   1. A sentence ends between them. An enumeration of members of one population is one sentence
+ *      ("claims of Rs A, Rs B, Rs C and Rs D were settled"); once a full stop intervenes, the text
+ *      has moved to a different subject.
+ *   2. A new numbered or lettered item begins between them. Section 12 and section 13 of a
+ *      memorandum are different populations by construction.
+ *
+ * Neither signal is a keyword, and neither depends on the wording of any particular document.
+ * That is the point: a rule that recognised the words "Reimbursement claims" would be an overfit
+ * to one file and would fail the next one.
+ */
+function populationBoundaryBetween(text, fromIndex, toIndex) {
+  if (toIndex <= fromIndex) return false;
+  const span = text.slice(fromIndex, toIndex);
+  return SENTENCE_END_BETWEEN.test(span) || ENUMERATED_ITEM_START.test(span);
+}
+
+/**
  * Groups amounts into runs that read as one itemised list: consecutive amounts none of which
- * carries an aggregate cue, separated by short gaps.
+ * carries an aggregate cue, separated by short gaps, and none separated from the one before it by
+ * a population boundary.
  */
 function itemisedRuns(text, amounts) {
   const runs = [];
@@ -173,10 +233,13 @@ function itemisedRuns(text, amounts) {
     const amount = amounts[i];
     const isAggregate = aggregateCueBefore(text, amount.index) !== null;
     const previous = amounts[i - 1];
-    const gap = previous ? amount.index - (previous.index + previous.raw.length) : 0;
+    const previousEnd = previous ? previous.index + previous.raw.length : 0;
+    const gap = previous ? amount.index - previousEnd : 0;
+    const crossesPopulation =
+      previous !== undefined && populationBoundaryBetween(text, previousEnd, amount.index);
 
-    // An aggregate claim, or a long gap, ends the run.
-    if (isAggregate || (previous && gap > MAX_AGGREGATE_DISTANCE_CHARS)) {
+    // An aggregate claim, a long gap, or a different population ends the run.
+    if (isAggregate || (previous && gap > MAX_AGGREGATE_DISTANCE_CHARS) || crossesPopulation) {
       if (current.length >= MIN_ITEMS_IN_LIST) runs.push(current);
       current = isAggregate ? [] : [amount];
       continue;
@@ -219,10 +282,19 @@ export function findNumericalInconsistencies(text) {
     const runEnd = lastItem.index + lastItem.raw.length;
     const sum = run.reduce((total, item) => total + item.paise, 0);
 
-    // The first aggregate claim that follows this run, within reach of it.
+    // The first aggregate claim that follows this run, within reach of it AND still describing the
+    // same population.
+    //
+    // A sentence break is allowed here, unlike inside a run: the total of a list is very often
+    // stated in the sentence after it ("...were settled during the year. Evidence for Rs 2.86 lakh
+    // could not be produced."). A new numbered section is not allowed, because a figure in the
+    // next section of a memorandum is about a different subject - which is precisely how the
+    // Rs 2.86 lakh of section 33 came to be presented as the total of twenty-four figures drawn
+    // from sections 9 to 32.
     const aggregate = amounts.find((candidate) => {
       if (candidate.index < runEnd) return false;
       if (candidate.index - runEnd > MAX_AGGREGATE_DISTANCE_CHARS) return false;
+      if (ENUMERATED_ITEM_START.test(text.slice(runEnd, candidate.index))) return false;
       return aggregateCueBefore(text, candidate.index) !== null;
     });
 

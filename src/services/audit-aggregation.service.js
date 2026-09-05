@@ -23,9 +23,73 @@ export const SUBSEQUENT_EVENT = Object.freeze({
   NOT_A_SUBSEQUENT_EVENT: null,
 });
 
-/** Text that places an event after the reporting date at all. */
+/**
+ * Text that says IN WORDS that an event falls after the reporting date.
+ *
+ * "in April" and "in May" survive only as a last-resort fallback for a document that states no
+ * reporting date at all, where an Indian 31 March year-end is the overwhelming default. They are
+ * no longer the main route, and must not be: hardcoding two month names meant an event in June,
+ * July or August was not recognised as a subsequent event at all. On a schedule of nine events
+ * spanning May to August, seven were invisible - not misclassified, never seen.
+ */
 const SUBSEQUENT_WINDOW =
   /\bsubsequent(?:ly)? to the (?:year|reporting|balance sheet)[\s-]?(?:end|date)\b|\bafter the (?:year|reporting|balance sheet)[\s-]?(?:end|date)\b|\bpost[\s-]?(?:year|balance sheet)[\s-]?(?:end|date)\b|\bsubsequent event\b|\bin April\b|\bin May\b/i;
+
+const MONTH_NAMES = [
+  "january",
+  "february",
+  "march",
+  "april",
+  "may",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+];
+
+const MONTH_ALTERNATION = MONTH_NAMES.join("|");
+
+/** "year ended 31 March 2026", "period ending 30 June 2025", "as at 31 March 2026". */
+const REPORTING_DATE_PATTERN = new RegExp(
+  `\\b(?:(?:year|period|quarter|half[\\s-]?year)\\s+end(?:ed|ing)|as\\s+at|as\\s+of)\\s+(?:\\d{1,2}(?:st|nd|rd|th)?\\s+)?(${MONTH_ALTERNATION})\\s+(\\d{4})\\b`,
+  "i",
+);
+
+/** Every explicit month-and-year reference, so an event's own date can be compared. */
+const MONTH_YEAR_PATTERN = new RegExp(`\\b(${MONTH_ALTERNATION})\\s+(\\d{4})\\b`, "gi");
+
+/**
+ * The reporting date the document states, as `{ month, year }` with month 0-11, or null.
+ *
+ * Deriving the window from the document rather than from a list of month names is the whole point:
+ * a 30 June year-end makes a July event subsequent and a May event not, and no fixed list of month
+ * names can express that.
+ */
+export function findReportingDate(text) {
+  if (typeof text !== "string") return null;
+  const match = text.match(REPORTING_DATE_PATTERN);
+  if (!match) return null;
+  const month = MONTH_NAMES.indexOf(match[1].toLowerCase());
+  const year = Number(match[2]);
+  if (month === -1 || !Number.isFinite(year)) return null;
+  return { month, year };
+}
+
+/** Whether the text names a month and year strictly after the reporting date. */
+function namesADateAfter(text, reportingDate) {
+  if (!reportingDate) return false;
+  for (const match of String(text ?? "").matchAll(MONTH_YEAR_PATTERN)) {
+    const month = MONTH_NAMES.indexOf(match[1].toLowerCase());
+    const year = Number(match[2]);
+    if (month === -1 || !Number.isFinite(year)) continue;
+    if (year > reportingDate.year) return true;
+    if (year === reportingDate.year && month > reportingDate.month) return true;
+  }
+  return false;
+}
 
 /**
  * Events that reveal a condition ALREADY PRESENT at the reporting date. These change the figures.
@@ -61,7 +125,19 @@ const NON_ADJUSTING_CUES = [
   // dividend declared after the reporting date is a textbook non-adjusting event, and requiring
   // adjacency in one direction only missed it. Sixth time this adjacency class has bitten here,
   // and again a fixture found it rather than anyone reading the pattern.
-  /\b(?:share|rights|bonus)\s+issue\b|\bbuy[- ]?back\b|\bdividend\b[^.]{0,25}\bdeclar|\bdeclar\w*\b[^.]{0,25}\bdividend\b/i,
+  // "share issue" and "issued equity shares" are the same event in two word orders, and only the
+  // first was matched. SEVENTH time this adjacency class has bitten in this file, and again a
+  // fixture found it rather than anyone reading the pattern - an equity issue after the reporting
+  // date is about as textbook a non-adjusting event as exists, and it was falling to UNCLEAR.
+  /\b(?:share|rights|bonus)\s+issue\b|\bissu\w*\b[^.]{0,30}\b(?:equity|shares?|debentures?|securities)\b|\bbuy[- ]?back\b|\bdividend\b[^.]{0,25}\bdeclar|\bdeclar\w*\b[^.]{0,25}\bdividend\b/i,
+  // A disposal after the reporting date is a new condition, not evidence about an old one. The
+  // list had every way of BUYING something and no way of selling one.
+  //
+  // BOTH word orders, because "a subsidiary was sold" and "sold the subsidiary" are the same event
+  // and the first version of this line matched only the second. Written one-directional while the
+  // comment three lines above it describes that exact mistake - which is the argument for testing
+  // patterns with fixtures rather than reading them.
+  /\b(?:sold|sale|disposal|disposed|divest\w*)\b[^.]{0,40}\b(?:subsidiary|division|undertaking|business|segment|investment|stake)\b|\b(?:subsidiary|division|undertaking|segment|investment|stake)\b[^.]{0,40}\b(?:was|were|been)\s+(?:sold|disposed|divested)\b/i,
   /\b(?:new|fresh)\s+(?:borrowing|loan|facility)\b/i,
   /\b(?:announced|commenced|launched|entered into)\b[^.]{0,60}\b(?:plan|expansion|restructuring|contract)\b/i,
   /\bchange in (?:law|regulation|tax rate)\b/i,
@@ -76,9 +152,14 @@ const NON_ADJUSTING_CUES = [
  * produce a confident wrong number in the accounts, and the whole point of the three-way split is
  * that the third way exists.
  */
-export function classifySubsequentEvent(text) {
+export function classifySubsequentEvent(text, options = {}) {
   const value = typeof text === "string" ? text : "";
-  if (!value.trim() || !SUBSEQUENT_WINDOW.test(value)) {
+  // Two independent routes into the window, and the second is the one that generalises: a phrase
+  // saying so, or a date the document's own reporting date places after the year end. The
+  // reportingDate is optional so every existing caller keeps working unchanged.
+  const inWindow =
+    SUBSEQUENT_WINDOW.test(value) || namesADateAfter(value, options.reportingDate ?? null);
+  if (!value.trim() || !inWindow) {
     return { classification: SUBSEQUENT_EVENT.NOT_A_SUBSEQUENT_EVENT, basis: null, action: null };
   }
 
@@ -258,4 +339,72 @@ export function mayBeFilteredAsImmaterial(finding, materialityPaise) {
     };
   }
   return { filterable: true, reasons: [] };
+}
+
+/**
+ * Every subsequent event in the document, individually classified.
+ *
+ * WHY THIS EXISTS
+ * classifySubsequentEvent was only ever reached through a FINDING - the structured model attaches
+ * it to a finding's subject. So an event the model did not write about was never classified at
+ * all, and a schedule of nine events could produce two classifications and seven silences. The
+ * reader has no way to tell a silence from a clean event.
+ *
+ * Driven from the document's own sections, so the count is a property of the document rather than
+ * of what the model chose to mention. Same principle as AA-01 and AA-31, applied to SA 560.
+ *
+ * @param sections from extractDocumentSections
+ * @param text the whole document, used only to find its stated reporting date
+ */
+export function buildSubsequentEventRegister(sections, text) {
+  if (!Array.isArray(sections) || sections.length === 0) return null;
+
+  const reportingDate = findReportingDate(text);
+  const events = [];
+
+  for (const section of sections) {
+    const verdict = classifySubsequentEvent(section.text, { reportingDate });
+    if (verdict.classification === SUBSEQUENT_EVENT.NOT_A_SUBSEQUENT_EVENT) continue;
+    events.push({
+      label: section.label,
+      classification: verdict.classification,
+      // What the classification MEANS for the accounts, in the vocabulary a reviewer works in:
+      // whether the condition existed at the reporting date, and whether the answer changes the
+      // figures or only a note.
+      conditionAtReportingDate:
+        verdict.classification === SUBSEQUENT_EVENT.ADJUSTING
+          ? true
+          : verdict.classification === SUBSEQUENT_EVENT.NON_ADJUSTING
+            ? false
+            : null,
+      treatment:
+        verdict.classification === SUBSEQUENT_EVENT.ADJUSTING
+          ? "adjustment"
+          : verdict.classification === SUBSEQUENT_EVENT.NON_ADJUSTING
+            ? "disclosure"
+            : "further evidence required",
+      basis: verdict.basis,
+      action: verdict.action,
+    });
+  }
+
+  if (events.length === 0) return null;
+
+  const byClassification = {};
+  for (const value of Object.values(SUBSEQUENT_EVENT)) {
+    if (value !== null) byClassification[value] = 0;
+  }
+  for (const event of events) byClassification[event.classification] += 1;
+
+  return {
+    total: events.length,
+    // Equal to total by construction and reported anyway, for the same reason the section ledger
+    // reports it: a reader should see the two numbers agree rather than take it on trust.
+    classified: events.filter((e) => e.classification).length,
+    reportingDate: reportingDate
+      ? { month: reportingDate.month + 1, year: reportingDate.year }
+      : null,
+    byClassification,
+    events,
+  };
 }

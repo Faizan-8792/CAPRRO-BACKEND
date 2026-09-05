@@ -90,6 +90,13 @@ const SCHEMA_THE_CALLER_ASKED_FOR = [
   "alternativeProcedures",
   // AA-11 / AA-12 joined the schema.
   "stratification",
+  // AA-33. The owner’s output contract names ACCOUNTING / REPORTING GUIDANCE and POSSIBLE
+  // ACCOUNTING IMPLICATION as two separate mandatory fields, and they answer two different
+  // questions: which framework governs the matter, versus what could be wrong in the accounts
+  // because of it. Only the second existed, and it was derived from whatever the model happened to
+  // cite - so a finding correctly citing SA 240, an AUDITING standard, named no accounting
+  // framework at all.
+  "accountingGuidance",
 ];
 
 check("every section the caller's schema asked for is present", () => {
