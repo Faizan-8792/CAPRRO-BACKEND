@@ -37,6 +37,10 @@ import {
   findUnknownStandardReferences,
   isStatusPermitted,
 } from "../src/services/audit-finding-guard.service.js";
+import {
+  STRUCTURED_SECTIONS,
+  validateStructuredFinding,
+} from "../src/services/audit-finding-model.service.js";
 
 let passed = 0;
 let failed = 0;
@@ -516,6 +520,61 @@ check("no rendered field starts a sentence in lower case", () => {
             `${path}: "${finding.title}".${field} has a lower-case sentence: "${sentence.slice(0, 60)}"`,
           );
         }
+      }
+    }
+  }
+});
+
+// ─── AA-09: the structured object, on every finding of every path ──
+
+check("every finding carries a valid structured object", () => {
+  for (const { path, state } of RESPONSES) {
+    for (const finding of state.body.insights ?? []) {
+      assert.ok(finding.structured, `${path}: "${finding.title}" has no structured object`);
+      assert.deepEqual(
+        validateStructuredFinding(finding.structured),
+        [],
+        `${path}: "${finding.title}" has a malformed structured object`,
+      );
+      for (const section of STRUCTURED_SECTIONS) {
+        assert.ok(
+          section in finding.structured,
+          `${path}: "${finding.title}" is missing schema section ${section}`,
+        );
+      }
+    }
+  }
+});
+
+check("the structured object agrees with the flat fields beside it", () => {
+  // If the two can disagree, a consumer reading the object and a person reading the card are
+  // looking at different findings - the same class of defect as the coverage count disagreeing
+  // with its own declaration.
+  for (const { path, state } of RESPONSES) {
+    for (const finding of state.body.insights ?? []) {
+      const s = finding.structured;
+      assert.equal(s.risk.status, finding.status, `${path}: "${finding.title}" status disagrees`);
+      if (finding.evidence) {
+        assert.equal(s.fact, finding.evidence.trim(), `${path}: "${finding.title}" fact disagrees`);
+      }
+      if (finding.nextAction) {
+        assert.equal(
+          s.procedure.conclusionCriterion,
+          finding.nextAction.trim(),
+          `${path}: "${finding.title}" conclusion criterion disagrees`,
+        );
+      }
+    }
+  }
+});
+
+check("the flat shape the shipped clients read is never removed", () => {
+  // The desktop reads Title, Detail, Risk, Standard, Evidence, Why, NextAction; the extension reads
+  // the same wire shape. Adding the structured object must not have quietly replaced any of them.
+  for (const { path, state } of RESPONSES) {
+    for (const finding of state.body.insights ?? []) {
+      for (const field of ["title", "detail", "risk", "standard", "evidence"]) {
+        assert.ok(field in finding, `${path}: "${finding.title}" lost the flat field ${field}`);
       }
     }
   }

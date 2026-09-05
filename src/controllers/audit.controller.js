@@ -14,6 +14,7 @@ import { guardFindings } from "../services/audit-finding-guard.service.js";
 import { buildContradictionInsights } from "../services/audit-contradiction.service.js";
 import { buildInjectionInsights } from "../services/audit-injection.service.js";
 import { buildMaterialityGuidance } from "../services/audit-materiality.service.js";
+import { withStructure } from "../services/audit-finding-model.service.js";
 
 function safeStr(v, max = 4000) {
   return String(v ?? "").slice(0, max);
@@ -681,7 +682,12 @@ function assembleInsightsBody({
       // AA-01. Appended AFTER the ceiling rather than competing for room under it. The one finding
       // that must never be dropped for space is the notice that something was dropped.
       .concat(coverageLedger.findings),
-  );
+  )
+    // AA-09. Attached LAST, after the guard has settled the status and softened anything that
+    // over-concluded, so the structured object describes the finding a reader actually receives
+    // rather than the one the model proposed. Purely additive: every flat field the desktop and
+    // the extension read is untouched, and a client that ignores the new key sees no change.
+    .map((finding) => withStructure(finding));
 
   return {
     insights,
