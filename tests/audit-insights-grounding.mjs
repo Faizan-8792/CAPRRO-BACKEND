@@ -506,9 +506,32 @@ const ALL_REJECTED_RESPONSE = JSON.stringify({
     "B5: an all-rejected model batch is flagged insufficientEvidence rather than a silent empty success",
     result.body?.insufficientEvidence === true,
   );
+  // This asserted `insights.length === 3` until the all-rejected path was routed through the same
+  // response assembly as every other path. It now also carries the AA-01 coverage declaration,
+  // which is the correct behaviour and was missing precisely here: a document whose every model
+  // finding was rejected is the one most likely to leave matters unaddressed, and this path used to
+  // say nothing about them at all. The assertion is kept but made specific, so it still fails if a
+  // mandatory procedure goes missing rather than merely counting to a number.
+  const b5Titles = (result.body?.insights ?? []).map((item) => item.title ?? "");
   check(
     "B5: the three mandatory procedures are still returned even when every model item is rejected",
-    Array.isArray(result.body?.insights) && result.body.insights.length === 3,
+    Array.isArray(result.body?.insights) &&
+      b5Titles.filter((title) => /materiality|confirmation|representation/i.test(title))
+        .length === 3,
+  );
+  check(
+    "B5: the coverage declaration is present too, since nothing the model returned was usable",
+    b5Titles.some((title) => /were not reviewed/i.test(title)),
+  );
+  check(
+    "B5: every returned finding carries a status, on this path as on every other",
+    (result.body?.insights ?? []).every(
+      (item) => typeof item.status === "string" && item.status.length > 0,
+    ),
+  );
+  check(
+    "B5: the coverage object is present and does not claim completeness",
+    result.body?.coverage !== undefined && result.body.coverage.complete === false,
   );
 }
 

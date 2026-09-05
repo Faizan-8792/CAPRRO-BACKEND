@@ -653,6 +653,7 @@ try {
         "audit-contradiction-contract",
         "audit-injection-contract",
         "audit-materiality-contract",
+        "audit-response-invariants",
         "audit-insights-grounding",
         "audit-insights-accuracy-speed",
         "audit-insights-coverage-and-discipline",

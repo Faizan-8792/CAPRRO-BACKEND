@@ -9,7 +9,7 @@ import {
 } from "../services/deepseek-provider.service.js";
 import { AUDIT_TOPIC_REFERENCE } from "../data/audit-topic-reference.js";
 import { buildNumericalIntegrityInsights } from "../services/audit-numerical-integrity.service.js";
-import { buildCoverageLedger } from "../services/audit-coverage.service.js";
+import { buildCoverageLedger, computeCoverage } from "../services/audit-coverage.service.js";
 import { guardFindings } from "../services/audit-finding-guard.service.js";
 import { buildContradictionInsights } from "../services/audit-contradiction.service.js";
 import { buildInjectionInsights } from "../services/audit-injection.service.js";
@@ -628,6 +628,97 @@ function buildMandatoryProcedures(
   }
 
   return procedures;
+}
+
+// The ONE place an insights response body is assembled.
+//
+// It exists because the guarantees kept being true of the main path and false of the others. The
+// two insufficient-evidence paths returned buildMandatoryProcedures(...) directly: no AA-04 status
+// on any finding, no AA-01 coverage object, and none of the AA-02 / AA-03 / AA-06 deterministic
+// findings - so a document with an arithmetic contradiction, a self-contradiction, or an embedded
+// instruction returned NONE of them whenever the model happened to ground nothing. Three separate
+// closed defects were quietly untrue on two of the five response paths.
+//
+// Patching each call site would have left the same hole open for the next path somebody adds. A
+// caller can no longer construct this body by hand: every path routes through here, so the
+// deterministic findings, the guard and the coverage ledger apply by construction rather than by
+// anyone remembering.
+function assembleInsightsBody({
+  rawText,
+  topicLabel,
+  resolvedTopicId = null,
+  evidencedInsights = [],
+  includeMandatory = true,
+}) {
+  // Deterministic and model-free. Computed once and used BOTH for the coverage measurement and for
+  // the returned list, because measuring one array and returning another is precisely how the live
+  // response came to name matters as unreviewed directly above findings about them.
+  const deterministicInsights = [
+    ...buildNumericalIntegrityInsights(rawText),
+    ...buildContradictionInsights(rawText),
+    ...buildInjectionInsights(rawText),
+  ];
+
+  const coverageLedger = buildCoverageLedger(rawText, [
+    ...deterministicInsights,
+    ...evidencedInsights,
+  ]);
+
+  const insights = guardFindings(
+    [
+      ...deterministicInsights,
+      ...(includeMandatory
+        ? buildMandatoryProcedures(
+            rawText,
+            topicLabel,
+            resolvedTopicId,
+            evidencedInsights,
+          )
+        : []),
+      ...evidencedInsights,
+    ]
+      .slice(0, MAX_TOTAL_INSIGHTS)
+      // AA-01. Appended AFTER the ceiling rather than competing for room under it. The one finding
+      // that must never be dropped for space is the notice that something was dropped.
+      .concat(coverageLedger.findings),
+  );
+
+  return {
+    insights,
+    // AA-01. Present on EVERY response, including the ones that produce no findings at all. A
+    // response with no findings and no coverage object is indistinguishable from a complete review
+    // that found nothing, and that is the exact silence this defect is about. Where nothing was
+    // measurable, unitsIdentified is 0 and complete is false - never a reassuring true.
+    coverage: {
+      unitsIdentified: coverageLedger.coverage.unitCount,
+      unitsAddressed: coverageLedger.coverage.coveredCount,
+      unitsUnaddressed: coverageLedger.coverage.uncoveredCount,
+      complete: coverageLedger.complete,
+    },
+  };
+}
+
+// The coverage statement owed by a response that produces no findings at all.
+//
+// The three hard-failure paths - no model configured, the model errored, the model's answer could
+// not be parsed - correctly return an empty insights array and a reason. They returned no coverage
+// object either, and a client reading `coverage.complete` got `undefined`. An empty list with no
+// coverage statement is indistinguishable from a complete review that found nothing, which is the
+// precise silence AA-01 exists to prevent.
+//
+// The units are still measured, because measuring them needs no model: the reader is told the
+// document contains N matters and that none of them were reached. `complete` is false, never a
+// reassuring true, and never absent.
+function coverageOnlyBody(rawText) {
+  const coverage = computeCoverage(rawText, []);
+  return {
+    coverage: {
+      unitsIdentified: coverage.unitCount,
+      unitsAddressed: 0,
+      unitsUnaddressed: coverage.unitCount,
+      complete: false,
+    },
+  };
 }
 
 // Best-effort match from a free-form topic name to one of AUDIT_TOPICS, used
@@ -1453,7 +1544,11 @@ export async function generateInsights(req, res, next) {
         ok: true,
         generated: false,
         reason: "LLM not configured",
+        // No model ran, so no findings are produced - but the coverage statement is still owed.
+        // "No findings" plus no coverage object reads exactly like a complete review that found
+        // nothing, and that inference must never be available by accident.
         insights: [],
+        ...coverageOnlyBody(rawText),
       });
     }
 
@@ -1513,6 +1608,7 @@ export async function generateInsights(req, res, next) {
         generated: false,
         reason: publicLlmFailureReason(r.reason),
         insights: [],
+        ...coverageOnlyBody(rawText),
       });
     }
 
@@ -1533,6 +1629,7 @@ export async function generateInsights(req, res, next) {
         generated: false,
         reason: "Could not parse LLM response",
         insights: [],
+        ...coverageOnlyBody(rawText),
       });
     }
 
@@ -1549,11 +1646,10 @@ export async function generateInsights(req, res, next) {
         generated: true,
         insufficientEvidence: true,
         reason,
-        insights: buildMandatoryProcedures(
-          rawText,
-          topicLabel,
-          resolvedTopicId,
-        ),
+        // Routed through the single assembly helper: this path previously returned the mandatory
+        // procedures raw, with no AA-04 status, no AA-01 coverage and none of the deterministic
+        // AA-02 / AA-03 / AA-06 findings.
+        ...assembleInsightsBody({ rawText, topicLabel, resolvedTopicId }),
         ...(partial ? { partial: true } : {}),
       });
     }
@@ -1587,11 +1683,9 @@ export async function generateInsights(req, res, next) {
         insufficientEvidence: true,
         reason:
           "No procedure returned by the assistant could be grounded in specific evidence from this text.",
-        insights: buildMandatoryProcedures(
-          rawText,
-          topicLabel,
-          resolvedTopicId,
-        ),
+        // Same routing, same reason. A document whose every model finding was rejected is exactly
+        // the document most likely to need the deterministic findings and the coverage statement.
+        ...assembleInsightsBody({ rawText, topicLabel, resolvedTopicId }),
         ...(partial ? { partial: true } : {}),
       });
     }
@@ -1696,74 +1790,15 @@ export async function generateInsights(req, res, next) {
       ...coveragePassInsights,
     ];
 
-    // Computed once and reused below, rather than called again inside the response literal:
-    // measuring coverage against one array and returning another is how the two came to disagree.
-    const deterministicInsights = [
-      ...buildNumericalIntegrityInsights(rawText),
-      ...buildContradictionInsights(rawText),
-      // AA-06. Text in the document addressed to the review tool rather than describing the
-      // client. It is reported rather than filtered: a working paper carrying directions to an
-      // automated reviewer did not acquire them in the ordinary course of preparation, and
-      // silently stripping it would delete the most interesting fact in the file.
-      ...buildInjectionInsights(rawText),
-    ];
-
-    // AA-01. Computed once, before the response, so the appended declaration and the reported
-    // counts come from a single measurement rather than two that could disagree.
-    //
-    // The deterministic findings are included in the measurement, and leaving them out was a real
-    // defect found by live verification rather than by any local test. A document whose matters 1
-    // to 3 had a contradiction finding and a numerical finding was still told "the following were
-    // not reviewed: 1, 2, 3", because only the model's findings were counted. The response
-    // contradicted itself - the exact failure AA-03 exists to report - and it did so in the one
-    // finding whose whole purpose is to be trustworthy about what was and was not covered.
-    const coverageLedger = buildCoverageLedger(rawText, [
-      ...deterministicInsights,
-      ...allEvidencedInsights,
-    ]);
-
     return res.json({
       ok: true,
       generated: true,
-      // AA-04 and AA-26. The guard runs LAST, over everything the response carries: the
-      // model's findings, the mandatory procedures, the deterministic numerical finding and the
-      // coverage declaration. Placing it here rather than beside the model call is deliberate -
-      // anything added to this list in future is covered without anyone remembering to opt in,
-      // and no path exists that reaches the reader without passing through it.
-      insights: guardFindings([
-        // AA-02 (.kiro/audit-assistance-defects.md). Deterministic and model-free, and it leads
-        // for a reason: a population that does not reconcile has to be settled before any
-        // procedure performed on it means anything. Listing it below the procedures would invite
-        // testing the wrong population first, which is exactly what happened in the review.
-        // AA-02 then AA-03, both deterministic, computed above so the coverage measurement and
-        // this list are the same findings. AA-03 is placed high for the same reason AA-02 is: a
-        // document that contradicts itself has already supplied both halves of the finding, so it
-        // needs no further evidence to be worth acting on. It states the conflict and refuses to
-        // resolve it - which one is true is a question for evidence, and choosing here would
-        // delete the most useful thing on the page.
-        ...deterministicInsights,
-        ...buildMandatoryProcedures(
-          rawText,
-          topicLabel,
-          resolvedTopicId,
-          allEvidencedInsights,
-        ),
-        ...allEvidencedInsights,
-      ]
-        .slice(0, MAX_TOTAL_INSIGHTS)
-        // AA-01. The coverage declaration is APPENDED after the ceiling rather than competing for
-        // room under it. The one finding that must never be dropped for space is the notice that
-        // something was dropped, and coverage is measured against the model's own evidenced
-        // findings, so a matter nobody addressed is named rather than passed over in silence.
-        .concat(coverageLedger.findings)),
-      // The ledger itself travels with the response so a client can show the count rather than
-      // inferring completeness from the absence of a warning.
-      coverage: {
-        unitsIdentified: coverageLedger.coverage.unitCount,
-        unitsAddressed: coverageLedger.coverage.coveredCount,
-        unitsUnaddressed: coverageLedger.coverage.uncoveredCount,
-        complete: coverageLedger.complete,
-      },
+      ...assembleInsightsBody({
+        rawText,
+        topicLabel,
+        resolvedTopicId,
+        evidencedInsights: allEvidencedInsights,
+      }),
       ...(partial || coveragePartial ? { partial: true } : {}),
     });
   } catch (err) {
