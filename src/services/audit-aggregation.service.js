@@ -62,9 +62,42 @@ const MONTH_NAMES = [
 
 const MONTH_ALTERNATION = MONTH_NAMES.join("|");
 
-/** "year ended 31 March 2026", "period ending 30 June 2025", "as at 31 March 2026". */
+/**
+ * "year ended 31 March 2026", "period ending 30 June 2025", "as at 31 March 2026", and the form
+ * that actually declares the boundary in a subsequent-events schedule: "The following occurred
+ * after 31 March 2026".
+ *
+ * AA-36. The last family was missing, and its absence cost far more than a date. A document that
+ * says "The following occurred after 31 March 2026" and then lists nine events was read as stating
+ * no reporting date at all, so the window fell back to the April/May default and five of the nine
+ * events were never recognised. The phrase that opens a subsequent-events schedule is the single
+ * most explicit statement of a reporting date a document ever makes; it is not a passing mention.
+ */
 const REPORTING_DATE_PATTERN = new RegExp(
-  `\\b(?:(?:year|period|quarter|half[\\s-]?year)\\s+end(?:ed|ing)|as\\s+at|as\\s+of)\\s+(?:\\d{1,2}(?:st|nd|rd|th)?\\s+)?(${MONTH_ALTERNATION})\\s+(\\d{4})\\b`,
+  `\\b(?:(?:year|period|quarter|half[\\s-]?year)\\s+end(?:ed|ing)|as\\s+at|as\\s+of|(?:occurred|arose|took\\s+place|happened|arising)\\s+(?:after|subsequent\\s+to)|(?:after|subsequent\\s+to)\\s+the\\s+(?:year|reporting|balance\\s+sheet)[\\s-]?(?:end|date)\\s+(?:of\\s+)?)\\s*(?:\\d{1,2}(?:st|nd|rd|th)?\\s+)?(${MONTH_ALTERNATION})\\s+(\\d{4})\\b`,
+  "i",
+);
+
+/**
+ * Text that declares the block that follows to be a schedule of post-reporting-date events.
+ *
+ * AA-37. Every item in such a block is a subsequent event BY DECLARATION, whatever its own wording
+ * says. Two of Test #6's nine events - "Bank issued no formal covenant waiver" and "Former
+ * distributor legal claim remains unresolved" - carry no date of any kind, so no date rule could
+ * ever reach them. The document states the boundary once and lists the items under it, which is
+ * precisely how an SA 560 schedule is written, and reading each item in isolation throws that
+ * structure away.
+ */
+const SUBSEQUENT_CONTEXT_DECLARATION =
+  /\bsubsequent\s+events?\b|\bevents?\s+after\s+the\s+(?:reporting|balance\s+sheet)\s+(?:period|date)\b|\bthe\s+following\s+(?:occurred|arose|took\s+place|happened)\s+(?:after|subsequent\s+to)\b/i;
+
+/**
+ * A stated boundary date, which a genuine schedule always carries and a heading about schedules
+ * does not. This is what separates "The following occurred after 31 March 2026:" from an
+ * instruction reading "SUBSEQUENT EVENTS - analyse each event from section 30 separately".
+ */
+const DECLARES_A_BOUNDARY_DATE = new RegExp(
+  `\\b(?:\\d{1,2}(?:st|nd|rd|th)?\\s+)?(?:${MONTH_ALTERNATION})\\s+\\d{4}\\b|\\b(?:year|reporting|balance\\s+sheet)[\\s-]?(?:end|date)\\b`,
   "i",
 );
 
@@ -112,16 +145,25 @@ const ADJUSTING_CUES = [
   // Words intervene in real prose: "the court DELIVERED ITS judgment", "the claim WAS settled BY
   // the court". Requiring adjacency missed both, and a passive settlement was then read as
   // non-adjusting because only the other half of the sentence matched.
-  /\bcourt\b[^.]{0,40}\b(?:judgment|judgement|order|ruling|decree)\b/i,
-  /\b(?:claim|dispute|case|litigation)\b[^.]{0,40}\b(?:settled|decided|adjudicated)\b/i,
+  /\bcourt\b(?:[^.]|\.(?=\d)){0,40}\b(?:judgment|judgement|order|ruling|decree)\b/i,
+  /\b(?:claim|dispute|case|litigation)\b(?:[^.]|\.(?=\d)){0,40}\b(?:settled|decided|adjudicated)\b/i,
   /\bsettled the (?:claim|dispute|case)\b/i,
   // An article intervenes in ordinary prose: "negotiated A settlement". Requiring adjacency missed
   // it, which is the same shape of miss as the court-judgment cue above.
   /\bnegotiated\s+(?:a|an|the)?\s*(?:price|settlement)\b|\bfinal(?:ised|ized)\s+(?:a|an|the)?\s*(?:price|claim|settlement)\b/i,
-  /\bsale of (?:the )?inventory\b[^.]{0,40}\bbelow cost\b|\brealisable value\b|\brealizable value\b/i,
-  /\bdetermin(?:ed|ation) of\b[^.]{0,40}\b(?:bonus|profit[- ]share|incentive)\b/i,
+  // Both word orders. "sale of the inventory below cost" and "inventory was sold below recorded
+  // cost" are the same event, and only the first was matched - the adjacency class again, which is
+  // why the cue below it now names the verb in either position.
+  /\bsale of (?:the )?inventory\b(?:[^.]|\.(?=\d)){0,40}\bbelow cost\b|\binventor\w*\b(?:[^.]|\.(?=\d)){0,40}\bsold\b(?:[^.]|\.(?=\d)){0,30}\bbelow\b(?:[^.]|\.(?=\d)){0,20}\bcost\b|\brealisable value\b|\brealizable value\b/i,
+  /\bdetermin(?:ed|ation) of\b(?:[^.]|\.(?=\d)){0,40}\b(?:bonus|profit[- ]share|incentive)\b/i,
   /\bdiscovery of (?:a )?(?:fraud|error)\b|\bfraud (?:was )?discovered\b/i,
-  /\breceivable\b[^.]{0,60}\b(?:defaulted|failed to pay|written off)\b/i,
+  /\breceivable\b(?:[^.]|\.(?=\d)){0,60}\b(?:defaulted|failed to pay|written off)\b/i,
+  // Goods returned because they were defective. The defect existed when the goods were despatched,
+  // so the return is evidence about the year-end position rather than a new event - the textbook
+  // adjusting case, and it had no cue at all.
+  /\b(?:returned|return of|sales? return)\b(?:[^.]|\.(?=\d)){0,60}\b(?:defect\w*|damaged|quality|faulty|not conforming)\b|\b(?:defect\w*|damaged|faulty)\b(?:[^.]|\.(?=\d)){0,40}\b(?:returned|return)\b/i,
+  // A warranty claim received after the year end is evidence about goods sold before it.
+  /\bwarranty claims?\b(?:[^.]|\.(?=\d)){0,40}\b(?:received|made|lodged|notified)\b|\b(?:received|lodged)\b(?:[^.]|\.(?=\d)){0,30}\bwarranty claims?\b/i,
 ];
 
 /**
@@ -139,7 +181,7 @@ const NON_ADJUSTING_CUES = [
   // first was matched. SEVENTH time this adjacency class has bitten in this file, and again a
   // fixture found it rather than anyone reading the pattern - an equity issue after the reporting
   // date is about as textbook a non-adjusting event as exists, and it was falling to UNCLEAR.
-  /\b(?:share|rights|bonus)\s+issue\b|\bissu\w*\b[^.]{0,30}\b(?:equity|shares?|debentures?|securities)\b|\bbuy[- ]?back\b|\bdividend\b[^.]{0,25}\bdeclar|\bdeclar\w*\b[^.]{0,25}\bdividend\b/i,
+  /\b(?:share|rights|bonus)\s+issue\b|\bissu\w*\b(?:[^.]|\.(?=\d)){0,30}\b(?:equity|shares?|debentures?|securities)\b|\bbuy[- ]?back\b|\bdividend\b(?:[^.]|\.(?=\d)){0,25}\bdeclar|\bdeclar\w*\b(?:[^.]|\.(?=\d)){0,25}\bdividend\b/i,
   // A disposal after the reporting date is a new condition, not evidence about an old one. The
   // list had every way of BUYING something and no way of selling one.
   //
@@ -147,9 +189,13 @@ const NON_ADJUSTING_CUES = [
   // and the first version of this line matched only the second. Written one-directional while the
   // comment three lines above it describes that exact mistake - which is the argument for testing
   // patterns with fixtures rather than reading them.
-  /\b(?:sold|sale|disposal|disposed|divest\w*)\b[^.]{0,40}\b(?:subsidiary|division|undertaking|business|segment|investment|stake)\b|\b(?:subsidiary|division|undertaking|segment|investment|stake)\b[^.]{0,40}\b(?:was|were|been)\s+(?:sold|disposed|divested)\b/i,
-  /\b(?:new|fresh)\s+(?:borrowing|loan|facility)\b/i,
-  /\b(?:announced|commenced|launched|entered into)\b[^.]{0,60}\b(?:plan|expansion|restructuring|contract)\b/i,
+  /\b(?:sold|sale|disposal|disposed|divest\w*)\b(?:[^.]|\.(?=\d)){0,40}\b(?:subsidiary|division|undertaking|business|segment|investment|stake)\b|\b(?:subsidiary|division|undertaking|segment|investment|stake)\b(?:[^.]|\.(?=\d)){0,40}\b(?:was|were|been)\s+(?:sold|disposed|divested)\b/i,
+  // "new borrowing" was the only adjective allowed, so "obtained a Rs 3 crore EMERGENCY borrowing
+  // facility in July" - a financing arrangement entered into after the year end, which is a new
+  // condition by definition - fell to UNCLEAR. Any borrowing OBTAINED after the reporting date is
+  // the same event whatever the adjective in front of it.
+  /\b(?:new|fresh|additional|emergency|further|standby|bridge)\s+(?:borrowing|loan|facility|credit line)\b|\b(?:obtained|secured|arranged|raised|entered into)\b(?:[^.]|\.(?=\d)){0,50}\b(?:borrowing|loan|facility|credit line)\b/i,
+  /\b(?:announced|commenced|launched|entered into)\b(?:[^.]|\.(?=\d)){0,60}\b(?:plan|expansion|restructuring|contract)\b/i,
   /\bchange in (?:law|regulation|tax rate)\b/i,
   /\bstrike\b|\blabour unrest\b/i,
 ];
@@ -164,11 +210,15 @@ const NON_ADJUSTING_CUES = [
  */
 export function classifySubsequentEvent(text, options = {}) {
   const value = typeof text === "string" ? text : "";
-  // Two independent routes into the window, and the second is the one that generalises: a phrase
-  // saying so, or a date the document's own reporting date places after the year end. The
-  // reportingDate is optional so every existing caller keeps working unchanged.
+  // Three independent routes into the window, and the third is the one that reaches an item with
+  // no date of its own: a phrase saying so, a date the document's own reporting date places after
+  // the year end, or a DECLARED context - the item sits inside a block the document itself
+  // introduced as "the following occurred after 31 March 2026". Both options are optional, so
+  // every existing caller keeps working unchanged.
   const inWindow =
-    SUBSEQUENT_WINDOW.test(value) || namesADateAfter(value, options.reportingDate ?? null);
+    options.inDeclaredWindow === true
+    || SUBSEQUENT_WINDOW.test(value)
+    || namesADateAfter(value, options.reportingDate ?? null);
   if (!value.trim() || !inWindow) {
     return { classification: SUBSEQUENT_EVENT.NOT_A_SUBSEQUENT_EVENT, basis: null, action: null };
   }
@@ -370,10 +420,51 @@ export function buildSubsequentEventRegister(sections, text) {
   if (!Array.isArray(sections) || sections.length === 0) return null;
 
   const reportingDate = findReportingDate(text);
+
+  // AA-37. The spans the document itself declares to be schedules of post-reporting-date events.
+  //
+  // A declaration opens the block; the block runs to the next section that is NOT one of the items
+  // listed under it. Items in a schedule are lettered or bulleted, so the block ends at the next
+  // numbered or labelled section - which is exactly where the document moves on to another subject.
+  const declaredSpans = [];
+  for (const section of sections) {
+    if (!SUBSEQUENT_CONTEXT_DECLARATION.test(section.text)) continue;
+    // The declaration must also state the boundary it is declaring. A real schedule says which
+    // date its items fall after; a heading that merely uses the words - an instruction saying
+    // "SUBSEQUENT EVENTS: analyse each event from section 30 separately" - does not, and without
+    // this the instruction block swallowed its own bullets and reported them as client events.
+    if (!DECLARES_A_BOUNDARY_DATE.test(section.text)) continue;
+    const after = sections.filter(
+      (s) => s.start > section.start && (s.kind === "numbered" || s.kind === "labelled"),
+    );
+    declaredSpans.push({ start: section.start, end: after.length > 0 ? after[0].start : Infinity });
+  }
+  const inDeclaredWindow = (section) =>
+    declaredSpans.some((span) => section.start >= span.start && section.start < span.end);
+
   const events = [];
 
-  for (const section of sections) {
-    const verdict = classifySubsequentEvent(section.text, { reportingDate });
+  // When the document declares a schedule, THAT is the register. Elsewhere in a long file, many
+  // sections mention an April or May date in passing - depreciation starting 1 April, a payment
+  // made in April, a bank email of 20 April - and reporting twenty-six "subsequent events" for a
+  // document that lists nine is noise that buries the nine. The other sections are not lost: they
+  // are accounted for by the section ledger and by the findings themselves.
+  //
+  // A document with no declared schedule keeps the per-section behaviour, which is the only way to
+  // find events in a file that never gathers them under a heading.
+  const considered =
+    declaredSpans.length > 0 ? sections.filter((s) => inDeclaredWindow(s)) : sections;
+
+  for (const section of considered) {
+    // The section that DECLARES the schedule is not itself one of the events. Its text is the
+    // boundary statement, and listing it beside the nine items would report ten.
+    if (SUBSEQUENT_CONTEXT_DECLARATION.test(section.text) && DECLARES_A_BOUNDARY_DATE.test(section.text)) {
+      continue;
+    }
+    const verdict = classifySubsequentEvent(section.text, {
+      reportingDate,
+      inDeclaredWindow: inDeclaredWindow(section),
+    });
     if (verdict.classification === SUBSEQUENT_EVENT.NOT_A_SUBSEQUENT_EVENT) continue;
     events.push({
       label: section.label,

@@ -128,6 +128,41 @@ function structuralStarts(text) {
   return letteredCount >= 2 ? starts : starts.filter((s) => !s.needsCompany);
 }
 
+/**
+ * The top-level structural units only, from the full list of openers.
+ *
+ * AA-38. A 60-section document reported 202 sections, because every bullet and every nested list
+ * item was counted as one. Section 41 of the reviewer's own case contains a numbered list of ten
+ * management explanations, and section 56 a numbered list of twenty-two output headings; those are
+ * CONTENT WITHIN a section, not sections. Reporting 202 is the same failure as reporting "73
+ * matters" where the document has 41 sections - a count the reader cannot reconcile to anything
+ * they can see.
+ *
+ * The rule is ordinal, not typographic: a numbered opener whose number does not advance beyond the
+ * last top-level number is a nested list restarting, because a document's own section numbering
+ * only ever goes up. Lettered items are kept - they are how a subsequent-events schedule lists its
+ * events - and bullets are dropped, because a bullet is always content inside whatever section
+ * contains it.
+ *
+ * Deliberately NOT applied to the coverage units: a bullet carrying a rupee amount is a genuine
+ * matter that must be addressed or declared unaddressed, and AA-01 depends on it staying countable.
+ * Sections and matters are different questions, which is the whole reason both ledgers exist.
+ */
+function topLevelStarts(starts) {
+  const kept = [];
+  let lastNumber = 0;
+  for (const start of starts) {
+    if (start.kind === "bullet") continue;
+    if (start.kind === "numbered") {
+      const value = Number(start.label);
+      if (!Number.isFinite(value) || value <= lastNumber) continue;
+      lastNumber = value;
+    }
+    kept.push(start);
+  }
+  return kept;
+}
+
 /** Whether a unit's own text makes it worth accounting for. */
 function isMaterialUnit(text) {
   if (text.trim().length < MIN_UNIT_TEXT_LENGTH) return false;
@@ -415,7 +450,8 @@ const CONTROL_DEFICIENCY_CUES = [
  */
 export function extractDocumentSections(text) {
   if (typeof text !== "string" || text.trim().length === 0) return [];
-  const starts = structuralStarts(text);
+  // Top-level only. See topLevelStarts: a nested list is content inside a section, not a section.
+  const starts = topLevelStarts(structuralStarts(text));
   if (starts.length < 2) return [];
   return starts.map((start, index) => {
     const end = index + 1 < starts.length ? starts[index + 1].start : text.length;
@@ -450,7 +486,7 @@ const sectionLabel = (start, index) => {
 export function buildSectionLedger(text, insights = [], links = []) {
   if (typeof text !== "string" || text.trim().length === 0) return null;
 
-  const starts = structuralStarts(text);
+  const starts = topLevelStarts(structuralStarts(text));
   if (starts.length < 2) return null;
 
   const normalisedText = normalise(text);
