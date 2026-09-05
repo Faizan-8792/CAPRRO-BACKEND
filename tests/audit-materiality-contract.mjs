@@ -227,6 +227,28 @@ check("the guidance no longer reads the same on any document", () => {
   assert.doesNotMatch(b.detail, /profit before tax/i, "it must not offer a base this text lacks");
 });
 
+check("every sentence in the detail starts with a capital", () => {
+  // Live output read ". revenue is a steadier base ... . total assets is usually preferred",
+  // because the benchmark notes were joined raw. It makes a working paper look machine-written
+  // before anyone reads what it says.
+  const guidance = buildMaterialityGuidance(THREE_BASES);
+  for (const field of ["detail", "nextAction"]) {
+    // Only boundaries where a LETTER follows the full stop: "Rs 3.20 crore" contains a period
+    // that does not end a sentence, and splitting on it would compare "20 crore..." against a
+    // capitalisation rule that does not apply to it.
+    const sentences = guidance[field]
+      .split(/(?<=\.)\s+(?=[A-Za-z])/)
+      .filter((part) => part.trim().length > 0);
+    for (const sentence of sentences) {
+      const first = sentence.trim().charAt(0);
+      assert.ok(
+        first === first.toUpperCase(),
+        `a sentence starts lowercase in ${field}: "${sentence.slice(0, 60)}"`,
+      );
+    }
+  }
+});
+
 // ── report ───────────────────────────────────────────────────────────────
 
 console.log(`\nResult: ${passed} passed, ${failed} failed (out of ${passed + failed})`);

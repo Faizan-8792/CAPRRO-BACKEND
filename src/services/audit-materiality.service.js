@@ -195,8 +195,14 @@ export function buildMaterialityGuidance(text) {
     .map((base) => `${base.label} at ${base.formatted}`)
     .join("; ");
 
+  // Each consideration after the first follows a full stop, so it starts a sentence and has to be
+  // capitalised. Joining them raw produced ". revenue is a steadier base" in live output - the kind
+  // of thing that makes a working paper look machine-written before anyone reads what it says.
   const considerations = bases
-    .map((base) => `${base.label} is ${base.note}`)
+    .map((base, index) => {
+      const sentence = `${base.label} is ${base.note}`;
+      return index === 0 ? sentence : sentence.charAt(0).toUpperCase() + sentence.slice(1);
+    })
     .join(". ");
 
   const stillNeeded = missing.map((input) => input.text);
