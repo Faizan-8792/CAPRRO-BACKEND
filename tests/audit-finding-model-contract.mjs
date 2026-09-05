@@ -25,6 +25,9 @@ import {
   toStructuredFinding,
   validateStructuredFinding,
   withStructure,
+  PRIORITY,
+  SUFFICIENCY,
+  deriveProcedureParts,
 } from "../src/services/audit-finding-model.service.js";
 
 let passed = 0;
@@ -70,6 +73,9 @@ const SCHEMA_THE_CALLER_ASKED_FOR = [
   "escalation",
   "workingPaperStatus",
   "missingInformation",
+  // AA-22 added triage to the schema. Listed here explicitly so growing the schema is a deliberate
+  // edit to this file rather than something that happens silently in the code under test.
+  "priority",
 ];
 
 check("every section the caller's schema asked for is present", () => {
@@ -334,6 +340,235 @@ check("a complete finding reports little missing; a bare one reports a lot", () 
     assert.equal(typeof entry, "string");
     assert.ok(entry.length > 10, "each entry names the input, rather than a code");
   }
+});
+
+// ── AA-08: changing the subject must change the assertion set ─────────────
+
+check("a cut-off finding and an existence finding carry different assertions", () => {
+  // The mandate's own mutation shape: "wrong period" and "nonexistent transaction" are different
+  // failures and must not produce the same answer. An assertion set that never changes is a label,
+  // not an analysis.
+  const wrongPeriod = deriveAssertions(
+    "Test dispatch cut-off: goods dispatched on 31 March were recognised in the year under audit",
+  );
+  const nonexistent = deriveAssertions(
+    "Attend the inventory count at the godown to establish the stock physically exists",
+  );
+  assert.notDeepEqual(wrongPeriod, nonexistent, "two different failures gave one answer");
+  assert.ok(wrongPeriod.includes(ASSERTIONS.CUTOFF), "a period problem is a cut-off assertion");
+  assert.ok(
+    !nonexistent.includes(ASSERTIONS.CUTOFF),
+    "an existence problem is not a cut-off assertion",
+  );
+  assert.ok(nonexistent.includes(ASSERTIONS.EXISTENCE));
+});
+
+check("a completeness finding and a valuation finding carry different assertions", () => {
+  const completeness = deriveAssertions("Search for unrecorded liabilities among the creditors");
+  const valuation = deriveAssertions("Review the debtor ageing for recoverability");
+  assert.notDeepEqual(completeness, valuation);
+  assert.ok(completeness.includes(ASSERTIONS.COMPLETENESS));
+  assert.ok(valuation.includes(ASSERTIONS.VALUATION));
+});
+
+// ── AA-19: the risk statement has three parts, not one platitude ──────────
+
+check("the risk names the mechanism, the statement impact and the audit consequence", () => {
+  const structured = toStructuredFinding(FLAT);
+  assert.ok(structured.risk.mechanism, "why this happens");
+  assert.ok(structured.risk.statementImpact, "what it does to the accounts");
+  assert.ok(structured.risk.auditConsequence, "what it means for the audit");
+  // "This could misstate assets" was the defect. The impact must be specific to the assertions.
+  assert.match(structured.risk.statementImpact, /do not exist|wrong amount|does not control/i);
+});
+
+check("the statement impact cannot disagree with the assertions beside it", () => {
+  // Derived from the assertions rather than written, so a finding that claims to test completeness
+  // and then describes an existence impact is not expressible.
+  const completeness = toStructuredFinding({
+    ...FLAT,
+    title: "Search for unrecorded liabilities",
+    detail: "Search for unrecorded liabilities among the creditors at the year end.",
+    evidence: "creditors at the year end",
+  });
+  assert.ok(completeness.assertions.includes(ASSERTIONS.COMPLETENESS));
+  assert.match(completeness.risk.statementImpact, /not recorded/i);
+});
+
+// ── AA-20: a procedure somebody can carry out ─────────────────────────────
+
+check("the executable parts of a procedure are pulled out of the sentence", () => {
+  const parts = deriveProcedureParts(
+    "Agree the closing balance to the bank statement obtained directly from the bank and recompute the interest.",
+  );
+  assert.ok(parts.document, "the document is named");
+  assert.match(parts.document, /bank statement/i);
+  assert.ok(parts.comparison, "the comparison is named");
+  assert.match(parts.comparison, /agree/i);
+  assert.ok(parts.recalculation, "the recalculation is named");
+  assert.match(parts.recalculation, /recompute/i);
+});
+
+check("a vague procedure yields nulls and is reported as missing", () => {
+  // "Investigate further" and "obtain evidence" are the defect. They must not be dressed up.
+  const parts = deriveProcedureParts("Investigate further and obtain evidence.");
+  assert.deepEqual(parts, {
+    document: null,
+    source: null,
+    comparison: null,
+    recalculation: null,
+  });
+  const structured = toStructuredFinding({
+    title: "Investigate",
+    detail: "Investigate further and obtain evidence.",
+  });
+  assert.ok(
+    structured.missingInformation.some((m) => /document to inspect/i.test(m)),
+    "a procedure naming no document and no comparison must say so",
+  );
+});
+
+// ── AA-21: how far the evidence gets you, and what is missing ─────────────
+
+check("evidence obtained independently can be sufficient; the client's word never is", () => {
+  const external = toStructuredFinding({
+    ...FLAT,
+    detail: "Agree the balance to the confirmation received directly from the bank.",
+    evidence: "A confirmation received directly from the bank",
+    nextAction: "If it disagrees, quantify the difference.",
+    standard: "SA 505",
+  });
+  assert.equal(external.evidence.sufficiency.level, SUFFICIENCY.SUFFICIENT);
+  assert.equal(external.evidence.sufficiency.minimumAdditionalEvidence, null);
+
+  const representation = toStructuredFinding({
+    ...FLAT,
+    evidence: "Management has confirmed that there are no related parties",
+  });
+  assert.equal(representation.evidence.sufficiency.level, SUFFICIENCY.INSUFFICIENT);
+  assert.match(
+    representation.evidence.sufficiency.minimumAdditionalEvidence,
+    /independently of management/i,
+    "it must name what would actually close the gap",
+  );
+});
+
+check("a document the client generated is only partially sufficient", () => {
+  // The middle of the range, and the case that was missing: a mutation making every ranked finding
+  // "sufficient" survived, because only the two ends were tested. A ledger or an invoice is the
+  // client's own record - it establishes what was written down, not that it is right.
+  const internal = toStructuredFinding({
+    ...FLAT,
+    detail: "Agree the balance to the purchase ledger and the supplier invoice.",
+    evidence: "the purchase ledger and the supplier invoice",
+    standard: "SA 500",
+  });
+  assert.equal(internal.evidence.rank, EVIDENCE_RANK.INTERNAL_DOCUMENT);
+  assert.equal(internal.evidence.sufficiency.level, SUFFICIENCY.PARTIALLY_SUFFICIENT);
+  assert.match(
+    internal.evidence.sufficiency.minimumAdditionalEvidence,
+    /outside the client|independently/i,
+    "it must name what would actually raise the evidence, not gesture at more of it",
+  );
+});
+
+check("a partially sufficient finding names the specific gap holding it back", () => {
+  // This branch - ranked evidence, but something evidence-related still missing - was reached by
+  // none of the fixtures, so a mutation replacing its message with "Obtain further evidence as
+  // appropriate" survived. The finding below has a rankable quote but a procedure that names no
+  // document and no comparison, which is exactly how a real finding lands here.
+  const structured = toStructuredFinding({
+    title: "Look at the balance",
+    detail: "Investigate the position.",
+    risk: "medium",
+    standard: "SA 500",
+    evidence: "the purchase ledger",
+    why: "The balance may not be right.",
+    nextAction: "Record the outcome.",
+  });
+  assert.equal(structured.evidence.rank, EVIDENCE_RANK.INTERNAL_DOCUMENT);
+  assert.equal(structured.evidence.sufficiency.level, SUFFICIENCY.PARTIALLY_SUFFICIENT);
+  assert.match(
+    structured.evidence.sufficiency.minimumAdditionalEvidence,
+    /Still required before this can be concluded on/i,
+    "the message must quote the actual outstanding input",
+  );
+  assert.match(
+    structured.evidence.sufficiency.minimumAdditionalEvidence,
+    /document to inspect/i,
+    "and must name which one it is",
+  );
+});
+
+check("the additional evidence is always named, never gestured at", () => {
+  // "Obtain further evidence as appropriate" is the AA-20 defect wearing an AA-21 hat, and a
+  // mutation that replaced the specific text with exactly that survived the first run.
+  const cases = [
+    toStructuredFinding({ title: "a", detail: "Look into it." }),
+    toStructuredFinding({ ...FLAT, evidence: "Management has confirmed the position" }),
+    toStructuredFinding({
+      ...FLAT,
+      detail: "Agree the balance to the purchase ledger.",
+      evidence: "the purchase ledger",
+    }),
+  ];
+  for (const structured of cases) {
+    const text = structured.evidence.sufficiency.minimumAdditionalEvidence;
+    if (text === null) continue;
+    assert.doesNotMatch(
+      text,
+      /\bas (?:appropriate|necessary|required)\b|\bfurther evidence\b(?!\s+is)/i,
+      `vague: "${text}"`,
+    );
+    assert.ok(text.length > 30, `too short to be actionable: "${text}"`);
+  }
+});
+
+check("a finding with nothing behind it is insufficient, and says what is needed", () => {
+  const bare = toStructuredFinding({ title: "Look into it", detail: "Look into it." });
+  assert.equal(bare.evidence.sufficiency.level, SUFFICIENCY.INSUFFICIENT);
+  assert.ok(bare.evidence.sufficiency.minimumAdditionalEvidence.length > 20);
+});
+
+check("the audit consequence follows the sufficiency rather than being asserted", () => {
+  const bare = toStructuredFinding({ title: "Look into it", detail: "Look into it." });
+  assert.match(bare.risk.auditConsequence, /cannot be concluded on/i);
+});
+
+// ── AA-22: triage on every finding ────────────────────────────────────────
+
+check("every finding carries one of the four triage levels", () => {
+  for (const fixture of [FLAT, { title: "x" }, { title: "y", risk: "low" }]) {
+    const structured = toStructuredFinding(fixture);
+    assert.ok(
+      Object.values(PRIORITY).includes(structured.priority),
+      `${structured.priority} is not a triage level`,
+    );
+  }
+});
+
+check("a fraud indicator outranks its risk rating, and so does an information gap", () => {
+  // Both outrank an ordinary rating, for different reasons: what the first might be, and the fact
+  // that an area nobody has looked at cannot be signed off however small it looks.
+  const fraud = toStructuredFinding({
+    title: "Management override of the approval limit",
+    detail: "Three orders were released without the second approval.",
+    risk: "low",
+  });
+  assert.equal(fraud.priority, PRIORITY.CRITICAL);
+
+  const gap = toStructuredFinding({
+    title: "Parts of this document were not reviewed",
+    detail: "Matters 3, 4 and 5 were not reviewed.",
+    risk: "low",
+  });
+  assert.equal(gap.priority, PRIORITY.HIGH);
+});
+
+check("an ordinary finding takes its triage from its risk rating", () => {
+  assert.equal(toStructuredFinding({ title: "a", detail: "b", risk: "high" }).priority, PRIORITY.HIGH);
+  assert.equal(toStructuredFinding({ title: "a", detail: "b", risk: "low" }).priority, PRIORITY.LOW);
+  assert.equal(toStructuredFinding({ title: "a", detail: "b", risk: "medium" }).priority, PRIORITY.MEDIUM);
 });
 
 check("malformed input never throws", () => {

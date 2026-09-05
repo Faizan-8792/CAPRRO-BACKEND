@@ -49,6 +49,7 @@ export const STRUCTURED_SECTIONS = Object.freeze([
   "escalation",
   "workingPaperStatus",
   "missingInformation",
+  "priority",
 ]);
 
 /** The assertions an audit procedure can be directed at. */
@@ -256,6 +257,157 @@ export function deriveSampling(text) {
   };
 }
 
+// ── AA-21: how far the evidence actually gets you ──────────────────────────
+
+export const SUFFICIENCY = Object.freeze({
+  SUFFICIENT: "sufficient",
+  PARTIALLY_SUFFICIENT: "partially sufficient",
+  INSUFFICIENT: "insufficient",
+});
+
+/**
+ * Whether the evidence a finding rests on is enough to conclude on it, and what the least
+ * additional evidence would be.
+ *
+ * The honest answer is usually "partially": a quote from the client's own document establishes that
+ * something was written down, not that it is true. Only evidence obtained independently of the
+ * client reaches `sufficient`, and even then only when nothing else is missing.
+ */
+export function deriveSufficiency(evidenceRank, missingInformation) {
+  // Only EVIDENCE gaps bear on whether the evidence is sufficient. An unstated population size is a
+  // sampling-planning input, not a defect in the evidence already held, and counting it here made
+  // "sufficient" almost unreachable - a bank confirmation for a single balance has no population to
+  // size. The other gaps still travel in missingInformation, where they belong.
+  const EVIDENCE_RELEVANT = /\b(?:evidence|passage|document to inspect|rests on|reliability)\b/i;
+  const missing = (Array.isArray(missingInformation) ? missingInformation : []).filter((entry) =>
+    EVIDENCE_RELEVANT.test(String(entry)),
+  );
+
+  if (!evidenceRank) {
+    return {
+      level: SUFFICIENCY.INSUFFICIENT,
+      minimumAdditionalEvidence:
+        "Identify what the finding rests on and where it came from, before anything is concluded from it.",
+    };
+  }
+  if (evidenceRank === EVIDENCE_RANK.MANAGEMENT_REPRESENTATION) {
+    return {
+      level: SUFFICIENCY.INSUFFICIENT,
+      minimumAdditionalEvidence:
+        "A written representation is the client's own assertion. Corroborate it with something obtained independently of management before relying on it.",
+    };
+  }
+  if (evidenceRank === EVIDENCE_RANK.EXTERNAL_DIRECT && missing.length === 0) {
+    return { level: SUFFICIENCY.SUFFICIENT, minimumAdditionalEvidence: null };
+  }
+  return {
+    level: SUFFICIENCY.PARTIALLY_SUFFICIENT,
+    minimumAdditionalEvidence:
+      missing.length > 0
+        ? `Still required before this can be concluded on: ${missing[0]}.`
+        : "Corroborate the client-generated document with a source outside the client's own records.",
+  };
+}
+
+// ── AA-22: what to do first ────────────────────────────────────────────────
+
+export const PRIORITY = Object.freeze({
+  CRITICAL: "critical",
+  HIGH: "high",
+  MEDIUM: "medium",
+  LOW: "low",
+});
+
+/**
+ * Triage, derived rather than asked for.
+ *
+ * A fraud indicator and an information gap both outrank an ordinary risk rating, for different
+ * reasons: the first because of what it might be, the second because an area nobody has looked at
+ * cannot be signed off however small it looks.
+ */
+export function derivePriority(status, riskLevel) {
+  if (status === FINDING_STATUS.POTENTIAL_FRAUD_INDICATOR) return PRIORITY.CRITICAL;
+  if (status === FINDING_STATUS.INFORMATION_GAP) return PRIORITY.HIGH;
+  const level = String(riskLevel ?? "").toLowerCase();
+  if (level === "high") return PRIORITY.HIGH;
+  if (level === "low") return PRIORITY.LOW;
+  return PRIORITY.MEDIUM;
+}
+
+// ── AA-19: what the risk actually does to the accounts ─────────────────────
+
+/** What each assertion, if wrong, does to the financial statements. */
+const STATEMENT_IMPACT = Object.freeze({
+  [ASSERTIONS.EXISTENCE]: "assets or income may be recorded that do not exist",
+  [ASSERTIONS.COMPLETENESS]: "liabilities or expenses may exist that are not recorded",
+  [ASSERTIONS.VALUATION]: "a balance may be carried at the wrong amount",
+  [ASSERTIONS.ACCURACY]: "an amount may be recorded incorrectly even though the item is real",
+  [ASSERTIONS.RIGHTS]: "an asset may be recorded that the entity does not control",
+  [ASSERTIONS.CUTOFF]: "a transaction may fall in the wrong period",
+  [ASSERTIONS.CLASSIFICATION]: "an item may sit under the wrong heading",
+  [ASSERTIONS.PRESENTATION]: "a disclosure the reader needs may be absent or wrong",
+});
+
+/**
+ * The three parts of a risk statement, replacing "this could misstate assets".
+ *
+ * `statementImpact` is derived from the assertions rather than written, so it cannot disagree with
+ * them - a finding that says it tests completeness and then describes an existence impact is the
+ * sort of thing a reader notices and stops trusting.
+ */
+export function deriveRiskParts(assertions, sufficiency) {
+  const list = Array.isArray(assertions) ? assertions : [];
+  const impacts = list.map((a) => STATEMENT_IMPACT[a]).filter(Boolean);
+  return {
+    statementImpact: impacts.length > 0 ? impacts.join("; ") : null,
+    auditConsequence:
+      sufficiency?.level === SUFFICIENCY.SUFFICIENT
+        ? "The evidence on file supports a conclusion on this point."
+        : "This area cannot be concluded on until the evidence above is obtained.",
+  };
+}
+
+// ── AA-20: a procedure somebody can actually carry out ─────────────────────
+
+const PROCEDURE_PART_CUES = [
+  {
+    key: "document",
+    pattern:
+      /\b(?:bank statement|confirmation|invoice|voucher|challan|ledger|register|schedule|agreement|contract|minutes|bill of lading|purchase order|goods receipt note|count sheet|ageing report|board minute)s?\b/i,
+  },
+  {
+    key: "source",
+    pattern:
+      /\b(?:from|with|against)\s+the\s+(?:bank|customer|supplier|lender|counsel|registrar|department|third party|client)\b/i,
+  },
+  {
+    key: "comparison",
+    pattern: /\b(?:compare|agree|reconcile|trace|match|vouch|cross[- ]?check)\b[^.]{0,60}/i,
+  },
+  {
+    key: "recalculation",
+    pattern: /\b(?:recompute|recalculate|re[- ]?perform|cast|foot)\b[^.]{0,60}/i,
+  },
+];
+
+/**
+ * Pulls the executable parts out of a procedure instruction.
+ *
+ * "Investigate further" and "obtain evidence" name no document, no source and no comparison, and
+ * every part comes back null - which is exactly the finding AA-20 is about, and it is then listed
+ * as missing rather than dressed up.
+ */
+export function deriveProcedureParts(instruction) {
+  const value = typeof instruction === "string" ? instruction : "";
+  const parts = { document: null, source: null, comparison: null, recalculation: null };
+  if (!value.trim()) return parts;
+  for (const cue of PROCEDURE_PART_CUES) {
+    const match = cue.pattern.exec(value);
+    if (match) parts[cue.key] = match[0].replace(/\s+/g, " ").trim();
+  }
+  return parts;
+}
+
 // ── the object itself ──────────────────────────────────────────────────────
 
 /**
@@ -298,6 +450,9 @@ export function toStructuredFinding(flat) {
     procedure: {
       instruction:
         typeof flat.detail === "string" && flat.detail.trim() ? flat.detail.trim() : null,
+      // AA-20. The executable parts, pulled out rather than left inside a sentence. "Investigate
+      // further" yields nulls in all four, which is the honest description of it.
+      ...deriveProcedureParts(flat.detail),
       conclusionCriterion:
         typeof flat.nextAction === "string" && flat.nextAction.trim()
           ? flat.nextAction.trim()
@@ -331,6 +486,9 @@ export function toStructuredFinding(flat) {
 
   // AA-21. Every null is recorded rather than left to be noticed.
   const missing = [];
+  if (!structured.procedure.document && !structured.procedure.comparison) {
+    missing.push("the specific document to inspect and what to compare it against");
+  }
   if (!structured.fact) missing.push("the passage in the document this finding rests on");
   if (!structured.risk.mechanism) missing.push("why this matters, in terms of the financial statements");
   if (structured.assertions.length === 0) missing.push("which assertions this procedure is directed at");
@@ -340,6 +498,15 @@ export function toStructuredFinding(flat) {
   if (structured.evidence.rank === null) missing.push("the kind and reliability of the evidence relied on");
   if (structured.sampling.applicable === null) missing.push("the size of the population being tested");
   structured.missingInformation = missing;
+
+  // AA-21 / AA-19 / AA-22, derived AFTER missingInformation, because each depends on it. Order
+  // matters here and getting it wrong would silently produce a sufficiency rating that ignored
+  // everything the finding was missing.
+  structured.evidence.sufficiency = deriveSufficiency(evidenceRank, missing);
+  const riskParts = deriveRiskParts(assertions, structured.evidence.sufficiency);
+  structured.risk.statementImpact = riskParts.statementImpact;
+  structured.risk.auditConsequence = riskParts.auditConsequence;
+  structured.priority = derivePriority(status, structured.risk.level);
 
   return structured;
 }
@@ -389,6 +556,14 @@ export function validateStructuredFinding(structured) {
   if (!Array.isArray(structured.assertions)) violations.push("assertions is not an array");
   if (!Array.isArray(structured.missingInformation)) {
     violations.push("missingInformation is not an array");
+  }
+  if (!Object.values(PRIORITY).includes(structured.priority)) {
+    violations.push(`priority ${structured.priority} is not one of the four triage levels`);
+  }
+  if (!structured.evidence || typeof structured.evidence !== "object") {
+    violations.push("evidence is not an object");
+  } else if (!Object.values(SUFFICIENCY).includes(structured.evidence.sufficiency?.level)) {
+    violations.push(`evidence.sufficiency.level ${structured.evidence.sufficiency?.level} is not a sufficiency rating`);
   }
   if (!structured.risk || typeof structured.risk !== "object") {
     violations.push("risk is not an object");

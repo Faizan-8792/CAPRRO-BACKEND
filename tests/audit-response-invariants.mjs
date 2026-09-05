@@ -568,6 +568,59 @@ check("the structured object agrees with the flat fields beside it", () => {
   }
 });
 
+check("every finding carries triage and an evidence-sufficiency rating", () => {
+  // AA-21 and AA-22 as response invariants: a finding without triage cannot be worked in order,
+  // and one without a sufficiency rating invites a reader to assume the evidence is enough.
+  const TRIAGE = ["critical", "high", "medium", "low"];
+  const SUFFICIENCY_LEVELS = ["sufficient", "partially sufficient", "insufficient"];
+  for (const { path, state } of RESPONSES) {
+    for (const finding of state.body.insights ?? []) {
+      const s = finding.structured;
+      assert.ok(
+        TRIAGE.includes(s.priority),
+        `${path}: "${finding.title}" has priority ${s.priority}`,
+      );
+      assert.ok(
+        SUFFICIENCY_LEVELS.includes(s.evidence.sufficiency?.level),
+        `${path}: "${finding.title}" has sufficiency ${s.evidence.sufficiency?.level}`,
+      );
+      if (s.evidence.sufficiency.level !== "sufficient") {
+        assert.ok(
+          (s.evidence.sufficiency.minimumAdditionalEvidence ?? "").length > 20,
+          `${path}: "${finding.title}" is not sufficient but names nothing that would close it`,
+        );
+      }
+    }
+  }
+});
+
+check("a fraud indicator is always triaged critical, on every path", () => {
+  for (const { path, state } of RESPONSES) {
+    for (const finding of state.body.insights ?? []) {
+      if (finding.status !== "POTENTIAL_FRAUD_INDICATOR") continue;
+      assert.equal(
+        finding.structured.priority,
+        "critical",
+        `${path}: "${finding.title}" is a fraud indicator but is not triaged critical`,
+      );
+    }
+  }
+});
+
+check("no risk statement is the generic one AA-19 exists to replace", () => {
+  for (const { path, state } of RESPONSES) {
+    for (const finding of state.body.insights ?? []) {
+      const impact = finding.structured.risk.statementImpact;
+      if (!impact) continue;
+      assert.doesNotMatch(
+        impact,
+        /^this could misstate (?:the accounts|assets)\.?$/i,
+        `${path}: "${finding.title}" fell back to the generic risk statement`,
+      );
+    }
+  }
+});
+
 check("the flat shape the shipped clients read is never removed", () => {
   // The desktop reads Title, Detail, Risk, Standard, Evidence, Why, NextAction; the extension reads
   // the same wire shape. Adding the structured object must not have quietly replaced any of them.
