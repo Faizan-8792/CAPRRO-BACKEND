@@ -702,6 +702,22 @@ try {
         # T1/T3 (.kiro/PLAN.md), registered the day each was added per the invariant above.
         "reminder-delivery-health-stat",
         "reminder-delivery-alert-scheduler",
+        # The 2026-09-06 504, registered the day they were added per the invariant above.
+        #
+        # outage-hardening reads the three bounds that incident needed: the pool wait, the health
+        # ping, and an overlap guard on all five schedulers rather than only the one that was fixed.
+        #
+        # reminder-overlap-behaviour RUNS the reminder guard against stubs instead of reading it,
+        # because a guard can be present in the source and still let two passes run, or latch
+        # permanently after a throw, and the source reads identically either way. It extracts the
+        # function and evaluates it - server.js cannot be imported here, since importing it calls
+        # app.listen() and connects to whatever MONGODB_URI is active.
+        #
+        # Both are node:test files, hence the ".test" in the registered name: this list is joined
+        # to "tests\<name>.mjs", and a node:test file run directly exits non-zero when a test fails,
+        # which is the only thing this runner needs from it.
+        "outage-hardening.test",
+        "reminder-overlap-behaviour.test",
         # Added the day the super panel sorting bug was fixed. The panel had a sidebar
         # router and sortable tables in production with nothing asserting either, so a
         # date column that sorted by the American field order shipped unnoticed.
