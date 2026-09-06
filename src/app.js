@@ -447,6 +447,9 @@ app.use(hpp());
 ================================ */
 import mongoose from "mongoose";
 
+// The longest /health may spend waiting on the database before it answers anyway.
+const HEALTH_PING_TIMEOUT_MS = 2_000;
+
 app.get("/health", async (req, res) => {
   const dbState = mongoose.connection?.readyState; // 0=disconnected,1=connected,2=connecting,3=disconnecting
   const dbStateName =
@@ -456,13 +459,33 @@ app.get("/health", async (req, res) => {
 
   let dbOk = dbState === 1;
   let dbPingMs = null;
+  let dbTimedOut = false;
   if (dbOk) {
     try {
       const start = Date.now();
-      await mongoose.connection.db.admin().ping();
+      // BOUNDED. `catch` catches a rejection; it does not catch a wait.
+      //
+      // This ping goes through the same connection pool as every other query, so when the pool is
+      // saturated it does not fail - it queues. Unbounded, that made the one endpoint whose whole
+      // job is to answer the only endpoint that could not: the process stayed up and listening
+      // while /health never replied, and an uptime monitor read that as 504 Gateway Timeout, which
+      // says "no response" rather than "the database is busy".
+      //
+      // A liveness endpoint that can hang is not a liveness endpoint. This one always answers, and
+      // says which of the two happened.
+      await Promise.race([
+        mongoose.connection.db.admin().ping(),
+        new Promise((_resolve, reject) => {
+          setTimeout(
+            () => reject(new Error("health-ping-timeout")),
+            HEALTH_PING_TIMEOUT_MS,
+          ).unref();
+        }),
+      ]);
       dbPingMs = Date.now() - start;
-    } catch {
+    } catch (error) {
       dbOk = false;
+      dbTimedOut = error?.message === "health-ping-timeout";
     }
   }
 
@@ -482,6 +505,14 @@ app.get("/health", async (req, res) => {
     db: { state: dbStateName, ping_ms: dbPingMs },
     background,
   };
+  // "connected but too busy to answer" and "not connected" are different faults with different
+  // fixes, and the state name alone cannot tell them apart - a saturated pool still reads
+  // "connected". Naming it is the difference between a monitor saying DOWN and a monitor saying
+  // which part is down.
+  if (dbTimedOut) {
+    payload.db.slow = true;
+    payload.db.timeout_ms = HEALTH_PING_TIMEOUT_MS;
+  }
   if (!dbOk && backgroundInitializationErrorCode) {
     payload.backgroundError = backgroundInitializationErrorCode;
     if (backgroundInitializationStage) {

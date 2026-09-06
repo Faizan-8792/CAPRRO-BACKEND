@@ -54,6 +54,7 @@ let bootstrapRetryTimer = null;
 // error code, and without the phase the code does not identify the cause.
 let bootstrapStage = null;
 let databaseConnectionInitialized = false;
+let reminderSchedulerPromise = null;
 let automationWorkerPromise = null;
 let digestSchedulerPromise = null;
 let reminderSchedulerTimer = null;
@@ -98,33 +99,63 @@ const server = app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
 
-async function runReminderScheduler() {
-  const nowUtc = new Date();
-  console.log("REMINDER Scheduler tick at", nowUtc.toISOString());
+/**
+ * The reminder tick.
+ *
+ * Guarded like its four siblings, which it was not. Every other scheduler here returns its
+ * in-flight promise rather than starting a second run; this one started a new pass every 15
+ * minutes whatever the previous pass was doing.
+ *
+ * That matters because the tick's cost grows with the data. It walks every active reminder
+ * serially, and a CASE-sourced reminder re-reads the noticeCases flag with `fresh: true`, which
+ * deliberately bypasses AppConfig's 30-second cache and makes a real round trip per reminder. Once
+ * one pass takes longer than the interval, passes overlap; overlapping passes hold more pool
+ * connections; and a saturated pool is the condition under which requests stop being answered at
+ * all. Nothing here failed loudly - it simply took longer each time until it did not finish.
+ *
+ * The guard also makes the pass awaitable, so gracefulShutdown can wait for it as it already waits
+ * for the other four.
+ */
+function runReminderScheduler() {
+  if (shuttingDown || reminderSchedulerPromise) return reminderSchedulerPromise;
+  reminderSchedulerPromise = (async () => {
+    const nowUtc = new Date();
+    console.log("REMINDER Scheduler tick at", nowUtc.toISOString());
 
-  try {
-    const noticeCasesEnabled = await AppConfig.isFeatureEnabled("noticeCases", {
-      fresh: true,
-    });
-    const activeReminders = await Reminder.find({
-      isActive: true,
-      ...(noticeCasesEnabled ? {} : { source: { $ne: "CASE" } }),
-    });
+    try {
+      const noticeCasesEnabled = await AppConfig.isFeatureEnabled(
+        "noticeCases",
+        { fresh: true },
+      );
+      const activeReminders = await Reminder.find({
+        isActive: true,
+        ...(noticeCasesEnabled ? {} : { source: { $ne: "CASE" } }),
+      });
 
-    for (const reminder of activeReminders) {
-      try {
-        await processReminderForNow(reminder, nowUtc);
-      } catch (error) {
-        console.error(
-          "REMINDER Error processing reminder",
-          reminder?.id,
-          error,
-        );
+      for (const reminder of activeReminders) {
+        // A shutdown that has begun must not be held open by the rest of the list.
+        if (shuttingDown) break;
+        try {
+          await processReminderForNow(reminder, nowUtc);
+        } catch (error) {
+          console.error(
+            "REMINDER Error processing reminder",
+            reminder?.id,
+            error,
+          );
+        }
       }
+    } catch (error) {
+      console.error("REMINDER Scheduler top-level error", error);
     }
-  } catch (error) {
-    console.error("REMINDER Scheduler top-level error", error);
-  }
+  })()
+    .catch((error) => {
+      console.error("REMINDER Scheduler unexpected error", error);
+    })
+    .finally(() => {
+      reminderSchedulerPromise = null;
+    });
+  return reminderSchedulerPromise;
 }
 
 function runDigestScheduler() {
@@ -421,6 +452,16 @@ async function gracefulShutdown(signal) {
     process.exit(1);
   }, 10_000);
   forceTimer.unref();
+
+  try {
+    // Now awaitable, because the tick is guarded. Before, a pass in flight was simply abandoned
+    // mid-list: a reminder could be delivered and the process exit before the delivery was
+    // recorded, which reads afterwards as a reminder that never went out.
+    const activeReminderScheduler = reminderSchedulerPromise;
+    if (activeReminderScheduler) await activeReminderScheduler;
+  } catch (error) {
+    console.error("Reminder scheduler shutdown error:", error.message);
+  }
 
   try {
     const activeWorker = automationWorkerPromise;
