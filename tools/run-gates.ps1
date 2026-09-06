@@ -664,6 +664,13 @@ try {
         "audit-insights-reasoning-pipeline",
         "audit-insights-capability-scorecard",
         "audit-redaction-references",
+        # These four existed in tests/ and the gate never ran them. They pass - they were simply
+        # never registered, which is exactly the failure the comment above says "breaks that gate"
+        # and which nothing was actually checking. tests/gate-suite-coverage.test.mjs now checks it.
+        "audit-population-boundary-contract",
+        "audit-provenance-contract",
+        "audit-section-ledger-contract",
+        "audit-test6-canonical-contract",
         "digest-unsubscribe-link",
         "reminder-message-validation",
         "audit-llm-failure-wording",
@@ -716,6 +723,9 @@ try {
         # Both are node:test files, hence the ".test" in the registered name: this list is joined
         # to "tests\<name>.mjs", and a node:test file run directly exits non-zero when a test fails,
         # which is the only thing this runner needs from it.
+        # Makes the invariant above real rather than stated. The first thing it reported was its own
+        # omission from this list, which is the shortest possible proof that it works.
+        "gate-suite-coverage.test",
         "outage-hardening.test",
         "reminder-overlap-behaviour.test",
         # health-failure-semantics boots the real app against the LOCAL dev container and stalls the
