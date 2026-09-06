@@ -718,6 +718,10 @@ try {
         # which is the only thing this runner needs from it.
         "outage-hardening.test",
         "reminder-overlap-behaviour.test",
+        # health-failure-semantics boots the real app against the LOCAL dev container and stalls the
+        # ping the way a saturated pool does - a promise that neither resolves nor rejects. It skips
+        # itself with a reason when no local Mongo is up, rather than passing on nothing.
+        "health-failure-semantics.test",
         # Added the day the super panel sorting bug was fixed. The panel had a sidebar
         # router and sortable tables in production with nothing asserting either, so a
         # date column that sorted by the American field order shipped unnoticed.
