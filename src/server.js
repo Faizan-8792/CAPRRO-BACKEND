@@ -42,6 +42,13 @@ const RETENTION_SCHEDULER_INTERVAL_MS = 6 * 60 * 60 * 1000;
 // throttle itself lives in reminder-delivery-alert.service.js.
 const REMINDER_DELIVERY_ALERT_INTERVAL_MS = 15 * 60 * 1000;
 const BOOTSTRAP_RETRY_DELAY_MS = 30 * 1000;
+// How many reminders one keyset batch reads. Small enough that a batch is cheap and its
+// connection is released quickly; large enough that a normal firm is one or two round trips.
+const REMINDER_SCAN_BATCH_SIZE = 200;
+// A terminating loop does not need this. Sustained inserts arriving faster than the pass drains
+// them do. 500 batches is 100,000 reminders in one tick, far past any real volume, and stopping
+// there is announced rather than silent.
+const REMINDER_SCAN_MAX_BATCHES = 500;
 const AUTOMATION_WORKER_BATCH_SIZE = 5;
 const automationWorkerId = `${hostname()}:${process.pid}`;
 
@@ -127,22 +134,69 @@ function runReminderScheduler() {
         "noticeCases",
         { fresh: true },
       );
-      const activeReminders = await Reminder.find({
+      const filter = {
         isActive: true,
         ...(noticeCasesEnabled ? {} : { source: { $ne: "CASE" } }),
-      });
+      };
 
-      for (const reminder of activeReminders) {
-        // A shutdown that has begun must not be held open by the rest of the list.
+      // Read in keyset batches rather than all at once.
+      //
+      // This used to be one unbounded find(): every active reminder in the product, hydrated as
+      // full documents, held in memory for the whole pass. It grew with total usage rather than
+      // with any one firm, and it was the last unbounded read left in the incident's own path.
+      //
+      // A .limit() alone would have been the wrong fix - it would silently stop processing
+      // reminders past the cap, which is worse than a slow pass, not better. A .cursor() would
+      // bound the memory but hold a server-side cursor open across every delivery in the pass,
+      // trading a memory problem for a longer-held connection - the exact resource this change is
+      // about. Keyset paging by _id gives both: each query is small and short-lived, the connection
+      // is released between batches, and the pass still reaches every reminder because it stops
+      // only when a batch comes back short.
+      let lastId = null;
+      let scanned = 0;
+      let batches = 0;
+
+      for (;;) {
         if (shuttingDown) break;
-        try {
-          await processReminderForNow(reminder, nowUtc);
-        } catch (error) {
+
+        const batch = await Reminder.find(
+          lastId ? { ...filter, _id: { $gt: lastId } } : filter,
+        )
+          .sort({ _id: 1 })
+          .limit(REMINDER_SCAN_BATCH_SIZE);
+
+        if (!batch.length) break;
+        batches += 1;
+
+        for (const reminder of batch) {
+          // A shutdown that has begun must not be held open by the rest of the list.
+          if (shuttingDown) break;
+          scanned += 1;
+          try {
+            await processReminderForNow(reminder, nowUtc);
+          } catch (error) {
+            console.error(
+              "REMINDER Error processing reminder",
+              reminder?.id,
+              error,
+            );
+          }
+        }
+
+        lastId = batch[batch.length - 1]?._id;
+        if (!lastId) break;
+        if (batch.length < REMINDER_SCAN_BATCH_SIZE) break;
+
+        // _id is unique and strictly ascending here, so this loop terminates on its own. The cap
+        // exists for the case it cannot: sustained inserts arriving faster than the pass drains
+        // them. It says exactly how many were processed and that more remain, because a pass that
+        // quietly stopped early would look identical to a pass that finished.
+        if (batches >= REMINDER_SCAN_MAX_BATCHES) {
           console.error(
-            "REMINDER Error processing reminder",
-            reminder?.id,
-            error,
+            `REMINDER Scheduler stopped after ${batches} batches (${scanned} reminders). More remain ` +
+              `and will be picked up by the next tick; raise REMINDER_SCAN_MAX_BATCHES if this recurs.`,
           );
+          break;
         }
       }
     } catch (error) {

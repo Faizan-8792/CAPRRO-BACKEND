@@ -167,9 +167,41 @@ test("a shutdown waits for the reminder pass it started", () => {
 
 test("the reminder pass stops when a shutdown begins", () => {
   const body = block(server, "function runReminderScheduler(");
+
+  // Two places, since the pass reads in keyset batches: between reminders, and before fetching the
+  // next batch. Checking only the inner loop would let a shutdown be held open for one more query.
   assert.match(
     body,
-    /for \(const reminder of activeReminders\) \{\s*(?:\/\/[^\n]*\n\s*)*if \(shuttingDown\) break;/,
-    "the loop does not check for shutdown, so a long list holds the process open past its deadline",
+    /for \(const reminder of batch\) \{\s*(?:\/\/[^\n]*\n\s*)*if \(shuttingDown\) break;/,
+    "the reminder loop does not check for shutdown, so a long list holds the process open past its deadline",
   );
+  assert.match(
+    body,
+    /for \(;;\) \{\s*(?:\/\/[^\n]*\n\s*)*if \(shuttingDown\) break;/,
+    "the batch loop does not check for shutdown, so one more query is issued after shutdown begins",
+  );
+});
+
+test("the reminder pass is bounded per query and still reaches every reminder", () => {
+  // The pass used to be one unbounded find() over every active reminder in the product. Bounding it
+  // with .limit() ALONE would have been worse than leaving it: reminders past the cap would simply
+  // never be sent, and nothing would say so. Both halves are asserted here, and the behaviour that
+  // makes them true is exercised in reminder-overlap-behaviour.test.mjs.
+  const body = block(server, "function runReminderScheduler(");
+
+  assert.match(body, /\.limit\(REMINDER_SCAN_BATCH_SIZE\)/, "the batch query lost its bound");
+  assert.match(body, /\.sort\(\{ _id: 1 \}\)/, "keyset paging needs a stable order");
+  assert.match(body, /_id: \{ \$gt: lastId \}/, "the pass no longer resumes from the previous batch");
+  assert.doesNotMatch(body, /\.skip\(/, "offset paging can skip a row when the set shifts underneath");
+
+  // Continues until a batch comes back short - that is what makes it complete rather than capped.
+  assert.match(
+    body,
+    /if \(batch\.length < REMINDER_SCAN_BATCH_SIZE\) break;/,
+    "the pass stops before the end of the collection",
+  );
+
+  // And the safety cap must announce itself; a quiet stop is indistinguishable from finishing.
+  assert.match(body, /if \(batches >= REMINDER_SCAN_MAX_BATCHES\)/, "the runaway cap is gone");
+  assert.match(body, /More remain/, "stopping at the cap does not say reminders were left unsent");
 });
