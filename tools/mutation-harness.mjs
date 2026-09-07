@@ -105,18 +105,30 @@ process.once("SIGINT", () => {
   process.exit(130);
 });
 
-/** Runs the suite. Caught means it failed, which is what a mutation should do. */
+/**
+ * Runs the suite. Caught means it failed, which is what a mutation should do.
+ *
+ * A mutation file may export `command` (an argv array) and `cwd` instead of `suite`, so this
+ * harness can score a C# suite through `dotnet test` as readily as a node one. Mutation testing is
+ * the standard of proof for this project on both sides of the wire, and a second harness for the
+ * desktop would be a second place for the missing-anchor bug to come back.
+ */
+const command = config.command || [process.execPath, suitePath];
+const commandCwd = config.cwd ? resolve(root, config.cwd) : root;
+
 function suiteFails() {
-  const run = spawnSync(process.execPath, [suitePath], {
-    cwd: root,
+  const run = spawnSync(command[0], command.slice(1), {
+    cwd: commandCwd,
     encoding: "utf8",
-    timeout: 300_000,
+    timeout: 1_800_000,
+    // A .exe is spawned directly; anything else may need the shell on Windows.
+    shell: process.platform === "win32" && !/\.exe$/i.test(command[0]),
   });
   return run.status !== 0;
 }
 
 console.log(`Mutating   ${targets.join(", ")}`);
-console.log(`Suite      ${suitePath}`);
+console.log(`Suite      ${command.join(" ")}`);
 for (const [target, original] of baseline) {
   console.log(`Baseline   ${target} sha256 ${original.hash.slice(0, 16)}...`);
 }
