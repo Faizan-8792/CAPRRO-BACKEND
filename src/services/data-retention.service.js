@@ -88,6 +88,14 @@ export const RETENTION_CLASSIFICATION = Object.freeze({
   ErasureReceipt: RETENTION_CLASSES.RETAIN,
   EngagementFinding: RETENTION_CLASSES.RETAIN,
   Firm: RETENTION_CLASSES.RETAIN,
+  // Added 2026-09-07 with firm invitations. RETAIN, and deliberately NOT SELF_EXPIRING even
+  // though the schema has an `expiresAt`: that field is an admission rule, not a TTL index, so
+  // nothing removes the document when it passes. Calling it SELF_EXPIRING would be exactly the
+  // false claim this file's header warns about and that the ProviderUsage note above records.
+  // An expired or revoked invitation is already inert -- its status is derived on every read --
+  // so retaining the row keeps the firm's admission history without keeping anything usable,
+  // which is the same reasoning as FirmMembership below.
+  FirmInvite: RETENTION_CLASSES.RETAIN,
   FirmMembership: RETENTION_CLASSES.RETAIN,
   ImportBatch: RETENTION_CLASSES.RETAIN,
   ImportRow: RETENTION_CLASSES.RETAIN,

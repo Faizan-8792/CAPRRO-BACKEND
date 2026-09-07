@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
 import Firm from "../src/models/Firm.js";
+import FirmInvite from "../src/models/FirmInvite.js";
 import FirmMembership from "../src/models/FirmMembership.js";
 import User from "../src/models/User.js";
 import WorkspaceOperation from "../src/models/WorkspaceOperation.js";
@@ -343,6 +344,21 @@ patch(Firm, "findById", (firmId) =>
 );
 patch(Firm, "findOne", (filter) =>
   query(activeHarness, "Firm.findOne", () => activeHarness.findFirm(filter)),
+);
+// Joining resolves a typed code through firm-admission.service.js, which tries the firm's own
+// joinCode first and then FirmInvite. This harness seeds no invitations, so the lookup finds
+// nothing and the join falls through to the same "Invalid or inactive join code" refusal it
+// always gave -- which is what the assertions below expect.
+//
+// Stubbed rather than left alone because an unpatched model here reaches a mongoose connection
+// that does not exist in this suite, and the failure is a 10-second buffering timeout inside the
+// join transaction: a real regression in the join path and an absent test stub look identical
+// from the output.
+patch(FirmInvite, "findOne", (filter) =>
+  query(activeHarness, "FirmInvite.findOne", () => {
+    void filter;
+    return null;
+  }),
 );
 patch(Firm, "create", async (value) => {
   activeHarness.firmCreates += 1;

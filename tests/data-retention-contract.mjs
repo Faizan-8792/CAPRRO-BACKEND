@@ -114,10 +114,16 @@ test("an invalid now is refused rather than silently treated as epoch", () => {
 
 // -------------------------------------------------------------- classification
 
-test("all 39 models are classified", () => {
+test("all 40 models are classified", () => {
   // 38 -> 39: L12 added ErasureReceipt.js, the record of a completed erasure. This guard firing on
   // that addition is the guard working -- a new model must be classified, not silently inherited.
-  assert.equal(Object.keys(RETENTION_CLASSIFICATION).length, 39);
+  //
+  // 39 -> 40: FirmInvite.js, 2026-09-07, with the firm invitation feature. It fired again, for the
+  // same reason and to the same effect: the model was classified by a person (RETAIN here, PURGE
+  // on firm erasure) rather than inheriting whatever a default happened to be. Both numbers are
+  // raised together deliberately -- raising only the count below, or only this one, is how a
+  // drift detector stops detecting drift.
+  assert.equal(Object.keys(RETENTION_CLASSIFICATION).length, 40);
 });
 
 test("classification matches the real src/models directory exactly", () => {
@@ -125,9 +131,9 @@ test("classification matches the real src/models directory exactly", () => {
   const modelNames = readdirSync(join(here, "..", "src", "models"))
     .filter((name) => name.endsWith(".js"))
     .map((name) => name.replace(/\.js$/, ""));
-  assert.equal(modelNames.length, 39);
+  assert.equal(modelNames.length, 40);
   const result = assertClassificationCoversModels(modelNames);
-  assert.equal(result.classified, 39);
+  assert.equal(result.classified, 40);
 });
 
 test("a new unclassified model makes the guard throw, naming it", () => {
@@ -172,13 +178,20 @@ test("classification totals match PLAN.md 33.9 (see note above: PLAN.md's own pr
   );
   // 30 -> 31 with ErasureReceipt, which is RETAIN for the reason recorded beside it in
   // data-retention.service.js: it is the proof an erasure happened and must outlive the data.
-  assert.equal(counts[RETENTION_CLASSES.RETAIN], 31);
+  //
+  // 31 -> 32 with FirmInvite, 2026-09-07. RETAIN, and the reason it is not SELF_EXPIRING is worth
+  // repeating here because SELF_EXPIRING is the class it superficially resembles: the schema has
+  // an `expiresAt`, but that is an admission rule evaluated on read, not a TTL index, so nothing
+  // ever removes the document. Six collections are SELF_EXPIRING because they genuinely have a
+  // TTL bounding their size; this one does not, and claiming otherwise is the false claim the
+  // service's own header warns against.
+  assert.equal(counts[RETENTION_CLASSES.RETAIN], 32);
   assert.equal(counts[RETENTION_CLASSES.PURGE_FIELD], 1);
   assert.equal(counts[RETENTION_CLASSES.PURGE_CONDITIONAL], 1);
   assert.equal(counts[RETENTION_CLASSES.SELF_EXPIRING], 6);
   assert.equal(
     Object.values(counts).reduce((total, value) => total + value, 0),
-    39,
+    40,
   );
 });
 

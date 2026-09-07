@@ -3,12 +3,14 @@ import mongoose from "mongoose";
 import Firm from "../models/Firm.js";
 import User from "../models/User.js";
 import FirmMembership from "../models/FirmMembership.js";
+import FirmInvite from "../models/FirmInvite.js";
 import WorkspaceOperation from "../models/WorkspaceOperation.js";
 import {
   ensureFirmMembership,
   ensurePersonalFirm,
 } from "../services/firm-provisioning.service.js";
 import workspaceOperationService from "../services/workspace-operation.service.js";
+import { resolveAdmissionCode } from "../services/firm-admission.service.js";
 import { userFacingMessage } from "../utils/user-facing-error.js";
 
 const MEMBERSHIP_TRANSACTION_OPTIONS = {
@@ -1176,6 +1178,52 @@ function trackedJoinReceipt(operationClaim, activeFirmId, completedAt) {
   };
 }
 
+/**
+ * Consumes one use of an invite and records who used it.
+ *
+ * THE CAP IS ENFORCED BY THE FILTER, NOT BY A PRIOR READ. `usedCount: { $lt: maxUses }` inside the
+ * same findOneAndUpdate is what makes a single-use invite genuinely single-use: two people
+ * redeeming the same code at the same moment both pass any read-then-check, and the second write
+ * is the only place the race can be lost safely. A usage cap on an admission credential that can
+ * be beaten by two simultaneous requests is not a cap.
+ *
+ * `revokedAt: null` is in the filter for the same reason: revocation during a join must win.
+ */
+async function recordInviteAcceptance(invite, { userId, grant, session }) {
+  const filter = { _id: invite._id, revokedAt: null };
+  if (invite.maxUses !== null && invite.maxUses !== undefined) {
+    filter.usedCount = { $lt: invite.maxUses };
+  }
+
+  const consumed = await FirmInvite.findOneAndUpdate(
+    filter,
+    {
+      $inc: { usedCount: 1 },
+      $push: {
+        acceptances: {
+          userId,
+          acceptedAt: new Date(),
+          // The role ACTUALLY granted, never the ceiling. An ADMIN-ceiling invite records MEMBER
+          // here while its approval is pending, because that is what the person holds.
+          resultingRole: grant.role,
+          approvalState: grant.approvalState,
+          decidedBy: null,
+          decidedAt: null,
+        },
+      },
+    },
+    { new: true, session },
+  );
+
+  if (!consumed) {
+    throw membershipLifecycleError(
+      409,
+      "This invitation was used up or revoked while you were joining. Ask for a new one.",
+    );
+  }
+  return consumed;
+}
+
 async function joinFirmInTransaction({
   userId,
   joinCode,
@@ -1183,15 +1231,16 @@ async function joinFirmInTransaction({
   authorizedTokenVersion,
 }) {
   return withMembershipTransaction(async (session) => {
-    // Persisted kind is part of join authority. Hydration defaults must not turn
-    // an ambiguous legacy row into a joinable shared workspace.
-    const firm = await Firm.findOne({
-      joinCode,
-      kind: "SHARED",
-    }).session(session);
-    if (!firm || !firm.isActive) {
-      throw membershipLifecycleError(404, "Invalid or inactive join code");
-    }
+    // The code may be the firm's own joinCode or a FirmInvite code. The resolver tries the firm
+    // code FIRST, so every code that worked before invites existed resolves identically, and it
+    // returns the role the membership must be created at. Everything below this line -- the
+    // sharingEnabled check, the tokenVersion compare-and-set, the receipt, the pointer -- is
+    // unchanged and applies to both kinds of code.
+    const {
+      firm,
+      invite,
+      grant: admissionGrant,
+    } = await resolveAdmissionCode(joinCode, { session });
 
     const user = await User.findById(userId).session(session);
     if (!user) throw membershipLifecycleError(404, "User not found");
@@ -1213,12 +1262,32 @@ async function joinFirmInTransaction({
       );
     }
 
+    // The firm's owner rejoining is always OWNER, whatever code they used -- an owner cannot
+    // demote themselves by redeeming a VIEWER invite. Otherwise the resolver's grant applies:
+    // MEMBER for a firm join code, the invite's ceiling for an invite, and MEMBER for an
+    // ADMIN-ceiling invite whose elevation is still pending.
+    //
+    // ensureFirmMembership does NOT change the role of an existing ACTIVE membership (it only
+    // upgrades to OWNER), so somebody who is already a member and redeems a second code keeps the
+    // tier they have. That is the safe direction in both senses: a VIEWER invite cannot demote a
+    // working member, and an ADMIN invite cannot elevate one without the owner's approval.
     const membership = await ensureFirmMembership(userId, firm._id, {
-      role: isOwner ? "OWNER" : "MEMBER",
+      role: isOwner ? "OWNER" : admissionGrant.role,
       isPersonal: false,
       reactivateRemoved: true,
       session,
     });
+
+    // Recorded only for a genuine new or reactivated redemption of an invite. `alreadyMember`
+    // means the membership was ACTIVE before this call, so counting it would let one person
+    // exhaust a capped invite by pressing Join twice -- the cap silently not existing.
+    if (invite && !alreadyMember && !isOwner) {
+      await recordInviteAcceptance(invite, {
+        userId,
+        grant: admissionGrant,
+        session,
+      });
+    }
     const elevated = hasFirmAdminAuthority(firm, membership, userId);
     const userChanges = {
       firmId: firm._id,

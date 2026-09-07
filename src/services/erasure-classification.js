@@ -35,6 +35,11 @@ export const REASONS = Object.freeze({
     strategy: STRATEGY.PURGE,
     reason: "Join rows carry no work product, and leaving them orphans the firm guards.",
   },
+  FirmInvite: {
+    strategy: STRATEGY.PURGE,
+    reason:
+      "An admission credential for a firm that is being erased, so there is nothing left to admit anybody to. Classified explicitly rather than left to the derived PURGE default because it does NOT match that default's description: it carries three identities of its own (createdBy, revokedBy, and a userId plus decidedBy on every acceptance), which under L9 point 6 also rules RETAIN out - statutory retention of work product may not be used to keep a person's identity forever, and an invitation code is not work product in any case. Purged whole rather than pseudonymised because pseudonymising would leave a live code and a use count for a firm that no longer exists.",
+  },
   ActivityEvent: {
     strategy: STRATEGY.PSEUDONYMISE,
     reason:
@@ -79,7 +84,9 @@ export const PINNED_FIRM_SCOPED = Object.freeze([
   "AutomationJob", "CaseAnalysis", "CaseDraft", "CaseMatter", "CaseProviderOperation",
   "CaseSubmission", "CaseTimelineEvent", "Client", "ComplianceOverride", "ComplianceRule",
   "DigestDelivery", "DigestRecoveryCursor", "Engagement", "EngagementFinding", "ErasureReceipt",
-  "FirmMembership",
+  // FirmInvite added 2026-09-07 with the invitation feature. The enumerator failed naming it,
+  // which is this list working: a new firmId-carrying collection must be classified by a person.
+  "FirmInvite", "FirmMembership",
   "ImportBatch", "ImportRow", "ReconciliationItem", "ReconciliationRun", "Reminder", "Task",
   "TaskBulkOperation", "TaxWorkSession", "TdsHealthCheck", "TdsHealthEvidenceLink", "TdsHealthRun",
   "TdsImportRow", "User",

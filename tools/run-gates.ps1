@@ -811,7 +811,19 @@ try {
         "gst-reconciliation-e2e",
         # The two bulk actions, proved against a real database: each must reach exactly the rows
         # its per-row equivalent would have reached, and no further.
-        "bulk-actions-e2e"
+        "bulk-actions-e2e",
+        # The four-tier firm role ladder and the invite/task-management surfaces built on it.
+        # Registered the day each was added, per the invariant above.
+        #
+        # firm-role-tier-contract is the one that must never be allowed to rot: it evaluates all
+        # 216 authority combinations through the real middleware AND through the accessor and
+        # requires them to agree, which is what stands behind "adding VIEWER changed no existing
+        # verdict". It is also the suite the 16 mutations in tools/mutations/firm-authority.mjs
+        # are scored against.
+        "firm-role-tier-contract",
+        # Invitations: code entropy, the derived status, the ceiling, and admission. Scored by
+        # tools/mutations/firm-invite.mjs (26 mutations across three modules).
+        "firm-invite-contract"
     )
 
     # The other four unwired suites need a REPLICA SET, not just a mongod: they run multi-document

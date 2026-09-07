@@ -82,6 +82,18 @@ async function seed(firmId) {
       doc.status = "COMPLETED";
       doc.steps = [];
     }
+    // FirmInvite.code is unique, and this seeder inserts through the driver rather than the model,
+    // so schema defaults and validation do not run. Two firms seeded with no code would both
+    // carry null and collide on the unique index with E11000 -- which is exactly what happened
+    // when this collection was added. Same reason User gets an email and ErasureReceipt an
+    // operationId above: a collection with a unique field needs a unique value from the seeder.
+    if (name === "FirmInvite") {
+      doc.code = mongoose.model("FirmInvite").generateCode();
+      doc.createdBy = oid();
+      doc.grantsRole = "MEMBER";
+      doc.usedCount = 0;
+      doc.acceptances = [];
+    }
     const res = await model.collection.insertOne(doc);
     seeded[name] = res.insertedId;
   }

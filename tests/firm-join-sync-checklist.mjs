@@ -35,6 +35,20 @@ const firmCtrl = readFileSync(
   "utf8"
 );
 
+// The join path is the controller plus the code resolver it delegates to. When invite codes were
+// added, resolving a typed code moved into firm-admission.service.js so that redeeming an invite
+// would reuse the controller's transaction rather than reimplement it -- and check 17 below, which
+// greps for the refusal wording, started failing because the string had simply moved one file
+// over while the behaviour was unchanged.
+//
+// So the join path is read as a whole. A source-text check must follow the code it is checking;
+// narrowing the assertion instead would have been deleting a check to make it pass.
+const admissionSvc = readFileSync(
+  join(__dirname, "..", "src", "services", "firm-admission.service.js"),
+  "utf8"
+);
+const joinPath = `${firmCtrl}\n${admissionSvc}`;
+
 const checks = [];
 const check = (name, pass, detail = "") => checks.push({ name, pass, detail });
 
@@ -203,8 +217,35 @@ check(
 // 17. Backend rejects bad codes with 404
 check(
   "Backend returns 404 'Invalid or inactive join code' on bad code",
-  /Invalid or inactive join code/.test(firmCtrl),
+  /Invalid or inactive join code/.test(joinPath),
   "Both surfaces show same error message from server"
+);
+
+// 18. An invite code must satisfy the validation the extension applies BEFORE it submits.
+//
+// This is the check that would have caught the 12-character invite code, and it exists because
+// check 16 above caught it by accident. The extension is in production and refuses a badly
+// shaped code client-side, so a backend code format the extension rejects is an invite that
+// never reaches the server and cannot be diagnosed from it.
+check(
+  "Generated invite codes satisfy the extension's own join-code pattern",
+  (() => {
+    const model = readFileSync(
+      join(__dirname, "..", "src", "models", "FirmInvite.js"),
+      "utf8"
+    );
+    const length = Number(model.match(/const CODE_LENGTH = (\d+);/)?.[1] || 0);
+    const alphabet = model.match(/const CODE_ALPHABET = "([^"]+)";/)?.[1] || "";
+    // Read from the extension rather than restated, so widening it there is what changes this.
+    const bound = taxWorkerJs.match(/\^\[A-Z0-9\]\{(\d+),(\d+)\}\$/);
+    if (!length || !alphabet || !bound) return false;
+    return (
+      length >= Number(bound[1]) &&
+      length <= Number(bound[2]) &&
+      /^[A-Z0-9]+$/.test(alphabet)
+    );
+  })(),
+  "A 12-character code was silently unusable in the tax-worker surface"
 );
 
 // ─── Print ─────────────────────────────────────────────────────────
