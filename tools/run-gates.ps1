@@ -472,6 +472,67 @@ function Get-SummaryLine {
     return (((@($first) -join " ") -replace "\s+", " ").Trim())
 }
 
+# One summary line is the right amount of log for a suite that PASSED. It is the wrong amount for
+# one that died, and this gap has already cost a real investigation: `firm-erasure-e2e` exited with
+# the Windows native-crash code -1073740791 (0xC0000409) during a full run on 2026-09-02, and the
+# only thing the log preserved was "=== seed a realistic firm ===" - not because that was the last
+# thing the suite said, but because a crash prints nothing matching Get-SummaryLine's
+# passed/failed/N-of-M token list, so it fell through to the FIRST line of output and discarded
+# everything after it. The suite could not be diagnosed from its own gate log; it took 32 manual
+# re-runs (10 plain node, 10 through the launcher alone, 12 running all four replica-set suites
+# in order through the launcher - every one of them green) to establish even that the trigger
+# needs the full ~47-suite run.
+#
+# So: on a non-zero exit only, keep a bounded tail of what the process actually said. Bounded
+# because an unbounded dump of a chatty suite's stdout would bury the summary block this log
+# exists for. The tail rather than the head because a stack trace, an assertion message and a
+# native abort's last words all land at the END of output; Get-SummaryLine already reports the
+# first line, so head and tail together bracket the failure.
+#
+# This file's sibling `tests/firm-erasure-e2e.mjs` reached the same conclusion for its own child
+# process and wrote it down at its stderr capture: "the first time this suite ever ran on a cold
+# scratch database the child exited on its own with Windows code 3221226505 (0xC0000409) after 0
+# steps, which was undiagnosable from the suite's own output because these bytes were being
+# discarded. Keep them." Same defect, one layer up.
+#
+# SWEPT, because the defect is the shape `if (...ExitCode -ne 0) { $failures++ }` and not the one
+# site that happened to bite. This script has five such sites: the contained-launcher handshake,
+# `node --check`, the suite loop, `npm audit` and the commit-pinned archive validation. Four now
+# call this function. `node --check` is deliberately NOT one of them and that is not an oversight:
+# it already solved this problem for its own case - it puts the reason on the line and falls back
+# to "exit=N, no output" - and it runs over ~165 files, so a 24-line dump per bad file would bury
+# the very syntax error it exists to surface.
+function Get-FailureDetail {
+    param(
+        [AllowNull()][string]$Output,
+        [int]$MaxLines = 24,
+        [int]$MaxWidth = 200
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Output)) {
+        return @("      (the process produced no output at all before exiting)")
+    }
+    $text = ConvertFrom-ClixmlText -Text $Output
+    $lines = @($text -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($lines.Count -eq 0) {
+        return @("      (the process produced no non-blank output before exiting)")
+    }
+    $tail = @($lines | Select-Object -Last $MaxLines)
+    $detail = New-Object System.Collections.Generic.List[string]
+    if ($lines.Count -gt $tail.Count) {
+        $detail.Add("      --- last $($tail.Count) of $($lines.Count) output line(s) ---")
+    }
+    else {
+        $detail.Add("      --- all $($tail.Count) output line(s) ---")
+    }
+    foreach ($line in $tail) {
+        $trimmed = $line.TrimEnd()
+        if ($trimmed.Length -gt $MaxWidth) { $trimmed = $trimmed.Substring(0, $MaxWidth) + " ..." }
+        $detail.Add("      " + $trimmed)
+    }
+    return $detail.ToArray()
+}
+
 function Get-GateSummary {
     param(
         [Parameter(Mandatory = $true)][int]$FailureCount,
@@ -571,7 +632,10 @@ try {
                 -TimeoutMs $processTimeoutMs
             $launcherCombined = $launcherResult.StandardOutput + "`n" + $launcherResult.StandardError
             $report.Add("  exit=$($launcherResult.ExitCode)  " + (Format-Elapsed -Result $launcherResult) + (Get-SummaryLine -Output $launcherCombined))
-            if ($launcherResult.ExitCode -ne 0) { $failures++ }
+            if ($launcherResult.ExitCode -ne 0) {
+                $failures++
+                foreach ($detailLine in (Get-FailureDetail -Output $launcherCombined)) { $report.Add($detailLine) }
+            }
         }
         catch {
             $report.Add("  ERROR  " + $_.Exception.Message)
@@ -847,7 +911,12 @@ try {
                 -EnvironmentOverrides $suiteEnv
             $combined = $result.StandardOutput + "`n" + $result.StandardError
             $report.Add("  " + $suite.PadRight(34) + " exit=$($result.ExitCode)  " + (Format-Elapsed -Result $result) + (Get-SummaryLine -Output $combined))
-            if ($result.ExitCode -ne 0) { $failures++ }
+            if ($result.ExitCode -ne 0) {
+                $failures++
+                # Only on failure: the one-line summary is not enough to diagnose a crash. See
+                # Get-FailureDetail's own note for the incident that made this necessary.
+                foreach ($detailLine in (Get-FailureDetail -Output $combined)) { $report.Add($detailLine) }
+            }
         }
         catch {
             $report.Add("  " + $suite.PadRight(34) + " ERROR  " + $_.Exception.Message)
@@ -872,7 +941,10 @@ try {
             }
         $auditCombined = $auditResult.StandardOutput + "`n" + $auditResult.StandardError
         $report.Add("  exit=$($auditResult.ExitCode)  " + (Format-Elapsed -Result $auditResult) + (Get-SummaryLine -Output $auditCombined))
-        if ($auditResult.ExitCode -ne 0) { $failures++ }
+        if ($auditResult.ExitCode -ne 0) {
+            $failures++
+            foreach ($detailLine in (Get-FailureDetail -Output $auditCombined)) { $report.Add($detailLine) }
+        }
     }
     catch {
         $report.Add("  ERROR  " + $_.Exception.Message)
@@ -897,7 +969,10 @@ try {
                 -TimeoutMs $archiveTimeoutMs
             $archiveCombined = $archiveResult.StandardOutput + "`n" + $archiveResult.StandardError
             $report.Add("  exit=$($archiveResult.ExitCode)  " + (Format-Elapsed -Result $archiveResult) + (Get-SummaryLine -Output $archiveCombined))
-            if ($archiveResult.ExitCode -ne 0) { $failures++ }
+            if ($archiveResult.ExitCode -ne 0) {
+                $failures++
+                foreach ($detailLine in (Get-FailureDetail -Output $archiveCombined)) { $report.Add($detailLine) }
+            }
         }
         catch {
             $report.Add("  ERROR  " + $_.Exception.Message)
