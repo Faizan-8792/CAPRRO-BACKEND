@@ -31,6 +31,7 @@ const IDENTITY = "../apps/desktop-native/src/CaPro.Desktop.Core/Models/Identity.
 const CAPABILITY = "../apps/desktop-native/src/CaPro.Desktop.Core/Access/Capability.cs";
 const MAPPER = "../apps/desktop-native/src/CaPro.Desktop.Core/Api/ResponseMapper.cs";
 const MODEL = "../apps/desktop-native/src/CaPro.Desktop.Core/Models/FirmInvite.cs";
+const POLICY = "../apps/desktop-native/src/CaPro.Desktop.Core/Presentation/FirmInvitePolicy.cs";
 
 export const mutations = [
   {
@@ -194,5 +195,90 @@ export const mutations = [
     target: MODEL,
     find: `    public const string DefaultGrantableRole = "MEMBER";`,
     replace: `    public const string DefaultGrantableRole = "ADMIN";`,
+  },
+
+  // --- the copy, which is where an overstatement would actually reach somebody ---
+  {
+    name: "21. an unrecognised designation collapses to Member",
+    target: POLICY,
+    find: `            _ => role!.Trim(),`,
+    replace: `            _ => "Member",`,
+  },
+  {
+    name: "22. an unrecognised invite status reads as Live",
+    target: POLICY,
+    find: `            _ => invite.StatusRaw is { Length: > 0 } raw
+                ? $"Reported as {raw}"
+                : "State not recorded",`,
+    replace: `            _ => "Live",`,
+  },
+  {
+    name: "23. an uncapped invitation reports zero uses left",
+    target: POLICY,
+    find: `        if (invite.MaxUses is not { } cap)
+        {
+            return $"{used}, no limit";
+        }`,
+    replace: `        var cap = invite.MaxUses ?? 0;`,
+  },
+  {
+    name: "24. a remaining count is allowed to go negative",
+    target: POLICY,
+    find: `        var left = invite.RemainingUses ?? Math.Max(0, cap - invite.UsedCount);`,
+    replace: `        var left = invite.RemainingUses ?? (cap - invite.UsedCount);`,
+  },
+  {
+    name: "25. the pending line shouts zero on every ordinary invitation",
+    target: POLICY,
+    find: `            <= 0 => string.Empty,`,
+    replace: `            <= 0 => "0 people are waiting for your approval",`,
+  },
+  {
+    name: "26. a person with no name is given an invented one",
+    target: POLICY,
+    find: `                : "Name not recorded";
+
+        var joined = acceptance.AcceptedUtc is { } when`,
+    replace: `                : $"User {acceptance.UserId}";
+
+        var joined = acceptance.AcceptedUtc is { } when`,
+  },
+  {
+    name: "27. a truncated list reports its returned count as the total",
+    target: POLICY,
+    find: `        var count = SurfaceFormat.Count(directory.Invites.Count, directory.Truncated);`,
+    replace: `        var count = SurfaceFormat.Count(directory.Invites.Count, false);`,
+  },
+  {
+    name: "28. the withdrawal warning stops saying it cannot be undone",
+    target: POLICY,
+    find: `        "Withdrawing an invitation cannot be undone. Anyone holding the code will no longer be able to use it, and people who have already joined are not affected.";`,
+    replace: `        "Turn this invitation off. You can turn it back on later.";`,
+  },
+  {
+    name: "29. the admin-ceiling notice claims the designation takes effect on joining",
+    target: POLICY,
+    find: `        "Someone joining with this code becomes a member first. You approve the administrator designation yourself, from Requests, before it takes effect.";`,
+    replace: `        "Someone joining with this code becomes an administrator of this workspace.";`,
+  },
+  {
+    name: "30. the approval confirmation drops the bound on what is granted",
+    target: POLICY,
+    find: `        return $"{who} will be able to administer this workspace's data, its members and its invitations. "
+            + "They will not be able to transfer ownership, change another administrator, or approve a designation. "
+            + "This applies to this workspace only.";`,
+    replace: `        return $"{who} will be able to administer this workspace.";`,
+  },
+  {
+    name: "31. the decline confirmation reads as a removal",
+    target: POLICY,
+    find: `        "The request is declined and they keep the designation they have now. They remain a member of this workspace.";`,
+    replace: `        "The request is declined.";`,
+  },
+  {
+    name: "32. a refused read is offered a retry that cannot work",
+    target: POLICY,
+    find: `            emptyTitle: "No invitations yet",`,
+    replace: `            emptyTitle: "No invitations",`,
   },
 ];
