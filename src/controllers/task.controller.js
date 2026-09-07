@@ -203,6 +203,12 @@ export const getTaskBoard = async (req, res) => {
         .skip(skip)
         .limit(limit)
         .populate("assignedTo", "name email")
+        // createdBy has always been STORED (createTask sets it) and was never serialised, so a
+        // "who raised this" column had no data to read. Populated with the same two fields as
+        // assignedTo and nothing more: a name and an email are what a person needs to be
+        // identified by a colleague, and widening the projection would ship account fields to a
+        // list view that has no use for them.
+        .populate("createdBy", "name email")
         .lean(),
     ]);
 
@@ -235,6 +241,17 @@ export const getTaskBoard = async (req, res) => {
             }
           : null,
         status: task.status,
+        // Who raised the task. Null rather than omitted when the populate found no user, so a
+        // client can tell "the server does not report this" from "nobody is recorded" -- the
+        // desktop renders those two differently, and it must not fall back to the assignee, who is
+        // usually a different person.
+        createdBy: task.createdBy
+          ? {
+              id: task.createdBy._id || task.createdBy,
+              name: task.createdBy.name || null,
+              email: task.createdBy.email || null,
+            }
+          : null,
         documentReadiness: task.documentReadiness || "UNKNOWN",
         reconciliationExceptionCount: Number(
           task.reconciliationExceptionCount || 0,

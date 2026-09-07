@@ -32,6 +32,7 @@ const CAPABILITY = "../apps/desktop-native/src/CaPro.Desktop.Core/Access/Capabil
 const MAPPER = "../apps/desktop-native/src/CaPro.Desktop.Core/Api/ResponseMapper.cs";
 const MODEL = "../apps/desktop-native/src/CaPro.Desktop.Core/Models/FirmInvite.cs";
 const POLICY = "../apps/desktop-native/src/CaPro.Desktop.Core/Presentation/FirmInvitePolicy.cs";
+const MATRIX = "../apps/desktop-native/src/CaPro.Desktop.Core/Presentation/TaskMatrixPolicy.cs";
 
 export const mutations = [
   {
@@ -280,5 +281,143 @@ export const mutations = [
     target: POLICY,
     find: `            emptyTitle: "No invitations yet",`,
     replace: `            emptyTitle: "No invitations",`,
+  },
+  {
+    name: "33. a missing workspace falls back to the generic retryable failure",
+    target: POLICY,
+    find: `        view.Status == ApiStatus.NotFound`,
+    replace: `        false`,
+  },
+
+  // --- the task matrix: a due date in the wrong time zone, and a filtered count ---
+  {
+    name: "34. the due date is compared in LOCAL time, so a deadline can cross a day",
+    target: MATRIX,
+    find: `        var dueDay = due.UtcDateTime.Date;
+        var today = todayUtc.UtcDateTime.Date;`,
+    replace: `        var dueDay = due.LocalDateTime.Date;
+        var today = todayUtc.LocalDateTime.Date;`,
+  },
+  {
+    name: "35. due-today is read as overdue (an inclusive lower bound)",
+    target: MATRIX,
+    find: `        if (dueDay < today) return TaskTiming.Overdue;`,
+    replace: `        if (dueDay <= today) return TaskTiming.Overdue;`,
+  },
+  {
+    name: "36. a task with no due date is reported as on track",
+    target: MATRIX,
+    find: `        if (task.DueDateUtc is not { } due)
+        {
+            return TaskTiming.Unknown;
+        }`,
+    replace: `        if (task.DueDateUtc is not { } due)
+        {
+            return TaskTiming.OnTrack;
+        }`,
+  },
+  {
+    name: "37. filed work is chased as overdue",
+    target: MATRIX,
+    find: `        if (IsSettled(task))
+        {
+            return TaskTiming.Completed;
+        }`,
+    replace: "",
+  },
+  {
+    name: "38. an unknown status counts as settled, dropping it out of an overdue filter",
+    target: MATRIX,
+    find: `        return SettledStatuses.Contains(task.Status, StringComparer.Ordinal);`,
+    replace: `        return !task.Status.StartsWith("NOT_", StringComparison.Ordinal);`,
+  },
+  {
+    name: "39. search covers only the title",
+    target: MATRIX,
+    find: `        return haystack.Any(field =>
+            field is { Length: > 0 }
+            && field.Contains(needle, StringComparison.OrdinalIgnoreCase));`,
+    replace: `        return task.Title.Contains(needle, StringComparison.OrdinalIgnoreCase);`,
+  },
+  {
+    name: "40. an empty search matches nothing instead of everything",
+    target: MATRIX,
+    find: `        if (needle is null or { Length: 0 })
+        {
+            return true;
+        }`,
+    replace: `        if (needle is null or { Length: 0 })
+        {
+            return false;
+        }`,
+  },
+  {
+    name: "41. an unscheduled task sorts FIRST under an ascending due sort",
+    target: MATRIX,
+    find: `                : rows.OrderBy(task => task.DueDateUtc ?? DateTimeOffset.MaxValue),
+            TaskMatrixSort.Client`,
+    replace: `                : rows.OrderBy(task => task.DueDateUtc ?? DateTimeOffset.MinValue),
+            TaskMatrixSort.Client`,
+  },
+  {
+    name: "42. the sort loses its tie-break, so the order is unstable",
+    target: MATRIX,
+    find: `        return [.. ordered.ThenBy(task => task.Id, StringComparer.Ordinal)];`,
+    replace: "        return [.. ordered];",
+  },
+  {
+    name: "43. the count reads as a firm-wide total",
+    target: MATRIX,
+    find: `        return isFiltered
+            ? $"Showing {shown} of {onPage} on this page - {firmTotal} in this workspace"
+            : $"Showing {onPage} on this page - {firmTotal} in this workspace";`,
+    replace: `        return isFiltered ? $"{shown} tasks" : $"{onPage} tasks";`,
+  },
+  {
+    name: "44. the workspace total drops the server's more-pages marker",
+    target: MATRIX,
+    find: `            ? SurfaceFormat.Count(board.Total, board.HasMore)`,
+    replace: `            ? SurfaceFormat.Count(board.Total, false)`,
+  },
+  {
+    name: "45. a creator with no name is reported as Unassigned",
+    target: MATRIX,
+    find: `        if (creator is null)
+        {
+            return "Creator not recorded";
+        }`,
+    replace: `        if (creator is null)
+        {
+            return "Unassigned";
+        }`,
+  },
+  {
+    name: "46. an assignee the response did not expand reads as Unassigned",
+    target: MATRIX,
+    find: `        if (assignee.Name is { Length: > 0 } name) return name;
+        if (assignee.Email is { Length: > 0 } email) return email;
+        return "Name not recorded";`,
+    replace: `        if (assignee.Name is { Length: > 0 } name) return name;
+        if (assignee.Email is { Length: > 0 } email) return email;
+        return "Unassigned";`,
+  },
+  {
+    name: "47. the due column is rendered in local time",
+    target: MATRIX,
+    find: `            ? due.UtcDateTime.ToString("d MMM yyyy", CultureInfo.CurrentCulture)`,
+    replace: `            ? due.LocalDateTime.ToString("d MMM yyyy", CultureInfo.CurrentCulture)`,
+  },
+  {
+    name: "48. an absent filter value silently matches nothing",
+    target: MATRIX,
+    find: `            && (serviceType is null or { Length: 0 }
+                || string.Equals(task.ServiceType, serviceType, StringComparison.Ordinal))`,
+    replace: `            && string.Equals(task.ServiceType, serviceType, StringComparison.Ordinal)`,
+  },
+  {
+    name: "49. the page-scope notice stops saying the filters are page-scoped",
+    target: MATRIX,
+    find: `        "Filters and search apply to the tasks on this page only, not to the whole workspace. Use the pager to reach the rest.";`,
+    replace: `        "Filter and search the workspace's tasks.";`,
   },
 ];
