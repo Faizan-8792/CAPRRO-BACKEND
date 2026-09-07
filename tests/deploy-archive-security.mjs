@@ -2296,9 +2296,25 @@ if (listed.status !== 0 || listed.error) {
   // secret AST scan: PASS (169 files)". The file is regular expressions over a string
   // passed in by the caller; it reads no environment variable, makes no network or
   // database call, and holds no secret, credential, configuration value or endpoint.
+  // Raised from 174 to 179 for the five files of the firm invitation feature:
+  // src/models/FirmInvite.js, src/services/firm-authority.service.js,
+  // src/services/firm-invite.service.js, src/services/firm-admission.service.js and
+  // src/controllers/firm-invite.controller.js. Caught by the pin exactly as the entries
+  // above were. Confirmed clean before the pin moved, independently of this file:
+  // `make-deploy-archive.ps1 -ValidateOnly` -> "JavaScript secret AST scan: PASS (179
+  // files)".
+  //
+  // Worth stating precisely what these five hold, since one of them generates an
+  // admission credential. FirmInvite.generateCode reads crypto.randomBytes and an
+  // alphabet constant; the code it produces is stored per row, never a configuration
+  // value and never in source. The only environment variable any of them reads is
+  // FIRM_INVITE_BASE_URL, a public https origin for a share link, and it is read through
+  // an injected `env` parameter that defaults to process.env rather than at module scope.
+  // None of them makes a network call, none holds a secret, credential or endpoint, and
+  // the controller deliberately never names the account-level FIRM_ADMIN grant at all.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 174 && result.status === 0,
+    files.length === 179 && result.status === 0,
     result,
   );
 }
