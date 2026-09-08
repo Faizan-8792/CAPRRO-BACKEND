@@ -697,6 +697,7 @@ try {
         "workspace-operation-contract",
         "firm-authorization-contract",
         "task-flow-checklist",
+        "task-assignment-receipt-contract",
         "task-date-contract",
         "taxworker-flow-checklist",
         "digest-delivery-correctness",

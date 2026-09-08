@@ -15,6 +15,7 @@ import {
   getTaskSource,
   getMyOpenTasks,
   completeTaskFromUser,
+  markTaskRead,
 } from "../controllers/task.controller.js";
 import {
   commitBulkTaskUpdate,
@@ -46,5 +47,9 @@ router.delete("/:id", archiveTask);
 router.get("/my-open", captureNoticeCases, getMyOpenTasks);
 router.get("/:id", captureNoticeCases, getTaskSource);
 router.patch("/:id/complete-from-user", completeTaskFromUser);
+
+// Assignee-only, like the route above it. Placed after "/:id" deliberately - Express matches in
+// declaration order and a bare "/:id" earlier in the file would otherwise swallow this path.
+router.patch("/:id/mark-read", markTaskRead);
 
 export default router;

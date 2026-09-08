@@ -86,6 +86,7 @@ export const createTask = async (req, res) => {
       assignedTo,
       status,
       reminderId,
+      remarks,
       meta = {},
     } = req.body || {};
 
@@ -130,6 +131,16 @@ export const createTask = async (req, res) => {
       title,
       dueDateISO: dueDate.toISOString(),
       assignedTo: assignedToUserId,
+
+      // Trimmed and coerced here rather than trusted: the schema caps the length, but a null or
+      // a number arriving from a client would otherwise be stored as-is and then rendered.
+      remarks: typeof remarks === "string" ? remarks.trim() : "",
+
+      // A brand-new assignment has not been read by anybody, INCLUDING when the administrator
+      // assigns it to themselves. Stated explicitly rather than left to the schema default, so
+      // the create path says out loud what the read receipt starts as.
+      assigneeReadAt: null,
+      assigneeReadBy: null,
       status: initialStatus,
       completedAt: initiallyComplete ? new Date() : null,
       completedBy: initiallyComplete ? user.id : null,
@@ -289,7 +300,15 @@ export const updateTask = async (req, res) => {
     const user = req.user;
     const firmId = user.firmId;
     const { id } = req.params;
-    const { status, assignedTo, title, dueDateISO, meta, expectedVersion } =
+    const {
+      status,
+      assignedTo,
+      title,
+      dueDateISO,
+      meta,
+      remarks,
+      expectedVersion,
+    } =
       req.body || {};
 
     if (!firmId) {
@@ -363,6 +382,11 @@ export const updateTask = async (req, res) => {
     }
 
     if (assignedTo !== undefined) {
+      // Read BEFORE the field moves, so "did the assignee actually change" is a comparison and
+      // not a guess. Compared as strings because one side is an ObjectId and the other arrives
+      // from JSON; == would be true for the same id and === never would.
+      const previousAssignee = task.assignedTo ? String(task.assignedTo) : null;
+
       if (!assignedTo) {
         task.assignedTo = null;
       } else {
@@ -377,6 +401,27 @@ export const updateTask = async (req, res) => {
         }
         task.assignedTo = assignedUser._id;
       }
+
+      const nextAssignee = task.assignedTo ? String(task.assignedTo) : null;
+
+      // THE RULE THIS FEATURE TURNS ON. A task handed to somebody else has not been read by
+      // them, so the receipt is cleared. An administrator looking at a tick left behind by the
+      // PREVIOUS assignee would conclude the new one has seen the work, which is the opposite of
+      // the truth and exactly the mistake a read receipt exists to prevent.
+      //
+      // Guarded on a real change, not on the field being present in the request: re-sending the
+      // same assignee (which a bulk edit or a form that posts every field does routinely) must
+      // NOT throw away an acknowledgement that genuinely happened.
+      if (previousAssignee !== nextAssignee) {
+        task.assigneeReadAt = null;
+        task.assigneeReadBy = null;
+      }
+    }
+
+    // Present-and-a-string, so an explicit empty string CLEARS the remarks while an absent field
+    // leaves them alone. `if (remarks)` would have made clearing them impossible.
+    if (typeof remarks === "string") {
+      task.remarks = remarks.trim();
     }
 
     if (meta && typeof meta === "object") {
@@ -532,6 +577,73 @@ export const getMyOpenTasks = async (req, res) => {
 };
 
 // -------- NEW: Mark done from extension (user) --------
+
+/**
+ * The assignee acknowledges work that was given to them.
+ *
+ * Assignee-only, by the same means completeTaskFromUser uses: assignedTo is part of the QUERY,
+ * so a task belonging to somebody else is simply not found. That keeps "not yours" and "does not
+ * exist" indistinguishable from outside, which is what stops this route from confirming the
+ * existence of another person's work.
+ *
+ * IDEMPOTENT on purpose. Opening the same task twice, or two devices doing it at once, must not
+ * move the recorded time - the administrator is reading "when did they first see this", and a
+ * timestamp that creeps forward on every glance answers a different question.
+ */
+export const markTaskRead = async (req, res) => {
+  try {
+    const user = req.user;
+    const firmId = user.firmId;
+    const { id } = req.params;
+
+    if (!firmId) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Firm not linked to this user" });
+    }
+
+    const task = await Task.findOne({
+      _id: id,
+      firmId,
+      isActive: true,
+      assignedTo: user.id,
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        ok: false,
+        error: "Task not found or not assigned to this user",
+      });
+    }
+
+    // Already acknowledged: report the state, change nothing, and say it was already read so a
+    // caller can tell "you have just marked this" from "this was marked days ago".
+    if (task.assigneeReadAt) {
+      return res.json({
+        ok: true,
+        alreadyRead: true,
+        assigneeReadAt: task.assigneeReadAt,
+        assigneeReadBy: task.assigneeReadBy,
+        task,
+      });
+    }
+
+    task.assigneeReadAt = new Date();
+    task.assigneeReadBy = user.id;
+    await task.save();
+
+    res.json({
+      ok: true,
+      alreadyRead: false,
+      assigneeReadAt: task.assigneeReadAt,
+      assigneeReadBy: task.assigneeReadBy,
+      task,
+    });
+  } catch (err) {
+    console.error("markTaskRead error:", err);
+    res.status(500).json({ ok: false, error: "Failed to mark the task as read" });
+  }
+};
 
 export const completeTaskFromUser = async (req, res) => {
   try {
