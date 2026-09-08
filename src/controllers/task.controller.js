@@ -324,6 +324,13 @@ export const getTaskBoard = async (req, res) => {
           task.reconciliationExceptionCount || 0,
         ),
         reviewStatus: task.reviewStatus || "NOT_REQUIRED",
+
+        // Named explicitly, like every other field on this hand-built row. An administrator
+        // reading the board is asking "have they seen it", and a null here is the honest
+        // answer "not yet" rather than a missing key the client has to guess about.
+        remarks: task.remarks || "",
+        assigneeReadAt: task.assigneeReadAt || null,
+
         filedAt: task.filedAt || null,
         filedBy: task.filedBy || null,
         mutationVersion: Number(task.mutationVersion || 0),
@@ -578,7 +585,7 @@ export const getTaskSource = async (req, res) => {
 
     const task = await Task.findOne(filter)
       .select(
-        "clientName serviceType title dueDateISO status assignedTo completedAt createdAt updatedAt",
+        "clientName serviceType title dueDateISO status assignedTo remarks assigneeReadAt assigneeReadBy completedAt createdAt updatedAt",
       )
       .lean();
     if (!task) {
@@ -635,8 +642,12 @@ export const getMyOpenTasks = async (req, res) => {
         .sort({ dueDateISO: 1, _id: 1 })
         .skip(skip)
         .limit(limit)
+        // remarks, assignedTo and the read receipt are listed because this is the screen the
+        // ASSIGNEE reads. Without remarks they cannot see what they were told; without the
+        // receipt the app cannot tell whether to offer "mark as read"; and without assignedTo
+        // it cannot tell that the work is theirs at all.
         .select(
-          "clientName serviceType title dueDateISO status documentReadiness reconciliationExceptionCount reviewStatus mutationVersion createdAt updatedAt",
+          "clientName serviceType title dueDateISO status assignedTo remarks assigneeReadAt assigneeReadBy documentReadiness reconciliationExceptionCount reviewStatus mutationVersion createdAt updatedAt",
         )
         .lean(),
     ]);

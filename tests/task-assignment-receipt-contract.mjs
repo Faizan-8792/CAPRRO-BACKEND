@@ -314,6 +314,73 @@ await test("a non-string remarks value is ignored rather than stored", async () 
   assert.equal(document.remarks, "Keep me", "an object must never reach the field");
 });
 
+// ---------------------------------------------------------------- the fields actually reach a screen
+//
+// THE CLASS OF BUG THIS PINS, and it is the quietest one in this backend: every task read projects
+// by hand. getTaskBoard composes its rows field by field, and getMyOpenTasks and getTaskSource use
+// written-out select lists. A new column on the model therefore reaches NOBODY until it is named in
+// each one - the model has the field, the API drops it, the screen shows nothing, and not one thing
+// fails anywhere. Both new fields were invisible to all three reads when they were first added.
+
+await test("the assignee's own queue asks for remarks, the receipt and the assignee", async () => {
+  const { getMyOpenTasks } = await import("../src/controllers/task.controller.js");
+
+  let selected = null;
+  const originalFind = Task.find;
+  const originalCount = Task.countDocuments;
+  Task.countDocuments = () => Promise.resolve(0);
+  Task.find = () => {
+    const chain = {
+      sort: () => chain,
+      skip: () => chain,
+      limit: () => chain,
+      select: (fields) => {
+        selected = fields;
+        return chain;
+      },
+      lean: () => Promise.resolve([]),
+    };
+    return chain;
+  };
+
+  try {
+    await getMyOpenTasks(fakeReq(), fakeRes());
+  } finally {
+    Task.find = originalFind;
+    Task.countDocuments = originalCount;
+  }
+
+  assert.ok(selected, "the query must project explicitly");
+  for (const field of ["remarks", "assigneeReadAt", "assignedTo"]) {
+    assert.ok(
+      selected.includes(field),
+      `${field} must be projected, or the assignee's own screen cannot show it`,
+    );
+  }
+});
+
+await test("the board's hand-built row names both new fields", async () => {
+  // Asserted against the source, deliberately. getTaskBoard composes its response object key by
+  // key, so the only way a field can be missing is by not being written there - and that is exactly
+  // what happened. A behavioural test would need half the board's dependencies stubbed to prove a
+  // property that is visible in one line.
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(
+    new URL("../src/controllers/task.controller.js", import.meta.url),
+    "utf8",
+  );
+
+  const start = source.indexOf("columns[key].push({");
+  assert.ok(start > 0, "the board's row builder moved; this test needs updating");
+  const row = source.slice(start, start + 2000);
+
+  assert.ok(row.includes("remarks:"), "the board row must carry remarks");
+  assert.ok(
+    row.includes("assigneeReadAt:"),
+    "the board row must carry the read receipt, or an administrator cannot see it",
+  );
+});
+
 // ---------------------------------------------------------------- the model declares them
 
 await test("the schema carries the three new fields, with safe defaults", async () => {
