@@ -51,6 +51,17 @@ process.env.MONGODB_URI =
   process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/capro-task-date-check";
 
 const { default: Task } = await import("../src/models/Task.js");
+
+// createTask and updateTask now record an ActivityEvent through safeRecordActivity. This file
+// monkey-patches Task but has no database, so each of those writes sat in Mongoose's buffer
+// until it timed out - the suite went from under a second to 20.7 seconds, entirely in waiting.
+// safeRecordActivity swallowed every failure so nothing was WRONG, it was just slow, which on a
+// gate carrying fixed 300-second timeouts is its own hazard.
+//
+// Stubbed rather than the timeout shortened: this file tests date handling, and whether the
+// activity trail can reach a database is not its business.
+const { default: ActivityEvent } = await import("../src/models/ActivityEvent.js");
+ActivityEvent.prototype.save = () => Promise.resolve();
 const { default: User } = await import("../src/models/User.js");
 const { default: TaskBulkOperation } = await import(
   "../src/models/TaskBulkOperation.js"

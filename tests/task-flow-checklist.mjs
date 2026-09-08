@@ -68,7 +68,17 @@ function check(name, pass, detail = "") {
 
 // --- 3. completeTaskFromUser requires assignedTo match ---
 {
-  const m = ctrl.match(/completeTaskFromUser[\s\S]*?(?=export const|$)/);
+  // Anchored on the DECLARATION, not on the first textual mention of the name.
+  //
+  // The previous pattern matched from wherever the string first appeared, so a comment ABOVE a
+  // different function that referred to this one by name captured that comment instead of this
+  // body - and then reported "Missing scope check!" about a function whose scope check was intact
+  // three lines further down. That happened: a doc comment on markTaskRead explaining that it is
+  // assignee-only "by the same means completeTaskFromUser uses" was enough to fail two checks.
+  //
+  // This is strictly more accurate rather than more permissive: it inspects exactly the function
+  // the check names, and the mutation below proves it still fails when the real guard is removed.
+  const m = ctrl.match(/export const completeTaskFromUser[\s\S]*?(?=export const|$)/);
   const block = m ? m[0] : "";
   const ok =
     /assignedTo:\s*user\.id/.test(block) &&
@@ -86,7 +96,17 @@ function check(name, pass, detail = "") {
 
 // --- 4. completeTaskFromUser logs audit metadata ---
 {
-  const m = ctrl.match(/completeTaskFromUser[\s\S]*?(?=export const|$)/);
+  // Anchored on the DECLARATION, not on the first textual mention of the name.
+  //
+  // The previous pattern matched from wherever the string first appeared, so a comment ABOVE a
+  // different function that referred to this one by name captured that comment instead of this
+  // body - and then reported "Missing scope check!" about a function whose scope check was intact
+  // three lines further down. That happened: a doc comment on markTaskRead explaining that it is
+  // assignee-only "by the same means completeTaskFromUser uses" was enough to fail two checks.
+  //
+  // This is strictly more accurate rather than more permissive: it inspects exactly the function
+  // the check names, and the mutation below proves it still fails when the real guard is removed.
+  const m = ctrl.match(/export const completeTaskFromUser[\s\S]*?(?=export const|$)/);
   const block = m ? m[0] : "";
   const ok =
     /completedByUserId:\s*user\.id/.test(block) && /completedAt:/.test(block);
