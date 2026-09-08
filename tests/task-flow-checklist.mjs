@@ -175,15 +175,32 @@ function check(name, pass, detail = "") {
 }
 
 // --- 8. Routes are auth-protected and firm-scoped ---
+//
+// The chain used to be one router.use(authRequired, requireFirmMember, requireFirmWriteAccess) and
+// this matched that literal shape. It is two calls now, because PATCH /:id/mark-read is deliberately
+// exempt from write policy -- a read-only member handed work has to be able to say they have seen
+// it. What THIS check is named for is unchanged and is what it now tests directly: authentication
+// and active membership gate every task route, before anything else.
+//
+// The write-policy half, and exactly which route is allowed to sit above it, is asserted by
+// firm-authorization-contract.mjs and task-assignment-receipt-contract.mjs. It is not restated here.
 {
-  const ok =
-    /router\.use\(\s*authRequired\s*,\s*requireFirmMember\s*,\s*requireFirmWriteAccess\s*\)/.test(
-      routes,
-    );
+  const memberGate =
+    /router\.use\(\s*authRequired\s*,\s*requireFirmMember\s*[,)]/.test(routes);
+
+  // Nothing may be declared before that gate: a route above it would answer to no membership check
+  // at all, which is the failure this item has always been about.
+  const gateAt = routes.search(/router\.use\(\s*authRequired\s*,\s*requireFirmMember\s*[,)]/);
+  const before = gateAt < 0 ? [] : [...routes.slice(0, gateAt).matchAll(/router\.(get|post|patch|delete)\(/g)];
+
   check(
     "All /api/tasks routes require authentication and active firm membership",
-    ok,
-    "JWT required to access any task endpoint",
+    memberGate && before.length === 0,
+    memberGate
+      ? (before.length === 0
+        ? "JWT and active membership required before any task endpoint"
+        : `${before.length} route(s) declared ABOVE the membership gate`)
+      : "no router.use(authRequired, requireFirmMember) gate found",
   );
 }
 

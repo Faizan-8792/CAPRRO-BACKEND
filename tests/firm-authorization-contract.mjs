@@ -13,6 +13,40 @@ const WRITE_GUARD_ROUTES = [
   "tds-health.routes.js",
 ];
 
+/**
+ * Route files that split the guard chain, and exactly which mutations may sit inside the split.
+ *
+ * WHY A SPLIT IS ALLOWED AT ALL. The property this file is named for is the ORDER: authentication,
+ * then active firm membership, then write policy. A single
+ * router.use(authRequired, requireFirmMember, requireFirmWriteAccess) satisfied that AND happened to
+ * guarantee something else -- that no route escapes write policy at all. The two were the same fact
+ * while every task mutation deserved the same treatment. They stopped being the same fact when one
+ * did not.
+ *
+ * Marking work as read is a RECEIPT for an assignment you were handed, not an edit of the firm's
+ * data, and any member can be an assignee (createTask requires only that the assignee is a User in
+ * the same firm). Under the monolithic chain a read-only member could be given work and then be
+ * refused when they said they had seen it -- while the desktop showed them the button, and the
+ * administrator's "has he seen it?" answer read "Not opened yet" for that person forever.
+ *
+ * WHAT THIS IS NOT. It is not a licence to loosen the regex until it passes. The exemption is
+ * per-ROUTE and named here, the ORDER is still asserted for the split form, and the test below
+ * compares the routes actually found inside the split against this list as a SET -- so an exemption
+ * that grows fails, and it fails naming the route that grew it.
+ */
+const SPLIT_WRITE_GUARD = new Map([
+  [
+    "task.routes.js",
+    {
+      routes: ["PATCH /:id/mark-read"],
+      reason:
+        "Acknowledging an assignment handed to you is a receipt, not a write against the firm. "
+        + "markTaskRead finds the task with { _id, firmId, assignedTo: user.id }, so a read-only "
+        + "member can set assigneeReadAt on a task ALREADY ASSIGNED TO THEM and nothing else.",
+    },
+  ],
+]);
+
 function project(document, selection) {
   if (!document || !selection) return document;
 
@@ -731,18 +765,65 @@ await test("Stats chase completion route rechecks membership then write access",
 });
 
 await test("Production write routers order authentication, membership, then write policy", async () => {
-  const expectedChain =
+  // The monolithic form: all three in one router.use, and nothing escapes write policy.
+  const combinedChain =
     /router\.use\(\s*authRequired(?:WithoutUsageTracking)?,\s*requireFirmMember,\s*requireFirmWriteAccess(?:,|\s*\))/s;
+
+  // The split form: authentication and membership first, write policy later, in that order. See
+  // SPLIT_WRITE_GUARD above for why a file is ever allowed to do this.
+  const memberHalf =
+    /router\.use\(\s*authRequired(?:WithoutUsageTracking)?,\s*requireFirmMember\s*\)/s;
+  const writeHalf = /router\.use\(\s*requireFirmWriteAccess\s*\)/s;
 
   for (const routeFile of WRITE_GUARD_ROUTES) {
     const source = await readFile(
       new URL(`../src/routes/${routeFile}`, import.meta.url),
       "utf8",
     );
-    assert.match(
-      source,
-      expectedChain,
-      `${routeFile} must keep the safe chain`,
+
+    const split = SPLIT_WRITE_GUARD.get(routeFile);
+    if (!split) {
+      assert.match(source, combinedChain, `${routeFile} must keep the safe chain`);
+      continue;
+    }
+
+    const memberAt = source.search(memberHalf);
+    const writeAt = source.search(writeHalf);
+
+    assert.ok(
+      memberAt >= 0,
+      `${routeFile} declares a split guard chain but has no `
+        + "router.use(authRequired, requireFirmMember) half",
+    );
+    assert.ok(
+      writeAt >= 0,
+      `${routeFile} declares a split guard chain but has no `
+        + "router.use(requireFirmWriteAccess) half -- every mutation in it is now unguarded",
+    );
+    assert.ok(
+      memberAt < writeAt,
+      `${routeFile} applies write policy BEFORE membership, which is the ordering this test exists `
+        + "to prevent",
+    );
+
+    // Everything mutating that sits between the two halves is exempt from write policy. That set
+    // must be exactly what SPLIT_WRITE_GUARD declares -- not a subset, not a superset.
+    const inside = source.slice(memberAt, writeAt);
+    const exempt = [...inside.matchAll(/router\.(post|patch|delete)\(\s*"([^"]+)"/g)].map(
+      (match) => `${match[1].toUpperCase()} ${match[2]}`,
+    );
+
+    assert.deepEqual(
+      exempt.sort(),
+      [...split.routes].sort(),
+      `${routeFile}: the mutations exempt from write policy are not the ones declared in `
+        + "SPLIT_WRITE_GUARD. Either a route gained an exemption it was never granted, or a granted "
+        + "one moved and the declaration is now stale.",
+    );
+
+    assert.ok(
+      split.reason && split.reason.length > 40,
+      `${routeFile}: every write-policy exemption must carry a written reason`,
     );
   }
 });
