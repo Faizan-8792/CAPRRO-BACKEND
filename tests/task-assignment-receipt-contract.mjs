@@ -409,6 +409,79 @@ await test("the schema carries the three new fields, with safe defaults", async 
   );
 });
 
+// ---------------------------------------------------------------- who is allowed to acknowledge
+
+// THE DEFECT THIS PINS
+// requireFirmWriteAccess refuses every mutating method for a read-only member, and it used to gate
+// every route in task.routes.js - mark-read included. Meanwhile createTask validates an assignee
+// only as "a User in the same firm", with no write requirement, so a read-only member could be
+// handed work and then be refused when they tried to say they had seen it. The desktop shows them
+// the button regardless, on the stated reasoning that acknowledging your own assignment is not a
+// write against the firm's data. So the two halves disagreed, and the visible result was an enabled
+// control the server would refuse - plus an administrator whose "has he seen it?" answer read
+// "Not opened yet" forever for that member.
+//
+// These checks are TEXTUAL, on the route file, and that is on purpose: the thing being asserted is
+// middleware ORDER, which is a property of how the router is assembled and not something the
+// controller functions this file otherwise drives can show.
+
+const routesSource = await import("node:fs").then(({ readFileSync }) =>
+  readFileSync(new URL("../src/routes/task.routes.js", import.meta.url), "utf8"),
+);
+
+await test("mark-read is declared above the write gate, so a read-only assignee can acknowledge", async () => {
+  const markRead = routesSource.indexOf('router.patch("/:id/mark-read"');
+  const writeGate = routesSource.indexOf("router.use(requireFirmWriteAccess)");
+
+  assert.ok(markRead >= 0, "the mark-read route is gone from task.routes.js");
+  assert.ok(
+    writeGate >= 0,
+    "router.use(requireFirmWriteAccess) is gone - every task mutation is now unguarded, which is a "
+      + "far worse defect than the one this check was written for",
+  );
+  assert.ok(
+    markRead < writeGate,
+    "mark-read is declared BELOW the write gate, so a read-only member assigned work cannot "
+      + "acknowledge it - and the desktop still shows them the button",
+  );
+});
+
+await test("membership is still required for mark-read", async () => {
+  // The exemption is from WRITE ACCESS only. An inactive firm or a removed membership must still be
+  // refused, or this would have turned a narrow receipt into a way past the firm gate entirely.
+  const memberGate = routesSource.indexOf("router.use(authRequired, requireFirmMember)");
+  const markRead = routesSource.indexOf('router.patch("/:id/mark-read"');
+
+  assert.ok(memberGate >= 0, "the authRequired/requireFirmMember gate is gone");
+  assert.ok(
+    memberGate < markRead,
+    "mark-read is declared above the membership gate, so it would accept a caller with no active "
+      + "firm membership",
+  );
+});
+
+await test("no OTHER task mutation slipped above the write gate", async () => {
+  // The check that keeps the exemption a single named route rather than a hole that grows. Every
+  // mutating declaration except mark-read must sit below the gate.
+  const writeGate = routesSource.indexOf("router.use(requireFirmWriteAccess)");
+  const mutations = [...routesSource.matchAll(/router\.(post|patch|delete)\("([^"]+)"/g)];
+
+  assert.ok(mutations.length >= 5, `parsed only ${mutations.length} mutating routes`);
+
+  const above = mutations
+    .filter((match) => match.index < writeGate)
+    .map((match) => `${match[1].toUpperCase()} ${match[2]}`);
+
+  assert.deepEqual(
+    above,
+    ["PATCH /:id/mark-read"],
+    "a task mutation other than mark-read is declared above the write gate, so a read-only member "
+      + "can now perform it",
+  );
+});
+
+// ---------------------------------------------------------------- teardown
+
 Task.findOne = originals.taskFindOne;
 User.findOne = originals.userFindOne;
 
