@@ -4,8 +4,52 @@ import Task from "../models/Task.js";
 import User from "../models/User.js";
 import AppConfig from "../models/AppConfig.js";
 import { parseStatutoryDayIso } from "../services/robust-normalize.service.js";
+import { safeRecordActivity } from "../services/activity.service.js";
+import ActivityEvent from "../models/ActivityEvent.js";
 
 const PRODUCT_ACCESS_MODEL = "FREE";
+
+/**
+ * The fields a firm actually needs to see the history of, and nothing else.
+ *
+ * Deliberately NOT the whole document. An activity trail that stores every field on every edit
+ * grows without bound, and the fields left out here are either derived (completedAt moves with
+ * status) or noise (mutationVersion). What IS captured is what somebody asks the trail about:
+ * who it was assigned to, where it was in the ladder, when it was due, and what they were told.
+ *
+ * assignedTo is stringified because it is an ObjectId on a loaded document and a string when it
+ * arrives from JSON; a trail that recorded one as an object and the other as a string would show
+ * a change on every edit that touched neither.
+ */
+function taskTrailSnapshot(task) {
+  if (!task) return null;
+  return {
+    assignedTo: task.assignedTo ? String(task.assignedTo) : null,
+    status: task.status ?? null,
+    title: task.title ?? null,
+    dueDateISO: task.dueDateISO ?? null,
+    remarks: task.remarks ?? "",
+    reviewStatus: task.reviewStatus ?? null,
+    assigneeReadAt: task.assigneeReadAt ? new Date(task.assigneeReadAt).toISOString() : null,
+  };
+}
+
+/**
+ * Which of the tracked fields actually moved. Returns null when nothing did.
+ *
+ * The trail records an event only when something changed, so "who touched this" stays readable
+ * instead of filling with no-op saves from forms that post every field they know about.
+ */
+function taskTrailChanges(before, after) {
+  if (!before || !after) return null;
+  const changed = {};
+  for (const key of Object.keys(after)) {
+    if (before[key] !== after[key]) {
+      changed[key] = { from: before[key], to: after[key] };
+    }
+  }
+  return Object.keys(changed).length > 0 ? changed : null;
+}
 const DEFAULT_TASK_PAGE_SIZE = 50;
 const MAX_TASK_PAGE_SIZE = 100;
 
@@ -152,6 +196,18 @@ export const createTask = async (req, res) => {
     });
 
     await task.save();
+
+    // safeRecordActivity, not recordActivity: the trail must never be the reason a task fails to
+    // be created. A missing audit line is a gap; a refused assignment is lost work.
+    await safeRecordActivity({
+      firmId,
+      actorUserId: user.id,
+      action: "task.created",
+      entityType: "Task",
+      entityId: task._id,
+      beforeSummary: null,
+      afterSummary: taskTrailSnapshot(task),
+    });
 
     res.json({ ok: true, task });
   } catch (err) {
@@ -323,6 +379,11 @@ export const updateTask = async (req, res) => {
     }
     if (await rejectCaseProjectionMutation(task, res)) return;
 
+    // Captured BEFORE anything below can move a field. Taken after the refusals above rather than
+    // before them, so a request that is about to be rejected never produces a trail entry for a
+    // change that did not happen.
+    const beforeTrail = taskTrailSnapshot(task);
+
     // Optional so an existing caller that never read mutationVersion keeps
     // working unchanged; a caller that did read it (the board response has
     // always returned it) can now use it to catch the case two people edit the
@@ -429,6 +490,24 @@ export const updateTask = async (req, res) => {
     }
 
     await task.save();
+
+    // The point of the whole trail: an assignment change records who held it BEFORE, which is
+    // what answers "whom was this assigned to previously". Nothing is recorded when nothing
+    // moved, so the history stays worth reading.
+    const trailChanges = taskTrailChanges(beforeTrail, taskTrailSnapshot(task));
+    if (trailChanges) {
+      await safeRecordActivity({
+        firmId,
+        actorUserId: user.id,
+        action: trailChanges.assignedTo ? "task.reassigned" : "task.updated",
+        entityType: "Task",
+        entityId: task._id,
+        beforeSummary: beforeTrail,
+        afterSummary: taskTrailSnapshot(task),
+        metadata: { changed: Object.keys(trailChanges) },
+      });
+    }
+
     res.json({ ok: true, task });
   } catch (err) {
     console.error("updateTask error:", err);
@@ -590,6 +669,74 @@ export const getMyOpenTasks = async (req, res) => {
  * move the recorded time - the administrator is reading "when did they first see this", and a
  * timestamp that creeps forward on every glance answers a different question.
  */
+/**
+ * One task's history: who changed what, and when.
+ *
+ * This is what answers the owner's "whom was this task assigned to before". It is a QUERY over
+ * ActivityEvent rather than a field on the task, because the trail already exists, is already
+ * firm-scoped and is already the audit surface - a second private history on Task would be a
+ * second thing to keep true, and the two would eventually disagree.
+ *
+ * Firm-scoped twice over, deliberately. The task is looked up inside the caller's firm first, so
+ * a task belonging to another firm is simply not found; then the events are queried by that same
+ * firmId, so even an entityId guessed from another tenant returns nothing. Any member of the firm
+ * may read it, which matches the task board they can already see - this exposes no task that was
+ * hidden from them.
+ */
+export const getTaskHistory = async (req, res) => {
+  try {
+    const user = req.user;
+    const firmId = user.firmId;
+    const { id } = req.params;
+
+    if (!firmId) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Firm not linked to this user" });
+    }
+
+    const task = await Task.findOne({ _id: id, firmId }).lean();
+    if (!task) {
+      return res.status(404).json({ ok: false, error: "Task not found" });
+    }
+
+    // Newest first: "what happened to this most recently" is the question somebody opening a
+    // history actually has. Capped so one heavily-edited task cannot return an unbounded page.
+    const events = await ActivityEvent.find({
+      firmId,
+      entityType: "Task",
+      entityId: String(id),
+    })
+      .sort({ occurredAt: -1 })
+      .limit(200)
+      .populate("actorUserId", "name email")
+      .lean();
+
+    res.json({
+      ok: true,
+      taskId: String(id),
+      events: (events || []).map((event) => ({
+        id: String(event._id),
+        action: event.action,
+        occurredAt: event.occurredAt,
+        actor: event.actorUserId
+          ? {
+              id: String(event.actorUserId._id ?? event.actorUserId),
+              name: event.actorUserId.name ?? null,
+              email: event.actorUserId.email ?? null,
+            }
+          : null,
+        before: event.beforeSummary ?? null,
+        after: event.afterSummary ?? null,
+        changed: event.metadata?.changed ?? null,
+      })),
+    });
+  } catch (err) {
+    console.error("getTaskHistory error:", err);
+    res.status(500).json({ ok: false, error: "Failed to load the task history" });
+  }
+};
+
 export const markTaskRead = async (req, res) => {
   try {
     const user = req.user;

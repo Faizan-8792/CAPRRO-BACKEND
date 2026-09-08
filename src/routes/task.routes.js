@@ -16,6 +16,7 @@ import {
   getMyOpenTasks,
   completeTaskFromUser,
   markTaskRead,
+  getTaskHistory,
 } from "../controllers/task.controller.js";
 import {
   commitBulkTaskUpdate,
@@ -51,5 +52,9 @@ router.patch("/:id/complete-from-user", completeTaskFromUser);
 // Assignee-only, like the route above it. Placed after "/:id" deliberately - Express matches in
 // declaration order and a bare "/:id" earlier in the file would otherwise swallow this path.
 router.patch("/:id/mark-read", markTaskRead);
+
+// Any member of the firm may read one task's history. That matches the board they can already
+// see, so this exposes nothing that was hidden; the firm scoping is inside the handler.
+router.get("/:id/history", getTaskHistory);
 
 export default router;

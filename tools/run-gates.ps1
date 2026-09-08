@@ -698,6 +698,7 @@ try {
         "firm-authorization-contract",
         "task-flow-checklist",
         "task-assignment-receipt-contract",
+        "task-history-trail-contract",
         "task-date-contract",
         "taxworker-flow-checklist",
         "digest-delivery-correctness",
