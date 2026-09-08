@@ -2312,9 +2312,21 @@ if (listed.status !== 0 || listed.error) {
   // an injected `env` parameter that defaults to process.env rather than at module scope.
   // None of them makes a network call, none holds a secret, credential or endpoint, and
   // the controller deliberately never names the account-level FIRM_ADMIN grant at all.
+  // Raised from 179 to 181 for the two files of the reporting-tree and adoption work:
+  // src/services/firm-org.service.js and src/controllers/firm-org.controller.js. Caught by the
+  // pin, as every entry above was. Confirmed clean before the pin moved, independently of this
+  // file: `make-deploy-archive.ps1 -ValidateOnly` -> "JavaScript secret AST scan: PASS (181
+  // files)".
+  //
+  // What the two hold: firm-org.service.js is pure graph and arithmetic over rows handed in -- a
+  // cycle check, a tree builder and a day count -- with no import of any model, no environment
+  // variable and no clock it does not receive as a parameter. firm-org.controller.js reads
+  // FirmMembership, User and Task, and runs two aggregations both scoped to req.user's firm; it
+  // holds no secret, credential, endpoint or configuration value, and it writes exactly one field
+  // (reportsToUserId) and never User.role.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 179 && result.status === 0,
+    files.length === 181 && result.status === 0,
     result,
   );
 }
