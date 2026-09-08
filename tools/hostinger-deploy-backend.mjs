@@ -118,7 +118,19 @@ const settings = await api(settingsPath);
 if (settings.status !== 200 || !settings.json) {
   console.error(`  FAILED: settings returned ${settings.status}`);
   console.error(`  ${settings.text.slice(0, 400)}`);
-  console.error("  A 404 here usually means the archive is not where this tool was told to look.");
+  if (settings.status === 404) {
+    console.error("  A 404 here means the archive is not where this tool was told to look.");
+  } else if (settings.status === 500) {
+    // The expected state BETWEEN deploys. Step 6 overwrites the archive with a placeholder once the
+    // build has read it, so the path holds a short text file rather than a zip and the settings
+     // endpoint cannot read build settings out of it. That is the exposure fix working, not a fault -
+    // and it means a stale archive can never be rebuilt from by accident. Upload a fresh archive
+    // first.
+    console.error("  A 500 here usually means the path holds the post-deploy placeholder rather than");
+    console.error("  an archive, which is the expected state between deploys. Upload the archive first.");
+  } else {
+    console.error("  Check that the archive is where this tool was told to look.");
+  }
   process.exit(1);
 }
 const built = settings.json?.data ?? settings.json;
