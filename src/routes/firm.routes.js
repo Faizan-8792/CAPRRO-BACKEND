@@ -2,6 +2,11 @@
 import express from "express";
 import { authRequired } from "../middleware/auth.middleware.js";
 import {
+  getFirmOrg,
+  setReportsTo,
+  getFirmAdoption,
+} from "../controllers/firm-org.controller.js";
+import {
   createFirmInvite,
   listFirmInvites,
   revokeFirmInvite,
@@ -71,6 +76,12 @@ router.patch("/:firmId/members/:userId/role", setFirmMemberRole);
 // trusting the caller's active workspace, because an owner may administer a firm they are not
 // currently switched into. The fixed segments are declared before ':inviteId' so "pending" is
 // never captured as an invite id.
+// The reporting tree and the adoption figures. Both administrator-only, decided in the controller
+// from resolveFirmAuthority. Declared before the ':inviteId' routes for the same reason as above.
+router.get("/:firmId/org", getFirmOrg);
+router.get("/:firmId/adoption", getFirmAdoption);
+router.patch("/:firmId/members/:userId/reports-to", setReportsTo);
+
 router.get("/:firmId/invites", listFirmInvites);
 router.post("/:firmId/invites", createFirmInvite);
 router.get("/:firmId/invites/pending", listPendingElevations);

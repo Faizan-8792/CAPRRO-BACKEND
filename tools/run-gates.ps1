@@ -823,7 +823,11 @@ try {
         "firm-role-tier-contract",
         # Invitations: code entropy, the derived status, the ceiling, and admission. Scored by
         # tools/mutations/firm-invite.mjs (26 mutations across three modules).
-        "firm-invite-contract"
+        "firm-invite-contract",
+        # The reporting tree and the adoption figures. The cycle check is the one that matters: a
+        # reporting graph can contain a loop, no mongoose schema can prevent it because a ref
+        # cannot say "not one of my own descendants", and a tree walk over one runs forever.
+        "firm-org-contract"
     )
 
     # The other four unwired suites need a REPLICA SET, not just a mongod: they run multi-document

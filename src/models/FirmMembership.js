@@ -62,6 +62,27 @@ const FirmMembershipSchema = new mongoose.Schema(
       default: "ACTIVE",
       index: true,
     },
+    // Who this person reports to INSIDE THIS FIRM.
+    //
+    // On the membership row rather than on the User, and that placement is the whole design: the
+    // relationship is per firm. The same person can report to different people in two firms, a
+    // reporting line cannot leak between firms, and removing somebody from a firm removes their
+    // reporting line with it rather than leaving a dangling pointer on their account.
+    //
+    // null is "nobody is recorded", which is NOT the same as "top of the tree" and must never be
+    // rendered as if it were. A firm that has not filled this in has every member at null, and a
+    // surface that called them all owners would be inventing a hierarchy.
+    //
+    // Two invariants the server enforces, neither of which a schema can express:
+    //   1. It must name a user with an ACTIVE membership of THIS firm. Enforced in
+    //      firm-org.controller.js, because a ref cannot check the firm.
+    //   2. The graph must stay ACYCLIC. Enforced by walking the chain before saving; without it
+    //      two people can be made to report to each other and every tree walk runs forever.
+    reportsToUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
     // Marks the user's own personal workspace membership. A personal membership
     // is never removed and never left, so every user always has a home workspace.
     isPersonal: {
