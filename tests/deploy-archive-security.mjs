@@ -1,4 +1,11 @@
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  MAX_SAFE_BODY_BYTES,
+  PLACEHOLDER_BODY,
+  assertArchivePathNotExposed,
+  classifyServedArchive,
+} from "../tools/lib/deploy-archive-exposure.mjs";
 import { spawnSync } from "node:child_process";
 
 const scannerPath = "tools/scan-deploy-secrets.mjs";
@@ -22,6 +29,10 @@ function runScanner(payload, timeout = 5_000) {
     input: JSON.stringify(payload),
     timeout,
   });
+}
+
+function sha256Hex(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 function record(name, condition, result) {
@@ -2349,6 +2360,191 @@ record(
   `8,000-alias scan stays bounded (${scaleElapsed} ms)`,
   scaleResult.status === 0 && scaleElapsed < 5_000,
   scaleResult,
+);
+
+// ---------------------------------------------------------------------------
+// The deploy archive must not REMAIN publicly downloadable after a build.
+//
+// On 2026-09-08 a real deploy left the whole backend source at
+// https://api.caprotoolkit.in/capro-backend.zip - 835,325 bytes, unauthenticated. The archive has
+// to be in the domain's served document root for the build to read it (an archive outside it
+// cannot be resolved: the settings endpoint answers 404), and the file service exposes no delete
+// (TUS DELETE in all three shapes answers 404). So the archive is necessarily public for the
+// length of one build, and what must be guaranteed is that it is not public afterwards.
+//
+// hostinger-deploy-backend.mjs now overwrites the path and then asserts what is served. These
+// tests cover the predicate that assertion uses. They are offline and deterministic on purpose:
+// the live check can only run against production, so the decision logic is pinned here where it
+// runs on every gate.
+// ---------------------------------------------------------------------------
+
+const realArchiveBytes = Buffer.concat([
+  Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+  Buffer.alloc(900_000, 7),
+]);
+const realArchiveSha = sha256Hex(realArchiveBytes);
+
+record(
+  "a body starting with the PK zip signature is exposure",
+  classifyServedArchive({
+    bytes: realArchiveBytes,
+    status: 200,
+    archiveSha256: realArchiveSha,
+    createHash,
+  }).safe === false,
+);
+
+record(
+  "PK is caught even when the archive hash is unknown to the checker",
+  classifyServedArchive({
+    bytes: Buffer.from([0x50, 0x4b, 0x05, 0x06]),
+    status: 200,
+    archiveSha256: null,
+    createHash,
+  }).safe === false,
+);
+
+record(
+  "a body byte-identical to the deployed archive is exposure even without PK",
+  (() => {
+    // Deliberately SMALL - under MAX_SAFE_BODY_BYTES and with no PK signature - so neither the
+    // size ceiling nor the signature check can account for the refusal. Only identity can. The
+    // first version of this test used a 6 KB body, which the ceiling already refused, so deleting
+     // the identity comparison altogether still passed.
+    const disguised = Buffer.concat([Buffer.from("XX"), Buffer.alloc(120, 3)]);
+    const verdict = classifyServedArchive({
+      bytes: disguised,
+      status: 200,
+      archiveSha256: sha256Hex(disguised),
+      createHash,
+    });
+    return (
+      disguised.length < MAX_SAFE_BODY_BYTES &&
+      verdict.safe === false &&
+      verdict.reason.includes("identical")
+    );
+  })(),
+);
+
+record(
+  "the size ceiling is small enough to be worth having",
+  // Pinned as an ABSOLUTE bound. The refusal test below uses a real archive size rather than
+  // MAX_SAFE_BODY_BYTES + 1, because a threshold-relative test keeps passing however far the
+  // threshold is raised - raising it to 100 MB left every test green.
+  MAX_SAFE_BODY_BYTES <= 65_536,
+);
+
+record(
+  "a body the size of the real archive is refused",
+  classifyServedArchive({
+    // 835,325 bytes is the size of the archive that was actually exposed on 2026-09-08. No PK, and
+    // a hash the checker does not know, so only the ceiling can refuse it.
+    bytes: Buffer.alloc(835_325, 65),
+    status: 200,
+    archiveSha256: null,
+    createHash,
+  }).safe === false,
+);
+
+record(
+  "a large unrecognised body fails closed rather than passing",
+  classifyServedArchive({
+    bytes: Buffer.alloc(MAX_SAFE_BODY_BYTES + 1, 65),
+    status: 200,
+    archiveSha256: realArchiveSha,
+    createHash,
+  }).safe === false,
+);
+
+record(
+  "the placeholder the deploy writes is accepted",
+  classifyServedArchive({
+    bytes: Buffer.from(PLACEHOLDER_BODY, "utf8"),
+    status: 200,
+    archiveSha256: realArchiveSha,
+    createHash,
+  }).safe === true,
+);
+
+record(
+  "the placeholder carries no PK signature",
+  PLACEHOLDER_BODY.charCodeAt(0) !== 0x50 || PLACEHOLDER_BODY.charCodeAt(1) !== 0x4b,
+);
+
+record(
+  "a path that is not served at all is the best outcome, not a failure",
+  classifyServedArchive({ bytes: null, status: 404, archiveSha256: realArchiveSha, createHash }).safe === true &&
+    classifyServedArchive({ bytes: null, status: 403, archiveSha256: realArchiveSha, createHash }).safe === true,
+);
+
+record(
+  "every refusal states a reason",
+  [
+    { bytes: realArchiveBytes, status: 200 },
+    { bytes: Buffer.alloc(MAX_SAFE_BODY_BYTES + 1, 1), status: 200 },
+  ].every((input) => {
+    const verdict = classifyServedArchive({ ...input, archiveSha256: realArchiveSha, createHash });
+    return verdict.safe === false && typeof verdict.reason === "string" && verdict.reason.length > 0;
+  }),
+);
+
+record(
+  "the live assertion throws when the served body is the archive",
+  await (async () => {
+    // The fetch is injected, so the refusal path is exercised without touching production.
+    try {
+      await assertArchivePathNotExposed({
+        domain: "example.invalid",
+        remotePath: "capro-backend.zip",
+        archiveSha256: realArchiveSha,
+        createHash,
+        fetchImpl: async () => ({
+          status: 200,
+          ok: true,
+          arrayBuffer: async () => realArchiveBytes,
+        }),
+      });
+      return false;
+    } catch (err) {
+      return String(err).includes("STILL PUBLIC");
+    }
+  })(),
+);
+
+record(
+  "the live assertion refuses to pass when it cannot run at all",
+  await (async () => {
+    // A network failure is an unproven claim, not a clean bill of health.
+    try {
+      await assertArchivePathNotExposed({
+        domain: "example.invalid",
+        remotePath: "capro-backend.zip",
+        archiveSha256: realArchiveSha,
+        createHash,
+        fetchImpl: async () => {
+          throw new Error("network down");
+        },
+      });
+      return false;
+    } catch (err) {
+      return String(err).includes("could not run");
+    }
+  })(),
+);
+
+record(
+  "the live assertion accepts a neutralised path",
+  await (async () => {
+    const body = Buffer.from(PLACEHOLDER_BODY, "utf8");
+    const result = await assertArchivePathNotExposed({
+      domain: "example.invalid",
+      remotePath: "capro-backend.zip",
+      archiveSha256: realArchiveSha,
+      createHash,
+      fetchImpl: async () => ({ status: 200, ok: true, arrayBuffer: async () => body }),
+    });
+    return result.bytes === body.length;
+  })(),
 );
 
 console.log(`Result: ${passed} passed, ${failed} failed`);

@@ -33,6 +33,14 @@
 //
 // The token is read from the environment and never printed, logged, or written anywhere.
 
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { uploadFileToHostinger } from "./lib/hostinger-files.mjs";
+import {
+  PLACEHOLDER_BODY,
+  assertArchivePathNotExposed,
+} from "./lib/deploy-archive-exposure.mjs";
+
 const BASE = process.env.HOSTINGER_API_BASE || "https://developers.hostinger.com";
 
 function arg(name, fallback = null) {
@@ -51,6 +59,10 @@ const timeoutMs = Number(arg("timeout-ms", "300000"));
 // Deploying new code and a new runtime major in one step would confuse a failure between the two,
 // so the caller pins the version that is already serving and changes one thing at a time.
 const nodeVersion = arg("node-version");
+// Optional. When the caller passes the local archive it deployed, the exposure check can
+// compare the served bytes against that exact file rather than only looking for a zip
+// signature - so a renamed or recompressed copy is caught too.
+const archiveFile = arg("archive-file");
 
 const token = process.env.HOSTINGER_API_TOKEN;
 if (!token) {
@@ -216,6 +228,64 @@ if (expectCommit) {
   // Optional, and only asserted when the caller supplies it: the deployed build id is not exposed
   // by the public API, so this is a courtesy echo rather than proof of the running commit.
   line("expected", expectCommit.slice(0, 12));
+}
+
+console.log("");
+console.log("=== 6. close the archive exposure ===");
+// The archive had to be in the domain's document root for the build to read it, and that root is
+// served statically - so for the length of the build the whole backend source was an
+// unauthenticated download. The build has now read it, so nothing needs it any more.
+//
+// Overwrite rather than delete, because there is nothing to delete with: the file service answers
+// 404 to DELETE in every shape TUS defines, and the build cannot read an archive kept outside the
+// served root. Both were probed against this account. See lib/deploy-archive-exposure.mjs.
+let archiveSha256 = null;
+if (archiveFile) {
+  try {
+    archiveSha256 = createHash("sha256").update(readFileSync(archiveFile)).digest("hex");
+    line("archive sha", `${archiveSha256.slice(0, 16)}...`);
+  } catch (err) {
+    console.error(`  could not hash ${archiveFile}: ${String(err)}`);
+    process.exit(1);
+  }
+}
+
+try {
+  await uploadFileToHostinger({
+    domain,
+    token,
+    remotePath: archive,
+    content: PLACEHOLDER_BODY,
+    log: (message) => console.log(message),
+  });
+} catch (err) {
+  console.error("");
+  console.error("=== NEUTRALISATION FAILED ===");
+  console.error(`  ${String(err)}`);
+  console.error(`  The backend source may still be downloadable at https://${domain}/${archive}.`);
+  console.error("  Overwrite that path before treating this deploy as finished.");
+  process.exit(1);
+}
+
+console.log("");
+console.log("=== 7. prove the archive is no longer public ===");
+// A deploy that cannot prove this fails. Reporting a deploy as complete while the source is still
+// downloadable is the exact outcome step 6 exists to prevent, so it is asserted rather than
+// assumed - and the request is cache-busted, because a stale 404 is how this was missed the first
+// time it happened.
+try {
+  await assertArchivePathNotExposed({
+    domain,
+    remotePath: archive,
+    archiveSha256,
+    createHash,
+    log: (message) => console.log(message),
+  });
+} catch (err) {
+  console.error("");
+  console.error("=== ARCHIVE STILL EXPOSED ===");
+  console.error(`  ${String(err)}`);
+  process.exit(1);
 }
 
 console.log("");
