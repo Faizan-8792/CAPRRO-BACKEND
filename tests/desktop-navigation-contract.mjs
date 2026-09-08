@@ -44,23 +44,37 @@ const surfaceStateSource = readFileSync(
   join(DESKTOP, "CaPro.Desktop.Core", "Presentation", "SurfaceState.cs"),
   "utf8"
 );
+const taskSectionsSource = readFileSync(
+  join(DESKTOP, "CaPro.Desktop.Core", "Presentation", "TaskManagementSectionPolicy.cs"),
+  "utf8"
+);
 
 const checks = [];
 const check = (name, pass, detail = "") => checks.push({ name, pass, detail });
 
 // --- What the router can actually reach ---------------------------
 //
-// Entries look like:  new(typeof(OverviewPage), "overview", "Overview", null, true),
-// The trailing boolean is IsNavigationTarget, and NavigateTo filters on it - so a page with
-// `false` is NOT reachable by tag even when it has one.
-
+// Entries look like:
+//   new(typeof(OverviewPage), "overview", "Overview", null, true, true),
+//
+// TWO booleans, and they answer different questions. IsNavigationTarget is whether the tag
+// resolves to this page at all - whether anything may navigate here BY TAG. InNavigationPane is
+// whether the destination has its own item in the shell's navigation pane.
+//
+// They used to be one flag, because they used to have one answer. The ten task-management
+// destinations broke that: they left the pane for the Task management interface and stayed fully
+// addressable by tag. Had the single flag been flipped to false for them, every check below would
+// have reported them dead - ten tags in SurfaceActionTargets, the review queue's Open buttons, the
+// Overview shortcuts - because PageForTag would answer "taskboard" with the Overview page. That is
+// the failure this suite exists to catch, and it caught it.
 const entryPattern =
-  /new\(\s*typeof\((\w+)\)\s*,\s*(null|"[a-z0-9]+")\s*,\s*"[^"]*"\s*,\s*(?:null|"[^"]*")\s*,\s*(true|false)\s*\)/g;
+  /new\(\s*typeof\((\w+)\)\s*,\s*(null|"[a-z0-9]+")\s*,\s*"[^"]*"\s*,\s*(?:null|"[^"]*")\s*,\s*(true|false)\s*,\s*(true|false)\s*\)/g;
 
 const routes = [...catalogueSource.matchAll(entryPattern)].map((m) => ({
   page: m[1],
   tag: m[2] === "null" ? null : m[2].replace(/"/g, ""),
   isNavigationTarget: m[3] === "true",
+  inNavigationPane: m[4] === "true",
 }));
 
 check("the route catalogue parses", routes.length >= 20, `${routes.length} routes`);
@@ -84,6 +98,81 @@ check(
   "child routes are recorded so they can be excluded",
   true,
   childRoutes.length ? childRoutes.join(", ") : "(none)"
+);
+
+// --- the two reach flags have to stay in a sane relationship ------
+//
+// A pane item whose tag resolved to nothing would be an enabled control that does nothing - the
+// same defect in the pane that this suite catches everywhere else. So InNavigationPane implies
+// IsNavigationTarget, one direction only.
+const paneButNotTarget = routes.filter((r) => r.inNavigationPane && !r.isNavigationTarget);
+check(
+  "a pane entry always resolves to a page",
+  paneButNotTarget.length === 0,
+  paneButNotTarget.length
+    ? `in the pane but unreachable by tag: ${paneButNotTarget.map((r) => r.page).join(", ")}`
+    : "no pane entry resolves to nothing"
+);
+
+// --- THE BLIND SPOT THE SPLIT OPENS, closed here ------------------
+//
+// NavigateTo finds its destination by matching a pane item's tag. A tag that resolves to a page but
+// has NO pane item therefore reaches nothing - unless NavigateTo knows another way in. It knows
+// exactly one: a tag naming a section of the Task management interface opens that interface at
+// that section.
+//
+// So every navigable tag must be a pane entry OR a section. A third case - resolvable, not in the
+// pane, not a section - is a tag every by-tag caller can name and none can reach, which is the
+// silent-dead-control failure wearing new clothes. Nothing else in the build would notice it: the
+// page compiles, the tag resolves, the button renders, and clicking does nothing.
+const sectionsBlock = taskSectionsSource.slice(
+  taskSectionsSource.indexOf("Sections { get; } ="),
+  taskSectionsSource.indexOf("public static TaskManagementSectionView Compose")
+);
+const sectionTags = new Set(
+  [...sectionsBlock.matchAll(/new\(\s*\n\s*"([a-z]+)",/g)].map((m) => m[1])
+);
+check(
+  "the Task management section list parses",
+  sectionTags.size >= 5,
+  `${sectionTags.size} sections: ${[...sectionTags].join(", ")}`
+);
+
+const paneTags = new Set(routes.filter((r) => r.inNavigationPane && r.tag).map((r) => r.tag));
+check(
+  "the pane's own tag set parses",
+  paneTags.size >= 10,
+  `${paneTags.size} pane entries`
+);
+
+const strandedTags = [...navigable].filter(
+  (tag) => !paneTags.has(tag) && !sectionTags.has(tag)
+);
+check(
+  "every navigable tag is reachable - a pane entry, or a Task management section",
+  strandedTags.length === 0,
+  strandedTags.length
+    ? `resolvable but reachable by nothing: ${strandedTags.join(", ")}`
+    : `${paneTags.size} in the pane, ${sectionTags.size} in the interface`
+);
+
+// And the reverse: a section the catalogue cannot resolve would draw a rail row that opens nothing.
+const unresolvableSections = [...sectionTags].filter((tag) => !navigable.has(tag));
+check(
+  "every Task management section resolves to a page",
+  unresolvableSections.length === 0,
+  unresolvableSections.length
+    ? `no page for: ${unresolvableSections.join(", ")}`
+    : "all ten resolve"
+);
+
+// A section that ALSO kept its pane entry is the owner's instruction going unmet: whatever the
+// interface offers must not also sit in the main menu.
+const stillInPane = [...sectionTags].filter((tag) => paneTags.has(tag));
+check(
+  "no Task management section is also a navigation-pane entry",
+  stillInPane.length === 0,
+  stillInPane.length ? `in both: ${stillInPane.join(", ")}` : "the pane and the interface do not overlap"
 );
 
 // --- Core's declared destinations ---------------------------------
@@ -240,6 +329,17 @@ check(
   navigateTo.indexOf("ReferenceEquals") >= 0
     ? "handles the already-selected case"
     : "assigning SelectedItem alone - a child page's button would do nothing",
+);
+
+// The branch that makes a section reachable at all. Without it NavigateTo returns silently for
+// ten tags, and every by-tag caller in the app - fourteen of them - becomes a dead control.
+check(
+  "NavigateTo opens the Task management interface for a tag with no pane item",
+  /TaskManagementSectionPolicy\.IsSection\(tag\)/.test(navigateTo)
+    && /OpenTaskManagement\(tag\)/.test(navigateTo),
+  /IsSection/.test(navigateTo)
+    ? "routes sections into the interface"
+    : "no pane item and no fallback - ten tags would silently navigate nowhere"
 );
 
 check(
