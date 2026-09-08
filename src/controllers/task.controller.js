@@ -276,6 +276,17 @@ export const getTaskBoard = async (req, res) => {
         // identified by a colleague, and widening the projection would ship account fields to a
         // list view that has no use for them.
         .populate("createdBy", "name email")
+
+        // Which employee the CLIENT sits with, which is a different question from who this
+        // one task is assigned to - the owner asked for both. Client.ownerUserId already
+        // modelled it and nothing had ever surfaced it, so an administrator could not see
+        // that a task about a client had gone to somebody other than the person who holds
+        // that client. Nested populate, because the answer is a name and not an id.
+        .populate({
+          path: "clientId",
+          select: "name ownerUserId",
+          populate: { path: "ownerUserId", select: "name email" },
+        })
         .lean(),
     ]);
 
@@ -293,7 +304,10 @@ export const getTaskBoard = async (req, res) => {
       columns[key].push({
         id: task._id,
         clientName: task.clientName,
-        clientId: task.clientId || null,
+        // Still an id, even though clientId is now populated: the client is a document here,
+        // and shipping the whole thing would change this field's shape for every existing
+        // caller. _id is read when present so both the populated and unpopulated cases work.
+        clientId: task.clientId ? task.clientId._id || task.clientId : null,
         serviceType: task.serviceType,
         complianceCode: task.complianceCode || null,
         period: task.period || null,
@@ -330,6 +344,17 @@ export const getTaskBoard = async (req, res) => {
         // answer "not yet" rather than a missing key the client has to guess about.
         remarks: task.remarks || "",
         assigneeReadAt: task.assigneeReadAt || null,
+
+        // The employee the client sits with. Null when the client is not linked or has no
+        // owner recorded, which are both real states and neither is an error.
+        clientOwner:
+          task.clientId && task.clientId.ownerUserId
+            ? {
+                id: task.clientId.ownerUserId._id,
+                name: task.clientId.ownerUserId.name,
+                email: task.clientId.ownerUserId.email,
+              }
+            : null,
 
         filedAt: task.filedAt || null,
         filedBy: task.filedBy || null,

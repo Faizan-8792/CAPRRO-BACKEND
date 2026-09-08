@@ -372,12 +372,23 @@ await test("the board's hand-built row names both new fields", async () => {
 
   const start = source.indexOf("columns[key].push({");
   assert.ok(start > 0, "the board's row builder moved; this test needs updating");
-  const row = source.slice(start, start + 2000);
+
+  // Bounded on the object literal's actual CLOSING, not on a character count. The first version
+  // sliced a fixed 2000 characters and started failing the moment the row grew past it - it
+  // reported "the board row must carry remarks" about a row that carried remarks at offset 1976.
+  // A fixed window measures the comments as much as the code.
+  const end = source.indexOf("      });", start);
+  assert.ok(end > start, "the board's row builder no longer closes where expected");
+  const row = source.slice(start, end);
 
   assert.ok(row.includes("remarks:"), "the board row must carry remarks");
   assert.ok(
     row.includes("assigneeReadAt:"),
     "the board row must carry the read receipt, or an administrator cannot see it",
+  );
+  assert.ok(
+    row.includes("clientOwner:"),
+    "the board row must say which employee holds the client",
   );
 });
 
