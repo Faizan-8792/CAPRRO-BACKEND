@@ -404,6 +404,17 @@ export const getTaskBoard = async (req, res) => {
         remarks: task.remarks || "",
         assigneeReadAt: task.assigneeReadAt || null,
 
+        // WHO read it, not just when. Found by the live end-to-end run against the deployed API:
+        // assigneeReadAt arrived and this came back undefined, because this row is composed key by
+        // key and this key was never added. Unit tests asserted the PROJECTION named it, which is a
+        // different claim - a field can be fetched from the database and still be dropped on the
+        // way into the response, and that is exactly what happened.
+        //
+        // It matters on a reassignment: with only a timestamp, a receipt left by the PREVIOUS
+        // assignee is indistinguishable from one left by the current one, which is the confusion
+        // the receipt exists to prevent.
+        assigneeReadBy: task.assigneeReadBy || null,
+
         // The employee the client sits with. Null when the client is not linked or has no
         // owner recorded, which are both real states and neither is an error.
         clientOwner:

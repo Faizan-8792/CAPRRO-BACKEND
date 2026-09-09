@@ -506,6 +506,60 @@ await test("a membership row whose account is gone is refused", async () => {
   assert.match(String(res.body?.error ?? ""), /no longer exists/i);
 });
 
+// ------------------------------------------------- what the board actually PUTS ON THE WIRE
+
+// THE DEFECT THIS PINS, and it took a live run against the deployed API to find.
+// assigneeReadBy came back undefined on every board row while assigneeReadAt arrived fine. The
+// board's row is composed key by key, and that key had simply never been added - the query fetches
+// the whole document, so nothing was missing from the database and nothing errored.
+//
+// The tests that were supposed to cover this asserted the PROJECTION named the field. That is a
+// different claim, and the gap between them is exactly where this hid: a field can be selected out
+// of the database and still be dropped on the way into the response. So this checks the composed
+// ROW, which is the thing a client actually receives.
+//
+// Why it matters rather than being a tidy-up: with only a timestamp, a receipt left by the PREVIOUS
+// assignee is indistinguishable from one left by the current one - which is the precise confusion
+// the read receipt exists to prevent.
+
+const controllerSource = await import("node:fs").then(({ readFileSync }) =>
+  readFileSync(
+    new URL("../src/controllers/task.controller.js", import.meta.url),
+    "utf8",
+  ),
+);
+
+await test("the board's composed row names every field the receipt feature needs", async () => {
+  // getTaskBoard's body only. Another handler naming the field would not help a board reader.
+  const start = controllerSource.indexOf("export const getTaskBoard =");
+  const end = controllerSource.indexOf("\nexport const ", start + 1);
+  const board = controllerSource.slice(
+    start,
+    end < 0 ? controllerSource.length : end,
+  );
+
+  assert.ok(board.length > 0, "getTaskBoard not found - this parser needs updating");
+
+  // Each of these is a key the row must EMIT, not merely select.
+  const required = [
+    "remarks",
+    "assigneeReadAt",
+    "assigneeReadBy",
+    "clientOwner",
+  ];
+
+  const missing = required.filter(
+    (field) => !new RegExp(`\\b${field}:`).test(board),
+  );
+
+  assert.deepEqual(
+    missing,
+    [],
+    "the board composes its row key by key, and these keys are not among them - a client reading "
+      + "the board will get undefined for each, with nothing erroring anywhere",
+  );
+});
+
 // ---------------------------------------------------------------- who is allowed to acknowledge
 
 // THE DEFECT THIS PINS
