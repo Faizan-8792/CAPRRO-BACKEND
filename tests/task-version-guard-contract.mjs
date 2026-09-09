@@ -15,6 +15,7 @@
 // task.controller.js imports Task directly rather than accepting it injected.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 process.env.NODE_ENV = process.env.NODE_ENV || "development";
 process.env.JWT_SECRET = process.env.JWT_SECRET || "local-verification-only";
@@ -209,6 +210,53 @@ await test("expectedVersion: 0 against a task already at version 2 is refused", 
 
   assert.equal(res.statusCode, 409);
   assert.equal(document.saveCount, 0);
+});
+
+// ---------------------------------------------------------------- the client half of the guard
+//
+// WHY A DESKTOP CHECK LIVES IN A BACKEND SUITE.
+// Everything above proves the SERVER refuses a stale write. None of it proves any client ever
+// sends expectedVersion - and a guard nobody triggers is not a guard. The gap was real: the task
+// board's one-tap ladder button ("Start work" / "Mark done" / "Mark completed") sent no
+// expectedVersion at all, while the status dialog and the undo button both did. So the fastest,
+// most-tapped status control on the page was the only one that could silently overwrite a
+// colleague's change, and every test in this file passed the whole time.
+//
+// Textual, because TaskBoardPage is internal to the desktop app project and there is no test
+// project that can see it - the same reason desktop-navigation-contract.mjs parses desktop source
+// from here.
+
+const boardSource = readFileSync(
+  new URL(
+    "../../apps/desktop-native/src/CaPro.Desktop.App/Views/TaskBoardPage.xaml.cs",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
+await test("every status write from the task board carries expectedVersion", async () => {
+  // Every TaskChange the page constructs, with its braces.
+  const changes = [...boardSource.matchAll(/new TaskChange\s*\{([^}]*)\}/g)].map(
+    (match) => match[1],
+  );
+
+  assert.ok(
+    changes.length >= 3,
+    `parsed only ${changes.length} TaskChange constructions - this parser needs updating, not ` +
+      "relaxing, because passing on zero of them would prove nothing",
+  );
+
+  const unguarded = changes.filter(
+    (body) => /\bStatus\s*=/.test(body) && !/\bExpectedVersion\s*=/.test(body),
+  );
+
+  assert.deepEqual(
+    unguarded,
+    [],
+    "a status write from the task board sends no ExpectedVersion, so two people changing one " +
+      "task at once produces a silent overwrite instead of the 409 this suite proves the server " +
+      "is ready to give",
+  );
 });
 
 Task.findOne = originals.findOne;

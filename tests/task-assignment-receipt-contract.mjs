@@ -28,6 +28,9 @@ process.env.MONGODB_URI =
 
 const { default: Task } = await import("../src/models/Task.js");
 const { default: User } = await import("../src/models/User.js");
+const { default: FirmMembership } = await import(
+  "../src/models/FirmMembership.js"
+);
 const { updateTask, markTaskRead } = await import(
   "../src/controllers/task.controller.js"
 );
@@ -35,6 +38,7 @@ const { updateTask, markTaskRead } = await import(
 const originals = {
   taskFindOne: Task.findOne,
   userFindOne: User.findOne,
+  membershipFindOne: FirmMembership.findOne,
 };
 
 let passed = 0;
@@ -115,10 +119,31 @@ function stubTaskFindOne(document) {
   };
 }
 
+// A stub that answers the chain the controller actually uses.
+//
+// resolveFirmAssignee calls .select(...).lean(), and this used to provide only .lean() - so the
+// call threw and the two reassignment tests failed for a reason that had nothing to do with
+// receipts. select() returns the same object so any order of chaining works.
+function leanResult(value) {
+  const result = {
+    select: () => result,
+    lean: () => Promise.resolve(value),
+  };
+  return result;
+}
+
+// Active membership by default, because that is the ordinary case every other test here assumes.
+// The tests that care about a REFUSAL set it explicitly.
+function stubMembership(status = "ACTIVE") {
+  FirmMembership.findOne = () =>
+    leanResult(status === null ? null : { status });
+}
+
 function stubUserFindOne(user) {
-  User.findOne = () => ({
-    lean: () => Promise.resolve(user),
-  });
+  User.findOne = () => leanResult(user);
+  // Every existing caller of this helper means "this assignee is assignable", so the membership
+  // the resolver now also checks is stubbed alongside it rather than at 20 call sites.
+  stubMembership("ACTIVE");
 }
 
 // ---------------------------------------------------------------- marking work as read
@@ -409,6 +434,78 @@ await test("the schema carries the three new fields, with safe defaults", async 
   );
 });
 
+// ---------------------------------------------------------------- who work may be handed to
+
+// THE DEFECT THESE PIN, and it lost work silently.
+// Both assignment sites used to resolve the assignee with User.findOne({ _id, firmId }).
+// FirmMembership.js states that User.firmId is the ACTIVE WORKSPACE - which firm somebody is
+// looking at right now - not which firms they belong to. So the check asked "is this colleague's
+// screen currently showing my firm?" and answered no for anybody working in a second workspace,
+// while the assign dropdown offers exactly those people (it reads FirmMembership, status ACTIVE).
+//
+// createTask then fell through to assignedToUserId = null. An administrator picked a real
+// colleague, got HTTP 201, and the task was created with NOBODY ASSIGNED. Nothing was said.
+
+await test("a reassignment to an active member of the firm is accepted", async () => {
+  const document = fakeTaskDocument({ assignedTo: "user-1" });
+  stubTaskFindOne(document);
+  stubUserFindOne({ _id: "user-2" });
+  stubMembership("ACTIVE");
+  const res = fakeRes();
+
+  await updateTask(fakeReq({ body: { assignedTo: "user-2" } }), res);
+
+  assert.equal(res.statusCode, 200, "an active member must be assignable");
+  assert.equal(String(document.assignedTo), "user-2");
+});
+
+await test("a reassignment to somebody with NO membership is refused, not dropped", async () => {
+  const document = fakeTaskDocument({ assignedTo: "user-1" });
+  stubTaskFindOne(document);
+  stubUserFindOne({ _id: "user-2" });
+  stubMembership(null);
+  const res = fakeRes();
+
+  await updateTask(fakeReq({ body: { assignedTo: "user-2" } }), res);
+
+  assert.equal(res.statusCode, 400, "a non-member must be refused");
+  assert.match(String(res.body?.error ?? ""), /not a member of this firm/i);
+  assert.equal(
+    String(document.assignedTo),
+    "user-1",
+    "the existing assignee must be left alone - a refused edit must not half-apply",
+  );
+});
+
+await test("a reassignment to a REMOVED member is refused, and says so differently", async () => {
+  // A different remedy from "not a member": this person was in the firm and is not any more, so
+  // the answer is reactivate them, not invite them.
+  const document = fakeTaskDocument({ assignedTo: "user-1" });
+  stubTaskFindOne(document);
+  stubUserFindOne({ _id: "user-2" });
+  stubMembership("REMOVED");
+  const res = fakeRes();
+
+  await updateTask(fakeReq({ body: { assignedTo: "user-2" } }), res);
+
+  assert.equal(res.statusCode, 400);
+  assert.match(String(res.body?.error ?? ""), /no longer an active member/i);
+});
+
+await test("a membership row whose account is gone is refused", async () => {
+  // A dangling membership must not become an assignment to an id nothing answers to.
+  const document = fakeTaskDocument({ assignedTo: "user-1" });
+  stubTaskFindOne(document);
+  stubMembership("ACTIVE");
+  User.findOne = () => leanResult(null);
+  const res = fakeRes();
+
+  await updateTask(fakeReq({ body: { assignedTo: "user-2" } }), res);
+
+  assert.equal(res.statusCode, 400);
+  assert.match(String(res.body?.error ?? ""), /no longer exists/i);
+});
+
 // ---------------------------------------------------------------- who is allowed to acknowledge
 
 // THE DEFECT THIS PINS
@@ -484,6 +581,7 @@ await test("no OTHER task mutation slipped above the write gate", async () => {
 
 Task.findOne = originals.taskFindOne;
 User.findOne = originals.userFindOne;
+FirmMembership.findOne = originals.membershipFindOne;
 
 console.log(`task assignment receipt contract: ${passed}/${passed + failed}`);
 for (const failure of failures) {

@@ -28,6 +28,9 @@ process.env.MONGODB_URI =
 
 const { default: Task } = await import("../src/models/Task.js");
 const { default: User } = await import("../src/models/User.js");
+const { default: FirmMembership } = await import(
+  "../src/models/FirmMembership.js"
+);
 const { default: ActivityEvent } = await import("../src/models/ActivityEvent.js");
 const { updateTask, getTaskHistory } = await import(
   "../src/controllers/task.controller.js"
@@ -43,6 +46,7 @@ const TASK = "6a65b73e8952e7e690a33590";
 const originals = {
   taskFindOne: Task.findOne,
   userFindOne: User.findOne,
+  membershipFindOne: FirmMembership.findOne,
   activitySave: ActivityEvent.prototype.save,
   activityFind: ActivityEvent.find,
 };
@@ -128,7 +132,18 @@ function stubTaskFindOne(document) {
 }
 
 function stubUserFindOne(user) {
-  User.findOne = () => ({ lean: () => Promise.resolve(user) });
+  // .select(...).lean() is the chain resolveFirmAssignee uses; .lean() alone made the call throw.
+  const result = {
+    select: () => result,
+    lean: () => Promise.resolve(user),
+  };
+  User.findOne = () => result;
+  // The assignee in these tests is always meant to be assignable.
+  const membership = {
+    select: () => membership,
+    lean: () => Promise.resolve({ status: "ACTIVE" }),
+  };
+  FirmMembership.findOne = () => membership;
 }
 
 function captureActivity({ fail = false } = {}) {

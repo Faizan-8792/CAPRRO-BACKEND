@@ -2,12 +2,71 @@
 
 import Task from "../models/Task.js";
 import User from "../models/User.js";
+import FirmMembership from "../models/FirmMembership.js";
 import AppConfig from "../models/AppConfig.js";
 import { parseStatutoryDayIso } from "../services/robust-normalize.service.js";
 import { safeRecordActivity } from "../services/activity.service.js";
 import ActivityEvent from "../models/ActivityEvent.js";
 
 const PRODUCT_ACCESS_MODEL = "FREE";
+
+/**
+ * Resolve who a task may be assigned to, for one firm.
+ *
+ * THE DEFECT THIS EXISTS TO FIX, because it was silent and it lost work.
+ * Both assignment sites used to ask `User.findOne({ _id, firmId })`. FirmMembership.js says in as
+ * many words that `User.firmId` points at the *active* workspace - it is which firm that person is
+ * looking at right now, not which firms they belong to. Membership lives in FirmMembership.
+ *
+ * So the question being asked was "is this colleague's screen currently showing my firm?", and the
+ * answer for anybody working in a second workspace is no. Meanwhile the assign dropdown is built
+ * from `GET /api/firms/:firmId/members`, which reads FirmMembership with status ACTIVE - so it
+ * offers exactly the people this check could reject.
+ *
+ * An administrator could therefore pick a real colleague from the list, press assign, receive
+ * HTTP 201, and get a task with NOBODY ASSIGNED. Nothing was said. The colleague never received
+ * the work, and the administrator had every reason to believe they had. In a product where one
+ * person is routinely in two firms, that is not an edge case.
+ *
+ * Two things are fixed here, not one:
+ *   1. The question. Active membership in THIS firm, which is what "in the firm" has always meant.
+ *   2. The silence. createTask used to fall through to null; updateTask already refused with 400.
+ *      Now both refuse, because quietly assigning work to nobody is never what the caller asked
+ *      for. The refusal distinguishes "not a member" from "no longer active" from "no such
+ *      account", since those have three different remedies.
+ *
+ * The user document is still loaded, so a membership row left behind by a deleted account cannot
+ * become an assignment to an id nothing answers to.
+ *
+ * @returns {Promise<{ ok: true, userId: unknown } | { ok: false, error: string }>}
+ */
+async function resolveFirmAssignee(firmId, assignedTo) {
+  const membership = await FirmMembership.findOne({
+    firmId,
+    userId: assignedTo,
+  })
+    .select("status")
+    .lean();
+
+  if (!membership) {
+    return { ok: false, error: "That person is not a member of this firm" };
+  }
+  if (membership.status !== "ACTIVE") {
+    return {
+      ok: false,
+      error: "That person is no longer an active member of this firm",
+    };
+  }
+
+  const assignedUser = await User.findOne({ _id: assignedTo })
+    .select("_id")
+    .lean();
+  if (!assignedUser) {
+    return { ok: false, error: "That account no longer exists" };
+  }
+
+  return { ok: true, userId: assignedUser._id };
+}
 
 /**
  * The fields a firm actually needs to see the history of, and nothing else.
@@ -153,16 +212,16 @@ export const createTask = async (req, res) => {
     // Product access is free for every authenticated firm. Operational limits
     // such as request-size caps and rate limiting remain enforced elsewhere.
 
-    // Validate assignedTo user inside same firm
+    // Who this is being handed to. A bad assignee is REFUSED rather than dropped: this used to
+    // fall through to null, so a task the administrator believed they had assigned was created
+    // with nobody on it and nobody was told. See resolveFirmAssignee.
     let assignedToUserId = null;
     if (assignedTo) {
-      const assignedUser = await User.findOne({
-        _id: assignedTo,
-        firmId,
-      }).lean();
-      if (assignedUser) {
-        assignedToUserId = assignedUser._id;
+      const assignee = await resolveFirmAssignee(firmId, assignedTo);
+      if (!assignee.ok) {
+        return res.status(400).json({ ok: false, error: assignee.error });
       }
+      assignedToUserId = assignee.userId;
     }
 
     const initialStatus = status || "NOT_STARTED";
@@ -483,16 +542,15 @@ export const updateTask = async (req, res) => {
       if (!assignedTo) {
         task.assignedTo = null;
       } else {
-        const assignedUser = await User.findOne({
-          _id: assignedTo,
-          firmId,
-        }).lean();
-        if (!assignedUser) {
-          return res
-            .status(400)
-            .json({ ok: false, error: "Assigned user not in firm" });
+        // Same resolver as createTask. This site already refused rather than dropping, but it was
+        // refusing on the wrong question - the assignee's ACTIVE WORKSPACE instead of their
+        // membership - so a reassignment to a colleague working in another firm was rejected as
+        // "not in firm" about somebody who plainly is.
+        const assignee = await resolveFirmAssignee(firmId, assignedTo);
+        if (!assignee.ok) {
+          return res.status(400).json({ ok: false, error: assignee.error });
         }
-        task.assignedTo = assignedUser._id;
+        task.assignedTo = assignee.userId;
       }
 
       const nextAssignee = task.assignedTo ? String(task.assignedTo) : null;

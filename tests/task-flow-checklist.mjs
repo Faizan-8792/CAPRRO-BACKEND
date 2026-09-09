@@ -117,27 +117,65 @@ function check(name, pass, detail = "") {
   );
 }
 
-// --- 5. createTask validates assignedTo belongs to same firm ---
+// --- 5. Both assignment sites resolve the assignee by ACTIVE MEMBERSHIP ---
+//
+// These two items used to grep for `User.findOne({ ..., firmId })`, and that was the wrong thing to
+// pin. FirmMembership.js states that `User.firmId` is the *active workspace* - which firm somebody
+// is looking at right now - while membership lives in FirmMembership. So the old check asked "is
+// this colleague's screen currently showing my firm?", and answered no for anybody working in a
+// second workspace, while the assign dropdown (GET /api/firms/:firmId/members, FirmMembership with
+// status ACTIVE) offered exactly those people.
+//
+// The item's stated intent never changed - "prevents assigning tasks to users outside the firm" -
+// so it now pins the mechanism that actually delivers it, and pins it harder: one shared resolver,
+// asking FirmMembership for ACTIVE status, used by BOTH sites.
 {
-  const m = ctrl.match(/createTask[\s\S]*?(?=export const|$)/);
-  const block = m ? m[0] : "";
-  const ok = /User\.findOne\(\s*\{[\s\S]{0,200}firmId\s*,?\s*\}/.test(block);
+  const resolver = ctrl.match(
+    /async function resolveFirmAssignee[\s\S]*?\n\}/,
+  );
+  const block = resolver ? resolver[0] : "";
+  const ok =
+    /FirmMembership\.findOne\(/.test(block) &&
+    /firmId/.test(block) &&
+    /userId/.test(block) &&
+    /"ACTIVE"/.test(block);
   check(
     "createTask validates assignedTo user is in the same firm",
     ok,
-    "Prevents assigning tasks to users outside the firm",
+    "Resolved by ACTIVE FirmMembership, not by the assignee's active workspace",
   );
 }
 
-// --- 6. updateTask validates assignedTo same-firm ---
+// --- 6. And neither site may silently drop a bad assignee ---
+//
+// THE DEFECT THIS PINS. createTask used to fall through to `assignedToUserId = null` when the
+// lookup missed, so an administrator could pick a real colleague, receive HTTP 201, and get a task
+// with nobody assigned - no error, no warning, and the work never reached anybody. Both sites must
+// now refuse.
 {
-  const m = ctrl.match(/export const updateTask[\s\S]*?(?=export const|$)/);
-  const block = m ? m[0] : "";
-  const ok = /User\.findOne\(\s*\{[\s\S]{0,200}firmId\s*,?\s*\}/.test(block);
+  // One handler's body, sliced on the export boundary. A lazy regex with a lookahead had to guess
+  // where a handler ended and guessed wrong, matching nothing and passing vacuously in one
+  // direction - which is worse than failing, so it is gone.
+  const bodyOf = (name) => {
+    const start = ctrl.indexOf(`export const ${name} =`);
+    if (start < 0) return "";
+    const next = ctrl.indexOf("\nexport const ", start + 1);
+    return ctrl.slice(start, next < 0 ? ctrl.length : next);
+  };
+
+  const ok = ["createTask", "updateTask"].every((name) => {
+    const body = bodyOf(name);
+    return (
+      body.length > 0 &&
+      /resolveFirmAssignee\(/.test(body) &&
+      /if \(!assignee\.ok\)/.test(body) &&
+      /status\(400\)/.test(body)
+    );
+  });
   check(
     "updateTask validates new assignedTo user is in the same firm",
     ok,
-    "Reassignment cannot leak tasks to other firms",
+    "Both sites REFUSE an unassignable person rather than quietly assigning the task to nobody",
   );
 }
 
