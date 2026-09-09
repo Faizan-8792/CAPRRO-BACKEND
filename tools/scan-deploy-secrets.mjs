@@ -6,8 +6,35 @@ import {
 } from "../node_modules/acorn/dist/acorn.mjs";
 
 const EXPECTED_ACORN_VERSION = "8.18.0";
+// The trusted lockfile.
+//
+// WHAT THIS PIN IS FOR. Every other lockfile check above answers "is this entry well formed?" -
+// integrity present, tarball URL on the real registry, no install-time lifecycle scripts, no
+// unreachable entries, direct dependencies satisfying package.json. This one answers a different
+// question: "is this the exact dependency graph somebody looked at and accepted?" A lockfile can be
+// perfectly well formed and still be a graph nobody chose, which is what a dependency-confusion or
+// a quiet transitive substitution looks like.
+//
+// So changing a dependency is SUPPOSED to fail here. The pin is not an obstacle to work around; it
+// is the step that forces the graph to be looked at.
+//
+// UPDATED 2026-09-09, from d085edd7aa9d6080bc80cbb2453d92d9d781b8e1e2e1e72a699845675f5ee4dc.
+// The change it blesses, and what was checked before blessing it:
+//   morgan      1.11.0 -> 1.12.0   log forging via unescaped Unicode line separators
+//   body-parser 1.20.6 -> 1.20.8   brings its own qs 6.16.0, the fixed one
+//   multer      2.2.0  -> 2.3.0    the HIGH advisory: four DoS / limit-bypass reports
+// Four packages, no others; every entry still resolves to registry.npmjs.org; and this digest check
+// is the LAST thing this function does, so all the structural checks above it had already passed on
+// this exact lock before it fired. The multer bump was additionally exercised rather than assumed -
+// tests/case-ocr-route-behaviour.mjs drives the real upload path and reports 21/21 on 2.3.0,
+// matching the 21/21 baseline captured on 2.2.0 first.
+//
+// TO UPDATE IT AGAIN: change the dependency, run the gates, read the digest the refusal prints,
+// satisfy yourself the lockfile diff is only what you intended, and put that digest here with the
+// same kind of note. Never copy a digest across without reading the diff - that turns the one check
+// that asks "did a human look?" into a rubber stamp.
 const EXPECTED_PACKAGE_LOCK_SHA256 =
-  "d085edd7aa9d6080bc80cbb2453d92d9d781b8e1e2e1e72a699845675f5ee4dc";
+  "4b26a8268dd32b972d95e0dcd47eca05ffcdfc2544bcea3a0cfc994c4e9bfb92";
 const MAX_INPUT_BYTES = 32 * 1024 * 1024;
 const MAX_STATIC_DECODE_BYTES = 1024 * 1024;
 const UNKNOWN = Symbol("unknown static value");

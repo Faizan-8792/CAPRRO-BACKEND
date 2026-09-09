@@ -2006,8 +2006,13 @@ const expectedManifestReasonByName = new Map([
     "package.json contains unsupported manifest field: publishConfig",
   ],
   [
+    // The digest here is the one the MUTATED fixture produces, so it moves whenever the real
+    // package-lock.json moves - it did on 2026-09-09 for the morgan/body-parser/multer security
+    // bumps. The mutation and the reason it is refused are unchanged: swapping one transitive
+    // package's integrity for another's is still caught, and still caught by the trusted-lock
+    // digest rather than by a narrower check, which is the point this row makes.
     "valid-length transitive integrity substitution is refused",
-    "package-lock.json canonical SHA-256 does not match the trusted lock (924125352518de566a0820d264777d4daf1720d50ee9d592cc70a185b57fc5df)",
+    "package-lock.json canonical SHA-256 does not match the trusted lock (6f1a1a7465d094bf519a8429cdd5150b83b7468c234724837de5b7e891be803a)",
   ],
   [
     "runtime package classified as development-only is refused",
@@ -2018,8 +2023,10 @@ const expectedManifestReasonByName = new Map([
     "package-lock.json peerDependencies dependency mime-types does not satisfy node_modules/accepts",
   ],
   [
+    // Same as above: the mutated fixture's digest moved with the base lock on 2026-09-09. Widening
+    // a transitive range to "*" is still refused, and still by the digest check.
     "widened transitive dependency range is refused",
-    "package-lock.json canonical SHA-256 does not match the trusted lock (afa194d84c35b8cdb6ea1d44655f78e1cbabc3a82cf77611aaf8fb5f6475f344)",
+    "package-lock.json canonical SHA-256 does not match the trusted lock (5acab20303b69d577c2dd57b9ae9b0b6d90a3b6234ab5994286be0275abad845)",
   ],
   [
     "unsupported semver OR alternative is refused before digest validation",
