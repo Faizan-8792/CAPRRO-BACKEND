@@ -7,8 +7,42 @@
 // over HTTPS and hashed as received, because the point is to prove what a customer would get.
 import { createHash } from "node:crypto";
 
-const EXPECTED_SHA256 = "1e95a06b4816fc5773c7f78f7bd34971b9e997b06ab28173f6d8f90beff4d153";
-const EXPECTED_SIZE = 65681457;
+// The artefact this run is checking the hosted copy against.
+//
+// WHY THESE WENT STALE, and why they are now overridable.
+// These were hardcoded to one historical build, so every release after it failed REL-sha, REL-size,
+// HEAD-size, DL-size and DL-sha - five of ten checks - while the hosted file was in fact correct.
+// The one check that mattered (DL-matches-announcement: the bytes a customer receives hash to what
+// the release announcement promises, so the client's integrity check passes) went on passing, which
+// is how the staleness stayed invisible: the tool looked broken-but-noisy rather than wrong.
+//
+// The constants stay, because the design is deliberate - the header's own words: "Nothing here
+// trusts a local copy". A known-good reference held independently of both the website and the API
+// is the whole point; if it were read from the announcement, the tool could only ever agree with
+// whatever was published, including a bad publish.
+//
+// What changed is that a release no longer has to EDIT this file to keep the reference honest:
+//   node tools/verify-hosted-installer.mjs --sha <sha256> --size <bytes>
+// Passing them is the same act as updating them, minus the chance of forgetting. The defaults below
+// are the current release (0.1.16), so an un-argued run still checks something real.
+function argValue(name) {
+  const i = process.argv.indexOf(`--${name}`);
+  return i !== -1 && process.argv[i + 1] ? process.argv[i + 1] : null;
+}
+
+const EXPECTED_SHA256 = (
+  argValue("sha")
+  ?? process.env.CAPRO_EXPECTED_INSTALLER_SHA256
+  ?? "21a941b9e527c1ce757fdc5b7cd601c2c8b99668321234fd3c82e1c4e1e4903a"
+).toLowerCase();
+const EXPECTED_SIZE = Number(
+  argValue("size") ?? process.env.CAPRO_EXPECTED_INSTALLER_SIZE ?? 65793405,
+);
+
+if (!/^[0-9a-f]{64}$/.test(EXPECTED_SHA256) || !Number.isSafeInteger(EXPECTED_SIZE) || EXPECTED_SIZE <= 0) {
+  console.error("--sha must be 64 hex characters and --size a positive integer.");
+  process.exit(2);
+}
 const API = "https://api.caprotoolkit.in";
 
 let pass = 0;
