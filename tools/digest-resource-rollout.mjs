@@ -34,7 +34,10 @@ function assignedWeeklyDay(id) {
 }
 
 function validEmail(value) {
-  return typeof value === "string" && value.trim().length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  if (typeof value !== "string" || value.trim().length > 254) return false;
+  const normalized = value.trim().toLowerCase();
+  if (/(^|\.)example\.(com|invalid)$/.test(normalized)) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized);
 }
 
 async function prepare() {
@@ -97,6 +100,16 @@ async function sendBatch(batch) {
       { new: true },
     ).select("email digestPreferences.rolloutNotice").lean();
     if (!user) break;
+    if (!validEmail(user.email)) {
+      await User.updateOne(
+        { _id: user._id, "digestPreferences.rolloutNotice.state": "SENDING" },
+        { $set: {
+          "digestPreferences.rolloutNotice.state": "FAILED",
+          "digestPreferences.rolloutNotice.lastError": "Excluded non-deliverable test email domain",
+        } },
+      );
+      continue;
+    }
     const idempotencyKey = `${CAMPAIGN}:${String(user._id)}`;
     try {
       const result = await sendDailyDigestActivationEmail({
