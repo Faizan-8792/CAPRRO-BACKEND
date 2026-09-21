@@ -1,5 +1,6 @@
 // User.js
 import mongoose from "mongoose";
+import { createHash } from "node:crypto";
 
 const WorkspaceOperationReceiptSchema = new mongoose.Schema(
   {
@@ -157,13 +158,38 @@ const UserSchema = new mongoose.Schema(
       dailyFrequency: {
         type: String,
         enum: ["DAILY", "EVERY_3_DAYS", "WEEKLY", "OFF"],
-        default: "DAILY",
+        default: "OFF",
       },
       // Retained for backward compatibility and kept in sync with
       // dailyFrequency (false === OFF). New clients use dailyFrequency.
-      dailyEnabled: { type: Boolean, default: true },
+      dailyEnabled: { type: Boolean, default: false },
       weeklyEnabled: { type: Boolean, default: true },
       emailEnabled: { type: Boolean, default: true },
+      // Weekly mail is deliberately spread across these three days. A legacy
+      // account with no stored day receives its stable hash-derived day until
+      // the rollout tool backfills it; users may choose any of the same days.
+      weeklyDeliveryDay: {
+        type: Number,
+        enum: [0, 1, 4],
+        default() {
+          const days = [0, 1, 4];
+          return days[createHash("sha256").update(String(this._id)).digest()[0] % days.length];
+        },
+      },
+      dailyRolloutVersion: { type: String, trim: true, maxlength: 40, default: "" },
+      rolloutNotice: {
+        campaign: { type: String, trim: true, maxlength: 40, default: "" },
+        batch: { type: String, enum: ["A", "B", ""], default: "" },
+        state: {
+          type: String,
+          enum: ["", "PENDING", "SENDING", "SENT", "FAILED"],
+          default: "",
+        },
+        attempts: { type: Number, min: 0, default: 0 },
+        providerMessageId: { type: String, trim: true, maxlength: 240, default: "" },
+        lastError: { type: String, trim: true, maxlength: 600, default: "" },
+        sentAt: { type: Date, default: null },
+      },
     },
   },
   { timestamps: true },

@@ -1,6 +1,7 @@
 import {
   DigestError,
   applyDigestUnsubscribe,
+  applyDailyDigestActivation,
   getDigestPreferences,
   listDigestInbox,
   markAllDigestsRead,
@@ -165,6 +166,18 @@ export async function postDigestUnsubscribe(req, res, next) {
       kind: req.query?.k,
       token: req.query?.t,
       scope: req.body?.scope || "THIS_KIND",
+    });
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return handleDigestError(error, req, res, next);
+  }
+}
+
+export async function postDailyDigestActivation(req, res, next) {
+  try {
+    const result = await applyDailyDigestActivation({
+      recipientUserId: req.body?.u,
+      token: req.body?.t,
     });
     return res.json({ ok: true, ...result });
   } catch (error) {

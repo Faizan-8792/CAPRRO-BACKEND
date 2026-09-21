@@ -331,6 +331,38 @@ export async function sendDigestEmail({
   }
 }
 
+export async function sendDailyDigestActivationEmail({
+  toEmail,
+  activationUrl,
+  idempotencyKey,
+}) {
+  if (!toEmail || !activationUrl || !idempotencyKey) {
+    throw new Error("sendDailyDigestActivationEmail requires recipient, activation URL, and idempotency key");
+  }
+  const safeUrl = requireUnsubscribeUrl(activationUrl, "activationUrl");
+  const response = await getResend().emails.send(
+    {
+      from: FROM_EMAIL,
+      to: toEmail,
+      subject: "CA PRO Toolkit: Daily Digest is now off",
+      html: `
+        <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;padding:16px;color:#111827;">
+          <h2 style="margin-top:0;">Daily Digest is now off</h2>
+          <p>To reduce unnecessary email, CA PRO Toolkit has turned off daily digest email by default.</p>
+          <p>If you want to receive your personal daily work digest, choose it yourself:</p>
+          <p><a href="${escapeHtml(safeUrl)}" style="display:inline-block;background:#1d4ed8;color:#fff;padding:10px 14px;border-radius:6px;text-decoration:none;">Activate Daily Digest</a></p>
+          <p style="font-size:12px;color:#6b7280;">The button opens a confirmation page. No reminder, OTP, or important compliance email has been turned off.</p>
+        </div>`,
+      text: `Daily Digest is now off by default. To activate your personal daily work digest, open this link and confirm: ${safeUrl}\n\nReminders, OTPs, and important compliance emails are unchanged.`,
+    },
+    { idempotencyKey: String(idempotencyKey).slice(0, 256) },
+  );
+  if (response?.error) {
+    throw new Error(String(response.error.message || "Resend rejected daily digest activation email"));
+  }
+  return response;
+}
+
 /**
  * ================================
  * TEST EMAIL (admin diagnostics)

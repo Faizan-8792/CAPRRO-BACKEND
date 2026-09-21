@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Activate Daily Digest | CA PRO Toolkit</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#f8fafc; color:#111827; margin:0; }
+      main { max-width: 580px; margin: 8vh auto; padding: 24px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; }
+      button { background:#1d4ed8; border:0; border-radius:6px; color:#fff; cursor:pointer; font:inherit; padding:10px 14px; }
+      button:disabled { opacity:.65; cursor:wait; }
+      #message { color:#4b5563; line-height:1.5; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Activate daily digest?</h1>
+      <p id="message">Daily digest email will be sent to this address. Reminders, OTPs, and important compliance emails are already unchanged.</p>
+      <button id="activate" type="button">Activate Daily Digest</button>
+    </main>
+    <script>
+      const query = new URLSearchParams(location.search);
+      const user = query.get("u");
+      const token = query.get("t");
+      const button = document.getElementById("activate");
+      const message = document.getElementById("message");
+      if (!user || !token) {
+        button.disabled = true;
+        message.textContent = "This activation link is invalid or incomplete.";
+      }
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        message.textContent = "Activating your daily digest…";
+        try {
+          const response = await fetch("/api/digests/activate-daily", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ u: user, t: token }),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok || !body.ok) throw new Error(body.error || "Activation could not be completed.");
+          message.textContent = "Daily digest is active. You can change it anytime in CA PRO Toolkit > Digests.";
+          button.remove();
+        } catch (error) {
+          message.textContent = error.message || "Activation could not be completed. Please try again.";
+          button.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

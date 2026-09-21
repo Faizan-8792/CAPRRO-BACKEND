@@ -63,6 +63,7 @@ check("brand-new user (no prefs) -> sensible defaults", () => {
     dailyEnabled: true,
     weeklyEnabled: true,
     emailEnabled: true,
+    weeklyDeliveryDay: 1,
   });
 });
 for (const freq of ["DAILY", "EVERY_3_DAYS", "WEEKLY", "OFF"]) {

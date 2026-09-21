@@ -33,6 +33,7 @@ const SEND_CLAIM_STALE_MS = 15 * 60 * 1000;
 const DIGEST_JOB_RECOVERY_LEASE_MS = 2 * 60 * 1000;
 const DIGEST_RECOVERY_CURSOR_LEASE_MS = 2 * 60 * 1000;
 const DIGEST_AUTHORITY_DEFER_MS = 30 * 1000;
+const WEEKLY_DELIVERY_DAYS = Object.freeze([0, 1, 4]); // Sunday, Monday, Thursday
 
 class DigestError extends Error {
   constructor(message, status = 400, code = "DIGEST_INVALID") {
@@ -264,7 +265,16 @@ function effectivePreferences(user) {
     dailyEnabled: dailyFrequency !== "OFF",
     weeklyEnabled: user?.digestPreferences?.weeklyEnabled !== false,
     emailEnabled: user?.digestPreferences?.emailEnabled !== false,
+    weeklyDeliveryDay: effectiveWeeklyDeliveryDay(user),
   };
+}
+
+function effectiveWeeklyDeliveryDay(user) {
+  const requested = user?.digestPreferences?.weeklyDeliveryDay;
+  if (WEEKLY_DELIVERY_DAYS.includes(requested)) return requested;
+  // Legacy records are treated as Monday only until the one-time rollout
+  // backfill gives each one a durable assigned day.
+  return 1;
 }
 
 function hasWeeklyDigestAuthority({ membership, user }) {
@@ -481,9 +491,9 @@ function weekStartKey(parts) {
   return localDate.toISOString().slice(0, 10);
 }
 
-function weeklyDue(parts, settings) {
+function weeklyDue(parts, settings, deliveryDay) {
   const currentFromMonday = (parts.weekday + 6) % 7;
-  const targetFromMonday = (Number(settings.weeklyDay ?? 1) + 6) % 7;
+  const targetFromMonday = (Number(deliveryDay) + 6) % 7;
   if (currentFromMonday < targetFromMonday) return false;
   if (currentFromMonday > targetFromMonday) return true;
   return parts.hour >= Number(settings.weeklyHour ?? 8);
@@ -732,6 +742,7 @@ function digestBusinessIdentity({ firmId, kind, periodKey, recipientUserId }) {
 // one interactive session and expire in 15 minutes, while this one has to
 // keep working from inside a mailbox weeks or months after send.
 const DIGEST_UNSUBSCRIBE_TOKEN_TTL_MS = 180 * 24 * 60 * 60 * 1000; // 180 days
+const DAILY_ACTIVATION_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 // Overridable only so a non-production environment can point the link at
 // itself; every real deployment uses the one production API host, the same
 // hardcoded convention already used for FROM_EMAIL and the CORS/CSP origin.
@@ -796,6 +807,47 @@ function digestUnsubscribeTokenMatches(recipientUserId, kind, token) {
     .update(
       digestUnsubscribeTokenPayload(canonicalRecipientUserId, kind, expiresAt),
     )
+    .digest();
+  const actual = Buffer.from(signature, "hex");
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+function dailyDigestActivationTokenPayload(recipientUserId, expiresAt) {
+  return `${recipientUserId}.DAILY_ACTIVATION.${expiresAt}`;
+}
+
+export function buildDailyDigestActivationLink(
+  recipientUserId,
+  expiresAt = Date.now() + DAILY_ACTIVATION_TOKEN_TTL_MS,
+) {
+  const canonicalRecipientUserId = requireCanonicalObjectId(
+    recipientUserId,
+    "recipientUserId",
+  );
+  const signature = createHmac("sha256", digestUnsubscribeSecret())
+    .update(dailyDigestActivationTokenPayload(canonicalRecipientUserId, expiresAt))
+    .digest("hex");
+  const query = new URLSearchParams({
+    u: canonicalRecipientUserId,
+    t: `${expiresAt}.${signature}`,
+  }).toString();
+  return `${DIGEST_UNSUBSCRIBE_BASE_URL}/daily-digest-activate.html?${query}`;
+}
+
+function dailyDigestActivationTokenMatches(recipientUserId, token) {
+  const canonicalRecipientUserId = canonicalObjectId(recipientUserId);
+  if (!canonicalRecipientUserId) return false;
+  const [expiresText, signature = ""] = String(token || "").split(".");
+  const expiresAt = Number(expiresText);
+  if (
+    !Number.isSafeInteger(expiresAt) ||
+    expiresAt <= Date.now() ||
+    !/^[a-f0-9]{64}$/i.test(signature)
+  ) {
+    return false;
+  }
+  const expected = createHmac("sha256", digestUnsubscribeSecret())
+    .update(dailyDigestActivationTokenPayload(canonicalRecipientUserId, expiresAt))
     .digest();
   const actual = Buffer.from(signature, "hex");
   return actual.length === expected.length && timingSafeEqual(actual, expected);
@@ -991,6 +1043,64 @@ async function applyDigestUnsubscribe(
     kindLabel: digestKindLabel(kind),
     preferences: effectivePreferences(user),
   };
+}
+
+// A mailed activation link is intentionally two-step: GET only renders the
+// confirmation page and this POST performs the change. Link-preview scanners
+// therefore cannot subscribe somebody merely by visiting the email link.
+async function applyDailyDigestActivation(
+  { recipientUserId, token },
+  {
+    User: UserModel = User,
+    safeRecordActivity: recordActivity = safeRecordActivity,
+  } = {},
+) {
+  const canonicalRecipientUserId = canonicalObjectId(recipientUserId);
+  if (!canonicalRecipientUserId || !dailyDigestActivationTokenMatches(canonicalRecipientUserId, token)) {
+    throw new DigestError(
+      "This daily digest activation link is invalid or has expired",
+      400,
+      "DIGEST_ACTIVATION_TOKEN_INVALID",
+    );
+  }
+  const before = await UserModel.findOne(
+    combineQueryFilters(
+      strictObjectIdFilter({ _id: canonicalRecipientUserId }),
+      { isActive: true },
+    ),
+  )
+    .select("firmId personalFirmId digestPreferences")
+    .lean();
+  if (!before) throw digestUnsubscribeAccountFailure();
+  const user = await UserModel.findOneAndUpdate(
+    combineQueryFilters(
+      strictObjectIdFilter({ _id: canonicalRecipientUserId }),
+      { isActive: true },
+    ),
+    {
+      $set: {
+        "digestPreferences.dailyFrequency": "DAILY",
+        "digestPreferences.dailyEnabled": true,
+        "digestPreferences.emailEnabled": true,
+      },
+    },
+    { new: true, runValidators: true },
+  )
+    .select("digestPreferences")
+    .lean();
+  if (!user) throw digestUnsubscribeAccountFailure();
+  await recordActivity({
+    firmId: before.firmId || before.personalFirmId || null,
+    actorUserId: canonicalRecipientUserId,
+    source: "USER",
+    action: "DAILY_DIGEST_ACTIVATED_VIA_EMAIL_LINK",
+    entityType: "User",
+    entityId: canonicalRecipientUserId,
+    beforeSummary: effectivePreferences(before),
+    afterSummary: effectivePreferences(user),
+    metadata: { channel: "ROLLOUT_NOTICE" },
+  });
+  return { preferences: effectivePreferences(user) };
 }
 
 function digestSendingRecoveryReason(delivery, now = new Date()) {
@@ -3165,8 +3275,7 @@ export async function enqueueDueDigests(
         weeklyHour: Number(firm.digestSettings?.weeklyHour ?? 8),
       };
       const dailyDue = dailyEnabled && parts.hour >= settings.dailyHour;
-      const firmWeeklyDue = weeklyEnabled && weeklyDue(parts, settings);
-      if (!dailyDue && !firmWeeklyDue) continue;
+      if (!dailyDue && !weeklyEnabled) continue;
 
       const memberships = await FirmMembershipModel.find(
         combineQueryFilters(strictObjectIdFilter({ firmId: firm._id }), {
@@ -3233,7 +3342,9 @@ export async function enqueueDueDigests(
           membership,
           user: recipient,
         });
-        if (firmWeeklyDue && weeklyAuthority && preferences.weeklyEnabled) {
+        const weeklyDueForRecipient =
+          weeklyEnabled && weeklyDue(parts, settings, preferences.weeklyDeliveryDay);
+        if (weeklyDueForRecipient && weeklyAuthority && preferences.weeklyEnabled) {
           await enqueueRecipientDigestProvider({
             firm,
             recipient,
@@ -4059,6 +4170,7 @@ export async function updateDigestPreferences(
     "dailyEnabled",
     "weeklyEnabled",
     "emailEnabled",
+    "weeklyDeliveryDay",
   ];
   const unknown = Object.keys(input).filter((key) => !allowed.includes(key));
   if (unknown.length) {
@@ -4093,6 +4205,12 @@ export async function updateDigestPreferences(
       throw new DigestError(`${key} must be boolean`);
     }
     update[`digestPreferences.${key}`] = input[key];
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "weeklyDeliveryDay")) {
+    if (!WEEKLY_DELIVERY_DAYS.includes(input.weeklyDeliveryDay)) {
+      throw new DigestError("weeklyDeliveryDay must be Sunday, Monday, or Thursday");
+    }
+    update["digestPreferences.weeklyDeliveryDay"] = input.weeklyDeliveryDay;
   }
   if (!Object.keys(update).length) {
     throw new DigestError("No digest preferences to update");
@@ -4739,6 +4857,7 @@ export {
   SEND_CLAIM_STALE_MS,
   WEEKLY_KIND,
   applyDigestUnsubscribe,
+  applyDailyDigestActivation,
   buildDigestSummary,
   buildDigestUnsubscribeLinks,
   buildDigestUnsubscribeToken,

@@ -7,6 +7,7 @@ import {
   getDigestUnsubscribePreview,
   patchDigestPreferences,
   patchFirmDigestSettings,
+  postDailyDigestActivation,
   postDigestUnsubscribe,
   readDigestInboxItem,
   readDigestPreferences,
@@ -45,6 +46,7 @@ const unsubscribeLimiter = rateLimit({
 // request, never from a session.
 router.get("/unsubscribe", unsubscribeLimiter, getDigestUnsubscribePreview);
 router.post("/unsubscribe", unsubscribeLimiter, postDigestUnsubscribe);
+router.post("/activate-daily", unsubscribeLimiter, postDailyDigestActivation);
 
 router.use(authRequired, requireFirmMember);
 router.get("/preferences", readDigestPreferences);

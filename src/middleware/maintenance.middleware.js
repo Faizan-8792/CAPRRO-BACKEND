@@ -14,6 +14,10 @@ const ALLOW_PREFIXES = [
   // being out of maintenance mode - CAN-SPAM/RFC 8058 unsubscribe is exactly
   // the kind of request that must always be honoured.
   "/api/digests/unsubscribe",
+  // The paired affirmative action is also a recipient-owned preference
+  // change. It is signed and confirmation-gated, so maintenance must not
+  // leave an activation notice permanently unusable.
+  "/api/digests/activate-daily",
 ];
 
 function isAllowed(path) {
