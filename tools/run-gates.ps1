@@ -712,6 +712,16 @@ try {
         "gst-match-rule-contract",
         "import-shape-contract",
         "import-date-order-contract",
+        # Bank-statement conversion is financial-data code. Keep every focused contract in the
+        # release runner from the first implementation day; the coverage gate below intentionally
+        # fails if a future suite is added without a matching entry here.
+        "bank-statement-normalization-contract",
+        "bank-statement-intake-contract",
+        "bank-statement-profile-contract",
+        "bank-statement-status-contract",
+        "bank-statement-xlsx-contract",
+        "bank-statement-end-to-end-contract",
+        "bank-statement-scale-contract",
         "gstr2b-amount-contract",
         "audit-numerical-integrity-contract",
         "audit-coverage-gate-contract",
