@@ -2,8 +2,9 @@
 //
 // No statement text is persisted or logged here. The caller receives only the content hash,
 // document metadata, per-page metrics, and a reason code. Parsing uses PDF.js with JavaScript
-// evaluation disabled; route-level work must additionally put this operation in an isolated,
-// network-disabled worker before any user-facing upload endpoint is enabled.
+// evaluation disabled. A request path must not call these helpers directly: it goes through
+// bank-statement-sandbox.service.js, which runs them in a separate permission-restricted process
+// with every network API removed before PDF.js loads.
 
 import { createHash } from "node:crypto";
 import { getDocument, OPS } from "pdfjs-dist/legacy/build/pdf.mjs";
@@ -30,8 +31,20 @@ function rejection(code, message, { pages = [], file = null } = {}) {
   return { accepted: false, status: "REJECTED", rejection: { code, message, pages }, file };
 }
 
+// Shared with the isolated process boundary so a rejection raised outside PDF.js has the same shape.
+export { rejection as bankStatementIntakeRejection };
+
 function safeMetadata(value) {
   return String(value ?? "").replace(/[\u0000-\u001F]/g, " ").slice(0, 500);
+}
+
+/** Content hash and metadata only; never page text. */
+export function describeBankStatementFile(input, fileName = "") {
+  return {
+    name: safeMetadata(fileName),
+    size: input.length,
+    sha256: createHash("sha256").update(input).digest("hex"),
+  };
 }
 
 function remainingMs(startedAt, maxProcessingMs) {
@@ -125,11 +138,7 @@ function pdfLoadOptions(input, password) {
 export async function inspectBankStatementPdf({ bytes, fileName = "", password = null, limits = {} } = {}) {
   const effectiveLimits = { ...BANK_STATEMENT_INTAKE_LIMITS, ...limits };
   const input = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes ?? []);
-  const file = {
-    name: safeMetadata(fileName),
-    size: input.length,
-    sha256: createHash("sha256").update(input).digest("hex"),
-  };
+  const file = describeBankStatementFile(input, fileName);
   if (!hasPdfSignature(input)) {
     return rejection(BANK_STATEMENT_INTAKE_CODES.INVALID_PDF, "This file is not a valid PDF document.", { file });
   }
@@ -233,8 +242,8 @@ export function orderBankStatementTextItems(items, { lineTolerance = 2 } = {}) {
 
 /**
  * Re-opens an accepted in-memory PDF and exposes positional text only to the next profile parser.
- * This is intentionally not an HTTP endpoint. The final upload route must execute this in the
- * network-disabled process boundary named in PLAN.md before it can call this helper.
+ * This is intentionally not an HTTP endpoint. A request path reaches it only through
+ * runBankStatementPdfInSandbox({ operation: "extract" }) in bank-statement-sandbox.service.js.
  */
 export async function extractBankStatementTextPositions({ bytes, fileName = "", password = null, limits = {} } = {}) {
   const intake = await inspectBankStatementPdf({ bytes, fileName, password, limits });

@@ -717,6 +717,7 @@ try {
         # fails if a future suite is added without a matching entry here.
         "bank-statement-normalization-contract",
         "bank-statement-intake-contract",
+        "bank-statement-sandbox-contract",
         "bank-statement-profile-contract",
         "bank-statement-status-contract",
         "bank-statement-xlsx-contract",
