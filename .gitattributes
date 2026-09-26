@@ -1,0 +1,5 @@
+# Byte-exact fixtures. Their tests pin SHA-256 and length, and the owner's canonical Test #6
+# document has deliberately mixed line endings. Without -text, a clone under core.autocrlf=true
+# (the Git for Windows default) adds a CR to every LF-only line on checkout, and the gate reports
+# the reviewer's document as modified when nobody touched it.
+tests/fixtures/test6-original-exact.md -text
