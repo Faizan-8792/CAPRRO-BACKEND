@@ -83,6 +83,17 @@ export async function withBrowser(body, { headless = true, port = 9333 } = {}) {
 
   const proc = spawn(findBrowser(), args, { stdio: "ignore", detached: false });
   let ws;
+  let send = null;
+  let treeKilled = false;
+  const killTree = () => {
+    if (treeKilled) return;
+    treeKilled = true;
+    if (process.platform === "win32") {
+      try { spawn("taskkill", ["/PID", String(proc.pid), "/T", "/F"], { stdio: "ignore" }); } catch { /* best effort */ }
+    } else {
+      try { process.kill(proc.pid, "SIGKILL"); } catch { /* already gone */ }
+    }
+  };
   try {
     const target = await waitForDevTools(port);
     ws = new WebSocket(target.webSocketDebuggerUrl);
@@ -112,7 +123,7 @@ export async function withBrowser(body, { headless = true, port = 9333 } = {}) {
       }
     });
 
-    const send = (method, params = {}) =>
+    send = (method, params = {}) =>
       new Promise((resolve, reject) => {
         const messageId = ++id;
         pending.set(messageId, { resolve, reject });
@@ -152,9 +163,16 @@ export async function withBrowser(body, { headless = true, port = 9333 } = {}) {
 
     return await body(page);
   } finally {
+    // M14: proc.kill() kills only the launcher; Chrome's child processes survived it, and one
+    // leaked browser was found spinning at 100% of a core ten hours later. Close gracefully over
+    // CDP first, then kill the whole process tree, and remove the profile only once nothing
+    // holds a lock on it.
+    try { if (send) await Promise.race([send("Browser.close"), sleep(3000)]); } catch { /* already closing */ }
+    killTree();
+    await sleep(500);
     try { ws?.close(); } catch { /* already gone */ }
     try { proc.kill(); } catch { /* already gone */ }
-    await sleep(400);
+    await sleep(300);
     try { rmSync(profile, { recursive: true, force: true }); } catch { /* temp dir; best effort */ }
   }
 }
