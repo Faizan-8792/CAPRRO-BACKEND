@@ -1318,7 +1318,10 @@ export const listEmailDeliveriesForSuper = async (req, res, next) => {
         .sort({ sentAt: -1, _id: 1 })
         .skip((page - 1) * limit)
         .limit(limit)
-        .select("type recipientEmailHash recipientEmailLast4 subjectTemplateName providerMessageId status errorClass sentAt deliveredAt lastEventAt firmId userId meta backfilled createdAt")
+        // recipientEmailHash is deliberately excluded: the panel computes the hash
+        // client-side for search and never needs it back, so the list carries one less
+        // pseudonymous identifier (the detail endpoint excludes it the same way).
+        .select("type recipientEmailLast4 subjectTemplateName providerMessageId status errorClass sentAt deliveredAt lastEventAt firmId userId meta backfilled createdAt")
         .populate("firmId", "displayName handle")
         .lean(),
       EmailDelivery.countDocuments(filter),
