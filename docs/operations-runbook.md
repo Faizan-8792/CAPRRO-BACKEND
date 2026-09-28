@@ -249,6 +249,28 @@ section is relative to that directory.
    archive as `capro-backend.zip`, then trigger the Node app build and restart. (See the URL gap
    noted just above — until it is filled in, this fallback needs the owner at the keyboard.)
 
+   **RESTARTS — measured 2026-09-28, and worth reading before the next deploy.** The deploy tool
+   triggers a build and polls it to `completed`; the platform's restart after a completed build is
+   asynchronous and can lag by minutes. Two rules follow from a real incident that day:
+
+   1. **`completed` is not `restarted`.** After the 2026-09-28 deploy, the build reported
+      `completed` while `/health` uptime kept climbing (the old process still serving, the new
+      route still absent from the catch-all). The deploy tool's own app-config probe cannot catch
+      this — the OLD process answers app-config too. After step 4, ALWAYS verify the restart with
+      uptime, not app-config: `/health` uptime must DROP to near zero. A discriminating probe for
+      a new route: it must answer with its OWN body, not the authenticated catch-all's
+      `Missing or invalid Authorization header`.
+   2. **Never call the manual restart to "fix" a lagging deploy.** `POST
+      /api/hosting/v1/accounts/{username}/websites/{domain}/nodejs/server/restart` (developers
+      .hostinger.com API, returns `{"message":"Request accepted"}`) restarts the process without
+      rebuilding — but calling it while the platform is still finalising a build WEDGED the app
+      for ~20 minutes on 2026-09-28: the process never bound again (platform 503 HTML on every
+      route) until the NEXT full build completed and its own restart brought it up in under a
+      minute. If a restart seems stuck: do nothing for 5 minutes, then re-run the deploy tool
+      with the SAME archive (a fresh build + its automatic restart recovers it — proven twice
+      that day). App stdout remains unreachable (the O7 gap), so there is no way to tell a crash
+      loop from a wedged spawn except by which body answers.
+
    Either way, expect the service to answer `/api/app-config` within seconds but `/health` to report
    `"status":"degraded"` with `"background":"initializing"` for a while after the restart — see the
    readiness note in step 5.
