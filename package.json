@@ -25,6 +25,7 @@
     "mongoose": "^8.7.0",
     "morgan": "^1.10.0",
     "multer": "2.3.0",
+    "pdfjs-dist": "5.4.149",
     "resend": "^6.6.0"
   },
   "devDependencies": {

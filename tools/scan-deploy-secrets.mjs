@@ -33,8 +33,27 @@ const EXPECTED_ACORN_VERSION = "8.18.0";
 // satisfy yourself the lockfile diff is only what you intended, and put that digest here with the
 // same kind of note. Never copy a digest across without reading the diff - that turns the one check
 // that asks "did a human look?" into a rubber stamp.
+//
+// UPDATED 2026-09-28, from 4b26a8268dd32b972d95e0dcd47eca05ffcdfc2544bcea3a0cfc994c4e9bfb92.
+// The change it blesses, and what was checked before blessing it:
+//   pdfjs-dist 5.4.149 ADDED (exact pin, no range) - the legacy-build PDF text
+//     extractor the bank-statement intake service imports
+//     (src/services/bank-statement-intake.service.js, PLAN.md section 41).
+//   @napi-rs/canvas 0.1.100 + its eleven platform-specific optional binaries
+//     ADDED - these are pdfjs-dist's own declared optional dependencies (one
+//     package per OS/arch; npm installs exactly the matching one), not a
+//     transitive surprise.
+// Nothing else changed: no existing entry was upgraded, downgraded, retargeted,
+// or removed (verified by reading the full git diff of package-lock.json - one
+// deletion, the lockfile's own version-context line). Every entry still
+// resolves to registry.npmjs.org with sha512 integrity and zero lifecycle
+// scripts - the structural checks above this one run first and had already
+// passed on this exact lock before the digest fired. `npm install --dry-run`
+// reports "up to date", so the lock is the deterministic graph package.json
+// describes. The bank-statement contracts that exercise the parser
+// (bank-statement-intake/xlsx/normalization/end-to-end) run green against it.
 const EXPECTED_PACKAGE_LOCK_SHA256 =
-  "4b26a8268dd32b972d95e0dcd47eca05ffcdfc2544bcea3a0cfc994c4e9bfb92";
+  "6ba2371cbd59c0cba8e3ee2f3b82afdeeed41afab4ddf9e038a70baa444ac3c4";
 const MAX_INPUT_BYTES = 32 * 1024 * 1024;
 const MAX_STATIC_DECODE_BYTES = 1024 * 1024;
 const UNKNOWN = Symbol("unknown static value");
