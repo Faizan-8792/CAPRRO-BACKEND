@@ -30,6 +30,7 @@ import {
   assertTdsReviewStorageReady,
 } from "./tds-storage-readiness.service.js";
 import { normalizeTdsContext } from "./tds-normalization.service.js";
+import { csvCell } from "../utils/csv.js";
 import { userFacingMessage } from "../utils/user-facing-error.js";
 
 const TDS_HEALTH_JOB_KIND = "TDS_HEALTH";
@@ -1845,13 +1846,6 @@ async function lockTdsHealthRun({ firmId, runId, actorUserId, requestId = "" }) 
     await session.endSession();
   }
   return { run: serializeRun(lockedRun), replayed };
-}
-
-function csvCell(value) {
-  const isText = typeof value === "string";
-  let text = value == null ? "" : String(value);
-  if (isText && /^[\s]*[=+@-]/.test(text)) text = `'${text}`;
-  return `"${text.replaceAll('"', '""')}"`;
 }
 
 async function exportTdsHealthRun({ firmId, runId }) {

@@ -6,6 +6,10 @@
 //
 // Run: node tests/digest-delivery-correctness.mjs
 
+// Updated 2026-09-28: injected provider fakes return the shared mailer's result shape
+// { providerMessageId } (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1 migrated sends onto
+// services/mailer.js), not the Resend SDK's { data: { id } }. Deliberate change —
+// the fakes model what the production seam now returns.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
@@ -1368,7 +1372,7 @@ function createProcessHarness({
   membershipError = null,
   beforeProviderAuthorityReload = null,
   leaseAssertion = async () => {},
-  provider = async () => ({ data: { id: "provider-message-fixed" } }),
+  provider = async () => ({ providerMessageId: "provider-message-fixed" }),
 } = {}) {
   const store = createInMemoryDigestDelivery([delivery]);
   const firmLookups = [];
@@ -2119,7 +2123,7 @@ await check(
         },
         sendDigestEmail: async () => {
           providerCalls += 1;
-          return { data: { id: "must-not-send" } };
+          return { providerMessageId: "must-not-send" };
         },
         safeRecordActivity: async () => {
           activityCalls += 1;
@@ -4746,7 +4750,7 @@ async function assertPolicyTakeoverDefers({
       },
       sendDigestEmail: async () => {
         providerCalls += 1;
-        return { data: { id: "must-not-send" } };
+        return { providerMessageId: "must-not-send" };
       },
       safeRecordActivity: async () => {
         activityCalls += 1;
@@ -5185,7 +5189,7 @@ await check(
       provider: async () => {
         providerAttempt += 1;
         if (providerAttempt === 1) throw providerError;
-        return { data: { id: "authoritative-retry-sent" } };
+        return { providerMessageId: "authoritative-retry-sent" };
       },
     });
     const losingJob = {
@@ -6519,7 +6523,7 @@ await check(
             },
           },
         );
-        return { data: { id: "provider-accepted-before-takeover" } };
+        return { providerMessageId: "provider-accepted-before-takeover" };
       },
     });
 
@@ -6582,7 +6586,7 @@ await check(
       provider: async () => {
         providerAttempt += 1;
         if (providerAttempt === 1) throw providerError;
-        return { data: { id: "provider-message-retry" } };
+        return { providerMessageId: "provider-message-retry" };
       },
     });
 
@@ -6640,7 +6644,7 @@ await check(
       provider: async () => {
         providerAttempt += 1;
         if (providerAttempt === 1) throw providerError;
-        return { data: { id: "legacy-provider-retry" } };
+        return { providerMessageId: "legacy-provider-retry" };
       },
     });
 
@@ -10554,7 +10558,7 @@ await check(
               }),
             sendDigestEmail: async () => {
               providerCalls += 1;
-              return { data: { id: "personal-test-message" } };
+              return { providerMessageId: "personal-test-message" };
             },
           },
         );
@@ -11098,7 +11102,7 @@ await check(
               beforeProviderAuthorityReload: leaseAssertion,
               sendDigestEmail: async () => {
                 providerCalls += 1;
-                return { data: { id: "must-not-send" } };
+                return { providerMessageId: "must-not-send" };
               },
             },
           ),
@@ -11397,7 +11401,7 @@ await check(
         assert.equal(harness.leaseCalls.length, 1);
         operationsAtProvider = harness.store.operations.length;
         leaseValid = false;
-        return { data: { id: "single-lease-provider-message" } };
+        return { providerMessageId: "single-lease-provider-message" };
       },
     });
 
@@ -12027,7 +12031,7 @@ await check(
                 }),
               sendDigestEmail: async () => {
                 providerCalls += 1;
-                return { data: { id: "must-not-send" } };
+                return { providerMessageId: "must-not-send" };
               },
             },
           ),
@@ -12108,7 +12112,7 @@ await check(
             previewDigest: async () => clone(summary),
             sendDigestEmail: async (input) => {
               providerCalls.push(clone(input));
-              return { data: { id: "must-not-send" } };
+              return { providerMessageId: "must-not-send" };
             },
           },
         ),
@@ -12182,7 +12186,7 @@ await check(
               },
               sendDigestEmail: async (input) => {
                 providerCalls.push(clone(input));
-                return { data: { id: "fresh-email-message" } };
+                return { providerMessageId: "fresh-email-message" };
               },
             },
           ),
@@ -12764,7 +12768,7 @@ await check(
               sendDigestEmail: async (input) => {
                 boundaryEvents.push("provider");
                 providerCalls.push(clone(input));
-                return { data: { id: "must-not-send" } };
+                return { providerMessageId: "must-not-send" };
               },
             },
           ),
@@ -12860,7 +12864,7 @@ await check(
             }),
             sendDigestEmail: async () => {
               providerCalls += 1;
-              return { data: { id: "must-not-send" } };
+              return { providerMessageId: "must-not-send" };
             },
           },
         ),
@@ -12945,7 +12949,7 @@ await check(
             },
             sendDigestEmail: async () => {
               providerCalls += 1;
-              return { data: { id: "must-not-send" } };
+              return { providerMessageId: "must-not-send" };
             },
           },
         ),
@@ -13075,7 +13079,7 @@ await check(
           sendDigestEmail: async (input) => {
             events.push("provider");
             providerCalls.push(clone(input));
-            return { data: { id: `provider-${testCase.kind}` } };
+            return { providerMessageId: `provider-${testCase.kind}` };
           },
         },
       );

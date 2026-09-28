@@ -62,7 +62,14 @@ function generateOtp() {
   return crypto.randomInt(100000, 1000000);
 }
 
-function buildTokenPayload(user) {
+// `client` is the usage-split claim (IMPROVEMENT-PLAN-V2-2026-09-28 Part 3):
+// 'desktop' may ONLY ever be passed here from the verified Google installed-app
+// audience check (isDesktopSignIn) — never from a request body field, which is
+// forgeable. 'extension' is the default so every existing token path (OTP and
+// extension Google sign-ins) stays backward compatible; an unexpired token
+// simply carries no client claim until its next refresh, and the auth layer
+// treats a missing claim as 'extension'.
+function buildTokenPayload(user, { client = "extension" } = {}) {
   return {
     id: user._id,
     email: user.email,
@@ -70,6 +77,7 @@ function buildTokenPayload(user) {
     accountType: user.accountType,
     firmId: user.firmId || null,
     isActive: user.isActive,
+    client,
   };
 }
 
@@ -391,7 +399,9 @@ export const googleLogin = async (req, res, next) => {
         })
       : null;
 
-    const tokenPayload = buildTokenPayload(user);
+    const tokenPayload = buildTokenPayload(user, {
+      client: isDesktopSignIn ? "desktop" : "extension",
+    });
     const jwtToken = jwt.sign(
       { ...tokenPayload, tv: user.tokenVersion || 0 },
       JWT_SECRET,

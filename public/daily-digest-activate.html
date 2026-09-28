@@ -10,7 +10,11 @@
       button { background:#1d4ed8; border:0; border-radius:6px; color:#fff; cursor:pointer; font:inherit; padding:10px 14px; }
       button:disabled { opacity:.65; cursor:wait; }
       #message { color:#4b5563; line-height:1.5; }
+      #message a { color:#1d4ed8; }
     </style>
+    <!-- The behaviour lives in an external script: the app CSP (script-src
+         'self') refuses inline scripts, so an inline version of this logic
+         silently did nothing. See daily-digest-activate.js. -->
   </head>
   <body>
     <main>
@@ -18,34 +22,6 @@
       <p id="message">Daily digest email will be sent to this address. Reminders, OTPs, and important compliance emails are already unchanged.</p>
       <button id="activate" type="button">Activate Daily Digest</button>
     </main>
-    <script>
-      const query = new URLSearchParams(location.search);
-      const user = query.get("u");
-      const token = query.get("t");
-      const button = document.getElementById("activate");
-      const message = document.getElementById("message");
-      if (!user || !token) {
-        button.disabled = true;
-        message.textContent = "This activation link is invalid or incomplete.";
-      }
-      button.addEventListener("click", async () => {
-        button.disabled = true;
-        message.textContent = "Activating your daily digest…";
-        try {
-          const response = await fetch("/api/digests/activate-daily", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ u: user, t: token }),
-          });
-          const body = await response.json().catch(() => ({}));
-          if (!response.ok || !body.ok) throw new Error(body.error || "Activation could not be completed.");
-          message.textContent = "Daily digest is active. You can change it anytime in CA PRO Toolkit > Digests.";
-          button.remove();
-        } catch (error) {
-          message.textContent = error.message || "Activation could not be completed. Please try again.";
-          button.disabled = false;
-        }
-      });
-    </script>
+    <script src="daily-digest-activate.js"></script>
   </body>
 </html>

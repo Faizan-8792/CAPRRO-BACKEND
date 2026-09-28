@@ -37,6 +37,7 @@ import {
   summarizeReconciliationItems,
   TAX_HEAD_FIELDS,
 } from "./gst-matching.service.js";
+import { csvCell } from "../utils/csv.js";
 import { userFacingMessage } from "../utils/user-facing-error.js";
 
 const GST_RECONCILIATION_JOB_KIND = "GST_RECONCILIATION";
@@ -3716,12 +3717,6 @@ export async function lockReconciliationRun({
     }
     throw error;
   }
-}
-
-function csvCell(value) {
-  let text = String(value ?? "");
-  if (/^[=+@-]/.test(text)) text = `'${text}`;
-  return `"${text.replace(/"/g, '""')}"`;
 }
 
 export async function exportReconciliationRun({ firmId, runId }) {

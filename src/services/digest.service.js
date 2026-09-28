@@ -4026,7 +4026,9 @@ export async function processDigestDeliveryJob(
         status: "DELIVERED",
         "email.state": "SENT",
         "email.providerMessageId": String(
-          response?.data?.id || response?.id || "",
+          // The shared mailer returns { deliveryId, providerMessageId } (IMPROVEMENT-PLAN-V2
+          // Part 1) — the webhook joins on this id, so it must be the provider's own.
+          response?.providerMessageId || "",
         ).slice(0, 240),
         "email.lastError": "",
         "email.sentAt": currentTime(),
@@ -4716,10 +4718,7 @@ export async function sendTestDigestNow(
   });
   return {
     summary,
-    providerMessageId: String(response?.data?.id || response?.id || "").slice(
-      0,
-      240,
-    ),
+    providerMessageId: String(response?.providerMessageId || "").slice(0, 240),
   };
 }
 

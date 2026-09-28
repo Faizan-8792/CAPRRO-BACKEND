@@ -94,6 +94,16 @@ async function seed(firmId) {
       doc.usedCount = 0;
       doc.acceptances = [];
     }
+    // WorkflowUsage (2026-09-28, IMPROVEMENT-PLAN-V2 Part 3) carries a compound unique index on
+    // (userId, client, workflow, periodDay). Two null-keyed seeds would collide exactly like the
+    // FirmInvite case above, so each seed gets a distinct userId; the other three parts of the
+    // key are constants, and the distinct userId keeps every seed row unique.
+    if (name === "WorkflowUsage") {
+      doc.userId = oid();
+      doc.client = "extension";
+      doc.workflow = "import";
+      doc.periodDay = new Date().toISOString().slice(0, 10);
+    }
     const res = await model.collection.insertOne(doc);
     seeded[name] = res.insertedId;
   }

@@ -637,10 +637,358 @@ async function loadUsageStats() {
           .join("");
       }
     }
+
+    renderClientSplit(u);
+    renderWorkflowBreakdown(u.workflowBreakdown || []);
+    renderPerUserUsage(u.perUser || []);
   } catch (err) {
     console.error("Usage stats error:", err);
     if (statusEl) statusEl.textContent = err.message || "Failed to load usage stats.";
   }
+}
+
+// ─── Client-split + per-user usage (WorkflowUsage-backed) ───────────
+const WORKFLOW_USAGE_LABELS = {
+  import: "Imports",
+  gst_recon: "GST reconciliation",
+  tds_health: "TDS health",
+  notice_case: "Notices and cases",
+  compliance_calendar: "Compliance calendar",
+  task: "Tasks",
+  digest_view: "Digest view",
+  audit_review: "Audit and assurance",
+  export: "Exports",
+  ocr_consent: "OCR (consented)",
+  downloader_run: "GST downloader runs",
+};
+
+function renderClientSplit(u) {
+  const gridEl = qs("clientSplitGrid");
+  const chartEl = qs("clientSplitChart");
+  const split = u.clientSplit || {};
+  if (!gridEl || !chartEl) return;
+
+  const cards = [
+    { key: "daily", label: "Today", split: split.daily },
+    { key: "weekly", label: "Last 7 days", split: split.weekly },
+    { key: "monthly", label: "Last 30 days", split: split.monthly },
+  ];
+  gridEl.innerHTML = cards
+    .map((c) => {
+      const desktop = c.split?.desktop ?? 0;
+      const extension = c.split?.extension ?? 0;
+      return `
+        <div style="flex:1;min-width:140px;border:1px solid var(--border);border-radius:8px;padding:10px 12px;">
+          <div style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">${c.label}</div>
+          <div style="display:flex;gap:14px;margin-top:4px;">
+            <div><span style="font-size:18px;font-weight:700;color:var(--text);">${desktop}</span><span style="font-size:10.5px;color:var(--muted);display:block;">🖥 Desktop</span></div>
+            <div><span style="font-size:18px;font-weight:700;color:var(--text);">${extension}</span><span style="font-size:10.5px;color:var(--muted);display:block;">🧩 Extension</span></div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  const days = u.dailyActivityByClient || [];
+  if (!days.length) {
+    chartEl.innerHTML = `<div style="color:var(--muted);font-size:12px;font-style:italic;padding:14px 0;">No workflow usage recorded yet — rows appear once workflows run on the new tracking</div>`;
+    return;
+  }
+  const max = Math.max(...days.map((d) => Math.max(d.desktop, d.extension)), 1);
+  chartEl.innerHTML = days
+    .map((d) => {
+      const hD = Math.max(6, Math.round((d.desktop / max) * 80));
+      const hE = Math.max(6, Math.round((d.extension / max) * 80));
+      const dayLabel = (d._id || "").slice(5);
+      return `
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;" title="${d._id}: ${d.desktop} desktop, ${d.extension} extension">
+          <div style="display:flex;gap:2px;align-items:flex-end;">
+            <div style="width:9px;height:${hD}px;background:var(--teal);border-radius:3px 3px 0 0;"></div>
+            <div style="width:9px;height:${hE}px;background:var(--gold,#d9a441);border-radius:3px 3px 0 0;"></div>
+          </div>
+          <div style="font-size:9.5px;color:var(--muted);font-weight:600">${dayLabel}</div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderWorkflowBreakdown(rows) {
+  const el = qs("workflowBreakdownList");
+  if (!el) return;
+  if (!rows.length) {
+    el.innerHTML = `<div style="color:var(--muted);font-style:italic;">No workflow usage recorded yet</div>`;
+    return;
+  }
+  el.innerHTML = rows
+    .map(
+      (row, i) => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:${i < rows.length - 1 ? "1px solid var(--border)" : "none"};">
+          <div>${escapeHtml(WORKFLOW_USAGE_LABELS[row.workflow] || row.workflow)}</div>
+          <div style="text-align:right;">
+            <span style="font-weight:700;color:var(--teal-dark);">${row.weekActive}</span>
+            <span style="font-size:10.5px;color:var(--muted);margin-left:4px;">users · ${row.totalCounts} runs${row.errorCounts ? ` · ${row.errorCounts} errored` : ""}</span>
+          </div>
+        </div>`,
+    )
+    .join("");
+}
+
+// ─── Emails page (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1) ────────────
+// One list request carries the summary for the same window, so the page load
+// costs a single call; the detail drawer and the suppressions list load only
+// when opened. Recipient search hashes the exact address client-side — the
+// server never receives, stores, or displays a raw address.
+const emailsPageState = { page: 1, pages: 1, loaded: false, suppressionsLoaded: false, lastRows: [] };
+
+const EMAIL_TYPE_LABELS = {
+  otp: "OTP", reminder: "Reminder", daily_digest: "Daily digest",
+  weekly_digest: "Weekly digest", test_digest: "Test digest",
+  digest_activation: "Digest activation", test_email: "Test email",
+  reminder_alert: "Delivery alert", rollout_notice: "Rollout notice",
+  campaign: "Campaign", other: "Other",
+};
+const EMAIL_STATUS_CLASSES = {
+  sent: "text-muted", delivered: "text-success", queued: "text-muted",
+  bounced: "text-danger", complained: "text-danger", failed: "text-danger",
+};
+
+async function sha256Hex(text) {
+  const bytes = new TextEncoder().encode(String(text).trim().toLowerCase());
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function emailsQueryString(includePage) {
+  const from = qs("emailsFrom")?.value || "";
+  const to = qs("emailsTo")?.value || "";
+  const type = qs("emailsType")?.value || "";
+  const status = qs("emailsStatusFilter")?.value || "";
+  const recipient = qs("emailsRecipient")?.value || "";
+  const params = new URLSearchParams();
+  if (from) params.set("from", `${from}T00:00:00Z`);
+  if (to) params.set("to", `${to}T23:59:59Z`);
+  if (type) params.set("types", type);
+  if (status) params.set("statuses", status);
+  if (recipient) params.set("recipientHash", await sha256Hex(recipient));
+  if (includePage) params.set("page", String(emailsPageState.page));
+  const q = params.toString();
+  return q ? `?${q}` : "";
+}
+
+async function loadEmailsPage({ resetPage = true } = {}) {
+  const statusEl = qs("emailsStatus");
+  const body = qs("emailsBody");
+  if (!body) return;
+  if (resetPage) emailsPageState.page = 1;
+  try {
+    if (statusEl) statusEl.textContent = "Loading emails...";
+    const query = await emailsQueryString(true);
+    const data = await api(`/super/emails${query}`);
+    if (!data.ok) throw new Error("Failed to load emails");
+    emailsPageState.loaded = true;
+    emailsPageState.pages = data.pages || 1;
+    emailsPageState.lastRows = data.emails || [];
+    if (statusEl) statusEl.textContent = "";
+    renderEmailsSummary(data.summary || {});
+    renderEmailsRows(emailsPageState.lastRows);
+    const info = qs("emailsPageInfo");
+    if (info) info.textContent = `Page ${data.page} of ${data.pages} — ${data.total} email(s)`;
+    const prev = qs("emailsPrevBtn");
+    const next = qs("emailsNextBtn");
+    if (prev) prev.disabled = (data.page || 1) <= 1;
+    if (next) next.disabled = (data.page || 1) >= data.pages;
+  } catch (err) {
+    if (statusEl) statusEl.textContent = err.message || "Failed to load emails.";
+  }
+}
+
+function renderEmailsSummary(summary) {
+  const strip = qs("emailsSummaryStrip");
+  const banner = qs("emailsBounceBanner");
+  if (!strip) return;
+  const cards = [
+    ["Sent", summary.sent], ["Delivered", summary.delivered], ["Queued", summary.queued],
+    ["Bounced", summary.bounced], ["Complained", summary.complained], ["Failed", summary.failed],
+    ["Bounce rate", `${summary.bounceRate || 0}%`],
+  ];
+  strip.innerHTML = cards
+    .map(([label, value]) => `
+      <div class="stat-card stat-primary">
+        <div class="stat-label">${label}</div>
+        <div class="stat-value">${value ?? 0}</div>
+      </div>`)
+    .join("");
+  if (banner) {
+    // An elevated bounce rate is how a dead domain or a stale list shows up.
+    const tooHigh = (summary.bounceRate || 0) > 5;
+    banner.hidden = !tooHigh;
+    if (tooHigh) {
+      banner.textContent = `Bounce rate for this window is ${summary.bounceRate}% — check the suppressed addresses and the sending domain.`;
+    }
+  }
+}
+
+function renderEmailsRows(rows) {
+  const body = qs("emailsBody");
+  if (!body) return;
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="8" class="text-muted" style="font-style:italic;">No emails in this window. Adjust the filters, or note that records start from this release (Resend keeps only 30 days of history).</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows
+    .map((row) => {
+      const when = row.sentAt || row.createdAt;
+      const time = when ? new Date(when).toISOString().slice(0, 16).replace("T", " ") : "—";
+      const firm = row.firmId?.handle || (row.firmId?.displayName ? String(row.firmId.displayName) : "—");
+      const statusClass = EMAIL_STATUS_CLASSES[row.status] || "";
+      const providerId = row.providerMessageId || "";
+      return `
+        <tr>
+          <td>${time}</td>
+          <td>${EMAIL_TYPE_LABELS[row.type] || escapeHtml(row.type)}</td>
+          <td>••••${escapeHtml(row.recipientEmailLast4 || "")}</td>
+          <td>${escapeHtml(firm)}</td>
+          <td class="${statusClass}" style="font-weight:700;">${escapeHtml(row.status || "—")}</td>
+          <td>${escapeHtml(row.errorClass || "—")}</td>
+          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(providerId)}">${providerId ? `${escapeHtml(providerId.slice(0, 10))}…` : "—"}</td>
+          <td><button class="btn btn-sm btn-outline-secondary email-detail-btn" data-id="${String(row._id)}">Details</button></td>
+        </tr>`;
+    })
+    .join("");
+  body.querySelectorAll(".email-detail-btn").forEach((btn) => {
+    btn.addEventListener("click", () => openEmailDetail(btn.getAttribute("data-id")));
+  });
+}
+
+async function openEmailDetail(id) {
+  const overlay = qs("emailDetailOverlay");
+  const bodyEl = qs("emailDetailBody");
+  if (!overlay || !bodyEl) return;
+  overlay.hidden = false;
+  bodyEl.innerHTML = `<div class="text-muted">Loading...</div>`;
+  try {
+    const data = await api(`/super/emails/${encodeURIComponent(id)}`);
+    if (!data.ok) throw new Error("Failed to load email detail");
+    const row = data.email;
+    const timeline = (row.timeline || [])
+      .map((entry) => `<li><strong>${escapeHtml(entry.event)}</strong> — ${entry.at ? new Date(entry.at).toISOString().replace("T", " ").slice(0, 19) + " UTC" : "—"}</li>`)
+      .join("");
+    bodyEl.innerHTML = `
+      <dl class="row mb-3">
+        <dt class="col-5">Type</dt><dd class="col-7">${EMAIL_TYPE_LABELS[row.type] || escapeHtml(row.type)}</dd>
+        <dt class="col-5">Status</dt><dd class="col-7">${escapeHtml(row.status)}</dd>
+        <dt class="col-5">Error class</dt><dd class="col-7">${escapeHtml(row.errorClass || "—")}</dd>
+        <dt class="col-5">To (suffix only)</dt><dd class="col-7">••••${escapeHtml(row.recipientEmailLast4 || "")}</dd>
+        <dt class="col-5">Provider id</dt><dd class="col-7" style="word-break:break-all;">${escapeHtml(row.providerMessageId || "—")}</dd>
+        <dt class="col-5">Source</dt><dd class="col-7">${row.backfilled ? "Backfilled from provider history" : "Recorded at send time"}</dd>
+      </dl>
+      <h6 style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:var(--muted);">Timeline</h6>
+      <ul class="mb-0">${timeline || "<li>No events recorded</li>"}</ul>
+    `;
+  } catch (err) {
+    bodyEl.innerHTML = `<div class="text-danger">${escapeHtml(err.message || "Failed to load email detail.")}</div>`;
+  }
+}
+
+async function loadEmailSuppressions() {
+  const body = qs("suppressionsBody");
+  if (!body) return;
+  try {
+    const data = await api("/super/emails/suppressions");
+    if (!data.ok) throw new Error("Failed to load suppressions");
+    const rows = data.suppressions || [];
+    emailsPageState.suppressionsLoaded = true;
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="4" class="text-muted" style="font-style:italic;">No suppressed addresses.</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows
+      .map((row) => `
+        <tr>
+          <td>${escapeHtml(row.reason)}</td>
+          <td>${row.createdAt ? new Date(row.createdAt).toISOString().slice(0, 10) : "—"}</td>
+          <td>${row.firmId ? "This firm" : "Global"}</td>
+          <td><button class="btn btn-sm btn-outline-danger suppression-remove-btn" data-id="${String(row.id)}">Remove</button></td>
+        </tr>`)
+      .join("");
+    body.querySelectorAll(".suppression-remove-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!window.confirm("Remove this do-not-email record? Future emails to this address will no longer be blocked.")) return;
+        btn.disabled = true;
+        try {
+          await api(`/super/emails/suppressions/${encodeURIComponent(btn.getAttribute("data-id"))}`, { method: "DELETE" });
+          await loadEmailSuppressions();
+        } catch (err) {
+          alert(err.message || "Failed to remove suppression.");
+          btn.disabled = false;
+        }
+      });
+    });
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="4" class="text-muted">${escapeHtml(err.message || "Failed to load suppressions.")}</td></tr>`;
+  }
+}
+
+function bindEmailsPageControls() {
+  const apply = qs("emailsApplyBtn");
+  if (apply) apply.addEventListener("click", () => loadEmailsPage());
+  const reset = qs("emailsResetBtn");
+  if (reset) {
+    reset.addEventListener("click", () => {
+      for (const id of ["emailsFrom", "emailsTo", "emailsType", "emailsStatusFilter", "emailsRecipient"]) {
+        const el = qs(id);
+        if (el) el.value = "";
+      }
+      loadEmailsPage();
+    });
+  }
+  const prev = qs("emailsPrevBtn");
+  if (prev) prev.addEventListener("click", () => { emailsPageState.page -= 1; loadEmailsPage({ resetPage: false }); });
+  const next = qs("emailsNextBtn");
+  if (next) next.addEventListener("click", () => { emailsPageState.page += 1; loadEmailsPage({ resetPage: false }); });
+  const close = qs("emailDetailCloseBtn");
+  if (close) close.addEventListener("click", () => { const o = qs("emailDetailOverlay"); if (o) o.hidden = true; });
+  const csv = qs("emailsCsvBtn");
+  if (csv) {
+    csv.addEventListener("click", () => {
+      const rows = emailsPageState.lastRows || [];
+      const headers = ["Date/time (UTC)", "Type", "To (suffix)", "Firm", "Status", "Error class", "Provider id"];
+      const data = rows.map((row) => [
+        (row.sentAt || row.createdAt) ? new Date(row.sentAt || row.createdAt).toISOString() : "",
+        row.type || "",
+        row.recipientEmailLast4 || "",
+        row.firmId?.handle || row.firmId?.displayName || "",
+        row.status || "",
+        row.errorClass || "",
+        row.providerMessageId || "",
+      ]);
+      globalThis.CaProFiles.downloadCsv("email-deliveries.csv", headers, data);
+    });
+  }
+}
+
+function renderPerUserUsage(rows) {
+  const body = qs("perUserUsageBody");
+  if (!body) return;
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="6" style="color:var(--muted);font-style:italic;">No usage rows yet — data appears as workflows run after this release</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows
+    .map((row) => {
+      const lastSeen = row.lastSeenAt ? new Date(row.lastSeenAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—";
+      return `
+        <tr>
+          <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(row.email || row.name || String(row.userId))}</td>
+          <td>${row.desktopCount || 0}</td>
+          <td>${row.extensionCount || 0}</td>
+          <td style="font-weight:700;color:var(--teal-dark);">${row.totalCount || 0}</td>
+          <td>${row.workflows || 0}</td>
+          <td style="color:var(--muted);">${lastSeen}</td>
+        </tr>`;
+    })
+    .join("");
 }
 
 // ─── Provider Usage (O10 spend meter/cap) ────────────────────────────
@@ -999,7 +1347,10 @@ async function deleteFirmUserApi(firmId, userId) {
 }
 
 async function deleteFirmApi(firmId) {
-  await api(`/super/firms/${encodeURIComponent(firmId)}`, { method: "DELETE" });
+  // The server refuses an erase without this exact confirmation token in the
+  // body (super.controller deleteFirmForSuper) — sending it is what makes the
+  // typed-confirmation flow below reach the endpoint instead of a 400.
+  await api(`/super/firms/${encodeURIComponent(firmId)}`, { method: "DELETE", body: { confirmation: "ERASE_FIRM_DATA" } });
 }
 
 function renderFirmRow(firm) {
@@ -1236,9 +1587,11 @@ async function handleEditFirmPlan(firmId, rowEl) {
 }
 
 async function handleDeleteFirm(firmId, rowEl) {
-  if (!window.confirm("Delete this firm? All linked users will be detached.")) return;
-  const text = window.prompt("Type DELETE to confirm:", "");
-  if (text !== "DELETE") { alert("Cancelled (you did not type DELETE)."); return; }
+  // The server's erase cascades every firm-scoped collection and is irreversible;
+  // the typed token below is the same token the server validates.
+  if (!window.confirm("Erase this firm and ALL of its data (tasks, reminders, imports, reconciliations, members' access)? This cannot be undone.")) return;
+  const text = window.prompt("Type ERASE_FIRM_DATA to confirm:", "");
+  if (text !== "ERASE_FIRM_DATA") { alert("Cancelled (you did not type ERASE_FIRM_DATA)."); return; }
 
   try {
     await deleteFirmApi(firmId);
@@ -1696,6 +2049,7 @@ async function initSuperPage() {
     bindAppConfigHandlers();
     bindUserDirectoryControls();
     bindTermsAcceptanceControls();
+    bindEmailsPageControls();
     await Promise.all([
       loadAppConfigSection(),
       loadUsageStats(),
@@ -2354,6 +2708,7 @@ const SUPER_PAGES = [
   "controls",
   "overview",
   "analytics",
+  "emails",
   "users",
   "firms",
   "approvals",
@@ -2551,8 +2906,21 @@ function superInitSortableTables() {
 function superInitNavigation() {
   if (!document.querySelector(".sidebar")) return;
   superShowPage(window.location.hash || `#${SUPER_DEFAULT_PAGE}`);
+  // The Emails page loads its own data on first visit, not at boot: the boot
+  // path is already nine requests against a 50-per-15-minute limiter.
+  const visitPage = (hash) => {
+    if (superShowPage(hash) === "emails" && !emailsPageState.loaded) {
+      loadEmailsPage();
+      loadEmailSuppressions();
+    }
+  };
+  visitPage(window.location.hash || `#${SUPER_DEFAULT_PAGE}`);
   window.addEventListener("hashchange", () => {
-    superShowPage(window.location.hash);
+    const current = superShowPage(window.location.hash);
+    if (current === "emails" && !emailsPageState.loaded) {
+      loadEmailsPage();
+      loadEmailSuppressions();
+    }
     // Landing on a section should start at its top, not wherever the previous
     // section happened to be scrolled to.
     const content = document.querySelector(".content");

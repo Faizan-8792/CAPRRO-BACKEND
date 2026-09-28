@@ -174,6 +174,37 @@ async function pseudonymiseUsers(model, firmId) {
   return changed;
 }
 
+/**
+ * PSEUDONYMISE EmailDelivery (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1).
+ *
+ * The row survives because the send facts are operational history, but the recipient link
+ * goes: recipientEmailHash (sha256 of the address) and recipientEmailLast4 (display
+ * suffix) are both nulled. A repeated run matches nothing, so this is idempotent.
+ */
+async function pseudonymiseEmailDeliveries(model, firmId) {
+  const res = await model.collection.updateMany(
+    { firmId, recipientEmailHash: { $ne: null } },
+    { $set: { recipientEmailHash: null, recipientEmailLast4: "" } },
+  );
+  return res?.modifiedCount ?? 0;
+}
+
+/**
+ * PSEUDONYMISE EmailSuppression.
+ *
+ * The do-not-email decision is retained deliberately — dropping it would let an address
+ * that bounced or complained be emailed again by whatever outlives this firm. The hash is
+ * replaced with a neutral marker so the row no longer points at the erased contact while
+ * the reason and dates keep the protection auditable.
+ */
+async function pseudonymiseEmailSuppressions(model, firmId) {
+  const res = await model.collection.updateMany(
+    { firmId },
+    { $set: { emailHash: `firm-erased-${String(firmId)}` } },
+  );
+  return res?.modifiedCount ?? 0;
+}
+
 /** RETAIN: touch nothing. The count is recorded so the receipt states what was kept. */
 async function countRetained(model, firmId) {
   return model.countDocuments({ firmId });
@@ -194,6 +225,8 @@ async function runStep(row, firmId) {
   if (row.strategy === STRATEGY.PSEUDONYMISE) {
     if (row.collectionName === "ActivityEvent") return pseudonymiseActivityEvents(model, firmId);
     if (row.collectionName === "User") return pseudonymiseUsers(model, firmId);
+    if (row.collectionName === "EmailDelivery") return pseudonymiseEmailDeliveries(model, firmId);
+    if (row.collectionName === "EmailSuppression") return pseudonymiseEmailSuppressions(model, firmId);
     const err = new Error(`No pseudonymisation defined for ${row.collectionName}`);
     err.code = "ERASURE_PSEUDONYMISE_UNDEFINED";
     throw err;

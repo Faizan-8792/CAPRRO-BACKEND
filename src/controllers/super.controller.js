@@ -5,12 +5,16 @@ import Firm from "../models/Firm.js";
 import Task from "../models/Task.js";
 import Reminder from "../models/Reminder.js";
 import FirmMembership from "../models/FirmMembership.js";
+import WorkflowUsage from "../models/WorkflowUsage.js";
+import EmailDelivery from "../models/EmailDelivery.js";
+import EmailSuppression from "../models/EmailSuppression.js";
 import {
   getDeepSelfTestRun,
   getLatestDeepSelfTestRun,
   startDeepSelfTest,
 } from "../services/self-test.service.js";
 import { sendTestEmail } from "../services/email.service.js";
+import { safeRecordActivity } from "../services/activity.service.js";
 import {
   eraseFirm,
   buildErasurePlan,
@@ -66,7 +70,17 @@ function serializeFirmForSuper(firm) {
   return responseFirm;
 }
 
-// 0a) Extension Usage Analytics (DAU/WAU/MAU)
+// 0a) Usage analytics. Two bases, stated plainly (PLAN.md §27.2 caption discipline):
+//
+// 1. LEGACY `dau/wau/mau/dailyActivity/topUsers` derive from User.lastActiveAt and the
+//    throttled totalApiCalls counter. lastActiveAt can never be activation evidence (§27.3) and
+//    the dailyActivity series only buckets a user onto their LAST active day, so these are
+//    returned unchanged for continuity but flagged `basis: "lastActiveAt-approximate"`.
+//
+// 2. NEW client-split analytics read WorkflowUsage (IMPROVEMENT-PLAN-V2-2026-09-28 Part 3):
+//    real per-day distinct-user series per client type (desktop/extension), DAU/WAU/MAU per
+//    client type, per-workflow actives, and the per-user table (super-admin only by route guard)
+//    that answers "who uses more, who uses less". Content-free by model contract: counts only.
 export const getUsageStats = async (req, res, next) => {
   try {
     assertSuper(req.user);
@@ -77,6 +91,14 @@ export const getUsageStats = async (req, res, next) => {
     const sevenDay = new Date(now.getTime() - 7 * dayMs);
     const thirtyDay = new Date(now.getTime() - 30 * dayMs);
     const ninetyDay = new Date(now.getTime() - 90 * dayMs);
+
+    // UTC day strings matching WorkflowUsage.periodDay, inclusive window.
+    const dayKey = (date) => date.toISOString().slice(0, 10);
+    const todayKey = dayKey(now);
+    const weekAgoKey = dayKey(new Date(now.getTime() - 6 * dayMs)); // 7 calendar days incl. today
+    const monthAgoKey = dayKey(new Date(now.getTime() - 29 * dayMs)); // 30 incl. today
+    const fourteenAgoKey = dayKey(new Date(now.getTime() - 13 * dayMs));
+    const perUserWindowKey = dayKey(new Date(now.getTime() - 29 * dayMs));
 
     const [dau, wau, mau, qau, totalEverActive, totalUsers, totalApiCallsAgg] =
       await Promise.all([
@@ -119,9 +141,140 @@ export const getUsageStats = async (req, res, next) => {
       .populate("firmId", "displayName handle")
       .lean();
 
+    // ── Client-split analytics from WorkflowUsage (real per-workflow recording) ──
+
+    // Distinct users per client type per period: a user active on both clients
+    // in one day counts once under each — that is the split, not a dedupe.
+    const activesByClient = async (fromKey) => {
+      const rows = await WorkflowUsage.aggregate([
+        { $match: { periodDay: { $gte: fromKey } } },
+        {
+          $group: {
+            _id: { client: "$client", userId: "$userId" },
+          },
+        },
+        { $group: { _id: "$_id.client", users: { $sum: 1 } } },
+      ]);
+      const out = { desktop: 0, extension: 0 };
+      for (const row of rows) out[row._id] = row.users;
+      return out;
+    };
+
+    const [dauByClient, wauByClient, mauByClient] = await Promise.all([
+      activesByClient(todayKey),
+      activesByClient(weekAgoKey),
+      activesByClient(monthAgoKey),
+    ]);
+
+    // Real 14-day per-day series: distinct users recorded per day per client.
+    const dailyActivityByClientRows = await WorkflowUsage.aggregate([
+      { $match: { periodDay: { $gte: fourteenAgoKey } } },
+      {
+        $group: {
+          _id: { day: "$periodDay", client: "$client" },
+          users: { $addToSet: "$userId" },
+        },
+      },
+      { $project: { _id: 0, day: "$_id.day", client: "$_id.client", count: { $size: "$users" } } },
+      { $sort: { day: 1 } },
+    ]);
+    const dailyByClientMap = new Map();
+    for (const row of dailyActivityByClientRows) {
+      if (!dailyByClientMap.has(row.day)) {
+        dailyByClientMap.set(row.day, { _id: row.day, desktop: 0, extension: 0 });
+      }
+      dailyByClientMap.get(row.day)[row.client] = row.count;
+    }
+    const dailyActivityByClient = [...dailyByClientMap.values()];
+
+    // Per-workflow actives and volume over the 30-day window.
+    const workflowBreakdown = await WorkflowUsage.aggregate([
+      { $match: { periodDay: { $gte: monthAgoKey } } },
+      {
+        $group: {
+          _id: "$workflow",
+          users: { $addToSet: "$userId" },
+          totalCounts: { $sum: "$count" },
+          errorCounts: { $sum: "$outcomeCounts.error" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          workflow: "$_id",
+          weekActive: { $size: "$users" },
+          totalCounts: 1,
+          errorCounts: 1,
+        },
+      },
+      { $sort: { totalCounts: -1 } },
+    ]);
+
+    // Per-user usage (owner's "who uses more, who uses less"), 30-day window,
+    // biggest first. Super-admin-only endpoint: firm admins never receive this
+    // (PLAN.md forbids employee ranking), and that is enforced by the route
+    // guard, not by UI absence.
+    const perUserRows = await WorkflowUsage.aggregate([
+      { $match: { periodDay: { $gte: perUserWindowKey } } },
+      {
+        $group: {
+          _id: { userId: "$userId", client: "$client" },
+          count: { $sum: "$count" },
+          lastSeenAt: { $max: "$lastSeenAt" },
+          workflows: { $addToSet: "$workflow" },
+        },
+      },
+      {
+        $group: {
+          _id: "$_id.userId",
+          desktopCount: {
+            $sum: { $cond: [{ $eq: ["$_id.client", "desktop"] }, "$count", 0] },
+          },
+          extensionCount: {
+            $sum: { $cond: [{ $eq: ["$_id.client", "extension"] }, "$count", 0] },
+          },
+          lastSeenAt: { $max: "$lastSeenAt" },
+          workflows: { $addToSet: "$workflows" },
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "_id",
+          foreignField: "_id",
+          as: "user",
+        },
+      },
+      { $unwind: { path: "$user", preserveNullAndEmpty: true } },
+      {
+        $project: {
+          _id: 0,
+          userId: "$_id",
+          email: "$user.email",
+          name: "$user.name",
+          desktopCount: 1,
+          extensionCount: 1,
+          totalCount: { $add: ["$desktopCount", "$extensionCount"] },
+          workflows: {
+            $size: {
+              $reduce: {
+                input: "$workflows",
+                initialValue: [],
+                in: { $setUnion: ["$$value", "$$this"] },
+              },
+            },
+          },
+          lastSeenAt: 1,
+        },
+      },
+      { $sort: { totalCount: -1, lastSeenAt: -1 } },
+      { $limit: 100 },
+    ]);
+
     return res.json({
       ok: true,
       usage: {
+        basis: "mixed — legacy fields are lastActiveAt-approximate; clientSplit/dailyActivityByClient/workflowBreakdown/perUser are WorkflowUsage counters (server-verified)",
         dau,
         wau,
         mau,
@@ -135,6 +288,11 @@ export const getUsageStats = async (req, res, next) => {
           totalEverActive > 0 ? Math.round((wau / totalEverActive) * 100) : 0,
         dailyActivity,
         topUsers,
+        clientSplit: { daily: dauByClient, weekly: wauByClient, monthly: mauByClient },
+        dailyActivityByClient,
+        workflowBreakdown,
+        perUser: perUserRows,
+        perUserWindowDays: 30,
       },
     });
   } catch (err) {
@@ -754,6 +912,18 @@ export const updateFirmPlan = async (req, res, next) => {
   }
 };
 
+// Resolves a user through their membership row in the *target firm from the
+// request* — the multi-firm source of truth. Any status qualifies: the roster
+// lists ACTIVE members only, but a super admin may still need to tombstone the
+// account of a previously removed member.
+async function findUserScopedToFirm(firmId, userId) {
+  const membership = await FirmMembership.findOne({ firmId, userId })
+    .select("_id")
+    .lean();
+  if (!membership) return null;
+  return User.findOne({ _id: userId }).select("_id email role isActive");
+}
+
 // 7) Update a user's role / active flag inside a firm (super admin only)
 export const updateFirmUserForSuper = async (req, res, next) => {
   try {
@@ -762,7 +932,12 @@ export const updateFirmUserForSuper = async (req, res, next) => {
     const { firmId, userId } = req.params;
     const { role, isActive } = req.body || {};
 
-    const user = await User.findOne({ _id: userId, firmId });
+    // Membership is the multi-firm source of truth (listFirmUsersForSuper reads the
+    // same table). The legacy User.firmId only reflects one workspace, so scoping on
+    // it 404'd any member whose membership points at this firm while their embedded
+    // workspace field holds another firm — exactly the cross-firm edit this route
+    // exists for.
+    const user = await findUserScopedToFirm(firmId, userId);
     if (!user) {
       return res
         .status(404)
@@ -800,7 +975,8 @@ export const deleteFirmUserForSuper = async (req, res, next) => {
 
     const { firmId, userId } = req.params;
 
-    const user = await User.findOne({ _id: userId, firmId });
+    // Same membership-scoped lookup as the update route above.
+    const user = await findUserScopedToFirm(firmId, userId);
     if (!user) {
       return res
         .status(404)
@@ -1027,7 +1203,7 @@ export const sendSuperTestEmail = async (req, res, next) => {
       return res.json({
         ok: true,
         to,
-        id: result?.data?.id || result?.id || "",
+        id: result?.providerMessageId || "",
       });
     } catch (mailErr) {
       // Surface the real provider error to the admin diagnostic instead of a 500,
@@ -1085,5 +1261,171 @@ export const sendTestDigest = async (req, res, next) => {
     }
   } catch (err) {
     return next(err);
+  }
+};
+
+// 16) Email observability (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1).
+//
+// One request returns the filtered list AND the summary for the same window:
+// the panel loads the whole page with a single call (superLimiter budget).
+// Recipient addresses exist only as sha256 hashes — the client hashes an
+// exact-address search input before sending it, so a raw address never
+// reaches the server for search and none is stored for display.
+
+function parseEmailDateBoundary(value, fallback) {
+  if (!value) return fallback;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? fallback : new Date(parsed);
+}
+
+const EMAILS_PAGE_LIMIT = 25;
+const EMAILS_MAX_LIMIT = 100;
+
+export const listEmailDeliveriesForSuper = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+
+    const now = new Date();
+    const defaultFrom = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const from = parseEmailDateBoundary(req.query.from, defaultFrom);
+    const toRaw = parseEmailDateBoundary(req.query.to, now);
+    const to = new Date(Math.min(toRaw.getTime(), now.getTime()));
+
+    const filter = { sentAt: { $gte: from, $lte: to } };
+    const types = String(req.query.types || "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    if (types.length) filter.type = { $in: types };
+    const statuses = String(req.query.statuses || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (statuses.length) filter.status = { $in: statuses };
+    if (req.query.firmId && mongoose.isValidObjectId(req.query.firmId)) {
+      filter.firmId = req.query.firmId;
+    }
+    // Exact-address search: the client hashes the address (sha256 of the
+    // lowercased trimmed value) so no raw address is sent or stored.
+    const hash = String(req.query.recipientHash || "").trim().toLowerCase();
+    if (/^[0-9a-f]{64}$/.test(hash)) filter.recipientEmailHash = hash;
+
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(EMAILS_MAX_LIMIT, Math.max(1, Number(req.query.limit) || EMAILS_PAGE_LIMIT));
+
+    const [rows, total, summaryRows] = await Promise.all([
+      EmailDelivery.find(filter)
+        .sort({ sentAt: -1, _id: 1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select("type recipientEmailHash recipientEmailLast4 subjectTemplateName providerMessageId status errorClass sentAt deliveredAt lastEventAt firmId userId meta backfilled createdAt")
+        .populate("firmId", "displayName handle")
+        .lean(),
+      EmailDelivery.countDocuments(filter),
+      EmailDelivery.aggregate([
+        { $match: filter },
+        { $group: { _id: "$status", count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    const summary = { sent: 0, delivered: 0, bounced: 0, complained: 0, failed: 0, queued: 0 };
+    for (const row of summaryRows) {
+      if (row._id in summary) summary[row._id] = row.count;
+    }
+    const attempts = summary.sent + summary.delivered + summary.bounced + summary.complained;
+    const bounceRate = attempts > 0 ? Math.round(((summary.bounced + summary.complained) / attempts) * 100) : 0;
+
+    return res.json({
+      ok: true,
+      emails: rows,
+      page,
+      limit,
+      total,
+      pages: Math.ceil(total / limit) || 1,
+      summary: { ...summary, bounceRate, window: { from: from.toISOString(), to: to.toISOString() } },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getEmailDeliveryForSuper = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(404).json({ ok: false, error: "Email delivery not found" });
+    }
+    const row = await EmailDelivery.findById(id)
+      .select("-recipientEmailHash")
+      .populate("firmId", "displayName handle")
+      .lean();
+    if (!row) {
+      return res.status(404).json({ ok: false, error: "Email delivery not found" });
+    }
+    // The timeline is the row's own lifecycle — no provider call is made here.
+    const timeline = [];
+    if (row.backfilled) timeline.push({ event: "backfilled", at: row.sentAt || row.createdAt });
+    if (row.sentAt) timeline.push({ event: "sent", at: row.sentAt });
+    if (row.deliveredAt) timeline.push({ event: "delivered", at: row.deliveredAt });
+    if (row.status === "bounced" || row.status === "complained" || row.status === "failed") {
+      timeline.push({ event: row.status, at: row.lastEventAt || row.updatedAt });
+    }
+    return res.json({ ok: true, email: { ...row, timeline } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const listEmailSuppressionsForSuper = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    const rows = await EmailSuppression.find({})
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
+    return res.json({
+      ok: true,
+      // The hash is the row's key, not a display value; the client shows the
+      // reason, date, and a removable id only.
+      suppressions: rows.map((row) => ({
+        id: row._id,
+        reason: row.reason,
+        firmId: row.firmId || null,
+        createdBy: row.createdBy || null,
+        createdAt: row.createdAt,
+      })),
+      truncated: rows.length >= 200,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteEmailSuppressionForSuper = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(404).json({ ok: false, error: "Suppression not found" });
+    }
+    const removed = await EmailSuppression.findByIdAndDelete(id);
+    if (!removed) {
+      return res.status(404).json({ ok: false, error: "Suppression not found" });
+    }
+    // Audited: ActivityEvent keeps the operational trail for super-admin actions.
+    await safeRecordActivity({
+      userId: req.user.id,
+      firmId: null,
+      action: "EMAIL_SUPPRESSION_REMOVED",
+      entityType: "EmailSuppression",
+      entityId: String(id),
+      beforeSummary: null,
+      afterSummary: "Super admin removed a do-not-email record",
+      source: "super-panel",
+    }).catch(() => {});
+    return res.json({ ok: true });
+  } catch (err) {
+    next(err);
   }
 };

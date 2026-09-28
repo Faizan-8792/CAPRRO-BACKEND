@@ -289,7 +289,7 @@ async function loadTodayReminders() {
         const reminders = resp?.reminders || [];
 
         if (!reminders.length) {
-            listEl.innerHTML = "<li class='text-muted'>No reminders are due tomorrow.</li>";
+            listEl.innerHTML = "<li class='text-muted'>No reminders are due today.</li>";
             if (statusEl) statusEl.textContent = '';
             return;
         }
@@ -304,7 +304,7 @@ async function loadTodayReminders() {
             .join('');
 
         if (statusEl) {
-            statusEl.textContent = `${reminders.length} reminder${reminders.length === 1 ? '' : 's'} due tomorrow.`;
+            statusEl.textContent = `${reminders.length} reminder${reminders.length === 1 ? '' : 's'} due today.`;
         }
     } catch (error) {
         console.error('Upcoming reminders load error:', error);

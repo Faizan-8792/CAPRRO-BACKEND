@@ -1,25 +1,14 @@
 // src/services/email.service.js
+//
+// All sends route through the shared mailer (services/mailer.js) — one Resend
+// client, suppression checking, and an EmailDelivery row per send
+// (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1). This module keeps only what its
+// callers and tests care about: content building, validation, and the
+// call-signature contract.
 
-import { Resend } from "resend";
-
-/**
- * Lazy Resend client — initialized on first use so missing env var
- * doesn't crash the module at import time.
- */
-let _resend = null;
-function getResend() {
-  if (!_resend) {
-    const key = process.env.RESEND_API_KEY;
-    if (!key) throw new Error("RESEND_API_KEY env var is required");
-    _resend = new Resend(key);
-  }
-  return _resend;
-}
-
-/**
- * VERIFIED sender (must match verified domain in Resend)
- */
-const FROM_EMAIL = "CA PRO Toolkit <noreply@caprotoolkit.in>";
+import {
+  sendEmail as recordAndSend,
+} from "./mailer.js";
 
 /**
  * ================================
@@ -32,11 +21,7 @@ export async function sendOtpEmail(toEmail, otp) {
       throw new Error("sendOtpEmail: toEmail and otp are required");
     }
 
-    const res = await getResend().emails.send({
-      from: FROM_EMAIL,
-      to: toEmail,
-      subject: "Your CA PRO Toolkit OTP",
-      html: `
+    const html = `
         <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding:16px; color:#111827;">
           <h2 style="margin-top:0;">CA PRO Toolkit – Login OTP</h2>
           <p>Your One-Time Password (OTP) is:</p>
@@ -49,21 +34,18 @@ export async function sendOtpEmail(toEmail, otp) {
             If you did not request this OTP, you can safely ignore this email.
           </p>
         </div>
-      `,
+      `;
+
+    const result = await recordAndSend({
+      to: toEmail,
+      type: "otp",
+      subjectTemplateName: "otp_code",
+      subject: "Your CA PRO Toolkit OTP",
+      html,
     });
 
-    if (res?.error) {
-      // Resend returns a soft error object (unverified domain, invalid key, etc.)
-      // without throwing. Surface it so we never report a false "OTP sent".
-      throw new Error(
-        String(res.error.message || "Resend rejected the OTP email"),
-      );
-    }
-    console.log(
-      `📧 OTP email sent to: ${toEmail}`,
-      res?.data?.id || res?.id || "",
-    );
-    return res;
+    console.log(`📧 OTP email sent to: ${toEmail}`, result.providerMessageId || "");
+    return result;
   } catch (err) {
     // Surface the full Resend error body so you can diagnose domain/key issues
     console.error(
@@ -125,23 +107,16 @@ export async function sendComplianceReminderEmail({
       </div>
     `;
 
-    const res = await getResend().emails.send({
-      from: FROM_EMAIL,
+    const result = await recordAndSend({
       to: toEmail,
+      type: "reminder",
+      subjectTemplateName: "compliance_reminder",
       subject,
       html,
     });
 
-    if (res?.error) {
-      throw new Error(
-        String(res.error.message || "Resend rejected the reminder email"),
-      );
-    }
-    console.log(
-      `📧 Compliance reminder sent to: ${toEmail}`,
-      res?.data?.id || res?.id || "",
-    );
-    return res;
+    console.log(`📧 Compliance reminder sent to: ${toEmail}`, result.providerMessageId || "");
+    return result;
   } catch (err) {
     console.error("❌ Resend reminder error:", err);
     throw err;
@@ -280,6 +255,10 @@ export async function sendDigestEmail({
   idempotencyKey,
   pageUrl,
   apiUrl,
+  deliveryType,
+  firmId = null,
+  userId = null,
+  digestDeliveryId = null,
 }) {
   if (!toEmail) {
     throw new Error("sendDigestEmail: toEmail is required");
@@ -304,27 +283,23 @@ export async function sendDigestEmail({
   });
 
   try {
-    const response = await getResend().emails.send(
-      {
-        from: FROM_EMAIL,
-        to: toEmail,
-        subject: String(subject).slice(0, 240),
-        html,
-        text,
-        headers,
-      },
-      { idempotencyKey: normalizedIdempotencyKey },
-    );
-    if (response?.error) {
-      throw new Error(
-        String(response.error.message || "Resend rejected digest email"),
-      );
-    }
-    console.log(
-      `Digest email sent to: ${toEmail}`,
-      response?.data?.id || response?.id || "",
-    );
-    return response;
+    const result = await recordAndSend({
+      to: toEmail,
+      // digest.service sends both daily and weekly through this builder; the
+      // caller may say which. Default preserves the historical daily routing.
+      type: deliveryType === "weekly_digest" ? "weekly_digest" : "daily_digest",
+      subjectTemplateName: deliveryType === "weekly_digest" ? "weekly_digest" : "daily_digest",
+      subject: String(subject).slice(0, 240),
+      html,
+      text,
+      headers,
+      idempotencyKey: normalizedIdempotencyKey,
+      firmId,
+      userId,
+      meta: { digestDeliveryId: digestDeliveryId || null },
+    });
+    console.log(`Digest email sent to: ${toEmail}`, result.providerMessageId || "");
+    return result;
   } catch (error) {
     console.error("Resend digest error:", error?.message || error);
     throw error;
@@ -340,12 +315,12 @@ export async function sendDailyDigestActivationEmail({
     throw new Error("sendDailyDigestActivationEmail requires recipient, activation URL, and idempotency key");
   }
   const safeUrl = requireUnsubscribeUrl(activationUrl, "activationUrl");
-  const response = await getResend().emails.send(
-    {
-      from: FROM_EMAIL,
-      to: toEmail,
-      subject: "CA PRO Toolkit: Daily Digest is now off",
-      html: `
+  const result = await recordAndSend({
+    to: toEmail,
+    type: "digest_activation",
+    subjectTemplateName: "digest_activation_notice",
+    subject: "CA PRO Toolkit: Daily Digest is now off",
+    html: `
         <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;padding:16px;color:#111827;">
           <h2 style="margin-top:0;">Daily Digest is now off</h2>
           <p>To reduce unnecessary email, CA PRO Toolkit has turned off daily digest email by default.</p>
@@ -353,14 +328,10 @@ export async function sendDailyDigestActivationEmail({
           <p><a href="${escapeHtml(safeUrl)}" style="display:inline-block;background:#1d4ed8;color:#fff;padding:10px 14px;border-radius:6px;text-decoration:none;">Activate Daily Digest</a></p>
           <p style="font-size:12px;color:#6b7280;">The button opens a confirmation page. No reminder, OTP, or important compliance email has been turned off.</p>
         </div>`,
-      text: `Daily Digest is now off by default. To activate your personal daily work digest, open this link and confirm: ${safeUrl}\n\nReminders, OTPs, and important compliance emails are unchanged.`,
-    },
-    { idempotencyKey: String(idempotencyKey).slice(0, 256) },
-  );
-  if (response?.error) {
-    throw new Error(String(response.error.message || "Resend rejected daily digest activation email"));
-  }
-  return response;
+    text: `Daily Digest is now off by default. To activate your personal daily work digest, open this link and confirm: ${safeUrl}\n\nReminders, OTPs, and important compliance emails are unchanged.`,
+    idempotencyKey: String(idempotencyKey).slice(0, 256),
+  });
+  return result;
 }
 
 /**
@@ -373,9 +344,10 @@ export async function sendDailyDigestActivationEmail({
 export async function sendTestEmail(toEmail) {
   if (!toEmail) throw new Error("sendTestEmail: toEmail is required");
   const sentAt = new Date().toISOString();
-  const res = await getResend().emails.send({
-    from: FROM_EMAIL,
+  const result = await recordAndSend({
     to: toEmail,
+    type: "test_email",
+    subjectTemplateName: "test_email",
     subject: "CA PRO Toolkit — test email",
     html: `
       <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding:16px; color:#111827;">
@@ -385,13 +357,8 @@ export async function sendTestEmail(toEmail) {
       </div>
     `,
   });
-  if (res?.error)
-    throw new Error(String(res.error.message || "Resend rejected test email"));
-  console.log(
-    `📧 Test email sent to: ${toEmail}`,
-    res?.data?.id || res?.id || "",
-  );
-  return res;
+  console.log(`📧 Test email sent to: ${toEmail}`, result.providerMessageId || "");
+  return result;
 }
 
 /**
@@ -439,22 +406,16 @@ export async function sendReminderDeliveryAlertEmail({
     </div>
   `;
 
-  const res = await getResend().emails.send({
-    from: FROM_EMAIL,
+  const result = await recordAndSend({
     to: toEmail,
+    type: "reminder_alert",
+    subjectTemplateName: "reminder_alert",
     subject,
     html,
   });
-  if (res?.error) {
-    throw new Error(
-      String(
-        res.error.message || "Resend rejected reminder delivery alert email",
-      ),
-    );
-  }
   console.log(
     `📧 Reminder delivery alert sent to: ${toEmail}`,
-    res?.data?.id || res?.id || "",
+    result.providerMessageId || "",
   );
-  return res;
+  return result;
 }

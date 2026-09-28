@@ -67,6 +67,21 @@ export const REASONS = Object.freeze({
     reason:
       "The proof that an erasure happened. Purging it with the firm would destroy the only record that the request was honoured, which defeats the audit purpose the receipt exists for. It deliberately holds no erased content, no names and no email addresses — only collection names, counts and status — so retaining it retains nothing about a person.",
   },
+  EmailDelivery: {
+    strategy: STRATEGY.PSEUDONYMISE,
+    reason:
+      "Delivery records added 2026-09-28 (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1). The send facts (type, status, timestamps, error class) are kept, but each row carries recipientEmailHash — a link to a person that L9 point 6 makes erasable. The handler nulls the hash (and the display suffix); the row keeps answering 'was this email delivered' without saying to whom.",
+  },
+  EmailSuppression: {
+    strategy: STRATEGY.PSEUDONYMISE,
+    reason:
+      "Do-not-email rows added 2026-09-28. The suppression itself must outlive the erasure (removing it could re-email an address that complained), so the row is kept with its reason; it never held content — only a one-way hash, which the handler replaces with a neutral marker to break the link to the erased firm's contacts.",
+  },
+  WorkflowUsage: {
+    strategy: STRATEGY.PURGE,
+    reason:
+      "Per-user analytics counters (IMPROVEMENT-PLAN-V2 Part 3: usage split by desktop/extension). Not work product — a (user, client type, workflow, day) tally with ok/error counts and nothing else. Added 2026-09-28; classified explicitly rather than left to the derived PURGE default so the record shows the decision was made, per the pinned-surface rule that a new firmId-carrying collection must be classified by a person.",
+  },
   TaskBulkOperation: {
     strategy: STRATEGY.PURGE,
     reason:
@@ -90,6 +105,13 @@ export const PINNED_FIRM_SCOPED = Object.freeze([
   "ImportBatch", "ImportRow", "ReconciliationItem", "ReconciliationRun", "Reminder", "Task",
   "TaskBulkOperation", "TaxWorkSession", "TdsHealthCheck", "TdsHealthEvidenceLink", "TdsHealthRun",
   "TdsImportRow", "User",
+  // WorkflowUsage added 2026-09-28 with the usage-split analytics (IMPROVEMENT-PLAN-V2
+  // Part 3). Classified PURGE in REASONS above — analytics counters, not work product.
+  "WorkflowUsage",
+  // EmailDelivery / EmailSuppression added 2026-09-28 with email observability
+  // (IMPROVEMENT-PLAN-V2 Part 1). Both PSEUDONYMISE in REASONS above: send facts and the
+  // do-not-email protection survive; the recipient hash link does not.
+  "EmailDelivery", "EmailSuppression",
 ]);
 
 /**

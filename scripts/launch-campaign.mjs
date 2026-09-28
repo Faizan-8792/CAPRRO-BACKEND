@@ -28,6 +28,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Resend } from "resend";
+import { sendEmail } from "../src/services/mailer.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, "..");
@@ -413,22 +414,25 @@ async function main() {
   const sent = [];
   for (const r of recipients) {
     try {
-      const res = await resend.emails.send(
-        {
-          from: FROM_EMAIL,
-          to: r.email,
-          replyTo: REPLY_TO,
-          subject: SUBJECT,
-          html: buildHtml(r),
-          text: buildText(r),
-          headers: {
-            "List-Unsubscribe": `<mailto:${REPLY_TO}?subject=Unsubscribe>`,
-          },
+      // The send routes through the shared mailer (IMPROVEMENT-PLAN-V2-2026-09-28
+      // Part 1) so campaign sends land in the EmailDelivery table like every
+      // other outbound email. The separate Resend client below is kept only for
+      // the read-only --status diagnostic.
+      const res = await sendEmail({
+        to: r.email,
+        type: "campaign",
+        subjectTemplateName: "campaign",
+        subject: SUBJECT,
+        html: buildHtml(r),
+        text: buildText(r),
+        headers: {
+          "List-Unsubscribe": `<mailto:${REPLY_TO}?subject=Unsubscribe>`,
         },
-        { idempotencyKey: `${CAMPAIGN_ID}:${r.email}` }
-      );
+        replyTo: REPLY_TO,
+        idempotencyKey: `${CAMPAIGN_ID}:${r.email}`,
+      });
       if (res?.error) throw new Error(String(res.error.message || "Resend rejected the email"));
-      const id = res?.data?.id || res?.id || "";
+      const id = res?.providerMessageId || res?.data?.id || res?.id || "";
       ok += 1;
       sent.push({ email: r.email, id });
       console.log(`✅ ${r.email} ${id}`);

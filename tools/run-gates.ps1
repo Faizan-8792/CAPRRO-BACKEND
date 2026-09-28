@@ -712,7 +712,22 @@ try {
         "gst-match-rule-contract",
         "import-shape-contract",
         "import-date-order-contract",
+
         "gstr2b-amount-contract",
+        # IMPROVEMENT-PLAN-V2-2026-09-28 Phase 0: the CSV formula-injection guard
+        # is deduplicated into src/utils/csv.js; this contract pins the merged
+        # semantics and rejects any fourth local csvCell copy.
+        "csv-export-guard-contract",
+        # IMPROVEMENT-PLAN-V2-2026-09-28 Part 3: the desktop/extension usage split.
+        # Pins the WorkflowUsage privacy shape (counts and nothing else), the
+        # deliberate trackWorkflow wiring on the four previously invisible workflows,
+        # and the model's atomic-upsert behaviour (Mongo subset, scratch-marked).
+        "workflow-usage-contract",
+        # IMPROVEMENT-PLAN-V2-2026-09-28 Part 1: email observability. Pins the single
+        # transport path through services/mailer.js, the suppression gate, the
+        # forward-only webhook transitions, the Svix signature scheme, and the
+        # no-inline-script CSP fix on the digest-activation page.
+        "email-delivery-contract",
         "audit-numerical-integrity-contract",
         "audit-coverage-gate-contract",
         "audit-finding-guard-contract",

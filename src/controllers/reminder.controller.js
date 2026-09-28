@@ -347,6 +347,10 @@ async function sendDeliveryEmail(reminder, spec, providerKey) {
     dueDateISO: reminder.dueDateISO,
     daysLeft: -offset,
     idempotencyKey: providerKey,
+    // Attribution for the EmailDelivery row (IMPROVEMENT-PLAN-V2 Part 1).
+    reminderId: reminder._id,
+    firmId: reminder.firmId,
+    userId: reminder.userId,
   });
 }
 

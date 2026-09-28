@@ -25,6 +25,10 @@ import {
   sendSuperTestEmail,
   sendTestDigest,
   forceLogoutUser,
+  listEmailDeliveriesForSuper,
+  getEmailDeliveryForSuper,
+  listEmailSuppressionsForSuper,
+  deleteEmailSuppressionForSuper,
 } from "../controllers/super.controller.js";
 import { listTermsAcceptances } from "../controllers/terms.controller.js";
 import { requireSuperAdmin } from "../middleware/authorization.middleware.js";
@@ -65,6 +69,14 @@ router.get("/dashboard-stats", getSuperDashboardStats);
 
 // Extension usage analytics (DAU/WAU/MAU)
 router.get("/usage-stats", getUsageStats);
+
+// Email observability (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1). The list
+// endpoint carries its own summary so a page load costs ONE request; the
+// detail endpoint exists for the drawer, not the table.
+router.get("/emails", requireSuperAdmin, listEmailDeliveriesForSuper);
+router.get("/emails/suppressions", requireSuperAdmin, listEmailSuppressionsForSuper);
+router.delete("/emails/suppressions/:id", requireSuperAdmin, deleteEmailSuppressionForSuper);
+router.get("/emails/:id", requireSuperAdmin, getEmailDeliveryForSuper);
 
 // O10: paid-provider (DeepSeek / OCR.space) call-volume meter -- backs the
 // "Provider usage" admin panel card.

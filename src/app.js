@@ -27,6 +27,7 @@ import caseRoutes from "./routes/case.routes.js";
 import engagementRoutes from "./routes/engagement.routes.js";
 import firmOperationsRoutes from "./routes/firm-operations.routes.js";
 import digestRoutes from "./routes/digest.routes.js";
+import webhookRoutes from "./routes/webhook.routes.js";
 import { sanitizeInputs } from "./middleware/sanitize.middleware.js";
 import { trackUsage } from "./middleware/usage-tracker.middleware.js";
 import { requestId } from "./middleware/request-id.middleware.js";
@@ -428,6 +429,16 @@ app.use((req, res, next) => {
 // two characters and a control character costs six - so a register the parser would have accepted
 // could still be rejected by the transport, with the wrong message. 24mb leaves the parser as the
 // thing that decides, which is the whole point of a route-scoped limit.
+// The Resend webhook is signature-verified over the RAW request body, so its parser
+// stashes the pre-parse buffer (webhook.controller.js reads req.rawBody). Mounted before the
+// generic parsers so the signature check sees exactly what the provider signed.
+app.use("/api/webhooks/resend", express.json({
+  limit: "256kb",
+  verify: (req, _res, buf) => {
+    req.rawBody = buf.toString("utf8");
+  },
+}));
+app.use("/api/webhooks", webhookRoutes);
 app.use("/api/imports", express.json({ limit: "24mb" }));
 app.use(express.json({ limit: "1mb" }));
 // A mail client's automatic RFC 8058 one-click unsubscribe POST sends

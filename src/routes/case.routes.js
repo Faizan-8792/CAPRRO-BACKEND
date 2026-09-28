@@ -24,6 +24,7 @@ import {
   authRequired,
   authRequiredWithoutUsageTracking,
 } from "../middleware/auth.middleware.js";
+import { trackWorkflow } from "../middleware/workflow-usage.middleware.js";
 import {
   requireFirmMember,
   requireFirmWriteAccess,
@@ -72,6 +73,7 @@ const ocrRouteLimiter = rateLimit({
 router.post(
   "/ocr",
   authRequiredWithoutUsageTracking,
+  trackWorkflow("ocr_consent"),
   requireFirmMember,
   requireFeatureFlag("noticeCases"),
   ocrRouteLimiter,

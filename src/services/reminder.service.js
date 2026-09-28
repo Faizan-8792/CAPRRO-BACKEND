@@ -1,21 +1,10 @@
 // src/services/reminder.service.js
+//
+// The compliance-reminder send routes through the shared mailer
+// (services/mailer.js) — one Resend client, suppression checking, and an
+// EmailDelivery row per send (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1).
 
-import { Resend } from "resend";
-
-// Lazy Resend client
-let _resend = null;
-function getResend() {
-  if (!_resend) {
-    const key = process.env.RESEND_API_KEY;
-    if (!key) throw new Error("RESEND_API_KEY env var is required");
-    _resend = new Resend(key);
-  }
-  return _resend;
-}
-
-// Default Resend sender (no custom domain required)
-const FROM_EMAIL = "CA PRO Toolkit <noreply@caprotoolkit.in>";
-
+import { sendEmail as recordAndSend } from "./mailer.js";
 
 // ---------- Helper ----------
 function escHtml(s) {
@@ -27,7 +16,7 @@ function escHtml(s) {
     .replaceAll("'", "&#39;");
 }
 
-// ---------- Provider-bound Resend delivery ----------
+// ---------- Provider-bound delivery (through the shared mailer) ----------
 export async function sendComplianceReminderEmail({
   toEmail,
   title,
@@ -35,6 +24,9 @@ export async function sendComplianceReminderEmail({
   dueDateISO,
   daysLeft,
   idempotencyKey,
+  reminderId = null,
+  firmId = null,
+  userId = null,
 }) {
   if (!toEmail) {
     throw new Error("sendComplianceReminderEmail: toEmail is required");
@@ -95,22 +87,19 @@ export async function sendComplianceReminderEmail({
     </div>
   `;
 
-  const { data, error } = await getResend().emails.send(
-    {
-      from: FROM_EMAIL,
-      to: [toEmail],
-      subject,
-      text,
-      html,
-    },
-    { idempotencyKey: normalizedIdempotencyKey }
-  );
-
-  if (error) {
-    console.error("❌ Resend compliance reminder failed:", error);
-    throw new Error("Compliance reminder email failed");
-  }
+  const result = await recordAndSend({
+    to: toEmail,
+    type: "reminder",
+    subjectTemplateName: "compliance_reminder",
+    subject,
+    text,
+    html,
+    idempotencyKey: normalizedIdempotencyKey,
+    firmId,
+    userId,
+    meta: { reminderId: reminderId || null },
+  });
 
   console.log("📧 Compliance reminder sent to", toEmail);
-  return { providerMessageId: data?.id || null };
+  return { providerMessageId: result.providerMessageId, deliveryId: result.deliveryId };
 }

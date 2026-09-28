@@ -18,6 +18,7 @@ import {
   verifyPanCompatibility,
 } from "../controllers/tds-health.controller.js";
 import { authRequiredWithoutUsageTracking } from "../middleware/auth.middleware.js";
+import { trackWorkflow } from "../middleware/workflow-usage.middleware.js";
 import {
   requireFirmAdmin,
   requireFirmMember,
@@ -31,6 +32,7 @@ router.use(
   authRequiredWithoutUsageTracking,
   requireFirmMember,
   requireFirmWriteAccess,
+  trackWorkflow("tds_health"),
   requireFeatureFlag("tdsHealth")
 );
 

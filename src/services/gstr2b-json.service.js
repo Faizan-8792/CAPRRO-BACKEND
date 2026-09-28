@@ -10,6 +10,9 @@
 // downstream (the normalizer parses to integer paise).
 
 import { DATE_ORDER, parseFlexibleDateIso, parseFlexibleMoneyMinor } from "./robust-normalize.service.js";
+// Machine CSV: this text round-trips through parseMappedImport, so no formula
+// guard — see src/utils/csv.js.
+import { csvCellMachine as csvCell } from "../utils/csv.js";
 
 const CANONICAL_HEADERS = Object.freeze([
   "Supplier GSTIN",
@@ -278,11 +281,6 @@ export function convertGstr2bJson(input) {
     },
     warnings,
   };
-}
-
-function csvCell(value) {
-  const s = String(value == null ? "" : value);
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 export { CANONICAL_HEADERS, GSTR2B_MAPPING };

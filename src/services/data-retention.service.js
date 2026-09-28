@@ -80,6 +80,16 @@ export const RETENTION_CLASSIFICATION = Object.freeze({
   Client: RETENTION_CLASSES.RETAIN,
   ComplianceOverride: RETENTION_CLASSES.RETAIN,
   ComplianceRule: RETENTION_CLASSES.RETAIN,
+  // Added 2026-09-28 with email observability (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1).
+  // RETAIN for now: the plan's 180-day raw → aggregate policy needs an aggregation job that
+  // has not been built, and calling it SELF_EXPIRING today would be a false claim (same
+  // reasoning as the ProviderUsage note above). Rows carry no raw recipient address — a
+  // sha256 hash wiped on erasure, a 4-char display suffix, status/timestamps.
+  EmailDelivery: RETENTION_CLASSES.RETAIN,
+  // Added 2026-09-28 with email observability. RETAIN: a do-not-email safety record must
+  // outlive the data it protects — dropping it on schedule would let a complained-about
+  // address be emailed again. It stores a one-way hash, never the address itself.
+  EmailSuppression: RETENTION_CLASSES.RETAIN,
   DigestDelivery: RETENTION_CLASSES.RETAIN,
   Engagement: RETENTION_CLASSES.RETAIN,
   // The record that an erasure was performed. Never purged: deleting it would destroy the proof
@@ -114,6 +124,13 @@ export const RETENTION_CLASSIFICATION = Object.freeze({
   TdsImportRow: RETENTION_CLASSES.RETAIN,
   TermsAcceptance: RETENTION_CLASSES.RETAIN,
   User: RETENTION_CLASSES.RETAIN,
+  // Added 2026-09-28 with the usage-split analytics (IMPROVEMENT-PLAN-V2-2026-09-28 Part 3).
+  // RETAIN, deliberately NOT SELF_EXPIRING: nothing expires these rows yet — same reasoning as
+  // the ProviderUsage note above. The plan's 180-day raw → aggregate policy is a future
+  // aggregation job that has not been built; a content-free (user, client, workflow, day) counter
+  // is also not sensitive on the scale of work product. Erasure purges the row (see
+  // erasure-classification.js); firm-scoped rows therefore do not outlive their firm.
+  WorkflowUsage: RETENTION_CLASSES.RETAIN,
   WorkspaceOperation: RETENTION_CLASSES.SELF_EXPIRING,
 });
 

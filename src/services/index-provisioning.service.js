@@ -21,6 +21,8 @@ import { REQUIRED_CASE_INDEXES } from "./case-index-readiness.service.js";
 import { REQUIRED_DIGEST_INDEXES } from "./digest-index-readiness.service.js";
 import { REQUIRED_ENGAGEMENT_INDEXES } from "./engagement-index-readiness.service.js";
 import { REQUIRED_PROVIDER_USAGE_INDEXES } from "./provider-usage-index-readiness.service.js";
+import { REQUIRED_WORKFLOW_USAGE_INDEXES } from "./workflow-usage-index-readiness.service.js";
+import { REQUIRED_EMAIL_INDEXES } from "./email-index-readiness.service.js";
 import { REQUIRED_GST_STORAGE_INDEXES } from "./gst-storage-readiness.service.js";
 
 // Taking the model set from the same requirement lists startup asserts against
@@ -42,6 +44,13 @@ const REQUIREMENT_GROUPS = Object.freeze([
   ["assuranceEngagements", REQUIRED_ENGAGEMENT_INDEXES],
   ["auditWorkingPapers", REQUIRED_AUDIT_WORKING_PAPER_INDEXES],
   ["providerUsage", REQUIRED_PROVIDER_USAGE_INDEXES],
+  // "workflowUsage" is not flag-gated: the usage-split counters (IMPROVEMENT-PLAN-V2
+  // Part 3) are written by every import/GST/TDS/OCR request from the moment it ships,
+  // and recordUsage's atomic upsert needs its unique index on the first concurrent write.
+  ["workflowUsage", REQUIRED_WORKFLOW_USAGE_INDEXES],
+  // "email" is not flag-gated: every outbound email writes an EmailDelivery row from the
+  // moment this ships, and the webhook joins on the sparse-unique providerMessageId.
+  ["email", REQUIRED_EMAIL_INDEXES],
   // "gstStorage" is not flag-gated either. assertGstStorageIndexes refuses every import commit and
   // every reconciliation while these are missing, and with autoIndex off in production nothing
   // else would ever create them -- so a fresh deployment, or a restore into a new cluster, would
