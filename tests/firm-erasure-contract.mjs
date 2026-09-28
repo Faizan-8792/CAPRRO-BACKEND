@@ -8,6 +8,7 @@
 // mis-set MONGODB_URI is the one mistake that must never be survivable.
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import mongoose from "mongoose";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -103,6 +104,13 @@ async function seed(firmId) {
       doc.client = "extension";
       doc.workflow = "import";
       doc.periodDay = new Date().toISOString().slice(0, 10);
+    }
+    // EmailSuppression (2026-09-28, IMPROVEMENT-PLAN-V2 Part 1) has a unique emailHash —
+    // same E11000 shape as FirmInvite.code. The seeded hash is a valid-looking 64-hex value
+    // derived from the firm id so both firms seed distinct rows.
+    if (name === "EmailSuppression") {
+      doc.emailHash = createHash("sha256").update(`seed-${String(firmId)}`).digest("hex");
+      doc.reason = "manual";
     }
     const res = await model.collection.insertOne(doc);
     seeded[name] = res.insertedId;
