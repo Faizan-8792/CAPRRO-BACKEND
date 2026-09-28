@@ -2012,7 +2012,9 @@ const expectedManifestReasonByName = new Map([
     // package's integrity for another's is still caught, and still caught by the trusted-lock
     // digest rather than by a narrower check, which is the point this row makes.
     "valid-length transitive integrity substitution is refused",
-    "package-lock.json canonical SHA-256 does not match the trusted lock (6f1a1a7465d094bf519a8429cdd5150b83b7468c234724837de5b7e891be803a)",
+    // 2026-09-28: the fixture digest moved with the base lock (pdfjs-dist addition). The
+    // mutation and the refusal reason are unchanged.
+    "package-lock.json canonical SHA-256 does not match the trusted lock (8579abdf07873e2e489fc5d69c6475c257e14a38d20073fa49389cc017296429)",
   ],
   [
     "runtime package classified as development-only is refused",
@@ -2026,7 +2028,8 @@ const expectedManifestReasonByName = new Map([
     // Same as above: the mutated fixture's digest moved with the base lock on 2026-09-09. Widening
     // a transitive range to "*" is still refused, and still by the digest check.
     "widened transitive dependency range is refused",
-    "package-lock.json canonical SHA-256 does not match the trusted lock (5acab20303b69d577c2dd57b9ae9b0b6d90a3b6234ab5994286be0275abad845)",
+    // 2026-09-28: fixture digest moved with the base lock; reason unchanged.
+    "package-lock.json canonical SHA-256 does not match the trusted lock (a49007e5c30a3549a7e4c4d78f0bed827bb7314fdcac3be63dcff6e5b9ac0711)",
   ],
   [
     "unsupported semver OR alternative is refused before digest validation",
@@ -2046,7 +2049,9 @@ const expectedManifestReasonByName = new Map([
   ],
   [
     "invalid package JSON is refused",
-    "package.json is not strict JSON: Expected double-quoted property name in JSON at position 797 (line 34 column 1)",
+    // 2026-09-28: the injected syntax error moved one line down with the pdfjs-dist
+    // dependency line in the real package.json.
+    "package.json is not strict JSON: Expected double-quoted property name in JSON at position 827 (line 35 column 1)",
   ],
   [
     "incompatible direct lock version is refused",
@@ -2342,9 +2347,23 @@ if (listed.status !== 0 || listed.error) {
   // FirmMembership, User and Task, and runs two aggregations both scoped to req.user's firm; it
   // holds no secret, credential, endpoint or configuration value, and it writes exactly one field
   // (reportsToUserId) and never User.role.
+  // Raised from 181 to 196 on 2026-09-28 for sixteen files from two workstreams,
+  // all confirmed clean by this very scan (status 0, no REFUSED line) before the
+  // pin moved. Improvement-Plan-V2 Phase 0 + Part 3 + Part 1 (eleven): the shared
+  // CSV helper src/utils/csv.js and the panel-side daily-digest-activate.js (both
+  // pure string arithmetic); the WorkflowUsage / EmailDelivery / EmailSuppression
+  // models; the workflow-usage tracker middleware; the mailer (reads
+  // RESEND_API_KEY lazily at send time, never a literal); the two index-readiness
+  // services; and the Resend webhook controller and route (verify an HMAC over
+  // the raw body against RESEND_WEBHOOK_SECRET read at request time - no literal
+  // secret, and the route refuses when the variable is unset). Bank-statement
+  // M1 (five): the normalization / intake / profile / status / xlsx services -
+  // pure parsing and arithmetic over caller-supplied text and rows; the intake
+  // service imports pdfjs-dist and reads no environment variable at module
+  // scope.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 181 && result.status === 0,
+    files.length === 196 && result.status === 0,
     result,
   );
 }
