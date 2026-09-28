@@ -737,6 +737,11 @@ try {
         # forward-only webhook transitions, the Svix signature scheme, and the
         # no-inline-script CSP fix on the digest-activation page.
         "email-delivery-contract",
+        # IMPROVEMENT-PLAN-V2-2026-09-28 Part 1: the Resend webhook proven over real
+        # HTTP against the real app — unsigned/stale/tampered/wrong-secret refusals,
+        # forward-only transitions, duplicate no-ops, and bounce/complaint
+        # suppression gating a real mailer send.
+        "resend-webhook-e2e",
         "audit-numerical-integrity-contract",
         "audit-coverage-gate-contract",
         "audit-finding-guard-contract",
