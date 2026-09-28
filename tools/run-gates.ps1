@@ -891,6 +891,12 @@ try {
         "terms-acceptance-contract" = "scratch-gates-terms"
         "gst-reconciliation-e2e" = "scratch-gates-gst-e2e"
         "bulk-actions-e2e" = "scratch-gates-bulk"
+        # IMPROVEMENT-PLAN-V2-2026-09-28 Part 1: the webhook suite boots the real app
+        # and drives delivery/suppression rows; it refuses to run unless the URI is
+        # loopback AND scratch-marked, so it needs its own entry here to run at all.
+        "resend-webhook-e2e" = "scratch-gates-webhook-e2e"
+        "workflow-usage-contract" = "scratch-gates-workflow-usage"
+        "email-delivery-contract" = "scratch-gates-email-delivery"
     }
     # Probed once, not assumed. On a machine with no local Mongo the behaviour is unchanged from
     # before -- the variable stays unset and the suites run their Mongo-free subset -- but the

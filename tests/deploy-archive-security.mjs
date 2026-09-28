@@ -2361,9 +2361,13 @@ if (listed.status !== 0 || listed.error) {
   // pure parsing and arithmetic over caller-supplied text and rows; the intake
   // service imports pdfjs-dist and reads no environment variable at module
   // scope.
+  // 196 -> 197, same day: the missing-mailer repair commit (2cc5524) turned
+  // src/services/mailer.js from an untracked file into a tracked one, so the count
+  // the pin had just been raised to was measured while that file was still
+  // invisible to git ls-files.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 196 && result.status === 0,
+    files.length === 197 && result.status === 0,
     result,
   );
 }
