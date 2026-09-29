@@ -746,6 +746,11 @@ try {
         # ($lookup/$unwind) driven end-to-end with seeded rows — the first production call 500'd
         # on a wrong $unwind option no model-level suite exercised.
         "usage-stats-contract",
+        # Part 1 completion pass: the Emails controllers driven with seeded rows - the detail
+        # route, the firmId filter and suppression removal reached mongoose.isValidObjectId
+        # without the import and 500ed on first production use; this pins all three call sites,
+        # their audit trail and their guards.
+        "super-emails-controller-contract",
         "audit-numerical-integrity-contract",
         "audit-coverage-gate-contract",
         "audit-finding-guard-contract",
