@@ -7,6 +7,11 @@
 //
 //   node scripts/backfill-email-deliveries.mjs           # last 30 days
 //   node scripts/backfill-email-deliveries.mjs --dry-run # count without writing
+//   node scripts/backfill-email-deliveries.mjs --production # the real backfill
+//
+// A run without --production must target a loopback, scratch-marked database
+// (a rehearsal). --production is the deliberate opt-in that runs against
+// MONGODB_URI as configured in .env.
 //
 // Every inserted row is marked backfilled: true — its status is "sent" (the
 // list endpoint has no delivery history) unless a webhook event corrects it
@@ -48,8 +53,20 @@ async function main() {
   if (!apiKey) throw new Error("RESEND_API_KEY is required (it lives in capro-backend/.env)");
   const uri = process.env.MONGODB_URI;
   if (!uri) throw new Error("MONGODB_URI is required");
-  if (!/localhost|127\.0\.0\.1/.test(new URL(uri).hostname) || !uri.includes("scratch")) {
-    throw new Error("Refusing to run: the target database must be loopback AND scratch-marked for a local backfill rehearsal. For production, run against the production URI deliberately.");
+  // A local run writes to a database, so it must be loopback AND scratch-marked.
+  // Production is reached only through the explicit --production flag: the flag is
+  // the deliberate act this message always asked for but the old check made
+  // impossible, because it threw on EVERY non-loopback URI, production included.
+  const PRODUCTION = process.argv.includes("--production");
+  // A production Atlas URI lists several comma-separated hosts, which the WHATWG
+  // URL parser rejects outright ("Invalid URL"), so the loopback check reads the
+  // scheme's host portion as text instead of parsing it as a web URL.
+  const isLoopback = /^mongodb(\+srv)?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(uri);
+  if (PRODUCTION && isLoopback) {
+    throw new Error("--production given but MONGODB_URI is loopback; drop --production for a local scratch run.");
+  }
+  if (!PRODUCTION && (!isLoopback || !uri.includes("scratch"))) {
+    throw new Error("Refusing to run: a local backfill must target a loopback, scratch-marked database. Pass --production to run against the production URI deliberately.");
   }
 
   const emails = await fetchAllEmails(apiKey);
