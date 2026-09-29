@@ -29,6 +29,9 @@ import {
   getEmailDeliveryForSuper,
   listEmailSuppressionsForSuper,
   deleteEmailSuppressionForSuper,
+  configureResendWebhookSecret,
+  clearResendWebhookSecret,
+  getResendWebhookSecretState,
 } from "../controllers/super.controller.js";
 import { listTermsAcceptances } from "../controllers/terms.controller.js";
 import { requireSuperAdmin } from "../middleware/authorization.middleware.js";
@@ -76,6 +79,13 @@ router.get("/usage-stats", getUsageStats);
 router.get("/emails", requireSuperAdmin, listEmailDeliveriesForSuper);
 router.get("/emails/suppressions", requireSuperAdmin, listEmailSuppressionsForSuper);
 router.delete("/emails/suppressions/:id", requireSuperAdmin, deleteEmailSuppressionForSuper);
+
+// The Resend webhook signing secret. Write-only: the PUT stores it, the DELETE
+// unconfigures it, and the GET answers only whether one is present -- the value
+// itself never travels back out of the server, in any response, ever.
+router.put("/config/resend-webhook-secret", requireSuperAdmin, configureResendWebhookSecret);
+router.delete("/config/resend-webhook-secret", requireSuperAdmin, clearResendWebhookSecret);
+router.get("/config/resend-webhook-secret", requireSuperAdmin, getResendWebhookSecretState);
 router.get("/emails/:id", requireSuperAdmin, getEmailDeliveryForSuper);
 
 // O10: paid-provider (DeepSeek / OCR.space) call-volume meter -- backs the

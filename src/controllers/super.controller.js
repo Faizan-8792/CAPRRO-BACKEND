@@ -28,6 +28,7 @@ import {
 } from "../services/erasure-classification.js";
 import { sendTestDigestNow } from "../services/digest.service.js";
 import { deliveryHealth } from "./reminder.controller.js";
+import AppConfig from "../models/AppConfig.js";
 import ProviderUsage, {
   GLOBAL_USAGE_USER_ID,
   dailyPeriodKey,
@@ -1432,6 +1433,71 @@ export const deleteEmailSuppressionForSuper = async (req, res, next) => {
       source: "SUPER_ADMIN",
     }).catch(() => {});
     return res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// PUT /api/super/config/resend-webhook-secret — store the Resend webhook
+// signing secret (the Svix whsec value from the Resend dashboard). Write-only:
+// the stored value is never returned, in this response or any other. The
+// environment's RESEND_WEBHOOK_SECRET keeps precedence, so this field is the
+// fallback the hosting platform's unmanageable environment leaves room for.
+// Audited like the removal of a suppression: an ActivityEvent names the
+// action, never the value.
+export const configureResendWebhookSecret = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    const secret = typeof req.body?.secret === "string" ? req.body.secret : "";
+    const result = await AppConfig.setResendWebhookSecret(secret);
+    await safeRecordActivity({
+      userId: req.user.id,
+      firmId: null,
+      action: "RESEND_WEBHOOK_SECRET_CONFIGURED",
+      entityType: "AppConfig",
+      entityId: "singleton",
+      beforeSummary: null,
+      afterSummary: result.configured
+        ? "Super admin stored a Resend webhook signing secret"
+        : "Super admin cleared the Resend webhook signing secret",
+      source: "SUPER_ADMIN",
+    }).catch(() => {});
+    return res.json({ ok: true, configured: result.configured });
+  } catch (err) {
+    if (err?.statusCode) return res.status(err.statusCode).json({ ok: false, error: err.message });
+    next(err);
+  }
+};
+
+export const clearResendWebhookSecret = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    await AppConfig.setResendWebhookSecret(null);
+    await safeRecordActivity({
+      userId: req.user.id,
+      firmId: null,
+      action: "RESEND_WEBHOOK_SECRET_CLEARED",
+      entityType: "AppConfig",
+      entityId: "singleton",
+      beforeSummary: null,
+      afterSummary: "Super admin cleared the Resend webhook signing secret",
+      source: "SUPER_ADMIN",
+    }).catch(() => {});
+    return res.json({ ok: true, configured: false });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getResendWebhookSecretState = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    const stored = await AppConfig.getResendWebhookSecret();
+    return res.json({
+      ok: true,
+      configured: Boolean(stored) || Boolean(process.env.RESEND_WEBHOOK_SECRET),
+      source: process.env.RESEND_WEBHOOK_SECRET ? "environment" : stored ? "appconfig" : "none",
+    });
   } catch (err) {
     next(err);
   }

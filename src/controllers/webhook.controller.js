@@ -21,6 +21,7 @@
 //     (hashed on write) — nothing content-bearing is stored.
 
 import { createHmac, timingSafeEqual } from "node:crypto";
+import AppConfig from "../models/AppConfig.js";
 import EmailDelivery, { EMAIL_DELIVERY_EVENT_TRANSITIONS } from "../models/EmailDelivery.js";
 import EmailSuppression from "../models/EmailSuppression.js";
 import { applyResendEvent } from "../services/mailer.js";
@@ -58,9 +59,19 @@ function verifySvixSignature({ secret, id, timestamp, signatureHeader, payload }
 }
 
 export const resendWebhook = async (req, res) => {
-  const secret = process.env.RESEND_WEBHOOK_SECRET;
+  // The secret arrives from the environment when the host provides it, else
+  // from the super-admin-configured value in AppConfig (see the model comment
+  // for why a database field exists at all). Neither present: refuse rather
+  // than accept unsigned payloads.
+  let secret = process.env.RESEND_WEBHOOK_SECRET || null;
   if (!secret) {
-    // Unconfigured deployment: refuse rather than accept unsigned payloads.
+    try {
+      secret = await AppConfig.getResendWebhookSecret();
+    } catch {
+      secret = null; // database unavailable: stay fail-closed
+    }
+  }
+  if (!secret) {
     return res.status(503).json({ ok: false, error: "Webhook is not configured" });
   }
 

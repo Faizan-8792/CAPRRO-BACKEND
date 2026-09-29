@@ -152,11 +152,102 @@ try {
   check("suppression removal refuses a non-super-admin",
     (await asMember(deleteEmailSuppressionForSuper, { params: { id: new mongoose.Types.ObjectId().toString() } })) === 403);
 
+  // --- webhook secret configuration (write-only, AppConfig-delivered) ------
+  // The hosting platform's environment cannot be managed through its API and
+  // everything under the served root is publicly downloadable, so the signing
+  // secret is delivered through the super-admin route into AppConfig. These
+  // checks pin: the write stores, the response never echoes, the public
+  // app-config serialization never names the field, and the webhook controller
+  // verifies against the stored value when the environment has none.
+  const {
+    configureResendWebhookSecret,
+    clearResendWebhookSecret,
+    getResendWebhookSecretState,
+  } = await import("../src/controllers/super.controller.js");
+  const { default: AppConfig } = await import("../src/models/AppConfig.js");
+  const { resendWebhook, verifySvixSignature } = await import("../src/controllers/webhook.controller.js");
+  const { createHmac, randomUUID } = await import("node:crypto");
+
+  const junk = await call(configureResendWebhookSecret, { body: { secret: "not-a-whsec-value" } });
+  check("a secret without the whsec_ prefix is refused 400", junk.status === 400, "got " + junk.status);
+  const short = await call(configureResendWebhookSecret, { body: { secret: "whsec_short" } });
+  check("a too-short secret is refused 400", short.status === 400, "got " + short.status);
+
+  const TEST_SECRET = "whsec_" + Buffer.from(randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", "")).toString("base64").slice(0, 32);
+  const stored = await call(configureResendWebhookSecret, { body: { secret: TEST_SECRET } });
+  check("storing a valid secret answers ok+configured", stored.status === 0 && stored.body?.ok === true && stored.body?.configured === true,
+    JSON.stringify(stored.body));
+  check("the store response never echoes the secret",
+    !JSON.stringify(stored.body ?? {}).includes(TEST_SECRET.slice(0, 10)));
+
+  const state = await call(getResendWebhookSecretState, {});
+  check("the state endpoint says configured without the value",
+    state.status === 0 && state.body?.configured === true && state.body?.source === "appconfig" &&
+    !JSON.stringify(state.body ?? {}).includes(TEST_SECRET.slice(0, 10)),
+    JSON.stringify(state.body));
+  check("a non-super-admin cannot store the secret",
+    (await asMember(configureResendWebhookSecret, { body: { secret: TEST_SECRET } })) === 403);
+
+  const { getAppConfig } = await import("../src/controllers/appconfig.controller.js");
+  let publicKeys = null;
+  {
+    let body = null;
+    const res = { status() { return this; }, json(b) { body = b; return this; } };
+    await getAppConfig({ query: {} }, res, () => {});
+    publicKeys = Object.keys(body?.config ?? {});
+  }
+  check("the public app-config serialization never names the secret field",
+    Array.isArray(publicKeys) && publicKeys.length > 0 && !publicKeys.includes("resendWebhookSecret"),
+    publicKeys?.join(","));
+
+  // The webhook controller verifies against the stored value when the
+  // environment carries none.
+  const previousEnvSecret = process.env.RESEND_WEBHOOK_SECRET;
+  delete process.env.RESEND_WEBHOOK_SECRET;
+  try {
+    const payload = JSON.stringify({ type: "email.sent", data: { email_id: "contract-secret-check" } });
+    const id = randomUUID();
+    const ts = Math.floor(Date.now() / 1000);
+    const key = Buffer.from(TEST_SECRET.replace(/^whsec_/, ""), "base64");
+    const sig = createHmac("sha256", key).update(`${id}.${ts}.${payload}`).digest("base64");
+    const webhookCall = async (body, headers) => {
+      let status = 0;
+      let json = null;
+      const res = { status(c) { status = c; return this; }, json(b) { json = b; return this; } };
+      await resendWebhook({ rawBody: body, headers }, res, (err) => { status = err?.statusCode ?? 500; });
+      return { status, json };
+    };
+    const accepted = await webhookCall(payload, {
+      "webhook-id": id, "webhook-timestamp": String(ts), "webhook-signature": `v1,${sig}`,
+    });
+    check("the webhook verifies against the AppConfig-stored secret when env has none",
+      (accepted.status === 0 || accepted.status === 200) && accepted.json?.ok === true && accepted.json?.type === "email.sent",
+      JSON.stringify(accepted.json ?? accepted.status));
+    const tampered = await webhookCall(payload.replace("sent", "delivered"), {
+      "webhook-id": id, "webhook-timestamp": String(ts), "webhook-signature": `v1,${sig}`,
+    });
+    check("the webhook still refuses a tampered payload under the stored secret", tampered.status === 401, "got " + tampered.status);
+
+    await AppConfig.setResendWebhookSecret(null);
+    const cleared = await call(getResendWebhookSecretState, {});
+    check("clearing works and reports unconfigured", cleared.status === 0 && cleared.body?.configured === false && cleared.body?.source === "none",
+      JSON.stringify(cleared.body));
+    const unconfigured = await webhookCall(payload, {
+      "webhook-id": id, "webhook-timestamp": String(ts), "webhook-signature": `v1,${sig}`,
+    });
+    check("with no secret anywhere the webhook stays fail-closed 503", unconfigured.status === 503, "got " + unconfigured.status);
+    check("verifySvixSignature stays exportable for the production verifier", typeof verifySvixSignature === "function");
+  } finally {
+    if (previousEnvSecret !== undefined) process.env.RESEND_WEBHOOK_SECRET = previousEnvSecret;
+  }
+
   await Promise.all([
     EmailDelivery.deleteMany({}),
     EmailSuppression.deleteMany({}),
     Firm.deleteMany({}),
     User.deleteMany({}),
+    ActivityEvent.deleteMany({}),
+    AppConfig.deleteMany({}),
   ]).catch(() => {});
 } finally {
   await mongoose.disconnect();

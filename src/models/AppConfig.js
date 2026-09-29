@@ -110,6 +110,15 @@ const AppConfigSchema = new mongoose.Schema(
       lastAlertAt: { type: Date, default: null },
       lastAlertIssueCount: { type: Number, min: 0, default: 0 },
     },
+    // Resend webhook signing secret (IMPROVEMENT-PLAN-V2 Part 1). Write-only by
+    // construction: it is set through the super-admin route and read by the
+    // webhook controller; it is NEVER included in any serialization, and the
+    // public /api/app-config route returns a named-key allowlist that does not
+    // name it. RESEND_WEBHOOK_SECRET in the environment takes precedence when
+    // present, so a host-configured value always wins; this field exists because
+    // the hosting platform's environment cannot be managed through its API and
+    // every file under the served root is publicly downloadable between deploys.
+    resendWebhookSecret: { type: String, trim: true, maxlength: 512, default: null },
   },
   { timestamps: true, _id: false }
 );
@@ -201,6 +210,47 @@ AppConfigSchema.statics.assertFeatureFlagVersion = async function (
 AppConfigSchema.statics.invalidateCache = function () {
   _cache = null;
   _cacheAt = 0;
+};
+
+// The Resend webhook signing secret. getResendWebhookSecret reads the cached
+// singleton (a rotation therefore lands within CACHE_MS, which is fine for a
+// signing key); setResendWebhookSecret writes directly and invalidates the
+// cache so the very next verification sees it. The setter accepts null to
+// unconfigure. Neither returns the stored value to a caller that did not
+// already know it: the setter's answer says only whether a secret is present.
+AppConfigSchema.statics.getResendWebhookSecret = async function () {
+  const config = await this.getInstance();
+  const value = typeof config?.resendWebhookSecret === "string" ? config.resendWebhookSecret.trim() : "";
+  return value.length > 0 ? value : null;
+};
+
+AppConfigSchema.statics.setResendWebhookSecret = async function (secret) {
+  const value = typeof secret === "string" ? secret.trim() : "";
+  if (value.length === 0) {
+    await this.findOneAndUpdate(
+      { _id: "singleton" },
+      { $set: { resendWebhookSecret: null } },
+      { upsert: true },
+    );
+  } else {
+    if (value.length < 16 || value.length > 512) {
+      const err = new Error("Webhook signing secret must be 16-512 characters");
+      err.statusCode = 400;
+      throw err;
+    }
+    if (!value.startsWith("whsec_")) {
+      const err = new Error("Webhook signing secret must be the whsec_... value from the Resend dashboard");
+      err.statusCode = 400;
+      throw err;
+    }
+    await this.findOneAndUpdate(
+      { _id: "singleton" },
+      { $set: { resendWebhookSecret: value } },
+      { upsert: true },
+    );
+  }
+  this.invalidateCache();
+  return { configured: value.length > 0 };
 };
 
 const AppConfig = mongoose.model("AppConfig", AppConfigSchema);
