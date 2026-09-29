@@ -594,6 +594,42 @@ than re-synchronised. See **Observability → provider spend caps** below for th
 Raising a cap is an env-var change plus a redeploy, not a code change. Note the global caps are the
 real budget control — the per-user caps only stop one account from consuming everything.
 
+### Resend webhook activation — the one step that needs the Resend dashboard (pending as of 2026-09-29)
+
+Delivery observability (IMPROVEMENT-PLAN-V2 Part 1) records every send, but
+delivered/bounced/complained transitions arrive only through Resend's webhook. The endpoint
+`POST /api/webhooks/resend` is live and fail-closed: with no `RESEND_WEBHOOK_SECRET` it answers
+503, and with the secret set it refuses anything unsigned, tampered, stale (>5 min) or
+wrongly-signed with 401. Creating the webhook needs the Resend dashboard — the account's API key
+is send-only (`restricted_api_key` on every non-send endpoint), so this cannot be automated.
+
+One dashboard session completes BOTH pending email items:
+
+1. **Webhook.** Resend dashboard → Webhooks → Add webhook: endpoint
+   `https://api.caprotoolkit.in/api/webhooks/resend`; events `email.sent`, `email.delivered`,
+   `email.bounced`, `email.complained`. Copy the `whsec_...` signing secret.
+2. **Backfill key (optional, one-time).** Resend dashboard → API Keys → create a key with read
+   scope. The send-only key cannot read the List Emails API, so the 30-day history backfill is
+   blocked on this key; with a read-capable key in `.env` as `RESEND_API_KEY`, run
+   `node scripts/backfill-email-deliveries.mjs --production` (the flag is the deliberate
+   production opt-in; a rehearsal without the flag must target a loopback scratch database).
+   Resend keeps 30 days of log — older history is permanently unavailable.
+
+Then:
+
+```
+# put the secret in capro-backend/.env (gitignored) AND in the Hostinger app's environment
+RESEND_WEBHOOK_SECRET=whsec_...
+# redeploy once so the running process sees it (Deploy section above), then verify:
+node tools/verify-resend-webhook.mjs
+```
+
+The verifier signs realistic events with the configured secret and proves, against production:
+unsigned → 401 (not 503), valid-but-unknown id → 200 with nothing transitioned, replay →
+idempotent, tampered → 401, stale → 401, out-of-model type → acknowledged/ignored. It never
+prints the secret. Delivery statuses recorded before the secret was set stay at `sent` — that is
+honest (no signal existed), not a defect.
+
 ## Fix needed under pressure — decision order
 
 Do not improvise this at 1am. In order:
