@@ -81,11 +81,15 @@ export const resendWebhook = async (req, res) => {
     return res.status(400).json({ ok: false, error: "Webhook body unavailable" });
   }
 
+  // Svix signs with svix-prefixed headers and the standardwebhooks spec names
+  // them webhook-*; Resend sends the svix- form in production, which is what
+  // the first real event arrived with (the hand-rolled verifier here read only
+  // webhook-* and refused every genuine dispatch until this accepted both).
   const verified = verifySvixSignature({
     secret,
-    id: req.headers["webhook-id"],
-    timestamp: req.headers["webhook-timestamp"],
-    signatureHeader: req.headers["webhook-signature"],
+    id: req.headers["svix-id"] ?? req.headers["webhook-id"],
+    timestamp: req.headers["svix-timestamp"] ?? req.headers["webhook-timestamp"],
+    signatureHeader: req.headers["svix-signature"] ?? req.headers["webhook-signature"],
     payload: rawBody,
   });
   if (!verified) {

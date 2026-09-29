@@ -127,6 +127,31 @@ try {
   );
   check("wrong signing secret refused with 401", wrongSecret.status === 401, `status=${wrongSecret.status}`);
 
+  // Svix services sign with svix-prefixed headers; Resend's production
+  // dispatches carry svix-id / svix-timestamp / svix-signature, not the
+  // webhook- form this suite used to test. A row must transition when the
+  // signature arrives under the svix names — this is the exact gap that left
+  // every genuine production event refused 401 until 2026-09-29.
+  const svixRow = await seedSentEmail("prov-e2e-svix");
+  const svixBody = JSON.stringify({ type: "email.delivered", data: { email_id: "prov-e2e-svix" } });
+  const svixId = `evt_${Math.random().toString(36).slice(2)}`;
+  const svixHeaders = signedHeaders({ id: svixId, payload: svixBody });
+  const svixRes = await fetch(`${base}/api/webhooks/resend`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "svix-id": svixHeaders["webhook-id"],
+      "svix-timestamp": svixHeaders["webhook-timestamp"],
+      "svix-signature": svixHeaders["webhook-signature"],
+    },
+    body: svixBody,
+  });
+  check("svix-prefixed signature headers are accepted (Resend's real shape)",
+    svixRes.status === 200 && (await svixRes.json())?.transitioned === true,
+    `status=${svixRes.status}`);
+  const svixRowAfter = await EmailDelivery.findOne({ providerMessageId: "prov-e2e-svix" }).lean();
+  check("the row transitioned under svix headers", svixRowAfter?.status === "delivered", svixRowAfter?.status);
+
   // ── 2. Delivery transitions on a real row ────────────────────────────────
 
   const row = await seedSentEmail("prov-e2e-1");
