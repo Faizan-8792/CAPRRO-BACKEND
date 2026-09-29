@@ -594,41 +594,38 @@ than re-synchronised. See **Observability → provider spend caps** below for th
 Raising a cap is an env-var change plus a redeploy, not a code change. Note the global caps are the
 real budget control — the per-user caps only stop one account from consuming everything.
 
-### Resend webhook activation — the one step that needs the Resend dashboard (pending as of 2026-09-29)
+### Resend webhook — configured and live (2026-09-29 evening)
 
-Delivery observability (IMPROVEMENT-PLAN-V2 Part 1) records every send, but
-delivered/bounced/complained transitions arrive only through Resend's webhook. The endpoint
-`POST /api/webhooks/resend` is live and fail-closed: with no `RESEND_WEBHOOK_SECRET` it answers
-503, and with the secret set it refuses anything unsigned, tampered, stale (>5 min) or
-wrongly-signed with 401. Creating the webhook needs the Resend dashboard — the account's API key
-is send-only (`restricted_api_key` on every non-send endpoint), so this cannot be automated.
+The webhook exists in Resend (endpoint , events
+email.sent/delivered/bounced/complained) and its signing secret is stored server-side in AppConfig
+through the write-only super-admin route — the hosting platform exposes no environment management
+through its API, and every file under the served root is publicly downloadable between deploys,
+which is exactly how the first secret leaked (it was rotated by recreating the webhook; the
+leaked value is dead).
 
-One dashboard session completes BOTH pending email items:
+Operate it like this:
 
-1. **Webhook.** Resend dashboard → Webhooks → Add webhook: endpoint
-   `https://api.caprotoolkit.in/api/webhooks/resend`; events `email.sent`, `email.delivered`,
-   `email.bounced`, `email.complained`. Copy the `whsec_...` signing secret.
-2. **Backfill key (optional, one-time).** Resend dashboard → API Keys → create a key with read
-   scope. The send-only key cannot read the List Emails API, so the 30-day history backfill is
-   blocked on this key; with a read-capable key in `.env` as `RESEND_API_KEY`, run
-   `node scripts/backfill-email-deliveries.mjs --production` (the flag is the deliberate
-   production opt-in; a rehearsal without the flag must target a loopback scratch database).
-   Resend keeps 30 days of log — older history is permanently unavailable.
+- **Configure / rotate:**  with
+   (super-admin token).  unconfigures;  answers only
+   and the source — the value never travels back out of the server.
+- **Verify after any deploy or rotation:** === Resend webhook verification against https://api.caprotoolkit.in/api/webhooks/resend ===
+  PASS configured: unsigned input is refused 401 (not 503)  got 401 {"ok":false,"error":"Invalid webhook signature"}
+  PASS signed event (unknown id) accepted 200, transitioned:false  got 200 {"ok":true,"type":"email.sent","transitioned":false}
+  PASS replayed identical request stays 200 (idempotent)  got 200 {"ok":true,"type":"email.sent","transitioned":false}
+  PASS tampered payload under the original signature refused 401  got 401 {"ok":false,"error":"Invalid webhook signature"}
+  PASS stale timestamp (>5 min) refused 401 despite valid signature  got 401 {"ok":false,"error":"Invalid webhook signature"}
+  PASS out-of-model event type acknowledged as ignored  got 200 {"ok":true,"ignored":"email.opened"}
 
-Then:
+webhook verify: 6 passed, 0 failed — signed
+  accept, replay idempotent, tampered/stale/unsigned refused (6 checks).
+- **End-to-end:** send a test email (panel or ) and watch the
+  Emails page: the row must move sent -> delivered within seconds of Resend dispatching.
+- **Backfill:**  — idempotent; also
+  refines the types of rows it inserted earlier. Resend keeps 30 days.
 
-```
-# put the secret in capro-backend/.env (gitignored) AND in the Hostinger app's environment
-RESEND_WEBHOOK_SECRET=whsec_...
-# redeploy once so the running process sees it (Deploy section above), then verify:
-node tools/verify-resend-webhook.mjs
-```
-
-The verifier signs realistic events with the configured secret and proves, against production:
-unsigned → 401 (not 503), valid-but-unknown id → 200 with nothing transitioned, replay →
-idempotent, tampered → 401, stale → 401, out-of-model type → acknowledged/ignored. It never
-prints the secret. Delivery statuses recorded before the secret was set stay at `sent` — that is
-honest (no signal existed), not a defect.
+Header note for anyone touching the verifier: Resend signs with svix-prefixed headers, not the
+webhook- form the standardwebhooks spec names — the controller accepts both, and the e2e pins
+the svix shape.
 
 ## Fix needed under pressure — decision order
 
