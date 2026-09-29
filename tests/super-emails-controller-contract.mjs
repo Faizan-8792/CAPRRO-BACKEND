@@ -56,13 +56,15 @@ const checks = [];
 const check = (name, pass, detail = "") => checks.push({ name, pass, detail });
 
 try {
-  await Promise.all([
-    EmailDelivery.deleteMany({}),
-    EmailSuppression.deleteMany({}),
-    Firm.deleteMany({}),
-    User.deleteMany({}),
-    ActivityEvent.deleteMany({}),
-  ]).catch(() => {});
+  // Sequential on purpose: this suite reproduces an intermittent
+  // DocumentNotFoundError when the five cleanup deletes race each other on the
+  // connection pool ahead of the seeding writes below (confirmed by bisection:
+  // wrapping User.create with an extra await made 10/12 failures vanish). The
+  // order is irrelevant; the point is that no delete is still in flight when
+  // the first seed is written.
+  for (const model of [EmailDelivery, EmailSuppression, Firm, User, ActivityEvent]) {
+    await model.deleteMany({}).catch(() => {});
+  }
 
   const firmOwner = await User.create({
     email: "firm-owner@example.com",
