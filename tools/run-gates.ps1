@@ -742,6 +742,10 @@ try {
         # forward-only transitions, duplicate no-ops, and bounce/complaint
         # suppression gating a real mailer send.
         "resend-webhook-e2e",
+        # IMPROVEMENT-PLAN-V2-2026-09-28 Part 3: the usage-stats controller's aggregations
+        # ($lookup/$unwind) driven end-to-end with seeded rows — the first production call 500'd
+        # on a wrong $unwind option no model-level suite exercised.
+        "usage-stats-contract",
         "audit-numerical-integrity-contract",
         "audit-coverage-gate-contract",
         "audit-finding-guard-contract",
@@ -895,6 +899,7 @@ try {
         # and drives delivery/suppression rows; it refuses to run unless the URI is
         # loopback AND scratch-marked, so it needs its own entry here to run at all.
         "resend-webhook-e2e" = "scratch-gates-webhook-e2e"
+        "usage-stats-contract" = "scratch-gates-usage-stats"
         "workflow-usage-contract" = "scratch-gates-workflow-usage"
         "email-delivery-contract" = "scratch-gates-email-delivery"
     }
