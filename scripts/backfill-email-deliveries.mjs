@@ -48,6 +48,25 @@ async function fetchAllEmails(apiKey, { windowDays = 30, pageSize = 100 } = {}) 
   });
 }
 
+// The list endpoint does not say which builder produced the email, so the type
+// is guessed from the subject — the honest coarse signal — and the row keeps
+// subjectTemplateName "other" rather than inventing a template key. The guesses
+// are ordered most-specific first: production subjects are "Daily work
+// digest · <date>", "Weekly firm summary · <date>", "Compliance Reminder: X",
+// "Your CA PRO Toolkit OTP", "CA PRO Toolkit — test email", and the digest
+// rollout notice ("Daily Digest is now off"), which the old ordering misfiled
+// under daily_digest because it merely contains the word digest.
+function guessTypeFromSubject(subject) {
+  const s = String(subject || "");
+  if (/test email/i.test(s)) return "test_email";
+  if (/otp/i.test(s)) return "otp";
+  if (/reminder/i.test(s)) return "reminder";
+  if (/is now off|rollout|notice/i.test(s)) return "rollout_notice";
+  if (/weekly|firm summary/i.test(s)) return "weekly_digest";
+  if (/digest/i.test(s)) return "daily_digest";
+  return "other";
+}
+
 async function main() {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error("RESEND_API_KEY is required (it lives in capro-backend/.env)");
@@ -82,25 +101,26 @@ async function main() {
     const { default: EmailDelivery } = await import("../src/models/EmailDelivery.js");
     let inserted = 0;
     let skipped = 0;
+    let refined = 0;
     for (const email of emails) {
       if (!email?.id) continue;
-      const exists = await EmailDelivery.exists({ providerMessageId: email.id });
-      if (exists) {
+      const typeGuess = guessTypeFromSubject(email.subject);
+      const existing = await EmailDelivery.findOne({ providerMessageId: email.id })
+        .select("_id type backfilled")
+        .lean();
+      if (existing) {
         skipped += 1;
+        // Refine our OWN earlier guesses (backfilled rows only — provider-built
+        // records are never touched): the pre-2026-09-29 mapping filed the
+        // weekly summaries and the rollout notice under daily_digest/other.
+        if (existing.backfilled === true && existing.type !== typeGuess) {
+          await EmailDelivery.updateOne({ _id: existing._id }, { $set: { type: typeGuess } });
+          refined += 1;
+        }
         continue;
       }
       const to = Array.isArray(email.to) ? email.to[0] : email.to;
       const sentAt = email.created_at ? new Date(email.created_at) : new Date();
-      // The list endpoint does not say which builder produced the email; the
-      // coarse "other" template key and the subject-derived type guess keep
-      // the row honest without fabricating detail.
-      const typeGuess = /otp/i.test(String(email.subject || ""))
-        ? "otp"
-        : /reminder/i.test(String(email.subject || ""))
-          ? "reminder"
-          : /digest/i.test(String(email.subject || ""))
-            ? "daily_digest"
-            : "other";
       await EmailDelivery.create({
         recipientEmailHash: EmailDelivery.hashRecipient(to || ""),
         recipientEmailLast4: String(to || "").slice(-4),
@@ -115,7 +135,7 @@ async function main() {
       });
       inserted += 1;
     }
-    console.log(`Backfill complete: ${inserted} inserted, ${skipped} already present.`);
+    console.log(`Backfill complete: ${inserted} inserted, ${skipped} already present, ${refined} types refined.`);
   } finally {
     await mongoose.disconnect();
   }
