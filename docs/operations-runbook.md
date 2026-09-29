@@ -596,7 +596,7 @@ real budget control — the per-user caps only stop one account from consuming e
 
 ### Resend webhook — configured and live (2026-09-29 evening)
 
-The webhook exists in Resend (endpoint , events
+The webhook exists in Resend (endpoint `https://api.caprotoolkit.in/api/webhooks/resend`, events
 email.sent/delivered/bounced/complained) and its signing secret is stored server-side in AppConfig
 through the write-only super-admin route — the hosting platform exposes no environment management
 through its API, and every file under the served root is publicly downloadable between deploys,
@@ -605,22 +605,14 @@ leaked value is dead).
 
 Operate it like this:
 
-- **Configure / rotate:**  with
-   (super-admin token).  unconfigures;  answers only
-   and the source — the value never travels back out of the server.
-- **Verify after any deploy or rotation:** === Resend webhook verification against https://api.caprotoolkit.in/api/webhooks/resend ===
-  PASS configured: unsigned input is refused 401 (not 503)  got 401 {"ok":false,"error":"Invalid webhook signature"}
-  PASS signed event (unknown id) accepted 200, transitioned:false  got 200 {"ok":true,"type":"email.sent","transitioned":false}
-  PASS replayed identical request stays 200 (idempotent)  got 200 {"ok":true,"type":"email.sent","transitioned":false}
-  PASS tampered payload under the original signature refused 401  got 401 {"ok":false,"error":"Invalid webhook signature"}
-  PASS stale timestamp (>5 min) refused 401 despite valid signature  got 401 {"ok":false,"error":"Invalid webhook signature"}
-  PASS out-of-model event type acknowledged as ignored  got 200 {"ok":true,"ignored":"email.opened"}
-
-webhook verify: 6 passed, 0 failed — signed
+- **Configure / rotate:** `PUT /api/super/config/resend-webhook-secret` with
+  `{"secret": "whsec_..."}` and a super-admin token. `DELETE` unconfigures; `GET` answers only
+  `configured` and the source — the value never travels back out of the server.
+- **Verify after any deploy or rotation:** `node tools/verify-resend-webhook.mjs` — signed
   accept, replay idempotent, tampered/stale/unsigned refused (6 checks).
-- **End-to-end:** send a test email (panel or ) and watch the
+- **End-to-end:** send a test email (panel or `POST /api/super/send-test-email`) and watch the
   Emails page: the row must move sent -> delivered within seconds of Resend dispatching.
-- **Backfill:**  — idempotent; also
+- **Backfill:** `node scripts/backfill-email-deliveries.mjs --production` — idempotent; also
   refines the types of rows it inserted earlier. Resend keeps 30 days.
 
 Header note for anyone touching the verifier: Resend signs with svix-prefixed headers, not the
