@@ -1,5 +1,6 @@
 // src/controllers/super.controller.js
 
+import mongoose from "mongoose";
 import User from "../models/User.js";
 import Firm from "../models/Firm.js";
 import Task from "../models/Task.js";
@@ -1417,6 +1418,9 @@ export const deleteEmailSuppressionForSuper = async (req, res, next) => {
       return res.status(404).json({ ok: false, error: "Suppression not found" });
     }
     // Audited: ActivityEvent keeps the operational trail for super-admin actions.
+    // source SUPER_ADMIN is the one value recordActivity accepts with no tenant
+    // firmId; the previous "super-panel" value failed that validation, so the
+    // promised audit row for removals was silently never written.
     await safeRecordActivity({
       userId: req.user.id,
       firmId: null,
@@ -1425,7 +1429,7 @@ export const deleteEmailSuppressionForSuper = async (req, res, next) => {
       entityId: String(id),
       beforeSummary: null,
       afterSummary: "Super admin removed a do-not-email record",
-      source: "super-panel",
+      source: "SUPER_ADMIN",
     }).catch(() => {});
     return res.json({ ok: true });
   } catch (err) {

@@ -902,6 +902,7 @@ try {
         "usage-stats-contract" = "scratch-gates-usage-stats"
         "workflow-usage-contract" = "scratch-gates-workflow-usage"
         "email-delivery-contract" = "scratch-gates-email-delivery"
+        "super-emails-controller-contract" = "scratch-gates-super-emails"
     }
     # Probed once, not assumed. On a machine with no local Mongo the behaviour is unchanged from
     # before -- the variable stays unset and the suites run their Mongo-free subset -- but the
