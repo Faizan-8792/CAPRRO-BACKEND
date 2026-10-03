@@ -3,7 +3,6 @@
    Cream #f4efdb · Teal #176e87 · Warm Gold accent
    ========================= */
 
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 
 :root {
   --cream: #f4efdb;
@@ -51,7 +50,7 @@
   --radius-lg: 16px;
   --radius-full: 999px;
 
-  --font: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+  --font: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
   --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   --bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
 }
@@ -89,19 +88,19 @@ body::before {
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text);
   margin: 0 0 0.75rem;
   letter-spacing: -0.02em;
 }
 
-h4 { font-size: 1.2rem; font-weight: 700; }
+h4 { font-size: 1.2rem; font-weight: 600; }
 p { margin: 0 0 0.75rem; color: var(--text-secondary); }
 
 a {
   color: var(--teal);
   text-decoration: none;
-  font-weight: 500;
+  font-weight: 600;
   transition: color 0.2s;
 }
 a:hover { color: var(--teal-dark); }
@@ -148,7 +147,7 @@ a:hover { color: var(--teal-dark); }
 }
 
 .topbar .navbar-brand {
-  font-weight: 800;
+  font-weight: 600;
   font-size: 18px;
   letter-spacing: -0.02em;
   background: linear-gradient(135deg, var(--teal-dark), var(--teal), var(--gold));
@@ -192,7 +191,7 @@ a:hover { color: var(--teal-dark); }
   color: var(--teal-dark) !important;
   background: var(--teal-lighter) !important;
   border: 1px solid rgba(23, 110, 135, 0.2) !important;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   padding: 4px 10px !important;
 }
@@ -221,7 +220,7 @@ a:hover { color: var(--teal-dark); }
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: 13.5px;
-  font-weight: 500;
+  font-weight: 600;
   text-decoration: none;
   transition: var(--transition);
   border-left: 3px solid transparent;
@@ -257,7 +256,7 @@ a:hover { color: var(--teal-dark); }
 .sidebar a[href^="#"].active {
   background: linear-gradient(135deg, var(--teal-lighter), rgba(23, 110, 135, 0.08));
   color: var(--teal-dark);
-  font-weight: 700;
+  font-weight: 600;
   border-left-color: var(--teal);
   box-shadow: 0 2px 8px var(--teal-glow);
 }
@@ -305,17 +304,18 @@ a:hover { color: var(--teal-dark); }
    KPI
    ======================= */
 .kpi {
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
-  font-weight: 700;
+  font-weight: 600;
   margin-bottom: 4px;
 }
 
 .kpi-value {
   font-size: 28px;
-  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
   color: var(--text) !important;
   line-height: 1.1;
   margin-bottom: 2px;
@@ -352,8 +352,8 @@ input:hover, textarea:hover, select:hover {
 
 .form-label {
   color: var(--teal-dark) !important;
-  font-size: 11.5px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   margin-bottom: 6px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -363,7 +363,7 @@ input:hover, textarea:hover, select:hover {
   letter-spacing: 3px;
   font-size: 15px;
   text-transform: uppercase;
-  font-weight: 700;
+  font-weight: 600;
   font-family: 'Courier New', monospace;
 }
 
@@ -382,8 +382,8 @@ input:hover, textarea:hover, select:hover {
   color: var(--teal-dark) !important;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  font-size: 11px !important;
-  font-weight: 700;
+  font-size: 12px !important;
+  font-weight: 600;
   padding: 12px 14px !important;
 }
 
@@ -516,8 +516,8 @@ input:hover, textarea:hover, select:hover {
    BADGES
    ======================= */
 .badge {
-  font-size: 11px !important;
-  font-weight: 700 !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
   padding: 4px 10px !important;
   border-radius: var(--radius-full) !important;
 }
@@ -544,7 +544,7 @@ input:hover, textarea:hover, select:hover {
 
 .task-column-header {
   color: var(--teal-dark) !important;
-  font-weight: 800;
+  font-weight: 600;
   font-size: 12px;
   display: flex;
   justify-content: space-between;
@@ -573,9 +573,9 @@ input:hover, textarea:hover, select:hover {
   transform: translateY(-2px);
 }
 
-.task-summary-title { color: var(--text) !important; font-weight: 700; font-size: 13px; }
-.task-summary-sub { color: var(--muted) !important; font-size: 11px; }
-.task-meta { color: var(--muted) !important; font-size: 11px; margin-top: 5px; }
+.task-summary-title { color: var(--text) !important; font-weight: 600; font-size: 13px; }
+.task-summary-sub { color: var(--muted) !important; font-size: 12px; }
+.task-meta { color: var(--muted) !important; font-size: 12px; margin-top: 5px; }
 .task-meta strong { color: var(--text) !important; }
 
 .task-card .task-details { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
@@ -595,10 +595,10 @@ input:hover, textarea:hover, select:hover {
   padding: 20px;
 }
 
-#clientsToChaseCard h3 { font-size: 1rem; font-weight: 800; color: var(--teal-dark); }
+#clientsToChaseCard h3 { font-size: 1rem; font-weight: 600; color: var(--teal-dark); }
 #clientsToChaseCard p { font-size: 0.8rem; color: var(--muted); }
 #clientsToChaseCard .smart-section { margin-top: 14px; }
-#clientsToChaseCard .smart-section h4 { font-size: 0.85rem; font-weight: 700; color: var(--teal-dark); border-bottom: 2px solid var(--teal-lighter); padding-bottom: 6px; }
+#clientsToChaseCard .smart-section h4 { font-size: 0.85rem; font-weight: 600; color: var(--teal-dark); border-bottom: 2px solid var(--teal-lighter); padding-bottom: 6px; }
 
 #chasePendingStatus, #chaseRiskStatus { font-size: 0.78rem; color: var(--muted); font-style: italic; }
 
@@ -617,7 +617,7 @@ input:hover, textarea:hover, select:hover {
   transform: translateX(4px); box-shadow: var(--shadow-sm);
 }
 
-#chasePendingList li span, #chaseRiskList li span { flex: 1; color: var(--text); font-weight: 500; }
+#chasePendingList li span, #chaseRiskList li span { flex: 1; color: var(--text); font-weight: 600; }
 
 /* =======================
    PENDING BANNER
@@ -629,7 +629,7 @@ input:hover, textarea:hover, select:hover {
   color: var(--text);
   padding: 14px 18px;
 }
-#pendingBanner strong { color: var(--warn); font-weight: 700; }
+#pendingBanner strong { color: var(--warn); font-weight: 600; }
 
 /* =======================
    UTILITY
@@ -736,7 +736,7 @@ input:hover, textarea:hover, select:hover {
 .ca-modal-title {
   margin: 0;
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--teal-dark);
 }
@@ -751,7 +751,7 @@ input:hover, textarea:hover, select:hover {
   padding: 0 8px;
   border-radius: var(--radius-sm);
   transition: var(--transition);
-  font-weight: 300;
+  font-weight: 400;
 }
 
 .ca-modal-close:hover {
@@ -814,8 +814,8 @@ input:hover, textarea:hover, select:hover {
 
 .stat-card:hover::before { opacity: 1; }
 
-.stat-card .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; margin-bottom: 4px; }
-.stat-card .stat-value { font-size: 30px; font-weight: 800; color: var(--text); line-height: 1.1; letter-spacing: -0.02em; }
+.stat-card .stat-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+.stat-card .stat-value { font-size: 30px; font-weight: 600; color: var(--text); line-height: 1.1; letter-spacing: -0.02em; }
 .stat-card .stat-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
 .stat-card.stat-primary { border-left: 4px solid var(--teal); }
@@ -910,7 +910,7 @@ input:hover, textarea:hover, select:hover {
 
 .st-safety-grid > div:last-child { border-right: 0; }
 .st-safety-grid strong { display: block; color: var(--text); font-size: 12px; }
-.st-safety-grid span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.st-safety-grid span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.45; }
 
 .st-confirm {
   display: flex;
@@ -925,7 +925,7 @@ input:hover, textarea:hover, select:hover {
 }
 
 .st-confirm .form-check-input { flex: 0 0 auto; margin: 2px 0 0; }
-.st-run-meta { margin-top: 6px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.st-run-meta { margin-top: 6px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 
 .st-summary-grid {
   display: grid;
@@ -943,7 +943,7 @@ input:hover, textarea:hover, select:hover {
 }
 
 .st-metric strong { display: block; color: var(--text); font-size: 18px; line-height: 1.15; overflow-wrap: anywhere; }
-.st-metric span { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.st-metric span { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 .st-groups { display: grid; gap: 8px; }
 
 .st-group {
@@ -969,7 +969,7 @@ input:hover, textarea:hover, select:hover {
   outline-offset: -2px;
 }
 
-.st-group-count { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.st-group-count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .st-checks { border-top: 1px solid var(--border); }
 .st-empty-group { padding: 12px; color: var(--muted); font-size: 12px; }
 
@@ -988,7 +988,7 @@ input:hover, textarea:hover, select:hover {
 .st-check-copy { min-width: 0; }
 .st-check-copy strong { display: block; color: var(--text); font-size: 13px; }
 .st-check-copy span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
-.st-ms { padding-top: 2px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.st-ms { padding-top: 2px; color: var(--muted); font-size: 12px; white-space: nowrap; }
 
 .st-status {
   display: inline-flex;
@@ -998,8 +998,8 @@ input:hover, textarea:hover, select:hover {
   padding: 3px 7px;
   border: 1px solid transparent;
   border-radius: var(--radius-full);
-  font-size: 9px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 600;
   letter-spacing: .04em;
   line-height: 1.3;
   text-transform: uppercase;
@@ -1012,10 +1012,10 @@ input:hover, textarea:hover, select:hover {
 .st-status-pending { border-color: var(--border); background: var(--surface-2); color: var(--text-secondary); }
 
 .st-evidence { margin: 8px 0 0 68px; }
-.st-evidence > summary { color: var(--teal-dark); font-size: 11px; font-weight: 700; cursor: pointer; }
+.st-evidence > summary { color: var(--teal-dark); font-size: 12px; font-weight: 600; cursor: pointer; }
 .st-evidence-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
 .st-evidence-grid > div { min-width: 0; }
-.st-evidence h5 { margin: 0 0 4px; color: var(--muted); font-size: 9px; letter-spacing: .04em; text-transform: uppercase; }
+.st-evidence h5 { margin: 0 0 4px; color: var(--muted); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
 .st-evidence pre {
   max-height: 220px;
   margin: 0;
@@ -1025,7 +1025,7 @@ input:hover, textarea:hover, select:hover {
   border-radius: 6px;
   background: var(--surface-2);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1046,7 +1046,7 @@ input:hover, textarea:hover, select:hover {
 .st-ai-heading h3 { margin: 0; color: var(--text); font-size: 14px; }
 .st-ai-review p { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 .st-ai-review .st-ai-summary { color: var(--text-secondary); }
-.st-ai-review h4 { margin: 12px 0 4px; color: var(--text); font-size: 11px; }
+.st-ai-review h4 { margin: 12px 0 4px; color: var(--text); font-size: 12px; }
 .st-ai-review ul { margin: 0; padding-left: 18px; color: var(--text-secondary); font-size: 12px; }
 
 .st-banner { padding: 10px 14px; border-radius: var(--radius-sm); font-weight: 600; margin-bottom: 10px; }
@@ -1099,7 +1099,7 @@ th.super-sortable::after {
   position: absolute;
   right: 6px;
   opacity: 0.25;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 th.super-sortable[aria-sort="ascending"]::after { content: "↑"; opacity: 1; }
