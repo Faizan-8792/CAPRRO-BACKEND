@@ -263,6 +263,17 @@ function bindAppConfigHandlers() {
     toggle.addEventListener("change", async () => {
       const want = toggle.checked;
       const prev = !want;
+      // A platform-wide switch: ON puts every user behind the maintenance screen.
+      // It used to PATCH production on the first click, on the page this panel
+      // opened to. Like every other destructive action here it asks first, and
+      // declining makes NO network request (DS6).
+      const question = want
+        ? "Turn maintenance mode ON?\n\nEvery user will see the maintenance screen and cannot work until it is turned off."
+        : "Turn maintenance mode OFF?\n\nEvery user gets full access again.";
+      if (!window.confirm(question)) {
+        toggle.checked = prev;
+        return;
+      }
       toggle.disabled = true;
       try {
         const r = await api("/app-config/maintenance", {
@@ -2715,7 +2726,10 @@ const SUPER_PAGES = [
   "terms",
   "review",
 ];
-const SUPER_DEFAULT_PAGE = "controls";
+// Overview, not Controls: the panel used to open on the page holding the
+// maintenance switch and every platform-wide setting (DS6). Reading comes
+// first; Controls is one click away when it is wanted.
+const SUPER_DEFAULT_PAGE = "overview";
 
 function superShowPage(hash) {
   const wanted = String(hash || "").replace(/^#/, "");
