@@ -1108,3 +1108,113 @@ th.super-sortable[aria-sort="descending"]::after { content: "↓"; opacity: 1; }
 /* Only the routed section is on screen; [hidden] needs to beat Bootstrap's
    display rules on the same element. */
 .super-page[hidden] { display: none !important; }
+
+
+/* =======================================================================
+   The firm admin panel on a phone (DS5)
+   Below 992px the sidebar is a drawer behind the Menu button and the task
+   board's filters a sheet behind the Filters button (admin-layout.js opens
+   and closes them); wide tables scroll inside their own box with the first
+   column held in place. Above 992px none of this exists. Scoped to the firm
+   panel (body.firm-admin): super.html shares this sheet, .layout and
+   .sidebar, and keeps its own narrow-screen layout.
+   ======================================================================= */
+.firm-admin .sidebar-toggle,
+.firm-admin .filter-toggle,
+.firm-admin .filter-sheet-head { display: none; }
+
+.firm-admin .sidebar-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1040;
+  background: rgba(15, 23, 42, 0.38);
+}
+.firm-admin .sidebar-scrim[hidden] { display: none; }
+
+@media (max-width: 991.98px) {
+  .firm-admin .sidebar-toggle {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    margin-right: 8px;
+  }
+  .firm-admin .topbar .container-fluid { flex-wrap: wrap; gap: 6px; }
+  .firm-admin #emailBadge { max-width: 46vw; overflow: hidden; text-overflow: ellipsis; }
+  /* The firm name, the badges and Logout take their own line under the brand,
+     and wrap there rather than push the page sideways. */
+  .firm-admin .topbar .ms-auto { width: 100%; min-width: 0; margin-left: 0 !important; }
+  .firm-admin .topbar .ms-auto > .d-flex { flex-wrap: wrap; }
+
+  .firm-admin .layout { display: block; }
+  .firm-admin .content { padding: 16px 12px; overflow: visible; }
+  .firm-admin .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 1050;
+    order: 0;
+    width: min(280px, 84vw);
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 16px 8px;
+    border-top: none;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    transform: translateX(-105%);
+    visibility: hidden;
+    transition: transform 0.2s ease, visibility 0s linear 0.2s;
+  }
+  .firm-admin.sidebar-open .sidebar {
+    transform: none;
+    visibility: visible;
+    transition: transform 0.2s ease;
+  }
+  .firm-admin .sidebar > a,
+  .firm-admin .sidebar a[href^="#"] {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    margin: 0;
+    font-size: 14px;
+    white-space: normal;
+  }
+
+  .firm-admin .filter-toggle { display: inline-flex; align-items: center; min-height: 44px; }
+  .firm-admin .filter-sheet {
+    display: none;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1045;
+    max-height: 75vh;
+    overflow-y: auto;
+    margin: 0 !important;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -12px 32px rgba(15, 23, 42, 0.2);
+  }
+  .firm-admin.filters-open .filter-sheet { display: block; }
+  .firm-admin .filter-sheet-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .firm-admin .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .firm-admin .table-responsive table th:first-child,
+  .firm-admin .table-responsive table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--surface);
+  }
+}
+
+@media (max-width: 991.98px) and (prefers-reduced-motion: reduce) {
+  .firm-admin .sidebar,
+  .firm-admin.sidebar-open .sidebar { transition: none; }
+}
