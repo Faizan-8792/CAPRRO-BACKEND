@@ -69,6 +69,10 @@ function check(id, ok, detail) {
 let base = "";
 let token = "";
 let cleanup = async () => {};
+// What the stub's /api/app-config does (stub mode only).
+const stubState = { appConfigDelayMs: 0, appConfigFails: false };
+// What the Controls cards should show once read: the stub's maintenance mode, or the seeded one.
+const storedMaintenance = STUB ? true : false;
 
 if (STUB) {
   const express = (await import("express")).default;
@@ -97,7 +101,20 @@ if (STUB) {
     perUser: [{ userId: "u1", email: "user1@example.test", name: "User One", desktopCount: 9, extensionCount: 3, totalCount: 12, workflows: 2, lastSeenAt: new Date(todayUtc).toISOString() }],
     perUserWindowDays: 30,
   } }));
-  stub.get("/api/app-config", answer({ ok: true, config: { maintenanceMode: false, maintenanceMessage: "", welcomeMessage: "", welcomeVersion: 1, featureFlags: {} } }));
+  // getAppConfig's shape. The drive sets stubState to slow it down or make it fail, so the Controls
+  // cards can be seen waiting for it and refusing to open without it.
+  stub.get("/api/app-config", async (req, res) => {
+    await sleep(stubState.appConfigDelayMs);
+    if (stubState.appConfigFails) return res.status(500).json({ ok: false, error: "Server error" });
+    return res.json({ ok: true, config: {
+      maintenanceMode: true,
+      maintenanceMessage: "Back at 6 pm",
+      welcomeAnnouncement: { version: "v1", title: "Welcome", body: "Hello", enabled: true },
+      desktopRelease: null,
+      featureFlags: { gstReconciliation: true, tdsHealth: false, dailyDigest: false },
+      dataRetention: { summary: "stub" },
+    } });
+  });
   stub.get("/api/app-config/desktop-release", answer({ ok: true, desktopRelease: {} }));
   stub.get("/api/super/provider-usage", answer({ ok: true, usage: { today: {}, thisMonth: {}, topUsersToday: {} } }));
   stub.get("/api/super/reminder-delivery-health", answer({ ok: true, delivery: { issueCount: 0, sample: [], candidatesScanned: 0, candidatesScanTruncated: false } }));
@@ -313,6 +330,53 @@ try {
     const thrown = await page.evaluate(`window.__thrown.slice()`);
     const failedLoads = page.consoleLines().filter((line) => /Loading the .* page failed|TypeError|ReferenceError/.test(line));
     check("nothing-threw", thrown.length === 0 && failedLoads.length === 0, `${thrown.length} uncaught, ${failedLoads.length} failed page load(s)${thrown.length ? `: ${thrown[0]}` : ""}`);
+
+    // 5. The Controls cards stay closed until the server's settings have been read. Loading by
+    // page put the read at the moment the page opens, so a switch at rest and empty fields must
+    // not be clickable, or savable, as if they were the platform's state.
+    const CARDS = ["maintenanceSet", "welcomeSet", "featureFlagsSet", "desktopReleaseSet"];
+    const cardState = () => page.evaluate(`(() => ({
+      disabled: ${JSON.stringify(CARDS)}.map((id) => document.getElementById(id) ? document.getElementById(id).disabled : null),
+      busy: ${JSON.stringify(CARDS)}.map((id) => document.getElementById(id) ? document.getElementById(id).getAttribute("aria-busy") : null),
+      label: document.getElementById("maintenanceLabel").textContent.trim(),
+      checked: document.getElementById("maintenanceToggle").checked,
+    }))()`);
+    const reloadAt = async (hash, waitMs) => {
+      await page.send("Page.navigate", { url: "about:blank" });
+      await sleep(300);
+      await page.goto(`${panelUrl}#${hash}`, { waitMs });
+    };
+    if (STUB) {
+      stubState.appConfigDelayMs = 2500;
+      await reloadAt("controls", 1200);
+      const waiting = await cardState();
+      check(
+        "controls-cards-closed-while-reading",
+        waiting.disabled.slice(0, 3).every((d) => d === true) && waiting.busy.slice(0, 3).every((b) => b === "true") && /loading/i.test(waiting.label),
+        `while /app-config is outstanding: disabled ${waiting.disabled.join(",")}, label ${JSON.stringify(waiting.label)}`,
+      );
+      await sleep(2500);
+      stubState.appConfigDelayMs = 0;
+    } else {
+      await reloadAt("controls", 3000);
+    }
+    const opened = await cardState();
+    check(
+      "controls-cards-open-once-read",
+      opened.disabled.every((d) => d === false) && opened.busy.every((b) => b === "false") && opened.checked === storedMaintenance && opened.label === `Maintenance mode: ${storedMaintenance ? "ON" : "OFF"}`,
+      `after reading: disabled ${opened.disabled.join(",")}, switch ${opened.checked}, label ${JSON.stringify(opened.label)}`,
+    );
+    if (STUB) {
+      stubState.appConfigFails = true;
+      await reloadAt("controls", 2500);
+      const unread = await cardState();
+      check(
+        "controls-cards-stay-closed-when-unread",
+        unread.disabled.slice(0, 3).every((d) => d === true) && /could not be read/.test(unread.label),
+        `with /app-config failing: disabled ${unread.disabled.join(",")}, label ${JSON.stringify(unread.label)}`,
+      );
+      stubState.appConfigFails = false;
+    }
 
     if (process.env.DS10_SHOT) {
       await page.evaluate(`location.hash = "analytics"; document.querySelector(".content") && (document.querySelector(".content").scrollTop = 0); true`);

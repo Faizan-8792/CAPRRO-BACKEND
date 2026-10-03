@@ -1248,3 +1248,8 @@ th.super-sortable[aria-sort="descending"]::after { content: "↓"; opacity: 1; }
 .day-chart__table thead th span { display: block; }
 .day-chart__table thead th:first-child, .day-chart__table tbody th { width: 84px; padding-right: 8px; text-align: right; font-weight: 600; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .day-chart__table tbody th .day-chart__swatch { margin-right: 5px; vertical-align: -1px; }
+
+/* The Controls cards' fieldsets (DS10): no frame of their own. A card is disabled until the server's
+   settings have been read, and shows a busy cursor while it waits. */
+.super-loading-set { min-width: 0; margin: 0; padding: 0; border: 0; }
+.super-loading-set[aria-busy="true"] { cursor: progress; }

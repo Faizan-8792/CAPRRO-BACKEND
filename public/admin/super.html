@@ -129,6 +129,7 @@
         </div>
 
         <div class="card p-3 super-admin-card">
+          <fieldset id="maintenanceSet" class="super-loading-set" disabled aria-busy="true">
           <div class="row g-3 align-items-center">
             <div class="col-md-7">
               <div class="d-flex align-items-center gap-3">
@@ -136,7 +137,7 @@
                   <input class="form-check-input" type="checkbox" role="switch" id="maintenanceToggle" style="width: 44px; height: 24px;">
                 </div>
                 <div>
-                  <div style="font-weight:600; color: var(--text);" id="maintenanceLabel">Maintenance mode: OFF</div>
+                  <div style="font-weight:600; color: var(--text);" id="maintenanceLabel">Maintenance mode: loading&hellip;</div>
                   <div class="text-muted" style="font-size:12px;">When ON, all users see an "Under Maintenance" screen.</div>
                 </div>
               </div>
@@ -150,9 +151,11 @@
             <button class="btn btn-sm btn-primary" id="saveMaintenanceBtn">Save Message</button>
           </div>
           <div id="maintenanceStatus" class="small-label mt-2"></div>
+          </fieldset>
         </div>
 
         <div class="card p-3 super-admin-card mt-3">
+          <fieldset id="welcomeSet" class="super-loading-set" disabled aria-busy="true">
           <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Welcome Announcement</h6>
           <div class="row g-2">
             <div class="col-md-3">
@@ -177,9 +180,11 @@
             <button class="btn btn-sm btn-primary ms-auto" id="saveWelcomeBtn">Save Announcement</button>
           </div>
           <div id="welcomeStatus" class="small-label mt-2"></div>
+          </fieldset>
         </div>
 
         <div class="card p-3 super-admin-card mt-3">
+          <fieldset id="featureFlagsSet" class="super-loading-set" disabled aria-busy="true">
           <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Feature Flags</h6>
           <p class="text-muted mb-2" style="font-size:12px;">
             Every flag below defaults to OFF on a fresh deployment. Toggle the ones you want live, then press Save -- only the flags you actually change are sent to the server.
@@ -310,6 +315,7 @@
             <button class="btn btn-sm btn-primary" id="saveFeatureFlagsBtn">Save Feature Flags</button>
           </div>
           <div id="featureFlagsStatus" class="small-label mt-2" style="white-space:pre-wrap;"></div>
+          </fieldset>
         </div>
 
         <div class="card p-3 super-admin-card mt-3">
@@ -331,8 +337,9 @@
         </div>
 
         <div class="card p-3 super-admin-card mt-3">
+          <fieldset id="desktopReleaseSet" class="super-loading-set" disabled aria-busy="true">
           <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Desktop Release</h6>
-          <div id="desktopReleaseLive" class="text-muted small mb-2">Nothing announced yet.</div>
+          <div id="desktopReleaseLive" class="text-muted small mb-2">Reading the saved release&hellip;</div>
           <div class="row g-2">
             <div class="col-md-3">
               <label class="form-label small-label">Latest version</label>
@@ -375,6 +382,7 @@
             <button class="btn btn-sm btn-warning" id="notifyDesktopReleaseBtn">Notify all users</button>
           </div>
           <div id="desktopReleaseStatus" class="small-label mt-2"></div>
+          </fieldset>
         </div>
       </section>
 

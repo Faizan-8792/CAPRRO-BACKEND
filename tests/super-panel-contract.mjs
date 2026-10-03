@@ -421,6 +421,24 @@ if (chartApi) {
   check("no rows at all says so instead of drawing fourteen zeros", /No activity recorded yet/.test(empty.innerHTML) && !/<table/.test(empty.innerHTML), "");
 }
 
+// The Controls cards show the server's settings, so each starts disabled and busy, and their
+// resting text claims no state: loading by page put the read at the moment the page opens.
+const controlsCards = ["maintenanceSet", "welcomeSet", "featureFlagsSet", "desktopReleaseSet"];
+const closedCards = controlsCards.filter((id) =>
+  new RegExp(`<fieldset id="${id}" class="super-loading-set" disabled aria-busy="true">`).test(superHtml)
+);
+check(
+  "every Controls card starts closed until its settings are read",
+  closedCards.length === controlsCards.length && (superHtml.match(/<\/fieldset>/g) || []).length >= controlsCards.length,
+  closedCards.length + "/" + controlsCards.length + " cards"
+);
+check(
+  "the maintenance label and the release readout claim no state before reading",
+  !/id="maintenanceLabel">Maintenance mode: (ON|OFF)/.test(superHtml) &&
+    !/id="desktopReleaseLive"[^>]*>Nothing announced yet\./.test(superHtml),
+  ""
+);
+
 // The chart's table runs sideways in day order; the panel's column sorting must leave it alone.
 check(
   "the day-chart table is excluded from column sorting",

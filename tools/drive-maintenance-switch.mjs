@@ -133,9 +133,14 @@ try {
       `with no hash: overview shown ${landing.overview}, controls shown ${landing.controls}, current link ${JSON.stringify(landing.current)}`,
     );
 
-    // To the switch, the way a person gets there.
+    // To the switch, the way a person gets there. Its card opens once the server's settings have
+    // been read (DS10: Controls loads when it is opened, and stays disabled until then).
     await page.evaluate(`location.hash = "controls"; true`);
     await sleep(800);
+    for (let waited = 0; waited < 5000; waited += 200) {
+      if (await page.evaluate(`!document.getElementById("maintenanceSet") || !document.getElementById("maintenanceSet").disabled`)) break;
+      await sleep(200);
+    }
     const onControls = await page.evaluate(`!document.getElementById("page-controls").hidden`);
     check("controls-reachable", onControls === true, `Controls shown after choosing it: ${onControls}`);
 

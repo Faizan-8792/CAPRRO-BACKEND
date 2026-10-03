@@ -171,11 +171,32 @@ function reportFeatureFlagLoadFailure(reason) {
   }
 }
 
+// A Controls card shows the server's settings, so its form stays disabled (a fieldset in
+// super.html) until those settings have been read: the switch's resting position and an empty
+// field are not the platform's state, and saving them would overwrite it. DS10 moved this read
+// from startup to the first opening of the page, which put the gap in front of the admin. A card
+// whose settings could not be read stays closed and says so.
+function setControlsCardReady(id, ready) {
+  const set = qs(id);
+  if (!set) return;
+  set.disabled = !ready;
+  set.setAttribute("aria-busy", "false");
+}
+
+function reportAppConfigUnread() {
+  const label = qs("maintenanceLabel");
+  if (label) label.textContent = "Maintenance mode: could not be read - reload the page to try again";
+  setControlsCardReady("maintenanceSet", false);
+  setControlsCardReady("welcomeSet", false);
+  setControlsCardReady("featureFlagsSet", false);
+}
+
 async function loadAppConfigSection() {
   try {
     const r = await api("/app-config");
     if (!r.ok) {
       reportFeatureFlagLoadFailure("the server did not return a config");
+      reportAppConfigUnread();
       return;
     }
     const c = r.config;
@@ -186,24 +207,29 @@ async function loadAppConfigSection() {
     if (toggle) toggle.checked = !!c.maintenanceMode;
     if (label) label.textContent = `Maintenance mode: ${c.maintenanceMode ? "ON" : "OFF"}`;
     if (msg) msg.value = c.maintenanceMessage || "";
+    setControlsCardReady("maintenanceSet", true);
 
     const wa = c.welcomeAnnouncement || {};
     if (qs("welcomeVersion")) qs("welcomeVersion").value = wa.version || "";
     if (qs("welcomeTitleInput")) qs("welcomeTitleInput").value = wa.title || "";
     if (qs("welcomeBodyInput")) qs("welcomeBodyInput").value = wa.body || "";
     if (qs("welcomeEnabled")) qs("welcomeEnabled").checked = wa.enabled !== false;
+    setControlsCardReady("welcomeSet", true);
 
     // An empty or absent map is a LOAD FAILURE, not "all flags are off". An unauthenticated or
     // expired-session GET returns exactly that, and treating it as real state is what allowed a
     // panel showing nineteen unchecked boxes to be saved over a live configuration.
     if (!c.featureFlags || Object.keys(c.featureFlags).length === 0) {
       reportFeatureFlagLoadFailure("the server returned no flags");
+      setControlsCardReady("featureFlagsSet", false);
     } else {
       loadFeatureFlagsSection(c.featureFlags);
+      setControlsCardReady("featureFlagsSet", true);
     }
   } catch (err) {
     console.warn("App config load fail:", err.message);
     reportFeatureFlagLoadFailure(err.message || "network error");
+    reportAppConfigUnread();
   }
 
   // Deliberately a SEPARATE call to the super-only draft route below, NOT the public GET above --
@@ -226,8 +252,12 @@ async function loadAppConfigSection() {
     if (qs("desktopEnabled")) qs("desktopEnabled").checked = d.enabled === true;
 
     renderDesktopReleaseLive(d);
+    setControlsCardReady("desktopReleaseSet", true);
   } catch (err) {
     console.warn("Desktop release draft load fail:", err.message);
+    const live = qs("desktopReleaseLive");
+    if (live) live.textContent = "The saved release could not be read - reload the page to try again.";
+    setControlsCardReady("desktopReleaseSet", false);
   }
 }
 
