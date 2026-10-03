@@ -175,9 +175,9 @@ check(
 );
 
 check(
-  "Super JS wires toggle change → PATCH /app-config/maintenance",
-  /maintenanceToggle[\s\S]{0,600}\/app-config\/maintenance/.test(superJs),
-  "Toggle persists immediately"
+  "Super JS wires toggle change → confirm → PATCH /app-config/maintenance",
+  /maintenanceToggle[\s\S]{0,2000}window\.confirm\(question\)[\s\S]{0,600}\/app-config\/maintenance/.test(superJs),
+  "The toggle asks first (DS6), then persists"
 );
 
 check(
