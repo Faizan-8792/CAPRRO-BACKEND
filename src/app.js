@@ -27,6 +27,7 @@ import caseRoutes from "./routes/case.routes.js";
 import engagementRoutes from "./routes/engagement.routes.js";
 import firmOperationsRoutes from "./routes/firm-operations.routes.js";
 import digestRoutes from "./routes/digest.routes.js";
+import portalMapRoutes from "./routes/portal-map.routes.js";
 import webhookRoutes from "./routes/webhook.routes.js";
 import { sanitizeInputs } from "./middleware/sanitize.middleware.js";
 import { trackUsage } from "./middleware/usage-tracker.middleware.js";
@@ -601,6 +602,9 @@ app.use("/api/operations", operationsRoutes);
 app.use("/api/cases", caseRoutes);
 app.use("/api/engagements", engagementRoutes);
 app.use("/api/digests", digestRoutes);
+// GD28: the GST downloader's signed portal map. Mounted before the /api
+// catch-all below, which would otherwise answer every one of its paths.
+app.use("/api/gst-portal-map", portalMapRoutes);
 app.use("/api", firmOperationsRoutes);
 
 /* ===============================

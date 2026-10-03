@@ -27,3 +27,6 @@ __recover.mjs
 # Marketing campaign runtime artifacts (one-off ops script)
 scripts/campaign-log.jsonl
 scripts/preview.html
+# GD28: a portal-map signing key is never committed. tools/sign-portal-map.mjs refuses
+# to write or read one inside the checkout; this is the second guard.
+*.pem

@@ -32,6 +32,7 @@ import {
   configureResendWebhookSecret,
   clearResendWebhookSecret,
   getResendWebhookSecretState,
+  publishPortalMapVersion,
 } from "../controllers/super.controller.js";
 import { listTermsAcceptances } from "../controllers/terms.controller.js";
 import { requireSuperAdmin } from "../middleware/authorization.middleware.js";
@@ -91,6 +92,10 @@ router.get("/emails/:id", requireSuperAdmin, getEmailDeliveryForSuper);
 // O10: paid-provider (DeepSeek / OCR.space) call-volume meter -- backs the
 // "Provider usage" admin panel card.
 router.get("/provider-usage", requireSuperAdmin, getProviderUsageStats);
+
+// GD28: a new signed version of the GST downloader's portal map. authRequired
+// (router.use above), requireSuperAdmin here, assertSuper in the controller.
+router.post("/gst-portal-map", requireSuperAdmin, publishPortalMapVersion);
 
 // T1 (.kiro/PLAN.md): fleet-wide reminder delivery-failure visibility --
 // prerequisite for turning on reliableReminderDelivery/complianceGenerationShadow.

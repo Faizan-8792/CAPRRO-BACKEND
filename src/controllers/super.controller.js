@@ -29,6 +29,7 @@ import {
 import { sendTestDigestNow } from "../services/digest.service.js";
 import { deliveryHealth } from "./reminder.controller.js";
 import AppConfig from "../models/AppConfig.js";
+import { publishPortalMap } from "../services/portal-map.service.js";
 import ProviderUsage, {
   GLOBAL_USAGE_USER_ID,
   dailyPeriodKey,
@@ -297,6 +298,22 @@ export const getUsageStats = async (req, res, next) => {
         perUserWindowDays: 30,
       },
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// 0a) GD28: publish a new version of the GST downloader's portal map. The owner signs it offline
+// (tools/sign-portal-map.mjs); this only verifies and stores. Third of the three guards, after
+// authRequired and requireSuperAdmin on the route.
+export const publishPortalMapVersion = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    const result = await publishPortalMap(req.body, req.user);
+    if (!result.ok) {
+      return res.status(result.status).json({ ok: false, error: result.message, code: result.code });
+    }
+    return res.status(201).json({ ok: true, ...result.published });
   } catch (err) {
     next(err);
   }

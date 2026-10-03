@@ -2365,9 +2365,21 @@ if (listed.status !== 0 || listed.error) {
   // src/services/mailer.js from an untracked file into a tracked one, so the count
   // the pin had just been raised to was measured while that file was still
   // invisible to git ls-files.
+  // 197 -> 198: public/admin/admin-layout.js (DS5, c3fc206, the firm admin panel on phones). It
+  // was committed without this pin moving, and the next full gate run caught it - the pin doing
+  // its job. It is DOM code for the sidebar toggle, the scrim and the filter sheet: no network
+  // call, no storage, no secret, no configuration value.
+  // 198 -> 202 on 2026-10-04 for GD28, the signed portal map, all four confirmed clean by this
+  // very scan (status 0, no REFUSED line) before the pin moved: src/models/PortalMapVersion.js
+  // (a schema and its limits); src/services/portal-map.service.js, which reads
+  // GST_PORTAL_MAP_PUBLIC_KEY at call time - a PUBLIC key, never a literal; the private half
+  // lives offline with the owner and tools/sign-portal-map.mjs refuses to put it in the
+  // checkout - and verifies Ed25519 signatures with node:crypto, making no network call; and
+  // src/controllers/portal-map.controller.js and src/routes/portal-map.routes.js, two signed-in
+  // reads that serve only the stored signed text.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 197 && result.status === 0,
+    files.length === 202 && result.status === 0,
     result,
   );
 }

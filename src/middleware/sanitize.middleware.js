@@ -59,9 +59,18 @@ export function sanitizeInputs(req, res, next) {
   // routes elsewhere do.
   const isOpaqueImportRoute =
     req.method === "POST" && /^\/api\/imports\//.test(req.path);
+  // GD28: a signed portal map is verified byte for byte against the owner's
+  // signature, so the same rewriting would turn every honest submission into
+  // a "bad signature" - .trim() alone changes the signed bytes, and a CSS
+  // selector or portal sentence can match the tag and on*= patterns. The
+  // route is super-admin only, takes an allow-listed body, and stores the
+  // content as data that nothing renders.
+  const isSignedPortalMap =
+    req.method === "POST" && req.path === "/api/super/gst-portal-map";
 
   if (
     !isOpaqueImportRoute &&
+    !isSignedPortalMap &&
     req.body &&
     typeof req.body === "object"
   ) {

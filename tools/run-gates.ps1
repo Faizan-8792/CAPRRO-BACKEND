@@ -791,6 +791,10 @@ try {
         "provider-quota-contract",
         "client-version-contract",
         "desktop-fixture-drift-contract",
+        # Added 2026-10-04. admin-type-scale (DS2) was committed without being listed here, which
+        # gate-suite-coverage reported; portal-map-contract is GD28 (the signed portal map).
+        "admin-type-scale",
+        "portal-map-contract",
         # Added 2026-08-26. These six existed in tests/ and passed, but were NEVER in this list, so a
         # regression in any of them would have shipped silently. Found by diffing the suite files on
         # disk (50) against the names in this array (40) -- the same class of hole as the

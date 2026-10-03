@@ -110,6 +110,12 @@ export const RETENTION_CLASSIFICATION = Object.freeze({
   ImportBatch: RETENTION_CLASSES.RETAIN,
   ImportRow: RETENTION_CLASSES.RETAIN,
   Otp: RETENTION_CLASSES.SELF_EXPIRING,
+  // Added 2026-10-04 with the signed portal map (GD28). RETAIN: each row is one version of what
+  // the GST downloader was told about GST Portal, signed by the owner, and the run report names
+  // the version a run used - so the history is what lets a run be explained later. It holds no
+  // firm data and no client data; the publisher's id is the only reference to a person. Versions
+  // only go up, so the collection grows by one row per published map.
+  PortalMapVersion: RETENTION_CLASSES.RETAIN,
   ProviderUsage: RETENTION_CLASSES.RETAIN,
   ReconciliationItem: RETENTION_CLASSES.RETAIN,
   ReconciliationRun: RETENTION_CLASSES.RETAIN,
