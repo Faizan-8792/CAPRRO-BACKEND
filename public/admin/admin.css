@@ -18,6 +18,8 @@
   --gold-light: #d9a868;
   --gold-lighter: #f0e0c0;
   --gold-glow: rgba(200, 146, 75, 0.18);
+  /* A chart series on white needs 3:1 (WCAG 1.4.11); --gold is 2.6:1, this is 4.0:1 (DS10). */
+  --gold-strong: #a87425;
 
   --bg: var(--cream);
   --surface: #ffffff;
@@ -1218,3 +1220,31 @@ th.super-sortable[aria-sort="descending"]::after { content: "↓"; opacity: 1; }
   .firm-admin .sidebar,
   .firm-admin.sidebar-open .sidebar { transition: none; }
 }
+
+/* ---------- Day charts (DS10): a scale, a legend, and the figures in a table ----------
+   One component for every per-day chart in the super panel (super.js renderDayChart). The
+   table under the bars is the x-axis: its first column is as wide as the y-axis, so each
+   figure sits under its own bar. Narrow cards scroll the chart sideways rather than squeeze it. */
+.day-chart { margin-top: 10px; }
+.day-chart__empty { color: var(--muted); font-size: 12px; font-style: italic; padding: 14px 0; }
+.day-chart__legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 8px; padding: 0; list-style: none; font-size: 12px; color: var(--text-secondary); }
+.day-chart__legend li { display: inline-flex; align-items: center; gap: 6px; }
+.day-chart__swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.day-chart__frame { overflow-x: auto; }
+.day-chart__plot, .day-chart__table { min-width: 460px; }
+.day-chart__plot { display: grid; grid-template-columns: 84px minmax(0, 1fr); height: 128px; padding-top: 8px; }
+.day-chart__axis { position: relative; border-right: 1px solid var(--border-hover); }
+.day-chart__tick { position: absolute; right: 6px; transform: translateY(50%); font-size: 12px; line-height: 1; color: var(--muted); font-variant-numeric: tabular-nums; }
+.day-chart__bars { position: relative; display: grid; grid-template-columns: repeat(var(--days), minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr); border-bottom: 1px solid var(--border-hover); }
+.day-chart__gridline { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed var(--border); pointer-events: none; }
+.day-chart__day { display: flex; justify-content: center; align-items: flex-end; gap: 2px; height: 100%; padding: 0 3px; }
+.day-chart__bar { display: block; flex: 1 1 0; max-width: 18px; border-radius: 3px 3px 0 0; }
+.day-chart__bar--s0 { background: var(--teal); }
+.day-chart__bar--s1 { background: var(--gold-strong); }
+.day-chart__table { width: 100%; table-layout: fixed; border-collapse: collapse; margin: 4px 0 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+.day-chart__table caption { caption-side: bottom; padding: 6px 0 0; font-size: 12px; color: var(--muted); text-align: left; }
+.day-chart__table th, .day-chart__table td { padding: 3px 0; border: 0; text-align: center; font-weight: 400; color: var(--text); }
+.day-chart__table thead th { color: var(--muted); line-height: 1.15; }
+.day-chart__table thead th span { display: block; }
+.day-chart__table thead th:first-child, .day-chart__table tbody th { width: 84px; padding-right: 8px; text-align: right; font-weight: 600; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.day-chart__table tbody th .day-chart__swatch { margin-right: 5px; vertical-align: -1px; }

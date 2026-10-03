@@ -37,20 +37,23 @@ async function apiGetMe() {
   return res.json();
 }
 
+// Returns the signed-in super admin, or null after sending the browser elsewhere. The panel asks
+// /auth/me once and initSuperPage uses this user rather than asking again (DS10): every request
+// at startup counts against the API's limiter.
 async function ensureSuperAdminAuth() {
   try {
     const data = await apiGetMe();
     if (!data.ok) throw new Error("Invalid user");
     if (data.user.role !== "SUPER_ADMIN") {
       window.location.href = "/admin/admin.html";
-      return false;
+      return null;
     }
-    return true;
+    return data.user;
   } catch (err) {
     console.error("Auth error:", err);
     clearToken();
     window.location.href = "/index.html";
-    return false;
+    return null;
   }
 }
 
@@ -89,11 +92,6 @@ async function api(path, opts = {}) {
 
 function requireSuperAdmin(user) {
   return user.role === "SUPER_ADMIN" || user.email === "saifullahfaizan786@gmail.com";
-}
-
-async function loadMe() {
-  const me = await api("/auth/me");
-  return me.user;
 }
 
 // ─── App Config (maintenance + welcome) ────────────────────────────
@@ -607,25 +605,13 @@ async function loadUsageStats() {
     }
 
     if (chartEl) {
-      const days = u.dailyActivity || [];
-      if (!days.length) {
-        chartEl.innerHTML = `<div style="color:var(--muted);font-size:12px;font-style:italic;padding:14px 0;">No activity recorded yet</div>`;
-      } else {
-        const max = Math.max(...days.map((d) => d.count), 1);
-        chartEl.innerHTML = days
-          .map((d) => {
-            const h = Math.max(8, Math.round((d.count / max) * 80));
-            const dayLabel = d._id.slice(5); // MM-DD
-            return `
-              <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;" title="${d._id}: ${d.count} active">
-                <div style="width:100%;height:${h}px;background:linear-gradient(180deg,var(--teal),var(--teal-light));border-radius:4px 4px 0 0;"></div>
-                <div style="font-size:9.5px;color:var(--muted);font-weight:600">${dayLabel}</div>
-                <div style="font-size:10px;color:var(--text);font-weight:700">${d.count}</div>
-              </div>
-            `;
-          })
-          .join("");
-      }
+      renderDayChart(chartEl, {
+        rows: u.dailyActivity || [],
+        windowDays: 14,
+        series: [{ key: "count", label: "Users" }],
+        caption: "Users by the day of their latest activity (UTC)",
+        empty: "No activity recorded yet",
+      });
     }
 
     if (topUsersEl) {
@@ -639,9 +625,9 @@ async function loadUsageStats() {
               <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:${i < top.length - 1 ? "1px solid var(--border)" : "none"};">
                 <div style="flex:1;min-width:0;">
                   <div style="font-weight:600;color:var(--text);text-overflow:ellipsis;overflow:hidden;white-space:nowrap;">${escapeHtml(user.email || "—")}</div>
-                  <div style="font-size:11px;color:var(--muted);">${escapeHtml(user.role || "USER")}${user.firmId?.handle ? " · @" + escapeHtml(user.firmId.handle) : ""}</div>
+                  <div style="font-size:12px;color:var(--muted);">${escapeHtml(user.role || "USER")}${user.firmId?.handle ? " · @" + escapeHtml(user.firmId.handle) : ""}</div>
                 </div>
-                <div style="font-weight:700;color:var(--teal-dark);font-size:13px;margin-left:8px;">${user.totalApiCalls}</div>
+                <div style="font-weight:600;color:var(--teal-dark);font-size:13px;margin-left:8px;">${user.totalApiCalls}</div>
               </div>
             `
           )
@@ -690,38 +676,131 @@ function renderClientSplit(u) {
       const extension = c.split?.extension ?? 0;
       return `
         <div style="flex:1;min-width:140px;border:1px solid var(--border);border-radius:8px;padding:10px 12px;">
-          <div style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:700;">${c.label}</div>
+          <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:600;">${c.label}</div>
           <div style="display:flex;gap:14px;margin-top:4px;">
-            <div><span style="font-size:18px;font-weight:700;color:var(--text);">${desktop}</span><span style="font-size:10.5px;color:var(--muted);display:block;">🖥 Desktop</span></div>
-            <div><span style="font-size:18px;font-weight:700;color:var(--text);">${extension}</span><span style="font-size:10.5px;color:var(--muted);display:block;">🧩 Extension</span></div>
+            <div><span style="font-size:18px;font-weight:600;color:var(--text);">${desktop}</span><span style="font-size:12px;color:var(--muted);display:block;">🖥 Desktop</span></div>
+            <div><span style="font-size:18px;font-weight:600;color:var(--text);">${extension}</span><span style="font-size:12px;color:var(--muted);display:block;">🧩 Extension</span></div>
           </div>
         </div>
       `;
     })
     .join("");
 
-  const days = u.dailyActivityByClient || [];
-  if (!days.length) {
-    chartEl.innerHTML = `<div style="color:var(--muted);font-size:12px;font-style:italic;padding:14px 0;">No workflow usage recorded yet — rows appear once workflows run on the new tracking</div>`;
+  renderDayChart(chartEl, {
+    rows: u.dailyActivityByClient || [],
+    windowDays: 14,
+    series: [
+      { key: "desktop", label: "Desktop" },
+      { key: "extension", label: "Extension" },
+    ],
+    caption: "Distinct users per day by app (UTC)",
+    empty: "No workflow usage recorded yet — rows appear once workflows run on the new tracking",
+  });
+}
+
+// ─── Day charts: axes, a legend and the same figures as a table (DS10) ──
+// The two analytics charts were bare bars: no scale, no legend for the client split, a day with
+// no activity silently missing from the row, and the figures readable only by hovering. One
+// renderer now draws both. Every UTC day of the window is on the x-axis (a quiet day is a zero,
+// not a gap), the y-axis carries a labelled scale, a chart with more than one series gets a
+// legend, and the figures sit in a real table under the bars - its header row is the x-axis, so
+// each figure lines up with its bar. The bars are decoration for sighted readers; the table is
+// what a screen reader reads.
+const DAY_CHART_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// The window's UTC day keys, oldest first: windowDays days ending today, widened to take in any
+// day the server returned outside it (a partial first day, a clock a little ahead), so nothing
+// that came back is dropped.
+function dayChartKeys(rows, windowDays, today = new Date()) {
+  const returned = rows
+    .map((row) => String(row?._id || ""))
+    .filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(key))
+    .sort();
+  let end = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  let start = end - (windowDays - 1) * DAY_MS;
+  if (returned.length) {
+    start = Math.min(start, Date.parse(`${returned[0]}T00:00:00Z`));
+    end = Math.max(end, Date.parse(`${returned[returned.length - 1]}T00:00:00Z`));
+  }
+  const keys = [];
+  for (let at = start; at <= end; at += DAY_MS) keys.push(new Date(at).toISOString().slice(0, 10));
+  return keys;
+}
+
+// Whole-number ticks from 0 at a step of 1, 2 or 5 x 10^n, at most four steps; the last tick is
+// the top of the scale.
+function dayChartTicks(max) {
+  const top = Math.max(1, Math.ceil(Number(max) || 0));
+  let step = 1;
+  for (let power = 1; ; power *= 10) {
+    const found = [1, 2, 5].map((m) => m * power).find((candidate) => top / candidate <= 4);
+    if (found) { step = found; break; }
+  }
+  const ticks = [];
+  for (let value = 0; ; value += step) {
+    ticks.push(value);
+    if (value >= top) break;
+  }
+  return ticks;
+}
+
+function dayChartLabel(key) {
+  return { day: Number(key.slice(8, 10)), month: DAY_CHART_MONTHS[Number(key.slice(5, 7)) - 1] || "" };
+}
+
+function renderDayChart(container, { rows, windowDays, series, caption, empty }) {
+  if (!container) return;
+  if (!rows.length) {
+    container.innerHTML = `<div class="day-chart__empty">${escapeHtml(empty)}</div>`;
     return;
   }
-  const max = Math.max(...days.map((d) => Math.max(d.desktop, d.extension)), 1);
-  chartEl.innerHTML = days
-    .map((d) => {
-      const hD = Math.max(6, Math.round((d.desktop / max) * 80));
-      const hE = Math.max(6, Math.round((d.extension / max) * 80));
-      const dayLabel = (d._id || "").slice(5);
-      return `
-        <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;" title="${d._id}: ${d.desktop} desktop, ${d.extension} extension">
-          <div style="display:flex;gap:2px;align-items:flex-end;">
-            <div style="width:9px;height:${hD}px;background:var(--teal);border-radius:3px 3px 0 0;"></div>
-            <div style="width:9px;height:${hE}px;background:var(--gold,#d9a441);border-radius:3px 3px 0 0;"></div>
-          </div>
-          <div style="font-size:9.5px;color:var(--muted);font-weight:600">${dayLabel}</div>
-        </div>
-      `;
+  const byDay = new Map(rows.map((row) => [String(row._id), row]));
+  const keys = dayChartKeys(rows, windowDays);
+  const values = keys.map((key) => series.map((s) => Math.max(0, Number(byDay.get(key)?.[s.key]) || 0)));
+  const ticks = dayChartTicks(Math.max(...values.flat()));
+  const top = ticks[ticks.length - 1];
+  const first = dayChartLabel(keys[0]);
+  const last = dayChartLabel(keys[keys.length - 1]);
+  const span = `${first.day} ${first.month} to ${last.day} ${last.month}`;
+  const legend = series.length > 1
+    ? `<ul class="day-chart__legend">${series.map((s, i) => `<li><span class="day-chart__swatch day-chart__bar--s${i}" aria-hidden="true"></span>${escapeHtml(s.label)}</li>`).join("")}</ul>`
+    : "";
+  const axis = ticks
+    .map((tick) => `<span class="day-chart__tick" style="bottom:${(tick / top) * 100}%">${tick}</span>`)
+    .join("");
+  const grid = ticks
+    .map((tick) => `<span class="day-chart__gridline" style="bottom:${(tick / top) * 100}%"></span>`)
+    .join("");
+  const bars = keys
+    .map((key, k) => `<div class="day-chart__day">${series
+      .map((s, i) => `<span class="day-chart__bar day-chart__bar--s${i}" style="height:${(values[k][i] / top) * 100}%"></span>`)
+      .join("")}</div>`)
+    .join("");
+  const head = keys
+    .map((key) => {
+      const label = dayChartLabel(key);
+      return `<th scope="col" data-day="${key}"><span>${label.day}</span><span>${label.month}</span></th>`;
     })
     .join("");
+  const body = series
+    .map((s, i) => `<tr><th scope="row"><span class="day-chart__swatch day-chart__bar--s${i}" aria-hidden="true"></span>${escapeHtml(s.label)}</th>${keys
+      .map((key, k) => `<td>${values[k][i]}</td>`)
+      .join("")}</tr>`)
+    .join("");
+  container.innerHTML = `
+    ${legend}
+    <div class="day-chart__frame">
+      <div class="day-chart__plot" aria-hidden="true">
+        <div class="day-chart__axis">${axis}</div>
+        <div class="day-chart__bars" style="--days:${keys.length}">${grid}${bars}</div>
+      </div>
+      <table class="day-chart__table">
+        <caption>${escapeHtml(caption)}, ${span}</caption>
+        <thead><tr><th scope="col">Day</th>${head}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>`;
 }
 
 function renderWorkflowBreakdown(rows) {
@@ -737,8 +816,8 @@ function renderWorkflowBreakdown(rows) {
         <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:${i < rows.length - 1 ? "1px solid var(--border)" : "none"};">
           <div>${escapeHtml(WORKFLOW_USAGE_LABELS[row.workflow] || row.workflow)}</div>
           <div style="text-align:right;">
-            <span style="font-weight:700;color:var(--teal-dark);">${row.weekActive}</span>
-            <span style="font-size:10.5px;color:var(--muted);margin-left:4px;">users · ${row.totalCounts} runs${row.errorCounts ? ` · ${row.errorCounts} errored` : ""}</span>
+            <span style="font-weight:600;color:var(--teal-dark);">${row.weekActive}</span>
+            <span style="font-size:12px;color:var(--muted);margin-left:4px;">users · ${row.totalCounts} runs${row.errorCounts ? ` · ${row.errorCounts} errored` : ""}</span>
           </div>
         </div>`,
     )
@@ -860,7 +939,7 @@ function renderEmailsRows(rows) {
           <td>${EMAIL_TYPE_LABELS[row.type] || escapeHtml(row.type)}</td>
           <td>••••${escapeHtml(row.recipientEmailLast4 || "")}</td>
           <td>${escapeHtml(firm)}</td>
-          <td class="${statusClass}" style="font-weight:700;">${escapeHtml(row.status || "—")}</td>
+          <td class="${statusClass}" style="font-weight:600;">${escapeHtml(row.status || "—")}</td>
           <td>${escapeHtml(row.errorClass || "—")}</td>
           <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(providerId)}">${providerId ? `${escapeHtml(providerId.slice(0, 10))}…` : "—"}</td>
           <td><button class="btn btn-sm btn-outline-secondary email-detail-btn" data-id="${String(row._id)}">Details</button></td>
@@ -994,7 +1073,7 @@ function renderPerUserUsage(rows) {
           <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(row.email || row.name || String(row.userId))}</td>
           <td>${row.desktopCount || 0}</td>
           <td>${row.extensionCount || 0}</td>
-          <td style="font-weight:700;color:var(--teal-dark);">${row.totalCount || 0}</td>
+          <td style="font-weight:600;color:var(--teal-dark);">${row.totalCount || 0}</td>
           <td>${row.workflows || 0}</td>
           <td style="color:var(--muted);">${lastSeen}</td>
         </tr>`;
@@ -1014,7 +1093,7 @@ function renderProviderUsageTopUsers(rows) {
       (row, i) => `
         <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:${i < rows.length - 1 ? "1px solid var(--border)" : "none"};">
           <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(row.email || "—")}</div>
-          <div style="font-weight:700;color:var(--teal-dark);font-size:12.5px;margin-left:8px;">${Number(row.calls) || 0}</div>
+          <div style="font-weight:600;color:var(--teal-dark);font-size:12.5px;margin-left:8px;">${Number(row.calls) || 0}</div>
         </div>`,
     )
     .join("");
@@ -1039,18 +1118,18 @@ async function loadProviderUsageStats() {
           return `
             <div class="col-md-6">
               <div class="card p-3">
-                <h6 class="mb-2" style="font-size: 12.5px; font-weight: 700;">${escapeHtml(PROVIDER_USAGE_LABELS[provider])}</h6>
+                <h6 class="mb-2" style="font-size: 12.5px; font-weight: 600;">${escapeHtml(PROVIDER_USAGE_LABELS[provider])}</h6>
                 <div class="d-flex gap-4 mb-2">
                   <div>
-                    <div style="font-size:20px;font-weight:700;color:var(--text);">${today}</div>
-                    <div style="font-size:11px;color:var(--muted);">calls today</div>
+                    <div style="font-size:20px;font-weight:600;color:var(--text);">${today}</div>
+                    <div style="font-size:12px;color:var(--muted);">calls today</div>
                   </div>
                   <div>
-                    <div style="font-size:20px;font-weight:700;color:var(--text);">${month}</div>
-                    <div style="font-size:11px;color:var(--muted);">calls this month</div>
+                    <div style="font-size:20px;font-weight:600;color:var(--text);">${month}</div>
+                    <div style="font-size:12px;color:var(--muted);">calls this month</div>
                   </div>
                 </div>
-                <div style="font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.04em;">Top users today</div>
+                <div style="font-size:12px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.04em;">Top users today</div>
                 ${renderProviderUsageTopUsers(topUsers)}
               </div>
             </div>`;
@@ -1117,7 +1196,7 @@ async function loadReminderDeliveryHealthStats() {
     if (bodyEl) {
       const headline = `
         <div style="display:flex; align-items:baseline; gap:8px; margin-bottom:10px;">
-          <div style="font-size:22px;font-weight:700;color:var(--text);">${countText}</div>
+          <div style="font-size:22px;font-weight:600;color:var(--text);">${countText}</div>
           <div style="font-size:12px;color:var(--muted);">reminder${countText === "1" ? "" : "s"} with a delivery problem${truncated ? ` (of ${(Number(d.candidatesScanned) || 0).toLocaleString("en-IN")} scanned -- scan capped, more may exist)` : ""}</div>
         </div>`;
 
@@ -1128,7 +1207,7 @@ async function loadReminderDeliveryHealthStats() {
           : `<div style="color:var(--muted);font-style:italic;font-size:12px;">No delivery problems right now.</div>`;
       } else {
         const truncatedNote = d.sampleTruncated
-          ? `<div class="text-muted" style="font-size:11px;margin-top:6px;">Showing ${sample.length} of ${countText} -- soonest due first.</div>`
+          ? `<div class="text-muted" style="font-size:12px;margin-top:6px;">Showing ${sample.length} of ${countText} -- soonest due first.</div>`
           : "";
         body = `
           <div class="table-responsive">
@@ -2027,12 +2106,87 @@ function bindTermsAcceptanceControls() {
   });
 }
 
+async function loadPendingAdminsSection() {
+  const pendingTbody = qs("pendingAdminsBody");
+  const pendingStatus = qs("pendingStatus");
+  try {
+    const pending = await loadPendingAdmins();
+    if (!pending.length) {
+      if (pendingTbody) pendingTbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted">No pending requests.</td></tr>`;
+      if (pendingStatus) pendingStatus.textContent = "";
+    } else {
+      if (pendingTbody) { pendingTbody.innerHTML = pending.map(renderPendingRow).join(""); attachPendingHandlers(pendingTbody); }
+      if (pendingStatus) pendingStatus.textContent = "";
+    }
+  } catch (err) {
+    if (pendingStatus) pendingStatus.textContent = err.message || "Failed to load.";
+  }
+}
+
+async function loadFirmsSection() {
+  const firmsBody = qs("firmsBody");
+  const firmsStatus = qs("firmsStatus");
+  try {
+    const firmList = await loadFirms();
+    const firms = firmList.firms;
+    if (!firms.length) {
+      if (firmsBody) firmsBody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No firms found.</td></tr>`;
+      if (firmsStatus) firmsStatus.textContent = "";
+    } else {
+      if (firmsBody) { firmsBody.innerHTML = firms.map(renderFirmRow).join(""); attachFirmHandlers(); }
+      if (firmsStatus) {
+        firmsStatus.textContent = firmList.truncated
+          ? `Showing the ${firmList.returnedFirms} most recently created firms of ${firmList.totalFirms}. Older firms are not listed.`
+          : "";
+      }
+    }
+  } catch (err) {
+    if (firmsStatus) firmsStatus.textContent = err.message || "Failed to load firms.";
+  }
+}
+
+// ─── Each page loads its own data (DS10) ────────────────────────────
+// The panel used to fetch every page's data at startup - about ten requests against the API's
+// limiter of 50 per 15 minutes, so a few reloads could lock the super admin out of their own
+// panel. Now a page's data is fetched the first time that page is opened, and startup asks only
+// for the signed-in user and the page on screen.
+const SUPER_PAGE_LOADERS = {
+  overview: () => loadDashboardStats(),
+  controls: () => Promise.all([loadAppConfigSection(), loadProviderUsageStats(), loadReminderDeliveryHealthStats()]),
+  analytics: () => loadUsageStats(),
+  emails: () => Promise.all([loadEmailsPage(), loadEmailSuppressions()]),
+  users: () => loadUserDirectory(),
+  firms: () => loadFirmsSection(),
+  approvals: () => loadPendingAdminsSection(),
+  terms: () => loadTermsAcceptanceHistory(),
+  review: () => loadSelfTestSection(),
+};
+const superPagesRequested = new Set();
+let superSignedIn = false;
+
+function superLoadPage(page) {
+  // Nothing is fetched before the signed-in user is confirmed as a super admin.
+  if (!superSignedIn) return;
+  // The Emails page keeps its own flag, set only once its list has arrived, so a visit that
+  // failed is retried on the next one - as it was before this change.
+  if (page === "emails") {
+    if (!emailsPageState.loaded) SUPER_PAGE_LOADERS.emails();
+    return;
+  }
+  const loader = SUPER_PAGE_LOADERS[page];
+  if (!loader || superPagesRequested.has(page)) return;
+  superPagesRequested.add(page);
+  Promise.resolve()
+    .then(loader)
+    .catch((err) => console.error(`Loading the ${page} page failed:`, err));
+}
+
 // ─── Init ───────────────────────────────────────────────────────────
 async function initSuperPage() {
   if (!qs("superLogoutBtn")) return;
 
-  const isAuthenticated = await ensureSuperAdminAuth();
-  if (!isAuthenticated) return;
+  const me = await ensureSuperAdminAuth();
+  if (!me) return;
 
   const token = getToken();
   if (!token) { window.location.href = "/index.html"; return; }
@@ -2052,62 +2206,17 @@ async function initSuperPage() {
   bindModalCloseHandlers();
 
   try {
-    const me = await loadMe();
     if (!requireSuperAdmin(me)) { window.location.href = "/admin/admin.html"; return; }
     if (qs("superEmail")) qs("superEmail").textContent = me.email || "—";
 
-    // Load app config, usage analytics, dashboard stats, user directory, and Terms acceptance history in parallel.
     bindAppConfigHandlers();
     bindUserDirectoryControls();
     bindTermsAcceptanceControls();
     bindEmailsPageControls();
-    await Promise.all([
-      loadAppConfigSection(),
-      loadUsageStats(),
-      loadProviderUsageStats(),
-      loadReminderDeliveryHealthStats(),
-      loadDashboardStats(),
-      loadUserDirectory(),
-      loadTermsAcceptanceHistory(),
-    ]);
 
-    // Load pending admins
-    const pendingTbody = qs("pendingAdminsBody");
-    const pendingStatus = qs("pendingStatus");
-    try {
-      const pending = await loadPendingAdmins();
-      if (!pending.length) {
-        if (pendingTbody) pendingTbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted">No pending requests.</td></tr>`;
-        if (pendingStatus) pendingStatus.textContent = "";
-      } else {
-        if (pendingTbody) { pendingTbody.innerHTML = pending.map(renderPendingRow).join(""); attachPendingHandlers(pendingTbody); }
-        if (pendingStatus) pendingStatus.textContent = "";
-      }
-    } catch (err) {
-      if (pendingStatus) pendingStatus.textContent = err.message || "Failed to load.";
-    }
-
-    // Load firms
-    const firmsBody = qs("firmsBody");
-    const firmsStatus = qs("firmsStatus");
-    try {
-      const firmList = await loadFirms();
-      const firms = firmList.firms;
-      if (!firms.length) {
-        if (firmsBody) firmsBody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No firms found.</td></tr>`;
-        if (firmsStatus) firmsStatus.textContent = "";
-      } else {
-        if (firmsBody) { firmsBody.innerHTML = firms.map(renderFirmRow).join(""); attachFirmHandlers(); }
-        if (firmsStatus) {
-          firmsStatus.textContent = firmList.truncated
-            ? `Showing the ${firmList.returnedFirms} most recently created firms of ${firmList.totalFirms}. Older firms are not listed.`
-            : "";
-        }
-      }
-    } catch (err) {
-      if (firmsStatus) firmsStatus.textContent = err.message || "Failed to load firms.";
-    }
-
+    // Only the page on screen; the others load when they are opened.
+    superSignedIn = true;
+    superLoadPage(superShowPage(window.location.hash || `#${SUPER_DEFAULT_PAGE}`));
   } catch (err) {
     console.error(err);
     const statusEl = qs("statsLoadingStatus");
@@ -2643,12 +2752,20 @@ async function runSelfTest() {
   }
 }
 
-async function initializeSelfTestPanel() {
+// The review page's controls are wired at startup and stay disabled until its latest run has been
+// read; that read happens the first time the page is opened (DS10), through superLoadPage.
+function bindSelfTestPanel() {
   const button = qs("runSelfTestBtn");
   const confirmation = qs("selfTestConfirm");
   if (!button || !confirmation) return;
   button.addEventListener("click", runSelfTest);
   confirmation.addEventListener("change", updateSelfTestControls);
+  selfTestIsRunning = true;
+  updateSelfTestControls();
+}
+
+async function loadSelfTestSection() {
+  if (!qs("runSelfTestBtn") || !qs("selfTestConfirm")) return;
   const requestEpoch = beginSelfTestRequestFlow();
   selfTestIsRunning = true;
   updateSelfTestControls();
@@ -2661,7 +2778,7 @@ async function initializeSelfTestPanel() {
   await loadLatestSelfTestRun({ requestEpoch });
 }
 
-document.addEventListener("DOMContentLoaded", initializeSelfTestPanel);
+document.addEventListener("DOMContentLoaded", bindSelfTestPanel);
 
 
 // ─── Send test email (admin diagnostics) ────────────────────────────
@@ -2911,6 +3028,9 @@ function superInitSortableTables() {
   // quietly disagree with the dropdown that says how the data is ordered.
   document.querySelectorAll("table").forEach((table) => {
     if (table.closest("#page-users")) return;
+    // A day chart's table runs sideways - one column per day, in day order, under its bars - so
+    // sorting its columns would only scramble the axis (DS10).
+    if (table.classList.contains("day-chart__table")) return;
     if (table.dataset.superSortable === "1") return;
     table.dataset.superSortable = "1";
     superMakeSortable(table);
@@ -2919,22 +3039,11 @@ function superInitSortableTables() {
 
 function superInitNavigation() {
   if (!document.querySelector(".sidebar")) return;
-  superShowPage(window.location.hash || `#${SUPER_DEFAULT_PAGE}`);
-  // The Emails page loads its own data on first visit, not at boot: the boot
-  // path is already nine requests against a 50-per-15-minute limiter.
-  const visitPage = (hash) => {
-    if (superShowPage(hash) === "emails" && !emailsPageState.loaded) {
-      loadEmailsPage();
-      loadEmailSuppressions();
-    }
-  };
-  visitPage(window.location.hash || `#${SUPER_DEFAULT_PAGE}`);
+  // Every page loads its own data the first time it is opened (DS10). Before sign-in is confirmed
+  // superLoadPage does nothing; initSuperPage loads the page on screen once it is.
+  superLoadPage(superShowPage(window.location.hash || `#${SUPER_DEFAULT_PAGE}`));
   window.addEventListener("hashchange", () => {
-    const current = superShowPage(window.location.hash);
-    if (current === "emails" && !emailsPageState.loaded) {
-      loadEmailsPage();
-      loadEmailSuppressions();
-    }
+    superLoadPage(superShowPage(window.location.hash));
     // Landing on a section should start at its top, not wherever the previous
     // section happened to be scrolled to.
     const content = document.querySelector(".content");

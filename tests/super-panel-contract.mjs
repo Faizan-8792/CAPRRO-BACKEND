@@ -323,6 +323,111 @@ check(
   cssRef ? "v=" + cssRef[1] : "missing"
 );
 
+// --- Each page loads its own data (DS10) --------------------------
+//
+// Startup used to fetch every page's data - about ten requests against a limiter of 50 per 15
+// minutes. Now initSuperPage asks only for the page on screen, through superLoadPage, and every
+// routed page has exactly one loader.
+
+const loadersDecl = superJs.match(/const SUPER_PAGE_LOADERS\s*=\s*\{([\s\S]*?)\n\};/);
+const loaderPages = loadersDecl ? [...loadersDecl[1].matchAll(/^\s+([a-z-]+):/gm)].map((m) => m[1]) : [];
+check(
+  "every routed page has a loader, and no loader names a page the router does not know",
+  loaderPages.length > 0 &&
+    superPages.every((page) => loaderPages.includes(page)) &&
+    loaderPages.every((page) => superPages.includes(page)),
+  "loaders: " + loaderPages.join(", ")
+);
+
+const initStart = superJs.indexOf("async function initSuperPage()");
+const initBody = initStart >= 0 ? superJs.slice(initStart, superJs.indexOf("\n}\n", initStart)) : "";
+const directLoads = [...initBody.matchAll(/\b(load[A-Z]\w*)\s*\(/g)].map((m) => m[1]);
+check(
+  "startup calls no page loader directly - only superLoadPage for the page on screen",
+  initBody.length > 0 && directLoads.length === 0 && /superLoadPage\(superShowPage\(/.test(initBody),
+  directLoads.length ? "direct: " + directLoads.join(", ") : "superLoadPage only"
+);
+const meCalls = superJs.split("\n").filter((line) => line.includes("/auth/me") && !line.trim().startsWith("//"));
+check(
+  "startup asks /auth/me once - the user from the auth check is reused",
+  meCalls.length === 1,
+  meCalls.length + " call site(s)"
+);
+check(
+  "no DOMContentLoaded handler fetches on its own",
+  !/addEventListener\("DOMContentLoaded",\s*initializeSelfTestPanel\)/.test(superJs) &&
+    /addEventListener\("DOMContentLoaded",\s*bindSelfTestPanel\)/.test(superJs),
+  "the deep review's latest run is read when its page opens"
+);
+
+// --- Day charts (DS10) --------------------------------------------
+//
+// The chart helpers are lifted out and evaluated, as the sort key is above.
+
+const chartStart = superJs.indexOf("const DAY_CHART_MONTHS");
+const chartEnd = superJs.indexOf("\n// ─── Emails page");
+check("super.js carries the day-chart helpers", chartStart >= 0 && chartEnd > chartStart, "");
+const chartApi = chartStart >= 0 && chartEnd > chartStart
+  ? new Function(
+      "escapeHtml",
+      superJs.slice(chartStart, chartEnd) + "\nreturn { dayChartKeys, dayChartTicks, renderDayChart };"
+    )((s) => String(s ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;"))
+  : null;
+
+if (chartApi) {
+  const today = new Date("2026-10-04T15:00:00Z");
+  const keys = chartApi.dayChartKeys([{ _id: "2026-10-02" }, { _id: "2026-09-25" }], 14, today);
+  check(
+    "a chart's window is every UTC day, a quiet day included",
+    keys.length === 14 && keys[0] === "2026-09-21" && keys[13] === "2026-10-04" && keys.includes("2026-09-30"),
+    keys[0] + " .. " + keys[keys.length - 1] + " (" + keys.length + ")"
+  );
+  const widened = chartApi.dayChartKeys([{ _id: "2026-09-20" }, { _id: "2026-10-05" }], 14, today);
+  check(
+    "a day returned outside the window widens it rather than being dropped",
+    widened[0] === "2026-09-20" && widened[widened.length - 1] === "2026-10-05" && widened.length === 16,
+    widened[0] + " .. " + widened[widened.length - 1] + " (" + widened.length + ")"
+  );
+  const tickCases = [[0, "0,1"], [1, "0,1"], [3, "0,1,2,3"], [4, "0,1,2,3,4"], [5, "0,2,4,6"], [12, "0,5,10,15"], [100, "0,50,100"], [1234, "0,500,1000,1500"]];
+  const wrongTicks = tickCases.filter(([max, want]) => chartApi.dayChartTicks(max).join(",") !== want);
+  check(
+    "the scale is whole numbers from 0, at most four steps, topping the largest figure",
+    wrongTicks.length === 0,
+    wrongTicks.length ? wrongTicks.map(([max]) => max + " -> " + chartApi.dayChartTicks(max).join(",")).join("; ") : tickCases.length + " cases"
+  );
+
+  const box = { innerHTML: "" };
+  chartApi.renderDayChart(box, {
+    rows: [{ _id: "2026-10-01", desktop: 2, extension: 1 }],
+    windowDays: 3,
+    series: [{ key: "desktop", label: "Desktop" }, { key: "extension", label: "<b>Extension</b>" }],
+    caption: "Distinct users per day by app (UTC)",
+    empty: "none",
+  });
+  const html = box.innerHTML;
+  const dayColumns = (html.match(/<th scope="col" data-day="/g) || []).length;
+  check(
+    "the figures sit in a table, one column per day, one row per series",
+    /<table class="day-chart__table">/.test(html) && dayColumns >= 3 && (html.match(/<th scope="row">/g) || []).length === 2,
+    dayColumns + " day columns"
+  );
+  check("two series get a legend", /<ul class="day-chart__legend">/.test(html), "");
+  check("a series label is escaped", html.includes("&lt;b&gt;Extension&lt;/b&gt;") && !html.includes("<b>Extension"), "");
+  const single = { innerHTML: "" };
+  chartApi.renderDayChart(single, { rows: [{ _id: "2026-10-01", count: 1 }], windowDays: 3, series: [{ key: "count", label: "Users" }], caption: "c", empty: "none" });
+  check("one series has no legend", !/day-chart__legend/.test(single.innerHTML), "");
+  const empty = { innerHTML: "" };
+  chartApi.renderDayChart(empty, { rows: [], windowDays: 14, series: [{ key: "count", label: "Users" }], caption: "c", empty: "No activity recorded yet" });
+  check("no rows at all says so instead of drawing fourteen zeros", /No activity recorded yet/.test(empty.innerHTML) && !/<table/.test(empty.innerHTML), "");
+}
+
+// The chart's table runs sideways in day order; the panel's column sorting must leave it alone.
+check(
+  "the day-chart table is excluded from column sorting",
+  /classList\.contains\("day-chart__table"\)\) return;/.test(superJs),
+  ""
+);
+
 // --- Report -------------------------------------------------------
 
 let passed = 0;

@@ -5,7 +5,7 @@
     <title>CA PRO Toolkit – Super Admin</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="bootstrap.min.css" />
-    <link rel="stylesheet" href="admin.css?v=15" />
+    <link rel="stylesheet" href="admin.css?v=16" />
     <link rel="icon" type="image/png" href="logo.png" />
   </head>
   <body class="super-admin-body">
@@ -15,12 +15,12 @@
         <span class="navbar-brand fw-semibold d-flex align-items-center gap-2">
           <img src="logo.png" alt="CA PRO" style="width:32px;height:32px;border-radius:6px;" />
           <span class="badge bg-primary fw-bold">SUPER</span>
-          <span style="color: var(--text); font-weight: 700;">CA PRO Toolkit</span>
+          <span style="color: var(--text); font-weight: 600;">CA PRO Toolkit</span>
         </span>
 
         <div class="d-flex align-items-center gap-3 ms-auto">
           <div class="small text-end d-none d-md-block">
-            <div style="color: var(--muted); font-size: 11px;">Logged in as</div>
+            <div style="color: var(--muted); font-size: 12px;">Logged in as</div>
             <div class="fw-semibold" id="superEmail" style="color: var(--text);">—</div>
           </div>
 
@@ -136,7 +136,7 @@
                   <input class="form-check-input" type="checkbox" role="switch" id="maintenanceToggle" style="width: 44px; height: 24px;">
                 </div>
                 <div>
-                  <div style="font-weight:700; color: var(--text);" id="maintenanceLabel">Maintenance mode: OFF</div>
+                  <div style="font-weight:600; color: var(--text);" id="maintenanceLabel">Maintenance mode: OFF</div>
                   <div class="text-muted" style="font-size:12px;">When ON, all users see an "Under Maintenance" screen.</div>
                 </div>
               </div>
@@ -153,12 +153,12 @@
         </div>
 
         <div class="card p-3 super-admin-card mt-3">
-          <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Welcome Announcement</h6>
+          <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Welcome Announcement</h6>
           <div class="row g-2">
             <div class="col-md-3">
               <label class="form-label small-label">Version</label>
               <input type="text" class="form-control" id="welcomeVersion" placeholder="v1-ai-launch">
-              <div class="text-muted" style="font-size:11px;margin-top:4px;">Bump this to re-show to everyone.</div>
+              <div class="text-muted" style="font-size:12px;margin-top:4px;">Bump this to re-show to everyone.</div>
             </div>
             <div class="col-md-9">
               <label class="form-label small-label">Title</label>
@@ -180,7 +180,7 @@
         </div>
 
         <div class="card p-3 super-admin-card mt-3">
-          <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Feature Flags</h6>
+          <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Feature Flags</h6>
           <p class="text-muted mb-2" style="font-size:12px;">
             Every flag below defaults to OFF on a fresh deployment. Toggle the ones you want live, then press Save -- only the flags you actually change are sent to the server.
           </p>
@@ -208,7 +208,7 @@
                 <input type="checkbox" id="flag-reliableReminderDelivery">
                 <span>reliableReminderDelivery</span>
               </label>
-              <div class="text-muted" style="font-size:10.5px;margin-left:20px;">Retries failed reminder emails on a schedule. Off leaves failed sends unretried.</div>
+              <div class="text-muted" style="font-size:12px;margin-left:20px;">Retries failed reminder emails on a schedule. Off leaves failed sends unretried.</div>
             </div>
             <div class="col-md-4 col-sm-6">
               <label class="d-flex align-items-center gap-1" style="font-size:12px;">
@@ -263,14 +263,14 @@
                 <input type="checkbox" id="flag-noticeCases">
                 <span>noticeCases</span>
               </label>
-              <div class="text-muted" style="font-size:10.5px;margin-left:20px;">Turning this on runs a server-side index-readiness check that may reject the save.</div>
+              <div class="text-muted" style="font-size:12px;margin-left:20px;">Turning this on runs a server-side index-readiness check that may reject the save.</div>
             </div>
             <div class="col-md-4 col-sm-6">
               <label class="d-flex align-items-center gap-1" style="font-size:12px;">
                 <input type="checkbox" id="flag-assuranceEngagements">
                 <span>assuranceEngagements</span>
               </label>
-              <div class="text-muted" style="font-size:10.5px;margin-left:20px;">Turning this on runs a server-side index-readiness check that may reject the save.</div>
+              <div class="text-muted" style="font-size:12px;margin-left:20px;">Turning this on runs a server-side index-readiness check that may reject the save.</div>
             </div>
             <div class="col-md-4 col-sm-6">
               <label class="d-flex align-items-center gap-1" style="font-size:12px;">
@@ -289,21 +289,21 @@
                 <input type="checkbox" id="flag-auditWorkingPapers">
                 <span>auditWorkingPapers</span>
               </label>
-              <div class="text-muted" style="font-size:10.5px;margin-left:20px;">Turning this on runs a server-side index-readiness check that may reject the save.</div>
+              <div class="text-muted" style="font-size:12px;margin-left:20px;">Turning this on runs a server-side index-readiness check that may reject the save.</div>
             </div>
             <div class="col-md-4 col-sm-6">
               <label class="d-flex align-items-center gap-1" style="font-size:12px;">
                 <input type="checkbox" id="flag-dailyDigest">
                 <span>dailyDigest</span>
               </label>
-              <div class="text-muted" style="font-size:10.5px;margin-left:20px;">Enables outbound email.</div>
+              <div class="text-muted" style="font-size:12px;margin-left:20px;">Enables outbound email.</div>
             </div>
             <div class="col-md-4 col-sm-6">
               <label class="d-flex align-items-center gap-1" style="font-size:12px;">
                 <input type="checkbox" id="flag-weeklySummary">
                 <span>weeklySummary</span>
               </label>
-              <div class="text-muted" style="font-size:10.5px;margin-left:20px;">Enables outbound email.</div>
+              <div class="text-muted" style="font-size:12px;margin-left:20px;">Enables outbound email.</div>
             </div>
           </div>
           <div class="mt-2 text-end">
@@ -313,7 +313,7 @@
         </div>
 
         <div class="card p-3 super-admin-card mt-3">
-          <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Provider Usage</h6>
+          <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Provider Usage</h6>
           <p class="text-muted mb-2" style="font-size:12px;">
             DeepSeek and OCR.space are billed per call. Each is metered per user (daily + monthly caps) and against a provider-wide daily ceiling, enforced at the two provider choke points before any paid call is made. Figures below are live counts against those caps.
           </p>
@@ -322,7 +322,7 @@
         </div>
 
         <div class="card p-3 super-admin-card mt-3">
-          <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Reminder Delivery Health</h6>
+          <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Reminder Delivery Health</h6>
           <p class="text-muted mb-2" style="font-size:12px;">
             Reminders whose email delivery could not be confirmed healthy -- a retry pending, an unconfirmed delivery state, a claim gone stale, or a past failed attempt. Scans up to 5,000 reminders that have ever attempted delivery.
           </p>
@@ -331,7 +331,7 @@
         </div>
 
         <div class="card p-3 super-admin-card mt-3">
-          <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Desktop Release</h6>
+          <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Desktop Release</h6>
           <div id="desktopReleaseLive" class="text-muted small mb-2">Nothing announced yet.</div>
           <div class="row g-2">
             <div class="col-md-3">
@@ -345,7 +345,7 @@
             <div class="col-md-6">
               <label class="form-label small-label">Download URL</label>
               <input type="text" class="form-control" id="desktopDownloadUrl" placeholder="https://caprotoolkit.in/download/CA-PRO-Toolkit-Setup-0.1.2-x64.exe">
-              <div class="text-muted" style="font-size:11px;margin-top:4px;">Upload the installer to the website first, then paste its URL here. Only https URLs on caprotoolkit.in are accepted. Get the SHA-256 and size from the release script output.</div>
+              <div class="text-muted" style="font-size:12px;margin-top:4px;">Upload the installer to the website first, then paste its URL here. Only https URLs on caprotoolkit.in are accepted. Get the SHA-256 and size from the release script output.</div>
             </div>
           </div>
           <div class="row g-2 mt-2">
@@ -394,14 +394,14 @@
         <div class="row g-3 mb-4 mt-1">
           <div class="col-md-7">
             <div class="card p-3">
-              <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Daily Activity (last 14 days)</h6>
-              <p class="text-muted mb-1" style="font-size: 10.5px;">Approximate: distinct users whose last-seen time falls on each day &mdash; a user appears on their latest active day only. Use the client-split chart below for real per-day workflow activity.</p>
-              <div id="dailyActivityChart" style="display:flex; align-items:flex-end; gap:6px; min-height:90px; padding-top:10px;"></div>
+              <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Daily activity &mdash; users, last 14 days (UTC)</h6>
+              <p class="text-muted mb-1" style="font-size: 12px;">Approximate. Each user is counted once, on the day they were last active, so a day's figure is the number of users whose latest activity fell on it. The window is the 14 &times; 24 hours up to now, in UTC days, so the first day may be partial. Use the client-split chart below for real per-day workflow activity.</p>
+              <div id="dailyActivityChart" class="day-chart"></div>
             </div>
           </div>
           <div class="col-md-5">
             <div class="card p-3">
-              <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Top Active Users</h6>
+              <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Top Active Users</h6>
               <div id="topUsersList" style="font-size: 12.5px;">Loading...</div>
             </div>
           </div>
@@ -410,23 +410,23 @@
         <div class="row g-3 mb-4">
           <div class="col-md-6">
             <div class="card p-3">
-              <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Client split &mdash; distinct users by app (server-verified)</h6>
-              <p class="text-muted mb-1" style="font-size: 10.5px;">Counted from recorded workflow runs. A user active on both apps counts once under each.</p>
+              <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Client split &mdash; distinct users per day by app, last 14 days (UTC)</h6>
+              <p class="text-muted mb-1" style="font-size: 12px;">Counted from recorded workflow runs, over 14 UTC days including today. A user who used both apps on a day counts once under each, so the two figures can add up to more than the users active that day.</p>
               <div id="clientSplitGrid" style="display:flex; gap:10px; flex-wrap:wrap;"></div>
-              <div id="clientSplitChart" style="display:flex; align-items:flex-end; gap:6px; min-height:90px; padding-top:10px;"></div>
+              <div id="clientSplitChart" class="day-chart"></div>
             </div>
           </div>
           <div class="col-md-6">
             <div class="card p-3">
-              <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Workflow usage (last 30 days)</h6>
+              <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Workflow usage (last 30 days)</h6>
               <div id="workflowBreakdownList" style="font-size: 12.5px;">Loading...</div>
             </div>
           </div>
         </div>
 
         <div class="card p-3 mb-4">
-          <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Per-user usage (last 30 days, biggest first)</h6>
-          <p class="text-muted mb-2" style="font-size: 10.5px;">Super-admin only. Firm admins never see this table. Counts are recorded workflow runs per client app &mdash; content-free, no client data is involved.</p>
+          <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Per-user usage (last 30 days, biggest first)</h6>
+          <p class="text-muted mb-2" style="font-size: 12px;">Super-admin only. Firm admins never see this table. Counts are recorded workflow runs per client app &mdash; content-free, no client data is involved.</p>
           <div style="overflow-x:auto;">
             <table class="table table-sm table-hover mb-0" style="font-size:12px;">
               <thead>
@@ -537,8 +537,8 @@
         </div>
 
         <div class="card p-3 mb-3">
-          <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Suppression list (do-not-email)</h6>
-          <p class="text-muted mb-2" style="font-size: 10.5px;">Addresses that hard-bounced or complained. A suppressed address is refused before every future send. Removing a row is audited.</p>
+          <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Suppression list (do-not-email)</h6>
+          <p class="text-muted mb-2" style="font-size: 12px;">Addresses that hard-bounced or complained. A suppressed address is refused before every future send. Removing a row is audited.</p>
           <table class="table table-sm mb-0" style="font-size:12px;">
             <thead>
               <tr><th>Reason</th><th>Added</th><th>Scope</th><th></th></tr>
@@ -578,7 +578,7 @@
         <div class="row g-3 mb-4">
           <div class="col-md-6">
             <div class="card p-3">
-              <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Task Status Breakdown</h6>
+              <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Task Status Breakdown</h6>
               <div id="taskStatusBreakdown" class="d-flex flex-wrap gap-2">
                 <span class="text-muted small">Loading...</span>
               </div>
@@ -586,7 +586,7 @@
           </div>
           <div class="col-md-6">
             <div class="card p-3">
-              <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Service Type Distribution</h6>
+              <h6 class="mb-2" style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Service Type Distribution</h6>
               <div id="serviceBreakdown" class="d-flex flex-wrap gap-2">
                 <span class="text-muted small">Loading...</span>
               </div>
@@ -876,6 +876,6 @@
 
     <!-- Bootstrap JS no longer needed (custom modal). Kept removed. -->
     <script src="file-tools.js"></script>
-    <script src="super.js?v=26"></script>
+    <script src="super.js?v=27"></script>
   </body>
 </html>

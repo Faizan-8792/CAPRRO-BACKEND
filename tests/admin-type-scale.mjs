@@ -9,7 +9,7 @@
 //
 // USAGE
 //   node tests/admin-type-scale.mjs
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -41,6 +41,28 @@ for (const selector of [".kpi-value", ".st-group-count"]) {
   const block = at >= 0 ? css.slice(at, css.indexOf("}", at)) : "";
   check(`${selector} is set in tabular figures`, /font-variant-numeric:\s*tabular-nums/.test(block));
 }
+
+// The same rules for the styles written inline in the panels' pages and scripts. This test read
+// admin.css alone, and the super panel carried 25 inline sizes below 12px and 28 bold weights in
+// super.html and super.js (found and raised, or removed with the old charts, in DS10). Every page and script under public/admin
+// is read now, so an inline style cannot slip under the scale either.
+const ADMIN_DIR = join(HERE, "..", "public", "admin");
+const inlineSources = readdirSync(ADMIN_DIR)
+  .filter((name) => /\.(html|js)$/.test(name) && !/\.min\./.test(name))
+  .map((name) => ({ name, text: readFileSync(join(ADMIN_DIR, name), "utf8") }));
+const inlineSmall = [];
+const inlineHeavy = [];
+for (const { name, text } of inlineSources) {
+  for (const [, value, unit] of text.matchAll(/font-size:\s*(\d+(?:\.\d+)?)(px|rem)\b/g)) {
+    const px = unit === "rem" ? Number(value) * 16 : Number(value);
+    if (px < 12) inlineSmall.push(`${name} ${value}${unit}`);
+  }
+  for (const [, weight] of text.matchAll(/font-weight:\s*([a-z0-9]+)/g)) {
+    if (!["400", "600", "normal", "inherit"].includes(weight)) inlineHeavy.push(`${name} ${weight}`);
+  }
+}
+check(`no inline text below 12px in ${inlineSources.length} panel pages and scripts`, inlineSmall.length === 0, `found ${inlineSmall.join(", ")}`);
+check("inline weights are regular and semibold only", inlineHeavy.length === 0, `found ${inlineHeavy.join(", ")}`);
 
 console.log(`\npassed: ${passed}  failed: ${failed}`);
 if (failed) process.exit(1);
