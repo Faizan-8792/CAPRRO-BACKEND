@@ -219,12 +219,21 @@ if (wantsMongo) {
     check("an older frequency reading never overwrites a newer one", olderFrequency.stale === 1 && q1.freq === "Q", JSON.stringify(olderFrequency));
 
     // The financial-year filter.
-    await svc.recordRun({ firmId: firmA, records: [good({ period: "2024-04" }), good({ period: "FY:2025-26", returnType: "GSTR-9", fileType: "pdf" })] });
+    await svc.recordRun({
+      firmId: firmA,
+      records: [good({ period: "2024-04" }), good({ period: "FY:2025-26", returnType: "GSTR-9", fileType: "pdf" }), good({ period: "ledger", returnType: "ECL", fileType: "pdf" })],
+    });
     const fy = await svc.listRecords({ firmId: firmA, fy: "2025-26" });
     check(
-      "a financial year lists its months and its annual return, and nothing of another year",
-      fy.records.length === 3 && fy.records.every((row) => row.period !== "2024-04"),
+      "a financial year lists its months, its annual return and the ledger downloads (GD83), and nothing of another year",
+      fy.records.length === 4 && fy.records.every((row) => row.period !== "2024-04") && fy.records.some((row) => row.period === "ledger" && row.returnType === "ECL"),
       JSON.stringify(fy.records.map((row) => row.period)),
+    );
+    const otherYear = await svc.listRecords({ firmId: firmA, fy: "2024-25" });
+    check(
+      "the ledger downloads appear in every year, since they belong to none",
+      otherYear.records.map((row) => row.period).sort().join(",") === "2024-04,ledger",
+      JSON.stringify(otherYear.records.map((row) => row.period)),
     );
     const capped = await svc.listRecords({ firmId: firmA, limit: 2 });
     check("a list past its limit says so", capped.records.length === 2 && capped.truncated === true);

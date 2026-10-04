@@ -302,7 +302,9 @@ export function createGstDownloadsService({
     return { ok: true, recording: true, recorded, frequencyRecorded, filingRecorded, stale, refused };
   }
 
-  // The firm's matrix: every record, optionally for one GSTIN and one financial year, bounded.
+  // The firm's matrix: every record, optionally for one GSTIN and one financial year, bounded. A year
+  // also carries the ledger downloads (GD83): a ledger is recorded as "ledger", which belongs to no year,
+  // so a year-by-year reader would otherwise never see one.
   async function listRecords({ firmId, gstin, fy, limit }) {
     const filter = { firmId };
     if (gstin !== undefined && gstin !== "") {
@@ -313,7 +315,7 @@ export function createGstDownloadsService({
     if (fy !== undefined && fy !== "") {
       const periods = periodsOfYear(fy);
       if (!periods) return { ok: false, status: 400, code: "GST_DOWNLOADS_BAD_FY", error: "A financial year reads like 2025-26." };
-      filter.period = { $in: periods };
+      filter.period = { $in: [...periods, "ledger"] };
     }
     const cap = Math.min(Math.max(Number(limit) || 2000, 1), GST_DOWNLOAD_BULK_LIMITS.readRows);
     const rows = await Record.find(filter)
