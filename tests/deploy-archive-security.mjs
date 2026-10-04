@@ -2377,9 +2377,15 @@ if (listed.status !== 0 || listed.error) {
   // checkout - and verifies Ed25519 signatures with node:crypto, making no network call; and
   // src/controllers/portal-map.controller.js and src/routes/portal-map.routes.js, two signed-in
   // reads that serve only the stored signed text.
+  // 202 -> 207 on 2026-10-04 for GD30, the GST downloader's run records (owner decision OD4), all
+  // five confirmed clean by this very scan (status 0, no REFUSED line) before the pin moved:
+  // src/models/GstDownloadRecord.js and src/models/GstFrequencyObservation.js (schemas and their
+  // limits, metadata only); src/services/gst-downloads.service.js (validation and bounded
+  // upserts, no network call, no configuration value); src/controllers/gst-downloads.controller.js
+  // and src/routes/gst-downloads.routes.js (the signed-in member's own firm, from req.user).
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 202 && result.status === 0,
+    files.length === 207 && result.status === 0,
     result,
   );
 }

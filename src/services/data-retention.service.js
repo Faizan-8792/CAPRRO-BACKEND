@@ -96,6 +96,14 @@ export const RETENTION_CLASSIFICATION = Object.freeze({
   // that a request was honoured. It deliberately holds no names, emails or erased content -- only
   // collection names, counts and status -- so keeping it forever keeps nothing about a person.
   ErasureReceipt: RETENTION_CLASSES.RETAIN,
+  // Added 2026-10-04 with the GST downloader's run records (GD30; owner decision OD4). RETAIN:
+  // one row per (firm, GSTIN, return, format, period) - an upsert, so the collection is bounded
+  // by clients x periods, not by runs - holding metadata only (state, file name, size, hash),
+  // never a file, an amount or a person. A firm erasure purges it (erasure-classification.js).
+  GstDownloadRecord: RETENTION_CLASSES.RETAIN,
+  // Same decision and shape: how each client filed per quarter, one upserted row per
+  // (firm, GSTIN, year, quarter), no content and no person.
+  GstFrequencyObservation: RETENTION_CLASSES.RETAIN,
   EngagementFinding: RETENTION_CLASSES.RETAIN,
   Firm: RETENTION_CLASSES.RETAIN,
   // Added 2026-09-07 with firm invitations. RETAIN, and deliberately NOT SELF_EXPIRING even

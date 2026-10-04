@@ -117,7 +117,7 @@ test("an invalid now is refused rather than silently treated as epoch", () => {
 // 41 -> 43: EmailDelivery.js and EmailSuppression.js, 2026-09-28, with email observability
 // (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1). Both RETAIN: nothing expires them yet (the plan's
 // 180-day aggregation job is unbuilt), and a suppression row must outlive the data it protects.
-test("all 44 models are classified", () => {
+test("all 46 models are classified", () => {
   // 38 -> 39: L12 added ErasureReceipt.js, the record of a completed erasure. This guard firing on
   // that addition is the guard working -- a new model must be classified, not silently inherited.
   //
@@ -128,7 +128,10 @@ test("all 44 models are classified", () => {
   // drift detector stops detecting drift.
   // 43 -> 44: PortalMapVersion.js, 2026-10-04, with the signed portal map (GD28). RETAIN, for the
   // reason recorded beside it in data-retention.service.js.
-  assert.equal(Object.keys(RETENTION_CLASSIFICATION).length, 44);
+  // 44 -> 46: GstDownloadRecord.js and GstFrequencyObservation.js, 2026-10-04, with the GST
+  // downloader's run records (GD30; owner decision OD4). Both RETAIN, for the reasons recorded
+  // beside them - bounded upserts of metadata, purged with the firm.
+  assert.equal(Object.keys(RETENTION_CLASSIFICATION).length, 46);
 });
 
 test("classification matches the real src/models directory exactly", () => {
@@ -136,9 +139,9 @@ test("classification matches the real src/models directory exactly", () => {
   const modelNames = readdirSync(join(here, "..", "src", "models"))
     .filter((name) => name.endsWith(".js"))
     .map((name) => name.replace(/\.js$/, ""));
-  assert.equal(modelNames.length, 44);
+  assert.equal(modelNames.length, 46);
   const result = assertClassificationCoversModels(modelNames);
-  assert.equal(result.classified, 44);
+  assert.equal(result.classified, 46);
 });
 
 test("a new unclassified model makes the guard throw, naming it", () => {
@@ -194,13 +197,15 @@ test("classification totals match PLAN.md 33.9 (see note above: PLAN.md's own pr
   // data-retention.service.js: nothing expires the counters yet, and the plan's 180-day
   // aggregation policy is unbuilt -- calling it SELF_EXPIRING now would be the false claim.
   // 35 -> 36 with PortalMapVersion (GD28): the history of signed maps a run report can name.
-  assert.equal(counts[RETENTION_CLASSES.RETAIN], 36);
+  // 36 -> 38 with GstDownloadRecord and GstFrequencyObservation (GD30): bounded upserts of run
+  // metadata, one row per key however many runs.
+  assert.equal(counts[RETENTION_CLASSES.RETAIN], 38);
   assert.equal(counts[RETENTION_CLASSES.PURGE_FIELD], 1);
   assert.equal(counts[RETENTION_CLASSES.PURGE_CONDITIONAL], 1);
   assert.equal(counts[RETENTION_CLASSES.SELF_EXPIRING], 6);
   assert.equal(
     Object.values(counts).reduce((total, value) => total + value, 0),
-    44,
+    46,
   );
 });
 

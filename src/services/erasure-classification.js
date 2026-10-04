@@ -112,6 +112,10 @@ export const PINNED_FIRM_SCOPED = Object.freeze([
   // (IMPROVEMENT-PLAN-V2 Part 1). Both PSEUDONYMISE in REASONS above: send facts and the
   // do-not-email protection survive; the recipient hash link does not.
   "EmailDelivery", "EmailSuppression",
+  // GstDownloadRecord / GstFrequencyObservation added 2026-10-04 with the GST downloader's run
+  // records (GD30; owner decision OD4). Both carry firmId and no identity field, so the derived
+  // PURGE applies: run metadata about the firm's clients, deleted with the firm.
+  "GstDownloadRecord", "GstFrequencyObservation",
 ]);
 
 /**

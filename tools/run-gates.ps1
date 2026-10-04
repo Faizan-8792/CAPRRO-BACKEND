@@ -754,6 +754,10 @@ try {
         # O22: a signed-in request to an /api path no route matches answers the JSON envelope
         # (404, code NOT_FOUND), not Express's HTML page; signed out it is still the catch-all's 401.
         "api-not-found-contract",
+        # GD30 (owner decision OD4): the GST downloader's run records - server-side validation,
+        # firm A cannot read B, idempotent upsert, newer-wins, the recording switch off writes
+        # nothing, the bounds, the unique key (Mongo subset, scratch-marked).
+        "gst-downloads-contract",
         "audit-numerical-integrity-contract",
         "audit-coverage-gate-contract",
         "audit-finding-guard-contract",
@@ -916,6 +920,7 @@ try {
         "email-delivery-contract" = "scratch-gates-email-delivery"
         "super-emails-controller-contract" = "scratch-gates-super-emails"
         "api-not-found-contract" = "scratch-gates-api-not-found"
+        "gst-downloads-contract" = "scratch-gates-gst-downloads"
     }
     # Probed once, not assumed. On a machine with no local Mongo the behaviour is unchanged from
     # before -- the variable stays unset and the suites run their Mongo-free subset -- but the

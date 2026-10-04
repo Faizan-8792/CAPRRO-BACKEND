@@ -119,11 +119,14 @@ const connectSrc = /connect-src ([^;"]*)/.exec(
   manifest?.content_security_policy?.extension_pages || "",
 );
 
+// GD67 (extension, 2026-10-04) added exactly one host: GST Portal's file store, from which the
+// worker fetches an offline file within its one-minute link and reads it back before saving it.
+// Anything beyond these three is still refused.
 check(
-  "extension CSP connect-src allows only self and the shared backend",
+  "extension CSP connect-src allows only self, the shared backend and GST Portal's file store",
   Boolean(connectSrc) &&
     connectSrc[1].trim().split(/\s+/).filter(Boolean).sort().join(" ") ===
-      ["'self'", SHARED_ORIGIN].sort().join(" "),
+      ["'self'", SHARED_ORIGIN, "https://files.gst.gov.in"].sort().join(" "),
   connectSrc ? connectSrc[1].trim() : "connect-src not found",
 );
 

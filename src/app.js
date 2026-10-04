@@ -28,6 +28,7 @@ import engagementRoutes from "./routes/engagement.routes.js";
 import firmOperationsRoutes from "./routes/firm-operations.routes.js";
 import digestRoutes from "./routes/digest.routes.js";
 import portalMapRoutes from "./routes/portal-map.routes.js";
+import gstDownloadsRoutes from "./routes/gst-downloads.routes.js";
 import webhookRoutes from "./routes/webhook.routes.js";
 import { sanitizeInputs } from "./middleware/sanitize.middleware.js";
 import { trackUsage } from "./middleware/usage-tracker.middleware.js";
@@ -605,6 +606,8 @@ app.use("/api/digests", digestRoutes);
 // GD28: the GST downloader's signed portal map. Mounted before the /api
 // catch-all below, which would otherwise answer every one of its paths.
 app.use("/api/gst-portal-map", portalMapRoutes);
+// The GST downloader's run records, per firm (GD30; owner decision OD4).
+app.use("/api/gst-downloads", gstDownloadsRoutes);
 app.use("/api", firmOperationsRoutes);
 
 // O22: an /api path that no route matched answers in the API's own envelope. A signed-in request
