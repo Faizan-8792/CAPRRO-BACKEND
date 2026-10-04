@@ -1206,6 +1206,106 @@ define("POST", "api/engagements/working-papers/{workingPaperId}/rows", async () 
   );
 });
 
+// ── The GST downloader's run records (GD30, GD33), as the GST Downloads page reads them (GD35) ──
+//
+// Seeded through the extension's own route, POST api/gst-downloads/records/bulk, with the shape its
+// run sync sends (audit-nlp-extension gst-downloader/run-sync.js): a downloaded file with its
+// generation ledger, a month not filed, a GSTR-2B with its generation date, a quarter's filing
+// frequency and two filing-board rows. Every handler seeds first - the upsert makes a second seed a
+// no-op - so each fixture has one shape whether it runs in a full capture or alone under --only.
+// FY 2026-27 because that is the year the page opens on in October 2026, its first real request.
+// The client is the reconciliation fixture's own GSTIN, declared above.
+
+async function seedGstDownloads() {
+  const observedAt = "2026-09-15T09:30:00.000Z";
+  return call("POST", "api/gst-downloads/records/bulk", {
+    body: {
+      records: [
+        {
+          gstin: GST_FIXTURE_GSTIN,
+          returnType: "GSTR-3B",
+          fileType: "pdf",
+          period: "2026-04",
+          state: "downloaded",
+          outcome: "downloaded",
+          fileName: GST_FIXTURE_GSTIN + "_GSTR-3B_2026-27_2026-04_Apr.pdf",
+          bytes: 48211,
+          sha256: "a".repeat(64),
+          savedAt: "2026-09-15T09:29:40.000Z",
+          observedAt,
+          runId: "run_1789464000000",
+          mapVersion: 1,
+          ledger: {
+            requests: 1,
+            firstRequestedAt: "2026-09-15T09:29:00.000Z",
+            lastRequestedAt: "2026-09-15T09:29:00.000Z",
+            capped: false,
+            cappedAt: null,
+            capReason: "",
+          },
+        },
+        {
+          gstin: GST_FIXTURE_GSTIN,
+          returnType: "GSTR-1",
+          fileType: "pdf",
+          period: "2026-05",
+          state: "not-filed",
+          outcome: "not-filed",
+          observedAt,
+          runId: "run_1789464000000",
+          mapVersion: 1,
+        },
+        {
+          gstin: GST_FIXTURE_GSTIN,
+          returnType: "GSTR-2B",
+          fileType: "json",
+          period: "2026-08",
+          state: "downloaded",
+          outcome: "downloaded",
+          fileName: GST_FIXTURE_GSTIN + "_GSTR-2B_2026-27_2026-08_Aug.json",
+          bytes: 120533,
+          sha256: "b".repeat(64),
+          savedAt: "2026-09-15T09:29:50.000Z",
+          observedAt,
+          runId: "run_1789464000000",
+          mapVersion: 1,
+          gstr2bGeneratedOn: "14-09-2026",
+        },
+      ],
+      frequency: [
+        { gstin: GST_FIXTURE_GSTIN, fy: "2026-27", quarter: 1, freq: "Q", provisional: false, source: "rolestatus", seenAt: observedAt },
+      ],
+      filingStatus: [
+        { gstin: GST_FIXTURE_GSTIN, returnType: "GSTR-3B", period: "2026-04", statusClass: "filed", seenAt: observedAt, runId: "run_1789464000000" },
+        { gstin: GST_FIXTURE_GSTIN, returnType: "GSTR-1", period: "2026-05", statusClass: "not_filed", seenAt: observedAt, runId: "run_1789464000000" },
+      ],
+    },
+  });
+}
+
+async function withGstDownloads(read) {
+  const seeded = await seedGstDownloads();
+  if (seeded.status !== 200 || seeded.json?.recording !== true) {
+    return { skip: `could not seed the firm's GST downloader records (HTTP ${seeded.status})` };
+  }
+  return read();
+}
+
+// limit=5000 and the year: GstDownloadsService.LoadAsync's own first request.
+define("GET", "api/gst-downloads/records?", async () =>
+  withGstDownloads(() => call("GET", "api/gst-downloads/records?fy=2026-27&limit=5000")),
+);
+define("GET", "api/gst-downloads/filing-status?", async () =>
+  withGstDownloads(() => call("GET", "api/gst-downloads/filing-status?fy=2026-27")),
+);
+define("GET", "api/gst-downloads/frequency", async () => withGstDownloads(() => call("GET", "api/gst-downloads/frequency")));
+define("GET", "api/gst-downloads/settings", async () => call("GET", "api/gst-downloads/settings"));
+// true, so the firm still records afterwards and a later seed is not refused: the capture user owns
+// its personal firm, which makes it an admin the PATCH route accepts.
+define("PATCH", "api/gst-downloads/settings", async () =>
+  call("PATCH", "api/gst-downloads/settings", { body: { recording: true } }),
+);
+
 // ── Parameterised routes, batch 4: the two INDIRECTLY-constructed routes with no path parameter ──
 //
 // Form 3 (a literal built into a local, passed to the call by name), so neither precise parser sees

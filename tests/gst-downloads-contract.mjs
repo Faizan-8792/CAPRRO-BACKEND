@@ -125,6 +125,12 @@ check(
 );
 check("the recording switch is changed by firm admins only", /router\.patch\("\/settings", requireFirmAdmin, patchGstDownloadSettings\);/.test(routes));
 check("the filing board is a member's read", /router\.get\("\/filing-status", listGstFilingStatus\);/.test(routes));
+const settingsController = read("src/controllers/gst-downloads.controller.js");
+check(
+  "the settings say whether this account may change the switch, from the same verdict as requireFirmAdmin",
+  /const canChange = \(req\) => req\.firmAuthority\?\.canAdminister === true;/.test(settingsController) &&
+    (settingsController.match(/settings: \{ \.\.\.done\.settings, canChange: canChange\(req\) \}/g) || []).length === 2,
+);
 check(
   "a run's filing statuses reach the service from the body, beside its records and frequency",
   /records: body\.records,\s+frequency: body\.frequency,\s+filingStatus: body\.filingStatus,/.test(read("src/controllers/gst-downloads.controller.js")),

@@ -3,6 +3,11 @@
 
 import { gstDownloadsService } from "../services/gst-downloads.service.js";
 
+// Whether this account may change the recording switch: the verdict requireFirmAdmin reaches, reported
+// so a client need not offer a control the server would refuse (GD35). Presentation only - the PATCH
+// route still decides.
+const canChange = (req) => req.firmAuthority?.canAdminister === true;
+
 function answer(res, result, okBody) {
   if (!result.ok) {
     return res.status(result.status || 400).json({ ok: false, error: result.error, code: result.code });
@@ -71,7 +76,7 @@ export const listGstFilingStatus = async (req, res, next) => {
 export const getGstDownloadSettings = async (req, res, next) => {
   try {
     const result = await gstDownloadsService.readSettings({ firmId: req.user.firmId });
-    return answer(res, result, (done) => ({ ok: true, settings: done.settings }));
+    return answer(res, result, (done) => ({ ok: true, settings: { ...done.settings, canChange: canChange(req) } }));
   } catch (error) {
     return next(error);
   }
@@ -80,7 +85,7 @@ export const getGstDownloadSettings = async (req, res, next) => {
 export const patchGstDownloadSettings = async (req, res, next) => {
   try {
     const result = await gstDownloadsService.writeSettings({ firmId: req.user.firmId, input: req.body });
-    return answer(res, result, (done) => ({ ok: true, settings: done.settings }));
+    return answer(res, result, (done) => ({ ok: true, settings: { ...done.settings, canChange: canChange(req) } }));
   } catch (error) {
     return next(error);
   }
