@@ -24,12 +24,15 @@
 //
 //   GET  api/hosting/v1/accounts/{user}/websites/{domain}/nodejs/builds/settings/from-archive
 //   POST api/hosting/v1/accounts/{user}/websites/{domain}/nodejs/builds
+//   POST api/hosting/v1/accounts/{user}/websites/{domain}/nodejs/server/restart   (only when the
+//        API's own domain stays silent after the build, and at most once - lib/deploy-serving-check.mjs)
 //
 // SAFETY
 // ------
 // Build settings are FETCHED from the archive on the server, never hand-written here. Inventing an
 // entry file or a node version would be a silent way to deploy a differently-configured app; taking
-// the server's own answer means this tool cannot reconfigure the service, only rebuild it.
+// the server's own answer means this tool cannot reconfigure the service, only rebuild it - and, at
+// most once, restart the process it built.
 //
 // The token is read from the environment and never printed, logged, or written anywhere.
 
@@ -40,6 +43,7 @@ import {
   PLACEHOLDER_BODY,
   assertArchivePathNotExposed,
 } from "./lib/deploy-archive-exposure.mjs";
+import { confirmServing } from "./lib/deploy-serving-check.mjs";
 
 const BASE = process.env.HOSTINGER_API_BASE || "https://developers.hostinger.com";
 
@@ -214,47 +218,13 @@ if (final.state !== "completed") {
 }
 
 console.log("");
-console.log("=== 5. confirm the live API is actually serving again ===");
-// A completed build is not the same as a healthy service, so this asks the running app.
-let health = null;
-for (let attempt = 1; attempt <= 12; attempt += 1) {
-  try {
-    // Bounded: with the origin silent the CDN holds a request for minutes, and twelve unbounded
-    // attempts kept a dead API looking like a slow one for half an hour on 2026-10-04.
-    const response = await fetch(`https://${domain}/api/app-config`, { redirect: "follow", signal: AbortSignal.timeout(15000) });
-    if (response.ok) {
-      health = await response.json();
-      break;
-    }
-  } catch {
-    // still restarting
-  }
-  await new Promise((r) => setTimeout(r, 5000));
-}
-
-// A service that does not answer is a failed deploy, but the archive is still in the served root, and
-// leaving it there while somebody investigates was the larger harm: on 2026-10-04 the backend source
-// stayed downloadable for the whole 37 minutes the API was down. So the exposure is closed below on
-// this path too, and the failure is reported after it.
-const serviceAnswered = Boolean(health);
-if (serviceAnswered) {
-  line("app-config", "200 OK");
-} else {
-  console.error("  The build completed but /api/app-config did not answer. Investigate before assuming success.");
-  console.error("  Closing the archive exposure first; then roll back (docs/operations-runbook.md, Rollback).");
-}
-
-if (serviceAnswered && expectCommit) {
-  // Optional, and only asserted when the caller supplies it: the deployed build id is not exposed
-  // by the public API, so this is a courtesy echo rather than proof of the running commit.
-  line("expected", expectCommit.slice(0, 12));
-}
-
-console.log("");
-console.log("=== 6. close the archive exposure ===");
+console.log("=== 5. close the archive exposure ===");
 // The archive had to be in the domain's document root for the build to read it, and that root is
 // served statically - so for the length of the build the whole backend source was an
-// unauthenticated download. The build has now read it, so nothing needs it any more.
+// unauthenticated download. The build has now read it, so nothing needs it any more. It is covered
+// BEFORE the health check, not after: on 2026-10-04 the source stayed downloadable for the whole
+// 37 minutes the API was down, and the check can now take longer still (a silent domain is
+// restarted once and probed again), none of which needs the archive.
 //
 // Overwrite rather than delete, because there is nothing to delete with: the file service answers
 // 404 to DELETE in every shape TUS defines, and the build cannot read an archive kept outside the
@@ -288,11 +258,57 @@ try {
 }
 
 console.log("");
+console.log("=== 6. confirm the live API is actually serving again ===");
+// A completed build is not the same as a healthy service, so this asks the running app - on the
+// API's own domain, the only one clients use. Each probe is bounded: with the origin silent the CDN
+// holds a request for minutes, and twelve unbounded attempts kept a dead API looking like a slow one
+// for half an hour on 2026-10-04. A domain still silent after twelve is restarted once through
+// Hostinger's documented endpoint and probed again; lib/deploy-serving-check.mjs says why, and why
+// only once.
+let health = null;
+const serving = await confirmServing({
+  probe: async () => {
+    const response = await fetch(`https://${domain}/api/app-config`, { redirect: "follow", signal: AbortSignal.timeout(15000) });
+    if (!response.ok) return false;
+    health = await response.json();
+    return true;
+  },
+  // The request that recovered the API on 2026-10-04, unchanged: no body, so no Content-Type.
+  restart: async () => {
+    const response = await fetch(
+      `${BASE}/api/hosting/v1/accounts/${encodeURIComponent(username)}/websites/${encodeURIComponent(domain)}/nodejs/server/restart`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(60000),
+      },
+    );
+    return { status: response.status };
+  },
+  log: (message) => console.log(`  ${message}`),
+});
+
+const serviceAnswered = serving.answered && Boolean(health);
+if (serviceAnswered) {
+  line("app-config", serving.restarted ? "200 OK, after one restart" : "200 OK");
+} else {
+  console.error("  The build completed but /api/app-config did not answer on the API's own domain.");
+  console.error("  Investigate before assuming success, then roll back (docs/operations-runbook.md, Rollback).");
+}
+
+if (serviceAnswered && expectCommit) {
+  // Optional, and only asserted when the caller supplies it: the deployed build id is not exposed
+  // by the public API, so this is a courtesy echo rather than proof of the running commit.
+  line("expected", expectCommit.slice(0, 12));
+}
+
+console.log("");
 console.log("=== 7. prove the archive is no longer public ===");
 // A deploy that cannot prove this fails. Reporting a deploy as complete while the source is still
-// downloadable is the exact outcome step 6 exists to prevent, so it is asserted rather than
+// downloadable is the exact outcome step 5 exists to prevent, so it is asserted rather than
 // assumed - and the request is cache-busted, because a stale 404 is how this was missed the first
-// time it happened.
+// time it happened. A silent API is reported as well, not instead: both are a failed deploy.
+let exposureDisproved = true;
 try {
   await assertArchivePathNotExposed({
     domain,
@@ -302,18 +318,23 @@ try {
     log: (message) => console.log(message),
   });
 } catch (err) {
+  exposureDisproved = false;
   console.error("");
   console.error("=== ARCHIVE STILL EXPOSED ===");
   console.error(`  ${String(err)}`);
-  process.exit(1);
 }
 
 if (!serviceAnswered) {
   console.error("");
   console.error("=== DEPLOY FAILED: the API is not answering ===");
-  console.error("  The archive exposure is closed. Roll back to the last-known-good archive now.");
+  console.error(
+    exposureDisproved
+      ? "  The archive exposure is closed. Roll back to the last-known-good archive now."
+      : "  The archive exposure is NOT proved closed (above). Overwrite that path, then roll back.",
+  );
   process.exit(1);
 }
+if (!exposureDisproved) process.exit(1);
 
 console.log("");
 console.log("=== DEPLOY COMPLETE ===");

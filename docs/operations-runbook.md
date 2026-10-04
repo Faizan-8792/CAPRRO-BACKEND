@@ -374,6 +374,40 @@ exposure, so the backend source stayed downloadable throughout (now closed on ev
 failure reported). Rollback: upload 10:57:30Z, answering 10:58:08Z, `ok` 10:59:26Z; health, app-config,
 the extension preflight (204, origin reflected) and an authenticated `GET /api/auth/me` (200) all pass.
 
+**The same day, again, and what actually fixed it.** From about 11:20Z api.caprotoolkit.in hung
+again, and stayed down through more builds (seven completed that day, the known-good `ee091cb`
+among them) while the website's temporary domain (`lightcoral-hornet-860563.hostingersite.com`)
+answered `/health` with 200. The runtime log named the cause: Hostinger runs **one** Node process per
+website, and each start logged by the `[STARTUP]` line (added to `src/server.js` for this) bound
+`/usr/local/lsws/extapp-sock/lightcoral-hornet-860563.hostingersite.com:_.sock` - the temporary
+domain's virtual host. The CDN edges completed TLS for api.caprotoolkit.in and then waited for a
+first byte that never came (`connect` 0.05 s, `tls` 0.11 s, no byte in 20 s), while the same edges
+served the temporary domain in 0.35 s. At 17:33:42Z `POST
+api/hosting/v1/accounts/{user}/websites/api.caprotoolkit.in/nodejs/server/restart` (documented:
+"does not rebuild or redeploy ... recover a hung application") answered 200; at 17:33:44Z the new
+process bound `.../api.caprotoolkit.in:_.sock`; `/health` answered 503 while starting at 17:34:13Z
+and 200 at 17:34:43Z, and the temporary domain stopped answering at that moment - one process, one
+host. Smoke 4 of 4 (health, app-config, the extension preflight 204 with its origin reflected, an
+authenticated `GET /api/auth/me` 200). Outage about 6 h 14 min (11:20Z-17:34Z), on top of the
+morning's 37 minutes.
+
+So, when the API's own domain hangs and nothing in the runtime log says the app crashed:
+
+1. Read the newest `[STARTUP]` line in the runtime log. A socket named after anything other than
+   `api.caprotoolkit.in` is this failure.
+2. **Restart, do not rebuild**: the endpoint above, with the deploy token. After 11:20Z every
+   attempt was a rebuild (the "restart" at 12:00Z was a redeploy of `ee091cb`) and none brought
+   the domain back; the first use of this endpoint did. Why a start lands on one host or the other
+   is Hostinger's to explain and was not established.
+3. Do not use the temporary domain as evidence the API is up. It proves a process runs, not that
+   clients can reach it.
+
+`tools/hostinger-deploy-backend.mjs` now does step 2 itself: if `/api/app-config` on the API's own
+domain stays silent after twelve bounded probes, it restarts the process **once** through that
+endpoint and probes again, and only then reports the deploy failed. The archive is now covered
+before that check, not after it, so a slow check no longer lengthens the exposure. The decision is
+in `tools/lib/deploy-serving-check.mjs`, pinned by seven checks in `tests/deploy-archive-security.mjs`.
+
 **What the 2026-08-27 rehearsal did.** Both legs were confirmed by content, not by the deploy
 reporting success: the two builds differ observably only in the served `public/admin/super.js`
 (the O18 same-origin base landed in `da5c47f`), so after the rollback the live file carried the

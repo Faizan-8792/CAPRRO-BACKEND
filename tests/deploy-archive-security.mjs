@@ -6,6 +6,7 @@ import {
   assertArchivePathNotExposed,
   classifyServedArchive,
 } from "../tools/lib/deploy-archive-exposure.mjs";
+import { confirmServing } from "../tools/lib/deploy-serving-check.mjs";
 import { spawnSync } from "node:child_process";
 
 const scannerPath = "tools/scan-deploy-secrets.mjs";
@@ -2594,6 +2595,119 @@ record(
       fetchImpl: async () => ({ status: 200, ok: true, arrayBuffer: async () => body }),
     });
     return result.bytes === body.length;
+  })(),
+);
+
+// ---------------------------------------------------------------------------
+// A deploy whose own domain stays silent restarts the process once, and only once.
+//
+// On 2026-10-04 the API's single Node process came up bound to the website's temporary domain
+// after a deploy, and api.caprotoolkit.in hung for most of the day while seven rebuilds completed;
+// Hostinger's documented restart endpoint brought it back in under a minute. The decision lives in
+// tools/lib/deploy-serving-check.mjs and is pinned here offline, because the real probe and restart
+// can only run against production.
+// ---------------------------------------------------------------------------
+
+function servingScenario({ answers, restartStatus = 200, restartThrows = false }) {
+  const calls = { probes: 0, restarts: 0, probesBeforeRestart: null };
+  const input = {
+    attempts: 3,
+    delayMs: 0,
+    sleep: async () => {},
+    probe: async () => {
+      calls.probes += 1;
+      return answers(calls);
+    },
+    restart: async () => {
+      calls.probesBeforeRestart = calls.probes;
+      calls.restarts += 1;
+      if (restartThrows) throw new Error("network down");
+      return { status: restartStatus };
+    },
+  };
+  return { calls, run: () => confirmServing(input) };
+}
+
+record(
+  "a domain that answers is never restarted",
+  await (async () => {
+    const { calls, run } = servingScenario({ answers: () => true });
+    const result = await run();
+    return result.answered && !result.restarted && calls.probes === 1 && calls.restarts === 0;
+  })(),
+);
+
+record(
+  "a silent domain is restarted exactly once, only after every probe failed, and then answers",
+  await (async () => {
+    const { calls, run } = servingScenario({ answers: (c) => c.restarts > 0 });
+    const result = await run();
+    return (
+      result.answered &&
+      result.restarted &&
+      result.restartStatus === 200 &&
+      calls.restarts === 1 &&
+      calls.probesBeforeRestart === 3 &&
+      calls.probes === 4
+    );
+  })(),
+);
+
+record(
+  "a restart that does not help fails the deploy without a second restart",
+  await (async () => {
+    const { calls, run } = servingScenario({ answers: () => false });
+    const result = await run();
+    return !result.answered && result.restarted && calls.restarts === 1 && calls.probes === 6;
+  })(),
+);
+
+record(
+  "a refused restart is reported, not followed by more probes",
+  await (async () => {
+    const { calls, run } = servingScenario({ answers: (c) => c.restarts > 0, restartStatus: 401 });
+    const result = await run();
+    return !result.answered && !result.restarted && result.restartStatus === 401 && calls.probes === 3;
+  })(),
+);
+
+record(
+  "a restart request that throws is a failed deploy, not a crash",
+  await (async () => {
+    const { calls, run } = servingScenario({ answers: (c) => c.restarts > 0, restartThrows: true });
+    const result = await run();
+    return !result.answered && !result.restarted && result.restartStatus === null && calls.restarts === 1;
+  })(),
+);
+
+record(
+  "a probe that throws counts as silence, not as an answer",
+  await (async () => {
+    const { calls, run } = servingScenario({
+      answers: (c) => {
+        if (c.restarts === 0) throw new Error("The operation was aborted due to timeout");
+        return true;
+      },
+    });
+    const result = await run();
+    return result.answered && result.restarted && calls.restarts === 1;
+  })(),
+);
+
+record(
+  "the deploy tool covers the archive before the health check, restarts through the documented endpoint, and proves the cover last",
+  (() => {
+    const tool = readFileSync("tools/hostinger-deploy-backend.mjs", "utf8");
+    const cover = tool.indexOf("await uploadFileToHostinger({");
+    const serving = tool.indexOf("await confirmServing({");
+    const proof = tool.indexOf("await assertArchivePathNotExposed({");
+    return (
+      cover > 0 &&
+      serving > cover &&
+      proof > serving &&
+      tool.includes("/nodejs/server/restart`") &&
+      tool.split("await confirmServing({").length === 2
+    );
   })(),
 );
 
