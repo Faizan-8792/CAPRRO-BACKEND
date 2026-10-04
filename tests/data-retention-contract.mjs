@@ -131,7 +131,9 @@ test("all 46 models are classified", () => {
   // 44 -> 46: GstDownloadRecord.js and GstFrequencyObservation.js, 2026-10-04, with the GST
   // downloader's run records (GD30; owner decision OD4). Both RETAIN, for the reasons recorded
   // beside them - bounded upserts of metadata, purged with the firm.
-  assert.equal(Object.keys(RETENTION_CLASSIFICATION).length, 46);
+  // 46 -> 47: FilingStatusObservation.js, 2026-10-04, with the filing board (decision D4, GD33).
+  // RETAIN for the same reason: one upserted row per firm, client, return and month.
+  assert.equal(Object.keys(RETENTION_CLASSIFICATION).length, 47);
 });
 
 test("classification matches the real src/models directory exactly", () => {
@@ -139,9 +141,9 @@ test("classification matches the real src/models directory exactly", () => {
   const modelNames = readdirSync(join(here, "..", "src", "models"))
     .filter((name) => name.endsWith(".js"))
     .map((name) => name.replace(/\.js$/, ""));
-  assert.equal(modelNames.length, 46);
+  assert.equal(modelNames.length, 47);
   const result = assertClassificationCoversModels(modelNames);
-  assert.equal(result.classified, 46);
+  assert.equal(result.classified, 47);
 });
 
 test("a new unclassified model makes the guard throw, naming it", () => {
@@ -199,13 +201,14 @@ test("classification totals match PLAN.md 33.9 (see note above: PLAN.md's own pr
   // 35 -> 36 with PortalMapVersion (GD28): the history of signed maps a run report can name.
   // 36 -> 38 with GstDownloadRecord and GstFrequencyObservation (GD30): bounded upserts of run
   // metadata, one row per key however many runs.
-  assert.equal(counts[RETENTION_CLASSES.RETAIN], 38);
+  // 38 -> 39 with FilingStatusObservation (GD33): the same bounded upsert, for the filing board.
+  assert.equal(counts[RETENTION_CLASSES.RETAIN], 39);
   assert.equal(counts[RETENTION_CLASSES.PURGE_FIELD], 1);
   assert.equal(counts[RETENTION_CLASSES.PURGE_CONDITIONAL], 1);
   assert.equal(counts[RETENTION_CLASSES.SELF_EXPIRING], 6);
   assert.equal(
     Object.values(counts).reduce((total, value) => total + value, 0),
-    46,
+    47,
   );
 });
 

@@ -2,8 +2,9 @@
 // decision OD4, 2026-10-04).
 //
 // After a run the extension sends what each file reached - GSTIN, return, format, period, the
-// state in its one vocabulary, the file's name, size and SHA-256 - and how each client filed per
-// quarter. They are stored as METADATA only, upserted per key, so the storage is bounded by
+// state in its one vocabulary, the file's name, size and SHA-256 - how each client filed per
+// quarter, and (decision D4, GD33) whether each client had filed GSTR-1 and GSTR-3B for the months
+// the run read, for the firm's filing board. They are stored as METADATA only, upserted per key, so the storage is bounded by
 // clients x periods. The firm's recording switch decides whether anything is written: off means
 // zero writes. Every key the client sends is validated again here; a row that fails is refused by
 // itself and named in the answer, never stored, and never fails the rows around it. A row older
@@ -21,12 +22,17 @@ import GstDownloadRecordModel, {
   GST_DOWNLOAD_STATES,
 } from "../models/GstDownloadRecord.js";
 import GstFrequencyObservationModel, { GST_FREQUENCY_SOURCES } from "../models/GstFrequencyObservation.js";
+import FilingStatusObservationModel, {
+  FILING_STATUS_CLASSES,
+  FILING_STATUS_RETURN_TYPES,
+} from "../models/FilingStatusObservation.js";
 import FirmModel from "../models/Firm.js";
 
-export const GST_DOWNLOAD_BULK_LIMITS = Object.freeze({ records: 500, frequency: 200, readRows: 5000 });
+export const GST_DOWNLOAD_BULK_LIMITS = Object.freeze({ records: 500, frequency: 200, filingStatus: 500, readRows: 5000 });
 
 const PERIOD = /^(20\d{2}-(0[1-9]|1[0-2])|FY:20\d{2}-\d{2}|ledger)$/;
 const FY = /^20\d{2}-\d{2}$/;
+const MONTH = /^20\d{2}-(0[1-9]|1[0-2])$/;
 const OUTCOME = /^[a-z0-9-]{1,48}$/;
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -139,6 +145,27 @@ export function readFrequency(input, { now = Date.now() } = {}) {
   };
 }
 
+// One filing status from the client (decision D4): a month's coarse class for GSTR-1 or GSTR-3B.
+export function readFilingStatus(input, { now = Date.now() } = {}) {
+  const row = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const gstin = gstinFrom(row.gstin);
+  if (!gstin) return { ok: false, reason: "gstin" };
+  if (!FILING_STATUS_RETURN_TYPES.includes(row.returnType)) return { ok: false, reason: "returnType" };
+  const period = String(row.period || "");
+  if (!MONTH.test(period)) return { ok: false, reason: "period" };
+  if (!FILING_STATUS_CLASSES.includes(row.statusClass)) return { ok: false, reason: "statusClass" };
+  const seenAt = dateFrom(row.seenAt, now);
+  if (!seenAt) return { ok: false, reason: "seenAt" };
+  const runId = row.runId === undefined || row.runId === "" ? "" : String(row.runId);
+  if (runId && !RUN_ID.test(runId)) return { ok: false, reason: "runId" };
+  return {
+    ok: true,
+    key: { gstin, returnType: row.returnType, period },
+    set: { statusClass: row.statusClass, sourceRunId: runId },
+    seenAt,
+  };
+}
+
 // The financial year's period tokens: its twelve months and its annual token.
 export function periodsOfYear(fy) {
   if (!FY.test(String(fy || ""))) return null;
@@ -157,6 +184,7 @@ const isDuplicateKey = (error) => error?.code === 11000;
 export function createGstDownloadsService({
   Record = GstDownloadRecordModel,
   Frequency = GstFrequencyObservationModel,
+  Filing = FilingStatusObservationModel,
   Firm = FirmModel,
   now = () => Date.now(),
 } = {}) {
@@ -167,21 +195,27 @@ export function createGstDownloadsService({
     return firm.gstDownloaderRecording !== false;
   }
 
-  // Writes one bulk of a run's records and frequency readings, or nothing when the switch is off.
-  async function recordRun({ firmId, records, frequency }) {
+  // Writes one bulk of a run's records, frequency readings and filing statuses, or nothing when
+  // the switch is off.
+  async function recordRun({ firmId, records, frequency, filingStatus }) {
     const recording = await recordingFor(firmId);
     if (recording === null) return { ok: false, status: 404, code: "FIRM_NOT_FOUND", error: "This firm could not be found." };
     const rows = Array.isArray(records) ? records : [];
     const seen = Array.isArray(frequency) ? frequency : [];
-    if (rows.length > GST_DOWNLOAD_BULK_LIMITS.records || seen.length > GST_DOWNLOAD_BULK_LIMITS.frequency) {
+    const filed = Array.isArray(filingStatus) ? filingStatus : [];
+    if (
+      rows.length > GST_DOWNLOAD_BULK_LIMITS.records ||
+      seen.length > GST_DOWNLOAD_BULK_LIMITS.frequency ||
+      filed.length > GST_DOWNLOAD_BULK_LIMITS.filingStatus
+    ) {
       return {
         ok: false,
         status: 400,
         code: "GST_DOWNLOADS_TOO_MANY",
-        error: `Send at most ${GST_DOWNLOAD_BULK_LIMITS.records} records and ${GST_DOWNLOAD_BULK_LIMITS.frequency} frequency readings at a time.`,
+        error: `Send at most ${GST_DOWNLOAD_BULK_LIMITS.records} records, ${GST_DOWNLOAD_BULK_LIMITS.frequency} frequency readings and ${GST_DOWNLOAD_BULK_LIMITS.filingStatus} filing statuses at a time.`,
       };
     }
-    if (!recording) return { ok: true, recording: false, recorded: 0, frequencyRecorded: 0, stale: 0, refused: [] };
+    if (!recording) return { ok: true, recording: false, recorded: 0, frequencyRecorded: 0, filingRecorded: 0, stale: 0, refused: [] };
 
     const at = now();
     const refused = [];
@@ -225,6 +259,25 @@ export function createGstDownloadsService({
         },
       });
     });
+    const filingOps = [];
+    filed.forEach((input, index) => {
+      const read = readFilingStatus(input, { now: at });
+      if (!read.ok) {
+        refused.push({ index, kind: "filingStatus", reason: read.reason });
+        return;
+      }
+      filingOps.push({
+        updateOne: {
+          filter: {
+            firmId,
+            ...read.key,
+            $or: [{ lastSeenAt: { $lte: read.seenAt } }, { lastSeenAt: { $exists: false } }],
+          },
+          update: { $set: { ...read.set, lastSeenAt: read.seenAt }, $setOnInsert: { firstSeenAt: read.seenAt } },
+          upsert: true,
+        },
+      });
+    });
 
     // A row now holding the state sent: newly inserted, or matched (changed or already equal -
     // which is what makes a repeated sync idempotent).
@@ -245,7 +298,8 @@ export function createGstDownloadsService({
     };
     const recorded = await write(Record, recordOps);
     const frequencyRecorded = await write(Frequency, frequencyOps);
-    return { ok: true, recording: true, recorded, frequencyRecorded, stale, refused };
+    const filingRecorded = await write(Filing, filingOps);
+    return { ok: true, recording: true, recorded, frequencyRecorded, filingRecorded, stale, refused };
   }
 
   // The firm's matrix: every record, optionally for one GSTIN and one financial year, bounded.
@@ -282,6 +336,25 @@ export function createGstDownloadsService({
     return { ok: true, frequency: rows.slice(0, cap), truncated: rows.length > cap };
   }
 
+  // The firm's filing board (decision D4): every month's class, optionally for one GSTIN and one
+  // financial year, bounded.
+  async function listFilingStatus({ firmId, gstin, fy }) {
+    const filter = { firmId };
+    if (gstin !== undefined && gstin !== "") {
+      const one = gstinFrom(gstin);
+      if (!one) return { ok: false, status: 400, code: "GST_DOWNLOADS_BAD_GSTIN", error: "That is not a GSTIN." };
+      filter.gstin = one;
+    }
+    if (fy !== undefined && fy !== "") {
+      const periods = periodsOfYear(fy);
+      if (!periods) return { ok: false, status: 400, code: "GST_DOWNLOADS_BAD_FY", error: "A financial year reads like 2025-26." };
+      filter.period = { $in: periods.filter((period) => MONTH.test(period)) };
+    }
+    const cap = GST_DOWNLOAD_BULK_LIMITS.readRows;
+    const rows = await Filing.find(filter).select("-_id -firmId").sort({ gstin: 1, returnType: 1, period: 1 }).limit(cap + 1).lean();
+    return { ok: true, filingStatus: rows.slice(0, cap), truncated: rows.length > cap };
+  }
+
   async function readSettings({ firmId }) {
     const recording = await recordingFor(firmId);
     if (recording === null) return { ok: false, status: 404, code: "FIRM_NOT_FOUND", error: "This firm could not be found." };
@@ -299,7 +372,7 @@ export function createGstDownloadsService({
     return { ok: true, settings: { recording: updated.gstDownloaderRecording !== false } };
   }
 
-  return { recordRun, listRecords, listFrequency, readSettings, writeSettings };
+  return { recordRun, listRecords, listFrequency, listFilingStatus, readSettings, writeSettings };
 }
 
 export const gstDownloadsService = createGstDownloadsService();

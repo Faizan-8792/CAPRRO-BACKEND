@@ -116,6 +116,9 @@ export const PINNED_FIRM_SCOPED = Object.freeze([
   // records (GD30; owner decision OD4). Both carry firmId and no identity field, so the derived
   // PURGE applies: run metadata about the firm's clients, deleted with the firm.
   "GstDownloadRecord", "GstFrequencyObservation",
+  // FilingStatusObservation added 2026-10-04 with the filing board (decision D4, GD33): firmId and
+  // no identity field, so the same derived PURGE - deleted with the firm.
+  "FilingStatusObservation",
 ]);
 
 /**

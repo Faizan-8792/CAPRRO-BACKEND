@@ -1,5 +1,5 @@
 // The GST downloader's run records, per firm (GD30; GST-DOWNLOADER-PLAN section 8.13; owner
-// decision OD4, 2026-10-04).
+// decision OD4, 2026-10-04), and the filing board they feed (GD33; decision D4, V2 section 4.9).
 //
 //   1. Every key the extension sends is validated again on the server; a bad row is refused by
 //      itself, named, and never stored.
@@ -9,6 +9,8 @@
 //   4. Against a scratch database: firm A cannot read firm B's records; the upsert is idempotent;
 //      an older state never overwrites a newer one; the switch off means zero writes; a request
 //      past the bounds writes nothing; the unique index exists.
+//   5. Decision D4's acceptance: one 10-client run gives 10 board rows; the switch off gives zero
+//      writes.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -83,6 +85,28 @@ for (const [reason, over] of [["fy", { fy: "2025-27" }], ["quarter", { quarter: 
   const verdict = service.readFrequency(frequency(over), { now: NOW });
   check(`a frequency reading with a bad ${reason} is refused`, !verdict.ok && verdict.reason === reason, JSON.stringify(verdict));
 }
+const filing = (over = {}) => ({ gstin: A_GSTIN, returnType: "GSTR-3B", period: "2025-09", statusClass: "filed", seenAt: "2026-10-04T08:50:00Z", runId: "run_1", ...over });
+const readFiling = service.readFilingStatus(filing(), { now: NOW });
+check(
+  "a filing status is accepted, keyed by GSTIN, return and month, with the run that saw it",
+  readFiling.ok && readFiling.key.period === "2025-09" && readFiling.set.statusClass === "filed" && readFiling.set.sourceRunId === "run_1",
+  JSON.stringify(readFiling),
+);
+check("every class of the board is accepted", ["filed", "not_filed", "late_fee_flagged", "invalid"].every((statusClass) => service.readFilingStatus(filing({ statusClass }), { now: NOW }).ok));
+for (const [reason, over] of [
+  ["gstin", { gstin: "27AAAAA0000A1Z" }],
+  ["returnType", { returnType: "GSTR-2B" }],
+  ["period", { period: "FY:2025-26" }],
+  ["period", { period: "2025-13" }],
+  ["statusClass", { statusClass: "ready-to-file" }],
+  ["statusClass", { statusClass: "Filed" }],
+  ["seenAt", { seenAt: "2026-12-01T00:00:00Z" }],
+  ["runId", { runId: "a b" }],
+]) {
+  const verdict = service.readFilingStatus(filing(over), { now: NOW });
+  check(`a filing status with a bad ${reason} is refused (${JSON.stringify(over)})`, !verdict.ok && verdict.reason === reason, JSON.stringify(verdict));
+}
+
 const year = service.periodsOfYear("2025-26");
 check(
   "a financial year's periods are its twelve months, April to March, and its annual token",
@@ -100,16 +124,21 @@ check(
   /router\.post\("\/records\/bulk", requireFirmWriteAccess, trackWorkflow\("downloader_run"\), recordGstDownloads\);/.test(routes),
 );
 check("the recording switch is changed by firm admins only", /router\.patch\("\/settings", requireFirmAdmin, patchGstDownloadSettings\);/.test(routes));
+check("the filing board is a member's read", /router\.get\("\/filing-status", listGstFilingStatus\);/.test(routes));
+check(
+  "a run's filing statuses reach the service from the body, beside its records and frequency",
+  /records: body\.records,\s+frequency: body\.frequency,\s+filingStatus: body\.filingStatus,/.test(read("src/controllers/gst-downloads.controller.js")),
+);
 check("the routes are mounted at /api/gst-downloads", /app\.use\("\/api\/gst-downloads", gstDownloadsRoutes\);/.test(read("src/app.js")));
 const controller = read("src/controllers/gst-downloads.controller.js");
 check(
   "the firm is the signed-in user's own, never one the client names",
-  (controller.match(/firmId: req\.user\.firmId/g) || []).length === 5 && !/(body|query|params)\??\.firmId/.test(controller),
+  (controller.match(/firmId: req\.user\.firmId/g) || []).length === 6 && !/(body|query|params)\??\.firmId/.test(controller),
 );
 
 // ─── 3. Classification ───────────────────────────────────────────────────────
 
-for (const name of ["GstDownloadRecord", "GstFrequencyObservation"]) {
+for (const name of ["GstDownloadRecord", "GstFrequencyObservation", "FilingStatusObservation"]) {
   check(`${name} is classified for retention`, Boolean(RETENTION_CLASSIFICATION[name]));
   check(`${name} is on the firm-scoped erasure surface, purged with the firm`, PINNED_FIRM_SCOPED.includes(name) && classify(name, { hasFirmId: true }).strategy === "PURGE");
 }
@@ -124,11 +153,12 @@ if (wantsMongo) {
   const mongoose = (await import("mongoose")).default;
   const { default: Record } = await import("../src/models/GstDownloadRecord.js");
   const { default: Frequency } = await import("../src/models/GstFrequencyObservation.js");
+  const { default: Filing } = await import("../src/models/FilingStatusObservation.js");
   const { default: Firm } = await import("../src/models/Firm.js");
   await mongoose.connect(mongoUri);
   try {
-    await Promise.all([Record.deleteMany({}), Frequency.deleteMany({})]);
-    await Promise.all([Record.syncIndexes(), Frequency.syncIndexes()]);
+    await Promise.all([Record.deleteMany({}), Frequency.deleteMany({}), Filing.deleteMany({})]);
+    await Promise.all([Record.syncIndexes(), Frequency.syncIndexes(), Filing.syncIndexes()]);
     mongoRan = true;
     const firmA = new mongoose.Types.ObjectId();
     const firmB = new mongoose.Types.ObjectId();
@@ -226,7 +256,64 @@ if (wantsMongo) {
       indexes.some((index) => index.unique === true && JSON.stringify(index.key) === JSON.stringify({ firmId: 1, gstin: 1, returnType: 1, fileType: 1, period: 1 })),
     );
 
-    await Promise.all([Record.deleteMany({}), Frequency.deleteMany({}), Firm.collection.deleteMany({ _id: { $in: [firmA, firmB] } })]);
+    // ─── 5. Decision D4: the filing board ──────────────────────────────────────
+    // Ten clients, one month each, as the extension's run sync sends them (GD33).
+    const tenGstins = Array.from({ length: 10 }, (_, index) => `27AAAAA${String(1000 + index).slice(-4)}A1Z${"ABCDEFGHJK"[index]}`);
+    const tenRows = tenGstins.map((gstin, index) => filing({ gstin, statusClass: index % 3 === 2 ? "not_filed" : "filed", runId: "run_10" }));
+    const boardRun = await svc.recordRun({ firmId: firmA, filingStatus: tenRows });
+    const board = await svc.listFilingStatus({ firmId: firmA });
+    check(
+      "one 10-client run gives 10 board rows",
+      boardRun.ok && boardRun.filingRecorded === 10 && board.ok && board.filingStatus.length === 10 && new Set(board.filingStatus.map((row) => row.gstin)).size === 10,
+      JSON.stringify({ boardRun, rows: board.filingStatus?.length }),
+    );
+    check(
+      "a board row is the class, the month and when it was seen - no firm id, no person",
+      board.filingStatus.every((row) => !("firmId" in row) && !("_id" in row) && row.sourceRunId === "run_10" && row.firstSeenAt instanceof Date) &&
+        board.filingStatus.filter((row) => row.statusClass === "not_filed").length === 3,
+    );
+    const sameRunAgain = await svc.recordRun({ firmId: firmA, filingStatus: tenRows });
+    check("the same run sent again is still 10 rows", sameRunAgain.filingRecorded === 10 && (await Filing.countDocuments({ firmId: firmA })) === 10);
+    const filedLater = await svc.recordRun({ firmId: firmA, filingStatus: [filing({ gstin: tenGstins[2], statusClass: "filed", seenAt: "2026-10-04T08:55:00Z", runId: "run_11" })] });
+    const staleReading = await svc.recordRun({ firmId: firmA, filingStatus: [filing({ gstin: tenGstins[2], statusClass: "not_filed", seenAt: "2026-10-01T08:00:00Z" })] });
+    const client3 = await Filing.findOne({ firmId: firmA, gstin: tenGstins[2] }).lean();
+    check(
+      "a newer reading replaces the class; an older one never writes over it",
+      filedLater.filingRecorded === 1 && staleReading.stale === 1 && client3.statusClass === "filed" && client3.sourceRunId === "run_11" &&
+        client3.firstSeenAt.toISOString() === "2026-10-04T08:50:00.000Z",
+      JSON.stringify({ staleReading, client3 }),
+    );
+    check("firm B's board has none of firm A's rows", (await svc.listFilingStatus({ firmId: firmB })).filingStatus.length === 0);
+    await svc.recordRun({ firmId: firmA, filingStatus: [filing({ period: "2024-09" })] });
+    const boardYear = await svc.listFilingStatus({ firmId: firmA, fy: "2025-26" });
+    check("the board's year filter lists that year's months only", boardYear.filingStatus.length === 10 && boardYear.filingStatus.every((row) => row.period === "2025-09"));
+    check("the board refuses a GSTIN that is not one", (await svc.listFilingStatus({ firmId: firmA, gstin: "nope" })).code === "GST_DOWNLOADS_BAD_GSTIN");
+
+    // The switch off: zero writes, to any of the three collections.
+    await svc.writeSettings({ firmId: firmA, input: { recording: false } });
+    const counted = async () => [await Record.countDocuments({}), await Frequency.countDocuments({}), await Filing.countDocuments({})];
+    const beforeOff = await counted();
+    const offRun = await svc.recordRun({
+      firmId: firmA,
+      records: [good({ period: "2025-08" })],
+      frequency: [frequency({ quarter: 4 })],
+      filingStatus: tenGstins.map((gstin) => filing({ gstin, period: "2025-10" })),
+    });
+    check(
+      "with the switch off, a 10-client run writes nothing at all",
+      offRun.ok && offRun.recording === false && offRun.filingRecorded === 0 && JSON.stringify(await counted()) === JSON.stringify(beforeOff),
+      JSON.stringify({ offRun, beforeOff }),
+    );
+    await svc.writeSettings({ firmId: firmA, input: { recording: true } });
+    const filingFlood = await svc.recordRun({ firmId: firmA, filingStatus: Array.from({ length: 501 }, () => filing()) });
+    check("501 filing statuses in one request are refused whole", !filingFlood.ok && filingFlood.code === "GST_DOWNLOADS_TOO_MANY" && (await Filing.countDocuments({})) === beforeOff[2]);
+    const filingIndexes = await Filing.collection.listIndexes().toArray();
+    check(
+      "the (firm, GSTIN, return, month) key is unique",
+      filingIndexes.some((index) => index.unique === true && JSON.stringify(index.key) === JSON.stringify({ firmId: 1, gstin: 1, returnType: 1, period: 1 })),
+    );
+
+    await Promise.all([Record.deleteMany({}), Frequency.deleteMany({}), Filing.deleteMany({}), Firm.collection.deleteMany({ _id: { $in: [firmA, firmB] } })]);
   } finally {
     await mongoose.disconnect();
   }

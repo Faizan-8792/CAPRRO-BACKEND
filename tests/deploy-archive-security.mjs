@@ -2383,9 +2383,11 @@ if (listed.status !== 0 || listed.error) {
   // limits, metadata only); src/services/gst-downloads.service.js (validation and bounded
   // upserts, no network call, no configuration value); src/controllers/gst-downloads.controller.js
   // and src/routes/gst-downloads.routes.js (the signed-in member's own firm, from req.user).
+  // 207 -> 208 on 2026-10-04 for GD33, the filing board (decision D4), confirmed clean by this
+  // scan before the pin moved: src/models/FilingStatusObservation.js (a schema, the class only).
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 207 && result.status === 0,
+    files.length === 208 && result.status === 0,
     result,
   );
 }

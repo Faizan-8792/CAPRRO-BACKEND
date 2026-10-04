@@ -104,6 +104,10 @@ export const RETENTION_CLASSIFICATION = Object.freeze({
   // Same decision and shape: how each client filed per quarter, one upserted row per
   // (firm, GSTIN, year, quarter), no content and no person.
   GstFrequencyObservation: RETENTION_CLASSES.RETAIN,
+  // Same decision and shape (decision D4, GD33): whether each client had filed GSTR-1 and GSTR-3B
+  // for a month, one upserted row per (firm, GSTIN, return, month) - the class only, no amount,
+  // no content and no person.
+  FilingStatusObservation: RETENTION_CLASSES.RETAIN,
   EngagementFinding: RETENTION_CLASSES.RETAIN,
   Firm: RETENTION_CLASSES.RETAIN,
   // Added 2026-09-07 with firm invitations. RETAIN, and deliberately NOT SELF_EXPIRING even

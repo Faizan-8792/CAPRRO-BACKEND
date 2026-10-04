@@ -10,7 +10,8 @@ function answer(res, result, okBody) {
   return res.json(okBody(result));
 }
 
-// After a run: its records and frequency readings, written only when the firm records runs.
+// After a run: its records, frequency readings and filing statuses, written only when the firm
+// records runs.
 export const recordGstDownloads = async (req, res, next) => {
   try {
     const body = req.body && typeof req.body === "object" ? req.body : {};
@@ -18,12 +19,14 @@ export const recordGstDownloads = async (req, res, next) => {
       firmId: req.user.firmId,
       records: body.records,
       frequency: body.frequency,
+      filingStatus: body.filingStatus,
     });
     return answer(res, result, (done) => ({
       ok: true,
       recording: done.recording,
       recorded: done.recorded,
       frequencyRecorded: done.frequencyRecorded,
+      filingRecorded: done.filingRecorded,
       stale: done.stale,
       refused: done.refused,
     }));
@@ -50,6 +53,16 @@ export const listGstFrequency = async (req, res, next) => {
   try {
     const result = await gstDownloadsService.listFrequency({ firmId: req.user.firmId, gstin: req.query?.gstin });
     return answer(res, result, (done) => ({ ok: true, frequency: done.frequency, truncated: done.truncated }));
+  } catch (error) {
+    return next(error);
+  }
+};
+
+// The firm's filing board (decision D4, GD33).
+export const listGstFilingStatus = async (req, res, next) => {
+  try {
+    const result = await gstDownloadsService.listFilingStatus({ firmId: req.user.firmId, gstin: req.query?.gstin, fy: req.query?.fy });
+    return answer(res, result, (done) => ({ ok: true, filingStatus: done.filingStatus, truncated: done.truncated }));
   } catch (error) {
     return next(error);
   }
