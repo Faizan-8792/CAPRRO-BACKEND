@@ -7,7 +7,9 @@ import {
   classifyServedArchive,
 } from "../tools/lib/deploy-archive-exposure.mjs";
 import { confirmServing } from "../tools/lib/deploy-serving-check.mjs";
-import { spawnSync } from "node:child_process";
+import { publicOrigin } from "../tools/lib/public-origin.mjs";
+import { spawn, spawnSync } from "node:child_process";
+import http from "node:http";
 
 const scannerPath = "tools/scan-deploy-secrets.mjs";
 const secretNames = [
@@ -2698,9 +2700,11 @@ record(
   "the deploy tool covers the archive before the health check, restarts through the documented endpoint, and proves the cover last",
   (() => {
     const tool = readFileSync("tools/hostinger-deploy-backend.mjs", "utf8");
-    const cover = tool.indexOf("await uploadFileToHostinger({");
+    // Since O26 the cover and the proof are shared helpers every exit uses; on the deploy's own path
+    // these are the calls that run them, in this order.
+    const cover = tool.indexOf("if (!(await coverArchive())) return 1;");
     const serving = tool.indexOf("await confirmServing({");
-    const proof = tool.indexOf("await assertArchivePathNotExposed({");
+    const proof = tool.indexOf("const exposureDisproved = await proveCovered();");
     return (
       cover > 0 &&
       serving > cover &&
@@ -2709,6 +2713,198 @@ record(
       tool.split("await confirmServing({").length === 2
     );
   })(),
+);
+
+// ---------------------------------------------------------------------------
+// Every way out of the deploy tool covers the archive - not only the deploy that succeeds.
+//
+// hostinger-upload-file.mjs puts the whole backend source at a served path before the deploy tool
+// runs, so from that moment it is an unauthenticated download. Until O26 only a deploy that reached
+// step 5 covered it: a failed account lookup, a failed settings read, --dry-run, a refused trigger
+// and a failed build all left it public. These drive the REAL tool, as a child process, against a
+// loopback stand-in for the Hostinger API, its upload service and the public site, and look at what
+// the archive path serves when the tool has finished.
+// ---------------------------------------------------------------------------
+
+const FAKE_DOMAIN = "deploy-test.invalid";
+const FAKE_ARCHIVE = "capro-backend.zip";
+const servedArchive = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(6000, 1)]);
+
+async function runDeployToolAgainstFake(scenario, extraArgs = []) {
+  const state = { served: servedArchive, pending: null, builds: 0 };
+  const server = http.createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const body = Buffer.concat(chunks);
+    const path = new URL(req.url, "http://fake").pathname;
+    const json = (status, value) => {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(value));
+    };
+    if (path === "/api/hosting/v1/websites") {
+      return scenario.lookupFails
+        ? json(500, { error: "lookup down" })
+        : json(200, { data: [{ domain: FAKE_DOMAIN, username: "u100" }] });
+    }
+    if (path.endsWith("/nodejs/builds/settings/from-archive")) {
+      return scenario.settingsFail
+        ? json(404, { error: "no archive there" })
+        : json(200, { app_type: "express", node_version: 22, entry_file: "src/server.js" });
+    }
+    if (path.endsWith("/nodejs/builds") && req.method === "POST") {
+      state.builds += 1;
+      return scenario.triggerRefused ? json(422, { error: "refused" }) : json(200, { uuid: "build-1" });
+    }
+    if (path.endsWith("/nodejs/builds") && req.method === "GET") {
+      return json(200, { data: [{ uuid: "build-1", state: scenario.buildState }] });
+    }
+    if (path === "/api/hosting/v1/files/upload-urls") {
+      return json(200, { url: `${origin}/tus`, auth_key: "fake-auth", rest_auth_key: "fake-rest" });
+    }
+    if (path === `/tus/${FAKE_ARCHIVE}` && req.method === "POST") {
+      state.pending = { length: Number(req.headers["upload-length"]), parts: [] };
+      res.writeHead(201);
+      return res.end();
+    }
+    if (path === `/tus/${FAKE_ARCHIVE}` && req.method === "PATCH") {
+      state.pending.parts.push(body);
+      const received = Buffer.concat(state.pending.parts);
+      if (received.length >= state.pending.length) {
+        state.served = received;
+        state.readsSinceUpload = 0;
+      }
+      res.writeHead(204, { "upload-offset": String(received.length) });
+      return res.end();
+    }
+    if (path === `/${FAKE_ARCHIVE}`) {
+      // staleAfterUpload: the upload's own read-back (a HEAD and a GET) sees the placeholder, and every
+      // later read sees the archive again - a cache in front of the path, which only the proof catches.
+      state.readsSinceUpload = (state.readsSinceUpload ?? -Infinity) + 1;
+      const bytes = scenario.staleAfterUpload && state.readsSinceUpload > 2 ? servedArchive : state.served;
+      res.writeHead(200, { "content-type": "application/octet-stream", "content-length": bytes.length });
+      return res.end(req.method === "HEAD" ? undefined : bytes);
+    }
+    return json(404, { error: `not faked: ${req.method} ${path}` });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const child = spawn(
+      process.execPath,
+      ["tools/hostinger-deploy-backend.mjs", "--domain", FAKE_DOMAIN, "--archive", FAKE_ARCHIVE, "--node-version", "22", ...extraArgs],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          NODE_OPTIONS: "",
+          HOSTINGER_API_TOKEN: "loopback-test-token-not-a-credential",
+          HOSTINGER_API_BASE: origin,
+          CAPRO_DEPLOY_PUBLIC_ORIGIN: origin,
+        },
+      },
+    );
+    let output = "";
+    child.stdout.on("data", (data) => (output += data));
+    child.stderr.on("data", (data) => (output += data));
+    const code = await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        child.kill();
+        resolve("timeout");
+      }, 60_000);
+      child.on("exit", (exitCode) => {
+        clearTimeout(timer);
+        resolve(exitCode);
+      });
+    });
+    return { code, output, served: state.served, builds: state.builds, origin };
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+const placeholderBytes = Buffer.from(PLACEHOLDER_BODY, "utf8");
+const coveredAndProved = (run) =>
+  Buffer.compare(run.served, placeholderBytes) === 0 && /archive path : HTTP 200 - /.test(run.output);
+
+for (const [name, scenario, args, expectedCode] of [
+  ["a failed settings read", { settingsFail: true }, [], 1],
+  ["--dry-run", {}, ["--dry-run"], 0],
+  ["a refused build trigger", { triggerRefused: true }, [], 1],
+  ["a build that ends failed", { buildState: "failed" }, [], 1],
+]) {
+  const run = await runDeployToolAgainstFake(scenario, args);
+  record(
+    `the deploy tool covers the archive and proves it on ${name}, keeping exit code ${expectedCode}`,
+    run.code === expectedCode && coveredAndProved(run),
+    run.code === expectedCode && coveredAndProved(run) ? null : { error: `exit ${run.code}\n${run.output.slice(-1500)}` },
+  );
+}
+
+{
+  const run = await runDeployToolAgainstFake({ lookupFails: true });
+  const ok =
+    run.code === 1 &&
+    Buffer.compare(run.served, servedArchive) === 0 &&
+    run.output.includes("NEUTRALISATION FAILED") &&
+    run.output.includes(`${run.origin}/${FAKE_ARCHIVE}`) &&
+    run.output.includes("--cover-only");
+  record(
+    "a failed account lookup attempts the cover and, since it needs the same lookup, names the path to cover by hand",
+    ok,
+    ok ? null : { error: `exit ${run.code}\n${run.output.slice(-1500)}` },
+  );
+}
+
+{
+  const run = await runDeployToolAgainstFake({ buildState: "running" }, ["--timeout-ms", "1000"]);
+  const ok =
+    run.code === 1 &&
+    Buffer.compare(run.served, servedArchive) === 0 &&
+    run.output.includes("TIMED OUT") &&
+    run.output.includes("--cover-only");
+  record(
+    "a build that may still be reading the archive is not covered under it, and the tool prints the command that covers it",
+    ok,
+    ok ? null : { error: `exit ${run.code}\n${run.output.slice(-1500)}` },
+  );
+}
+
+{
+  const run = await runDeployToolAgainstFake({}, ["--cover-only"]);
+  const ok = run.code === 0 && coveredAndProved(run) && run.builds === 0;
+  record(
+    "--cover-only covers and proves the archive path and triggers no build",
+    ok,
+    ok ? null : { error: `exit ${run.code}\n${run.output.slice(-1500)}` },
+  );
+}
+
+{
+  const run = await runDeployToolAgainstFake({ staleAfterUpload: true }, ["--cover-only"]);
+  const ok = run.code === 1 && run.output.includes("ARCHIVE STILL EXPOSED");
+  record(
+    "a cover the proof cannot confirm fails the run, whatever code the stop itself had",
+    ok,
+    ok ? null : { error: `exit ${run.code}\n${run.output.slice(-1500)}` },
+  );
+}
+
+record(
+  "the public origin override is refused unless the Hostinger API base is loopback too",
+  (() => {
+    try {
+      publicOrigin("api.caprotoolkit.in", {
+        CAPRO_DEPLOY_PUBLIC_ORIGIN: "http://127.0.0.1:9",
+        HOSTINGER_API_BASE: "https://developers.hostinger.com",
+      });
+      return false;
+    } catch (error) {
+      return /loopback tests only/.test(String(error));
+    }
+  })() &&
+    publicOrigin("api.caprotoolkit.in", {}) === "https://api.caprotoolkit.in" &&
+    publicOrigin("x", { CAPRO_DEPLOY_PUBLIC_ORIGIN: "http://127.0.0.1:9/", HOSTINGER_API_BASE: "http://127.0.0.1:8" }) ===
+      "http://127.0.0.1:9",
 );
 
 console.log(`Result: ${passed} passed, ${failed} failed`);

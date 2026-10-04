@@ -233,6 +233,13 @@ section is relative to that directory.
    `/api/app-config` — a completed build is not the same as a healthy service. Add `--dry-run` to
    see the settings a deploy would use without triggering one.
 
+   **Every way out of the deploy tool covers the uploaded archive**, not only a deploy that succeeds
+   (O26): a failed lookup, a failed settings read, a refused trigger, a failed build and `--dry-run`
+   all overwrite `capro-backend.zip` with the placeholder and prove it before exiting. So **after a
+   dry run, upload the archive again before the real deploy.** The one exception is a build that
+   times out, because it may still be reading the archive: the tool leaves it and prints the command
+   that covers it once the build has ended, which is the same tool with `--cover-only`.
+
    **`--node-version` is not optional in practice.** The settings endpoint infers a Node major from
    the archive and has been observed inferring **20** while production runs **22**. Deploying new
    code and a new runtime major together makes any failure ambiguous, so pin the version that is

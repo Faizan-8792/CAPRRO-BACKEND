@@ -30,6 +30,8 @@
 // credentials both answer 404), so the only way to observe what is served is the public URL - which
 // is exactly the thing being checked, so that limitation costs nothing here.
 
+import { publicOrigin } from "./public-origin.mjs";
+
 /** The bytes written over the archive once the build has read it. */
 export const PLACEHOLDER_BODY =
   "This path is intentionally blank.\n" +
@@ -116,7 +118,7 @@ export async function assertArchivePathNotExposed({
   // Cache-busted deliberately. A 404 cached from before the archive was uploaded is exactly how
   // this exposure was missed the first time it happened: the bare URL answered 404 from cache while
   // the file was being served at origin.
-  const url = `https://${domain}/${remotePath}?cb=${Date.now()}`;
+  const url = `${publicOrigin(domain)}/${remotePath}?cb=${Date.now()}`;
 
   let status = null;
   let bytes = null;
@@ -137,7 +139,7 @@ export async function assertArchivePathNotExposed({
 
   if (!verdict.safe) {
     throw new Error(
-      `THE DEPLOY ARCHIVE IS STILL PUBLIC at https://${domain}/${remotePath} - ${verdict.reason}`,
+      `THE DEPLOY ARCHIVE IS STILL PUBLIC at ${publicOrigin(domain)}/${remotePath} - ${verdict.reason}`,
     );
   }
 

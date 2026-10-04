@@ -13,6 +13,7 @@
 
 import { createHash } from "node:crypto";
 import { openSync, readSync, closeSync, statSync, existsSync } from "node:fs";
+import { publicOrigin } from "./public-origin.mjs";
 
 const CHUNK = 10 * 1024 * 1024; // matches the reference client
 
@@ -145,7 +146,7 @@ export async function uploadFileToHostinger({
     log(`  ${offset}/${source.size} bytes (${((offset / source.size) * 100).toFixed(1)}%)`);
   }
 
-  const publicUrl = `https://${domain}/${remotePath}`;
+  const publicUrl = `${publicOrigin(domain)}/${remotePath}`;
   const head = await fetch(`${publicUrl}?cb=${Date.now()}`, { method: "HEAD", redirect: "follow" });
   if (!head.ok) throw new Error(`verify: the file is not being served (HTTP ${head.status})`);
 
