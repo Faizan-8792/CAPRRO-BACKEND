@@ -751,6 +751,9 @@ try {
         # without the import and 500ed on first production use; this pins all three call sites,
         # their audit trail and their guards.
         "super-emails-controller-contract",
+        # O22: a signed-in request to an /api path no route matches answers the JSON envelope
+        # (404, code NOT_FOUND), not Express's HTML page; signed out it is still the catch-all's 401.
+        "api-not-found-contract",
         "audit-numerical-integrity-contract",
         "audit-coverage-gate-contract",
         "audit-finding-guard-contract",
@@ -912,6 +915,7 @@ try {
         "workflow-usage-contract" = "scratch-gates-workflow-usage"
         "email-delivery-contract" = "scratch-gates-email-delivery"
         "super-emails-controller-contract" = "scratch-gates-super-emails"
+        "api-not-found-contract" = "scratch-gates-api-not-found"
     }
     # Probed once, not assumed. On a machine with no local Mongo the behaviour is unchanged from
     # before -- the variable stays unset and the suites run their Mongo-free subset -- but the

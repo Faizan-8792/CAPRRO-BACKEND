@@ -607,6 +607,21 @@ app.use("/api/digests", digestRoutes);
 app.use("/api/gst-portal-map", portalMapRoutes);
 app.use("/api", firmOperationsRoutes);
 
+// O22: an /api path that no route matched answers in the API's own envelope. A signed-in request
+// used to pass the catch-all above and fall through to Express's default HTML page ("Cannot GET
+// /api/..."). A signed-out one never gets here - the catch-all's authRequired answers it 401
+// first, which CLAUDE.md section 12's control-path check after a deploy relies on. Answered
+// directly rather than through the error handler: a missing route is not a server error to log.
+app.use("/api", (req, res) => {
+  res.status(404).json({
+    ok: false,
+    error: "The requested item could not be found.",
+    category: "NOT_FOUND",
+    code: "NOT_FOUND",
+    requestId: req.id || "",
+  });
+});
+
 /* ===============================
    GLOBAL ERROR HANDLER
 ================================ */
