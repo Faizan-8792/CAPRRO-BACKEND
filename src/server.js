@@ -104,6 +104,25 @@ export async function completeDigestStartup({
 setBackgroundReadiness(false);
 const server = app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
+  // Where the process really listens, what started it, and which port- or socket-like variables the
+  // platform set: on 2026-10-04 the server ran normally while the host's routing never reached it,
+  // and nothing in the log could say why. Ports and absolute paths are printed; any other value is
+  // named only, never shown.
+  try {
+    const bound = server.address();
+    const names = Object.keys(process.env)
+      .filter((key) => /port|sock|lsnode|lsws|passenger|listen/i.test(key))
+      .sort();
+    const shown = names.map((key) =>
+      /^\d{1,5}$/.test(process.env[key]) || /^\/[\w./-]+$/.test(process.env[key]) ? `${key}=${process.env[key]}` : key,
+    );
+    console.log(
+      `[STARTUP] bound ${typeof bound === "string" ? bound : JSON.stringify(bound)}; ` +
+        `argv ${process.argv.slice(0, 2).join(" ")}; env ${shown.join(" ")}`,
+    );
+  } catch {
+    // A diagnostic never stops the server.
+  }
 });
 
 /**
