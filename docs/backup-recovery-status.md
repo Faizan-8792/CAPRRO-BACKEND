@@ -86,6 +86,30 @@ The scratch database was dropped after the drill.
 
 ---
 
+## 2026-10-04 - the scheduled run had never kept a backup
+
+Every scheduled run from 2026-08-28 dumped the database and then failed to encrypt it, so it removed
+the plaintext and kept nothing: Git for Windows' gpg 2.4.9, running as SYSTEM, could not start
+keyboxd ("No Keybox daemon running"), which gpg 2.4 configures for every new home. The last good
+archives were the two hand runs of 2026-08-26. And the scheduled task passes no `-OffHostDirectory`,
+so even a run that encrypted would have stayed on this machine.
+
+Fixed in `tools/backup-database.ps1`:
+
+- gpg runs with a home of the backup's own (`D:\CA-PRO-Toolkit\capro-backups\.gnupg`, whose
+  `common.conf` leaves keyboxd out) and encrypts to the public key in `backup-recipient.asc` beside
+  the archives (`--recipient-file`), so no account's keyring or daemon is involved. A key file whose
+  fingerprint is not `CAPRO_BACKUP_RECIPIENT` is refused before anything is encrypted to it.
+- Git's MSYS gpg reads a `--homedir` of `D:\...` as relative to the working directory; the script
+  hands it `/d/...` (a native GnuPG gets the Windows path).
+- The off-host folder comes from `-OffHostDirectory`, else `CAPRO_BACKUP_OFFHOST`, else this
+  document's OneDrive destination when it exists.
+
+Hand run through the fixed path, 2026-10-04 11:01Z: `capro-test-20261004-110128.archive.gz.gpg`
+(491,671 bytes; 51 collections) in both folders, plaintext removed. Still open: the first scheduled
+SYSTEM run after the fix (02:30 IST on 2026-10-05), and a restore drill of this archive, which needs
+the key's passphrase.
+
 ## What this closes, and what it does not
 
 **Closed.** O3 and O4's backup and recovery *capability* is proven. It should not be carried as an

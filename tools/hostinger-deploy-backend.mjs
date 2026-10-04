@@ -219,7 +219,9 @@ console.log("=== 5. confirm the live API is actually serving again ===");
 let health = null;
 for (let attempt = 1; attempt <= 12; attempt += 1) {
   try {
-    const response = await fetch(`https://${domain}/api/app-config`, { redirect: "follow" });
+    // Bounded: with the origin silent the CDN holds a request for minutes, and twelve unbounded
+    // attempts kept a dead API looking like a slow one for half an hour on 2026-10-04.
+    const response = await fetch(`https://${domain}/api/app-config`, { redirect: "follow", signal: AbortSignal.timeout(15000) });
     if (response.ok) {
       health = await response.json();
       break;
@@ -230,13 +232,19 @@ for (let attempt = 1; attempt <= 12; attempt += 1) {
   await new Promise((r) => setTimeout(r, 5000));
 }
 
-if (!health) {
+// A service that does not answer is a failed deploy, but the archive is still in the served root, and
+// leaving it there while somebody investigates was the larger harm: on 2026-10-04 the backend source
+// stayed downloadable for the whole 37 minutes the API was down. So the exposure is closed below on
+// this path too, and the failure is reported after it.
+const serviceAnswered = Boolean(health);
+if (serviceAnswered) {
+  line("app-config", "200 OK");
+} else {
   console.error("  The build completed but /api/app-config did not answer. Investigate before assuming success.");
-  process.exit(1);
+  console.error("  Closing the archive exposure first; then roll back (docs/operations-runbook.md, Rollback).");
 }
-line("app-config", "200 OK");
 
-if (expectCommit) {
+if (serviceAnswered && expectCommit) {
   // Optional, and only asserted when the caller supplies it: the deployed build id is not exposed
   // by the public API, so this is a courtesy echo rather than proof of the running commit.
   line("expected", expectCommit.slice(0, 12));
@@ -297,6 +305,13 @@ try {
   console.error("");
   console.error("=== ARCHIVE STILL EXPOSED ===");
   console.error(`  ${String(err)}`);
+  process.exit(1);
+}
+
+if (!serviceAnswered) {
+  console.error("");
+  console.error("=== DEPLOY FAILED: the API is not answering ===");
+  console.error("  The archive exposure is closed. Roll back to the last-known-good archive now.");
   process.exit(1);
 }
 

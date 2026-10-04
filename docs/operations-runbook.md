@@ -359,6 +359,20 @@ passed on both legs, the fourth against `GET /api/auth/me` with a real super-adm
 | 2026-08-24 | agent (Opus 5), roll-forward | `10bf147` | `0ea0bcb` | **52 s** | 3 of 4 pass — see note |
 | 2026-08-27 | agent (Fable 5), rehearsal | `e000d87` | `0a0e5dc` | **47 s** | **4 of 4 pass** |
 | 2026-08-27 | agent (Fable 5), roll-forward | `0a0e5dc` | `e000d87` | **67 s** (+ ~2.5 min to `background:ready`) | **4 of 4 pass** |
+| 2026-10-04 | agent (Opus 5.5), **incident rollback** | `61bd367` | `ee091cb` | **38 s** to answering (+ 78 s to `background:ready`) | **4 of 4 pass** |
+
+**The 2026-10-04 incident.** The deploy of `61bd367` (GD83: one query filter, nothing that runs at
+startup) finished its Hostinger build at 10:21:21Z and the Node app never answered again: the CDN
+looped a 307 to the same path on every API route, then timed out (504), while static files in the
+same root were still served. The same rollback path brought `ee091cb` up in seconds, so the cause
+looks like the platform's restart of that build rather than the code - unproven, because the build
+logs were not reachable that session. Outage about 37 minutes (10:21Z-10:58Z), noticed at about
+10:52Z. Two tool defects made it worse, both fixed in `tools/hostinger-deploy-backend.mjs`: its
+health poll fetched with no timeout, so twelve attempts against a silent origin took about half an
+hour to report failure (now 15 s each); and on that failure it exited before closing the archive
+exposure, so the backend source stayed downloadable throughout (now closed on every path, then the
+failure reported). Rollback: upload 10:57:30Z, answering 10:58:08Z, `ok` 10:59:26Z; health, app-config,
+the extension preflight (204, origin reflected) and an authenticated `GET /api/auth/me` (200) all pass.
 
 **What the 2026-08-27 rehearsal did.** Both legs were confirmed by content, not by the deploy
 reporting success: the two builds differ observably only in the served `public/admin/super.js`

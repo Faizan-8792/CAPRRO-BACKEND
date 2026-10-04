@@ -32,13 +32,23 @@ param(
     # synced folder, or an rclone remote mounted as a path). Left empty the script still produces a
     # verified local archive but WARNS loudly, because a backup on the same machine as the developer
     # PC is not an off-host backup.
-    [string]$OffHostDirectory = "",
+    # Also read from $env:CAPRO_BACKUP_OFFHOST; with neither, the destination docs/backup-recovery-
+    # status.md records is used when it exists (see the preflight below).
+    [string]$OffHostDirectory = $env:CAPRO_BACKUP_OFFHOST,
 
     [int]$Retain = 14,
 
     # gpg recipient (key id, fingerprint or uid). O4 step 3 allows age or gpg; gpg 2.4.9 is what is
     # installed here. Without a recipient the script refuses to write an unencrypted dump.
     [string]$RecipientKey = $env:CAPRO_BACKUP_RECIPIENT,
+
+    # The recipient's PUBLIC key as a file. When it exists the dump is encrypted to it with a gpg home of
+    # the backup's own (-GpgHome), so no account's keyring or keyboxd is involved. Defaults to
+    # backup-recipient.asc in the output directory; its fingerprint must equal -RecipientKey.
+    [string]$RecipientKeyFile = $env:CAPRO_BACKUP_RECIPIENT_FILE,
+
+    # gpg home for the key-file path. Defaults to .gnupg in the output directory.
+    [string]$GpgHome = "",
 
     [string]$LogPath = "",
 
@@ -231,6 +241,68 @@ if ([string]::IsNullOrWhiteSpace($LogPath)) {
     $LogPath = Join-Path $OutputDirectory "backup-database.log"
 }
 
+# The scheduled task passes no -OffHostDirectory (operations-runbook.md's schtasks line), so a
+# destination that existed only on a command line meant no scheduled archive ever left this machine.
+$documentedOffHost = "C:\Users\Saifullah Faizan\OneDrive\CA-PRO-Backups"
+if ([string]::IsNullOrWhiteSpace($OffHostDirectory) -and (Test-Path -LiteralPath $documentedOffHost)) {
+    $OffHostDirectory = $documentedOffHost
+    Write-Log "off-host      : $OffHostDirectory (the destination docs/backup-recovery-status.md records)"
+}
+
+# gpg 2.4 gives a NEW home `use-keyboxd`, and under SYSTEM - the account the nightly task runs as -
+# Git's gpg cannot start keyboxd. Every scheduled run dumped the database, failed to encrypt it ("No
+# Keybox daemon running"), removed the plaintext and left no backup. Encrypting to the public key in
+# a file, from a gpg home whose common.conf leaves keyboxd out, needs neither a keyring nor a daemon.
+if ([string]::IsNullOrWhiteSpace($RecipientKeyFile)) {
+    $RecipientKeyFile = Join-Path $OutputDirectory "backup-recipient.asc"
+}
+if ([string]::IsNullOrWhiteSpace($GpgHome)) {
+    $GpgHome = Join-Path $OutputDirectory ".gnupg"
+}
+$useKeyFile = Test-Path -LiteralPath $RecipientKeyFile
+
+# Git for Windows ships an MSYS build of gpg, and it reads a --homedir of D:\... as a path relative to
+# the working directory (measured: it looked for capro-backend\D:\...\.gnupg). It takes /d/... instead;
+# a native GnuPG takes the Windows path. File arguments are converted for it and need nothing.
+$gpgHomeArg = $GpgHome
+if ($gpgExe -match '\\Git\\usr\\bin\\' -and $GpgHome -match '^([A-Za-z]):[\\/](.*)$') {
+    $gpgHomeArg = "/" + $Matches[1].ToLowerInvariant() + "/" + ($Matches[2] -replace '\\', '/')
+}
+
+if ($useKeyFile) {
+    if (-not (Test-Path -LiteralPath $GpgHome)) {
+        New-Item -ItemType Directory -Force -Path $GpgHome | Out-Null
+    }
+    $commonConf = Join-Path $GpgHome "common.conf"
+    if (-not (Test-Path -LiteralPath $commonConf)) {
+        # Present and without use-keyboxd: gpg then keeps a plain keyring file in this home.
+        [System.IO.File]::WriteAllText($commonConf, "# capro backup: plain keyring, no keyboxd`n")
+    }
+
+    # The file must hold exactly the configured recipient. A key swapped in by anyone who can write
+    # this folder would otherwise receive every backup.
+    $shown = Invoke-Bounded -FilePath $gpgExe -Arguments @(
+        "--homedir", $gpgHomeArg, "--batch", "--with-colons",
+        "--import-options", "show-only", "--import", $RecipientKeyFile
+    ) -Timeout 120
+    $records = @(($shown.StdOut -split "`r?`n") | Where-Object { $_ })
+    $primaries = @($records | Where-Object { $_ -like "pub:*" })
+    # The primary key fingerprint is the first fpr record after the pub record.
+    $primaryFpr = ""
+    $sawPrimary = $false
+    foreach ($line in $records) {
+        if ($line -like "pub:*") { $sawPrimary = $true; continue }
+        if ($sawPrimary -and $line -like "fpr:*") { $primaryFpr = ($line -split ":")[9]; break }
+    }
+    $wanted = ($RecipientKey -replace '\s', '').ToUpperInvariant()
+    if ($shown.ExitCode -ne 0 -or $primaries.Count -ne 1 -or $primaryFpr.ToUpperInvariant() -ne $wanted) {
+        throw "The recipient key file $RecipientKeyFile does not hold exactly the key $RecipientKey (found $($primaries.Count) key(s), first $primaryFpr). Refusing to encrypt to it."
+    }
+    Write-Log "recipient     : $primaryFpr from $RecipientKeyFile (gpg home $GpgHome, no keyboxd)"
+} else {
+    Write-Log "recipient     : $RecipientKey from this account's keyring ($RecipientKeyFile not present)"
+}
+
 $stampName = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss")
 $archiveName = "capro-$dbName-$stampName.archive.gz"
 $plainArchive = Join-Path $OutputDirectory $archiveName
@@ -340,12 +412,17 @@ try {
 
     # ------------------------------------------------------------------------------- encryption
     Write-Log "==> Encrypting to $RecipientKey"
-    $gpgRun = Invoke-Bounded -FilePath $gpgExe -Arguments @(
-        "--batch", "--yes", "--trust-model", "always",
-        "--recipient", $RecipientKey,
+    $recipientArgs = if ($useKeyFile) {
+        @("--homedir", $gpgHomeArg, "--recipient-file", $RecipientKeyFile)
+    } else {
+        @("--recipient", $RecipientKey)
+    }
+    $gpgRun = Invoke-Bounded -FilePath $gpgExe -Arguments (@(
+        "--batch", "--yes", "--trust-model", "always"
+    ) + $recipientArgs + @(
         "--output", $encArchive,
         "--encrypt", $plainArchive
-    ) -Timeout 900
+    )) -Timeout 900
     if ($gpgRun.ExitCode -ne 0) { throw "gpg encryption failed: $($gpgRun.StdErr)" }
     if (-not (Test-Path -LiteralPath $encArchive)) { throw "gpg reported success but no encrypted archive exists" }
 
