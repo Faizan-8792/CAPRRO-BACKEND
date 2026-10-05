@@ -98,6 +98,17 @@ try {
   check("at-floor-is-answered", equal.status === 200, `X-CaPro-Client-Version ${FLOOR} -> ${equal.status} (the floor is inclusive)`);
   const authBelow = await me("0.0.9", "/api/auth/me");
   check("auth-stays-open", authBelow.status === 200, `X-CaPro-Client-Version 0.0.9 on /api/auth/me -> ${authBelow.status} (sign-in is on the gate's allow-list, so an old client is never locked out before it is told)`);
+
+  // O24 (owner decision 2026-10-05): /api/reminders, /api/firms and /api/stats moved behind
+  // both gates. Each must answer 426 below the floor, like every other gated surface.
+  for (const gatedPath of ["/api/reminders", "/api/firms", "/api/stats"]) {
+    const below = await me("0.0.9", gatedPath);
+    check(
+      `below-floor-refused ${gatedPath}`,
+      below.status === 426 && below.body?.code === "CLIENT_UPDATE_REQUIRED",
+      `X-CaPro-Client-Version 0.0.9 on ${gatedPath} -> ${below.status} ${below.body?.code ?? ""}`,
+    );
+  }
 } catch (error) {
   fail += 1;
   console.log(`  ERROR ${error.message}`);

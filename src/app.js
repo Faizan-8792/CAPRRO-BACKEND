@@ -571,9 +571,6 @@ app.get("/admin", (req, res) =>
 // The whole group must NOT carry the strict 10/15min limiter, or /api/auth/me
 // (called on every workspace refresh/switch) 429s and bounces users to sign-in.
 app.use("/api/auth", authRoutes);
-app.use("/api/reminders", reminderRoutes);
-app.use("/api/firms", firmRoutes);
-app.use("/api/stats", statsRoutes);
 // App-config (maintenance/welcome) — registered FIRST so maintenance check runs before others
 app.use("/api/app-config", appConfigRoutes);
 
@@ -589,6 +586,15 @@ app.use(maintenanceGate);
 // client-version.middleware.js's own header comment for why that must never
 // be softened.
 app.use(clientVersionGate);
+
+// O24 (owner decision 2026-10-05): /api/reminders, /api/firms and /api/stats used to sit
+// BEFORE both gates so they answered even in maintenance mode or below the version floor.
+// Every route in all three requires sign-in, none is an email link, and both clients handle
+// a refusal gracefully (the extension keeps a reminder's local alarm and reports the error),
+// so they now sit behind both gates like every other signed-in surface.
+app.use("/api/reminders", reminderRoutes);
+app.use("/api/firms", firmRoutes);
+app.use("/api/stats", statsRoutes);
 
 app.use("/api/super", superLimiter, superRoutes);
 app.use("/api/tasks", taskRoutes);

@@ -130,6 +130,19 @@ try {
   check("protected-route-503-during-maintenance", during.status === 503, `GET /api/clients -> ${during.status}, body error=${duringBody.error}`);
   check("503-carries-configured-message", duringBody.message === "Local drill - scheduled maintenance", `message="${duringBody.message}"`);
 
+  // --- O24 (owner decision 2026-10-05): reminders, firms and stats sit behind the gate too ---
+  // The gate answers before authRequired, so the request carries no token on purpose: a 503
+  // whose error is "maintenance" proves the GATE answered, not the signed-out catch-all.
+  for (const gatedPath of ["/api/reminders", "/api/firms", "/api/stats"]) {
+    const response = await fetch(`${base}${gatedPath}`);
+    const body = await response.json().catch(() => ({}));
+    check(
+      `o24-route-503-during-maintenance ${gatedPath}`,
+      response.status === 503 && body.error === "maintenance",
+      `GET ${gatedPath} during maintenance -> ${response.status}, body error=${body.error}`,
+    );
+  }
+
   // --- /health specifically: prove maintenanceGate does not intercept it, separately from
   // whether /health's OWN unrelated background-readiness check reports itself healthy (which this
   // harness cannot produce - see the note above). The two are different claims; only the first is
