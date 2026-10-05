@@ -596,6 +596,20 @@ try {
     }
     Add-EnvironmentFact "node" { (& $nodeExecutable --version) }
     Add-EnvironmentFact "node path" { $nodeExecutable }
+    # V33: libuv 1.51.x (Node 24.0 to 24.15) has a Windows stack-cookie bug in its TCP read and write path
+    # (libuv/libuv#5274): a loopback connect can end the process with 0xC0000409 and no message at all.
+    # Measured 2026-10-05 on this machine: a MongoDB index-provisioning repro aborted 28 of 4800 runs on
+    # Node 24.15.0 (libuv 1.51.0) and 0 of 2400 on Node 24.21.0 (libuv 1.52.1); in the gates it showed as
+    # provider-quota-contract and bulk-actions-e2e ending -1073740791 in 2 of 3 full runs. A gate run on
+    # that runtime is not a measurement of the code, so it is refused here rather than reported later.
+    $libuvVersion = ""
+    try { $libuvVersion = ([string](& $nodeExecutable -p "process.versions.uv")).Trim() } catch { }
+    if ([string]::IsNullOrWhiteSpace($libuvVersion)) { $libuvVersion = "(unavailable)" }
+    $report.Add("  " + "libuv".PadRight(26) + $libuvVersion)
+    if ($libuvVersion -match '^1\.51\.') {
+        $report.Add("  REFUSED: libuv $libuvVersion aborts Windows TCP connects at random (0xC0000409, libuv/libuv#5274) - install Node 24.16 or later")
+        $failures++
+    }
     Add-EnvironmentFact "powershell" { $PSVersionTable.PSVersion.ToString() }
     Add-EnvironmentFact "console input encoding" {
         [Console]::InputEncoding.WebName + " (preamble " + [Console]::InputEncoding.GetPreamble().Length + " bytes)"
