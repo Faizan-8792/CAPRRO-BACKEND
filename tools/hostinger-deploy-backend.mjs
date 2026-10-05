@@ -73,12 +73,6 @@ const nodeVersion = arg("node-version");
 const archiveFile = arg("archive-file");
 
 const token = process.env.HOSTINGER_API_TOKEN;
-if (!token) {
-  console.error("HOSTINGER_API_TOKEN is not set in the environment.");
-  console.error("Load it from capro-backend/.env into the process environment; do not pass it on the command line.");
-  console.error("An archive already uploaded stays public until covered: set the token, then run with --cover-only.");
-  process.exit(2);
-}
 
 async function api(path, { method = "GET", body } = {}) {
   let response;
@@ -183,9 +177,15 @@ async function exitCovered(code) {
 // and lets Node finish on its own. Calling process.exit() after a fetch aborts Node 24 on Windows
 // with 0xC0000409 (libuv's "!(handle->flags & UV_HANDLE_CLOSING)" assertion) - every time, measured
 // 8 of 8 on 2026-10-04 - which turned a clean --dry-run into a crash code and hid a failure's real
-// code behind it. The token check above is the one process.exit() left, and it runs before any
-// request is made.
+// code behind it. Not even the token check calls it: tests/no-exit-after-network-contract.mjs
+// fails the gates for any process.exit() in a file that makes requests (V32).
 async function deploy() {
+  if (!token) {
+    console.error("HOSTINGER_API_TOKEN is not set in the environment.");
+    console.error("Load it from capro-backend/.env into the process environment; do not pass it on the command line.");
+    console.error("An archive already uploaded stays public until covered: set the token, then run with --cover-only.");
+    return 2;
+  }
   if (has("cover-only")) {
     console.log("=== cover only: nothing is built ===");
     return exitCovered(0);

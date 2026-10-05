@@ -303,6 +303,8 @@ console.log("");
 console.log(`passed: ${passed}  failed: ${failed}`);
 if (failed > 0) {
   console.log(`failing checks: ${failures.join(", ")}`);
-  process.exit(1);
+  // process.exitCode, not process.exit(): exiting after a fetch aborts Node 24 on Windows (V32).
+  process.exitCode = 1;
+} else {
+  console.log("ADMIN PANEL SAME-ORIGIN OK");
 }
-console.log("ADMIN PANEL SAME-ORIGIN OK");

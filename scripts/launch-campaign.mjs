@@ -361,11 +361,14 @@ function logLine(entry) {
   fs.appendFileSync(LOG_FILE, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n");
 }
 
+// Every way out sets process.exitCode and returns; none calls process.exit(), which aborts Node 24
+// on Windows once a request has been made (V32).
 async function main() {
   const { mode, dryRun, forceTestButAll, to, statusId, verify } = parseArgs(process.argv);
   if (forceTestButAll) {
     console.error("Refusing to run with both --test and --all. Pick one.");
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   // Diagnostic mode: just look up an existing email's delivery status.
@@ -373,7 +376,8 @@ async function main() {
     const key = process.env.RESEND_API_KEY;
     if (!key) {
       console.error("❌ RESEND_API_KEY env var is required for --status.");
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     console.log(`Checking delivery status for ${statusId}...`);
     await printStatus(new Resend(key), statusId);
@@ -405,7 +409,8 @@ async function main() {
   if (!key) {
     console.error("\n❌ RESEND_API_KEY env var is required to send.");
     console.error('   PowerShell: $env:RESEND_API_KEY="re_xxx"; node scripts/launch-campaign.mjs --' + mode);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   const resend = new Resend(key);
 
@@ -463,5 +468,5 @@ async function main() {
 
 main().catch((err) => {
   console.error("Fatal:", err?.message || err);
-  process.exit(1);
+  process.exitCode = 1;
 });

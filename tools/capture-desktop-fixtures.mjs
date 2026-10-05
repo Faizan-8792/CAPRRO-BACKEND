@@ -1390,175 +1390,182 @@ for (const [key, reason] of [
 // the drift gate treats transactionsAvailable as a comparability boundary, so merging a
 // standalone-mongod capture into a replica-set baseline (or the reverse) would plant exactly the
 // false drift that field exists to prevent.
-let existingManifest = null;
-if (onlyMode) {
-  const manifestPath = join(fixturesDir, "manifest.json");
-  if (!existsSync(manifestPath)) {
-    console.error(`--only needs an existing capture to merge into; no manifest at ${manifestPath}`);
-    await mongoose.connection.close();
-    await new Promise((resolve) => server.close(resolve));
-    process.exit(1);
-  }
-  existingManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  if (existingManifest.transactionsAvailable !== usingReplicaSet) {
-    console.error(
-      `--only refused: committed fixtures were captured with transactionsAvailable=` +
-        `${existingManifest.transactionsAvailable} but this run has ${usingReplicaSet}. ` +
-        `Start the replica set (27118) and re-run rather than merging across database classes.`,
-    );
-    await mongoose.connection.close();
-    await new Promise((resolve) => server.close(resolve));
-    process.exit(1);
-  }
-} else {
-  if (existsSync(fixturesDir)) {
-    rmSync(fixturesDir, { recursive: true, force: true });
-  }
-  mkdirSync(fixturesDir, { recursive: true });
-}
-
-// Static routes always; interpolated routes only where a handler exists. An interpolated route
-// with no handler is not a failure -- it is the remaining coverage gap, counted in the manifest
-// under parameterisedRoutesNotCaptured rather than turning the gate red for a gap that predates
-// this tool.
-const interpolatedWithHandler = interpolatedRoutes.filter((route) =>
-  plan.has(`${route.method} ${route.path}`),
-);
-
-// Same rule for the indirectly-constructed routes (batch 4): only where a handler exists. The
-// discovery contract already enforces that every indirect route is at least COUNTED, so one with
-// no handler here remains a reported coverage gap rather than a silent absence.
-const indirectWithHandler = indirectRoutes.filter((route) =>
-  plan.has(`${route.method} ${route.path}`),
-);
-
-for (const route of [...staticRoutes, ...interpolatedWithHandler, ...indirectWithHandler]) {
-  const key = `${route.method} ${route.path}`;
-  // Under --only, unselected routes are neither captured nor recorded as skipped: this run makes
-  // no claim about them, and the merge below leaves their committed entries exactly as they were.
-  if (onlyMode && !isSelected(route)) continue;
-  if (preSkippedKeys.has(key)) continue; // already recorded once, with its real reason, above.
-
-  const handler = plan.get(key);
-  if (!handler) {
-    skipped.push({ route: key, reason: "no capture handler defined yet for this route" });
-    continue;
-  }
-
-  const result = await handler();
-  if (result?.skip) {
-    skipped.push({ route: key, reason: result.skip });
-    continue;
-  }
-
-  const slug = key.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/(^-|-$)/g, "");
-  const fixturePath = join(fixturesDir, `${slug}.json`);
-  writeFileSync(
-    fixturePath,
-    JSON.stringify({ method: route.method, path: route.path, status: result.status, body: result.json }, null, 2) + "\n",
-  );
-  captured.push({ route: key, file: `${slug}.json`, status: result.status });
-}
-
-// Routes the parser found that this plan never even considered (a real gap, not a skip) --
-// should be empty; if not, the plan above has drifted from the real route list.
-const planless = staticRoutes.filter((route) => {
-  const key = `${route.method} ${route.path}`;
-  return !plan.has(key) && !preSkippedKeys.has(key);
-});
-
-// ── --only: merge this run's captures into the committed manifest and stop ──────────────────
 //
-// Only `captured` (and any now-stale `skipped` entry for the same route) changes. Every other
-// manifest field still describes the last FULL capture -- capturedAtUtc and backendCommitSha
-// deliberately keep saying when and against what the 62-fixture baseline was blessed, because
-// claiming this partial run re-verified all of them is precisely the lie --only exists to avoid.
-if (onlyMode) {
-  const capturedKeys = new Set(captured.map((entry) => entry.route));
-  existingManifest.captured = [
-    ...(existingManifest.captured || []).filter((entry) => !capturedKeys.has(entry.route)),
-    ...captured,
-  ];
-  existingManifest.skipped = (existingManifest.skipped || []).filter(
-    (entry) => !capturedKeys.has(entry.route),
-  );
-  writeFileSync(join(fixturesDir, "manifest.json"), JSON.stringify(existingManifest, null, 2) + "\n");
+// runPlan() RETURNS the exit code and the module sets process.exitCode: nothing here calls
+// process.exit(), which aborts Node 24 on Windows after a fetch (V32, tools/lib/exit-code.mjs).
+async function runPlan() {
+  let existingManifest = null;
+  if (onlyMode) {
+    const manifestPath = join(fixturesDir, "manifest.json");
+    if (!existsSync(manifestPath)) {
+      console.error(`--only needs an existing capture to merge into; no manifest at ${manifestPath}`);
+      await mongoose.connection.close();
+      await new Promise((resolve) => server.close(resolve));
+      return 1;
+    }
+    existingManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    if (existingManifest.transactionsAvailable !== usingReplicaSet) {
+      console.error(
+        `--only refused: committed fixtures were captured with transactionsAvailable=` +
+          `${existingManifest.transactionsAvailable} but this run has ${usingReplicaSet}. ` +
+          `Start the replica set (27118) and re-run rather than merging across database classes.`,
+      );
+      await mongoose.connection.close();
+      await new Promise((resolve) => server.close(resolve));
+      return 1;
+    }
+  } else {
+    if (existsSync(fixturesDir)) {
+      rmSync(fixturesDir, { recursive: true, force: true });
+    }
+    mkdirSync(fixturesDir, { recursive: true });
+  }
 
-  console.log(`--only requested   : ${onlyRoutes.join(", ")}`);
-  console.log(`captured           : ${captured.map((entry) => entry.route).join(", ") || "none"}`);
-  for (const item of skipped) console.log(`  SKIPPED: ${item.route} -- ${item.reason}`);
-
-  // A request that captured nothing is a mistake (a typo'd route, a handler that skipped), never
-  // a pass: fail loudly instead of leaving the fixture silently absent.
-  const missing = onlyRoutes.filter(
-    (value) =>
-      !captured.some((entry) => entry.route === value || entry.route.endsWith(` ${value}`)),
+  // Static routes always; interpolated routes only where a handler exists. An interpolated route
+  // with no handler is not a failure -- it is the remaining coverage gap, counted in the manifest
+  // under parameterisedRoutesNotCaptured rather than turning the gate red for a gap that predates
+  // this tool.
+  const interpolatedWithHandler = interpolatedRoutes.filter((route) =>
+    plan.has(`${route.method} ${route.path}`),
   );
-  for (const value of missing) console.log(`  NOT CAPTURED: ${value}`);
+
+  // Same rule for the indirectly-constructed routes (batch 4): only where a handler exists. The
+  // discovery contract already enforces that every indirect route is at least COUNTED, so one with
+  // no handler here remains a reported coverage gap rather than a silent absence.
+  const indirectWithHandler = indirectRoutes.filter((route) =>
+    plan.has(`${route.method} ${route.path}`),
+  );
+
+  for (const route of [...staticRoutes, ...interpolatedWithHandler, ...indirectWithHandler]) {
+    const key = `${route.method} ${route.path}`;
+    // Under --only, unselected routes are neither captured nor recorded as skipped: this run makes
+    // no claim about them, and the merge below leaves their committed entries exactly as they were.
+    if (onlyMode && !isSelected(route)) continue;
+    if (preSkippedKeys.has(key)) continue; // already recorded once, with its real reason, above.
+
+    const handler = plan.get(key);
+    if (!handler) {
+      skipped.push({ route: key, reason: "no capture handler defined yet for this route" });
+      continue;
+    }
+
+    const result = await handler();
+    if (result?.skip) {
+      skipped.push({ route: key, reason: result.skip });
+      continue;
+    }
+
+    const slug = key.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-").replaceAll(/(^-|-$)/g, "");
+    const fixturePath = join(fixturesDir, `${slug}.json`);
+    writeFileSync(
+      fixturePath,
+      JSON.stringify({ method: route.method, path: route.path, status: result.status, body: result.json }, null, 2) + "\n",
+    );
+    captured.push({ route: key, file: `${slug}.json`, status: result.status });
+  }
+
+  // Routes the parser found that this plan never even considered (a real gap, not a skip) --
+  // should be empty; if not, the plan above has drifted from the real route list.
+  const planless = staticRoutes.filter((route) => {
+    const key = `${route.method} ${route.path}`;
+    return !plan.has(key) && !preSkippedKeys.has(key);
+  });
+
+  // ── --only: merge this run's captures into the committed manifest and stop ──────────────────
+  //
+  // Only `captured` (and any now-stale `skipped` entry for the same route) changes. Every other
+  // manifest field still describes the last FULL capture -- capturedAtUtc and backendCommitSha
+  // deliberately keep saying when and against what the 62-fixture baseline was blessed, because
+  // claiming this partial run re-verified all of them is precisely the lie --only exists to avoid.
+  if (onlyMode) {
+    const capturedKeys = new Set(captured.map((entry) => entry.route));
+    existingManifest.captured = [
+      ...(existingManifest.captured || []).filter((entry) => !capturedKeys.has(entry.route)),
+      ...captured,
+    ];
+    existingManifest.skipped = (existingManifest.skipped || []).filter(
+      (entry) => !capturedKeys.has(entry.route),
+    );
+    writeFileSync(join(fixturesDir, "manifest.json"), JSON.stringify(existingManifest, null, 2) + "\n");
+
+    console.log(`--only requested   : ${onlyRoutes.join(", ")}`);
+    console.log(`captured           : ${captured.map((entry) => entry.route).join(", ") || "none"}`);
+    for (const item of skipped) console.log(`  SKIPPED: ${item.route} -- ${item.reason}`);
+
+    // A request that captured nothing is a mistake (a typo'd route, a handler that skipped), never
+    // a pass: fail loudly instead of leaving the fixture silently absent.
+    const missing = onlyRoutes.filter(
+      (value) =>
+        !captured.some((entry) => entry.route === value || entry.route.endsWith(` ${value}`)),
+    );
+    for (const value of missing) console.log(`  NOT CAPTURED: ${value}`);
+
+    await mongoose.connection.close();
+    await new Promise((resolve) => server.close(resolve));
+    return missing.length > 0 ? 1 : 0;
+  }
+
+  const commitSha = execSync("git rev-parse HEAD", { cwd: repoRoot, encoding: "utf8" }).trim();
+
+  const manifest = {
+    capturedAtUtc: new Date().toISOString(),
+    backendCommitSha: commitSha,
+    totalRoutesDiscovered: staticRoutes.length,
+    captured,
+    skipped,
+    // Which database class produced these fixtures. Two routes (PATCH api/digests/settings and
+    // POST api/firms/join) open MongoDB transactions, so a capture taken without a replica set is
+    // NOT comparable to one taken with it. Recording it lets the drift gate say "captured against a
+    // different database class" instead of reporting the difference as a field-shape change.
+    transactionsAvailable: usingReplicaSet,
+    uncoveredByPlan: planless.map((route) => `${route.method} ${route.path}`),
+    // The parameterised surface. Discovered and counted, not captured -- see parseInterpolatedRoutes
+    // for why these are reported rather than failed. Shrinking this list is real coverage work; a
+    // fixture for one of these is worth more than a fixture for another list endpoint, because every
+    // TDS-health and GST-reconciliation contract claim in the desktop suite sits behind one.
+    parameterisedRoutesTotal: interpolatedRoutes.length,
+    parameterisedRoutesNotCaptured: interpolatedRoutes
+      .filter((r) => !plan.has(`${r.method} ${r.path}`))
+      .map((r) => `${r.method} ${r.path}`),
+    // The THIRD construction form: a literal built into a local and passed to the call by name, e.g.
+    // `var path = string.Create(culture, $"api/tasks/my-open?...")`. Neither precise parser above can
+    // see those, so until this line they were not merely uncaptured, they were UNCOUNTED -- and
+    // `api/tasks/my-open` is the Overview page's own endpoint, whose absence from the fixture set is
+    // why D13 survived a drift gate built to catch exactly that class of defect. Their verb is
+    // INFERRED from the nearest following HttpMethod, so it is reported separately from the two
+    // parsed sets rather than blended into them.
+    indirectlyConstructedRoutes: indirectRoutes.map(
+      (r) => `${r.method} ${r.path}${r.methodSource === "inferred" ? " (verb inferred)" : ""}`,
+    ),
+    // The honest denominator: every `api/...` literal in the client, whichever way it is built. The
+    // three parsers must account for all of it; tests/desktop-route-discovery-contract.mjs fails when
+    // they do not, so a fourth construction form cannot go uncounted the way the third did.
+    routeLiteralsInClient: allRouteLiterals.length,
+  };
+  writeFileSync(join(fixturesDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+
+  console.log(`routes discovered : ${staticRoutes.length}`);
+  console.log(`captured          : ${captured.length}`);
+  console.log(`skipped           : ${skipped.length}`);
+  console.log(`uncovered by plan : ${planless.length}`);
+  console.log(
+    `parameterised     : ${interpolatedRoutes.length} discovered, ${interpolatedWithHandler.length} captured, ` +
+      `${interpolatedRoutes.length - interpolatedWithHandler.length} outstanding (see manifest)`,
+  );
+  console.log(
+    `indirect          : ${indirectRoutes.length} discovered (verb inferred), ${indirectWithHandler.length} captured, ` +
+      `of ${allRouteLiterals.length} route literals in the client`,
+  );
+  for (const item of planless) console.log(`  UNCOVERED: ${item.method} ${item.path}`);
+  for (const item of indirectRoutes) {
+    const status = plan.has(`${item.method} ${item.path}`) ? " (captured)" : "";
+    console.log(`  INDIRECT : ${item.method} ${item.path}${status}`);
+  }
 
   await mongoose.connection.close();
   await new Promise((resolve) => server.close(resolve));
-  process.exit(missing.length > 0 ? 1 : 0);
+
+  return planless.length > 0 ? 1 : 0;
 }
 
-const commitSha = execSync("git rev-parse HEAD", { cwd: repoRoot, encoding: "utf8" }).trim();
-
-const manifest = {
-  capturedAtUtc: new Date().toISOString(),
-  backendCommitSha: commitSha,
-  totalRoutesDiscovered: staticRoutes.length,
-  captured,
-  skipped,
-  // Which database class produced these fixtures. Two routes (PATCH api/digests/settings and
-  // POST api/firms/join) open MongoDB transactions, so a capture taken without a replica set is
-  // NOT comparable to one taken with it. Recording it lets the drift gate say "captured against a
-  // different database class" instead of reporting the difference as a field-shape change.
-  transactionsAvailable: usingReplicaSet,
-  uncoveredByPlan: planless.map((route) => `${route.method} ${route.path}`),
-  // The parameterised surface. Discovered and counted, not captured -- see parseInterpolatedRoutes
-  // for why these are reported rather than failed. Shrinking this list is real coverage work; a
-  // fixture for one of these is worth more than a fixture for another list endpoint, because every
-  // TDS-health and GST-reconciliation contract claim in the desktop suite sits behind one.
-  parameterisedRoutesTotal: interpolatedRoutes.length,
-  parameterisedRoutesNotCaptured: interpolatedRoutes
-    .filter((r) => !plan.has(`${r.method} ${r.path}`))
-    .map((r) => `${r.method} ${r.path}`),
-  // The THIRD construction form: a literal built into a local and passed to the call by name, e.g.
-  // `var path = string.Create(culture, $"api/tasks/my-open?...")`. Neither precise parser above can
-  // see those, so until this line they were not merely uncaptured, they were UNCOUNTED -- and
-  // `api/tasks/my-open` is the Overview page's own endpoint, whose absence from the fixture set is
-  // why D13 survived a drift gate built to catch exactly that class of defect. Their verb is
-  // INFERRED from the nearest following HttpMethod, so it is reported separately from the two
-  // parsed sets rather than blended into them.
-  indirectlyConstructedRoutes: indirectRoutes.map(
-    (r) => `${r.method} ${r.path}${r.methodSource === "inferred" ? " (verb inferred)" : ""}`,
-  ),
-  // The honest denominator: every `api/...` literal in the client, whichever way it is built. The
-  // three parsers must account for all of it; tests/desktop-route-discovery-contract.mjs fails when
-  // they do not, so a fourth construction form cannot go uncounted the way the third did.
-  routeLiteralsInClient: allRouteLiterals.length,
-};
-writeFileSync(join(fixturesDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
-
-console.log(`routes discovered : ${staticRoutes.length}`);
-console.log(`captured          : ${captured.length}`);
-console.log(`skipped           : ${skipped.length}`);
-console.log(`uncovered by plan : ${planless.length}`);
-console.log(
-  `parameterised     : ${interpolatedRoutes.length} discovered, ${interpolatedWithHandler.length} captured, ` +
-    `${interpolatedRoutes.length - interpolatedWithHandler.length} outstanding (see manifest)`,
-);
-console.log(
-  `indirect          : ${indirectRoutes.length} discovered (verb inferred), ${indirectWithHandler.length} captured, ` +
-    `of ${allRouteLiterals.length} route literals in the client`,
-);
-for (const item of planless) console.log(`  UNCOVERED: ${item.method} ${item.path}`);
-for (const item of indirectRoutes) {
-  const status = plan.has(`${item.method} ${item.path}`) ? " (captured)" : "";
-  console.log(`  INDIRECT : ${item.method} ${item.path}${status}`);
-}
-
-await mongoose.connection.close();
-await new Promise((resolve) => server.close(resolve));
-
-process.exit(planless.length > 0 ? 1 : 0);
+process.exitCode = await runPlan();

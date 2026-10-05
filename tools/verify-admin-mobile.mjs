@@ -136,6 +136,9 @@ await withBrowser(async (page) => {
 
 if (failures.length) {
   console.error(`\nADMIN MOBILE FAILED (${failures.length}):\n  ${failures.join("\n  ")}`);
-  process.exit(1);
+  // process.exitCode, not process.exit(): the browser driver fetches, and exiting after a fetch
+  // aborts Node 24 on Windows (V32).
+  process.exitCode = 1;
+} else {
+  console.log("\nADMIN MOBILE OK");
 }
-console.log("\nADMIN MOBILE OK");

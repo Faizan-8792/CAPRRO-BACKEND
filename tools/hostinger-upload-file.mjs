@@ -34,59 +34,64 @@
 
 import { uploadFileToHostinger, sha256OfFile } from "./lib/hostinger-files.mjs";
 import { statSync, existsSync } from "node:fs";
+import { ExitRequest, runToExitCode } from "./lib/exit-code.mjs";
 
 const TOKEN = process.env.HOSTINGER_API_TOKEN;
 
 function arg(name, required = true) {
   const i = process.argv.indexOf(`--${name}`);
   const v = i === -1 ? undefined : process.argv[i + 1];
-  if (required && !v) {
-    console.error(`missing --${name}`);
-    process.exit(2);
-  }
+  if (required && !v) throw new ExitRequest(2, `missing --${name}`);
   return v;
 }
 
-const domain = arg("domain");
-const filePath = arg("file");
-const remotePath = arg("remote").replace(/\\/g, "/").replace(/^\/+/, "");
-const dryRun = process.argv.includes("--dry-run");
+// Runs inside main(), which RETURNS the exit code (or throws an ExitRequest): nothing here calls
+// process.exit(), which aborts Node 24 on Windows once the upload's requests are done (V32,
+// tools/lib/exit-code.mjs). That is the step a deploy runs first, so its exit code has to be real.
+async function main() {
+  const domain = arg("domain");
+  const filePath = arg("file");
+  const remotePath = arg("remote").replace(/\\/g, "/").replace(/^\/+/, "");
+  const dryRun = process.argv.includes("--dry-run");
 
-if (!TOKEN) {
-  console.error("HOSTINGER_API_TOKEN is not set. Set it for this one command; it is never stored.");
-  process.exit(2);
-}
-if (!existsSync(filePath)) {
-  console.error(`local file not found: ${filePath}`);
-  process.exit(2);
+  if (!TOKEN) {
+    console.error("HOSTINGER_API_TOKEN is not set. Set it for this one command; it is never stored.");
+    return 2;
+  }
+  if (!existsSync(filePath)) {
+    console.error(`local file not found: ${filePath}`);
+    return 2;
+  }
+
+  const size = statSync(filePath).size;
+  const localSha = sha256OfFile(filePath);
+  console.log("=== local artefact ===");
+  console.log(`  file   : ${filePath}`);
+  console.log(`  size   : ${size} bytes`);
+  console.log(`  sha256 : ${localSha}`);
+  console.log(`  target : ${domain} :: ${remotePath}`);
+  if (dryRun) {
+    console.log("\n  --dry-run: stopping before any network call.");
+    return 0;
+  }
+
+  try {
+    console.log("\n=== uploading and verifying ===");
+    const result = await uploadFileToHostinger({
+      domain,
+      token: TOKEN,
+      remotePath,
+      filePath,
+      log: (line) => console.log(line),
+    });
+    console.log(`\n  HEAD ${result.publicUrl} -> served, content-length ${result.size}`);
+    console.log("\n=== UPLOAD VERIFIED ===");
+    return 0;
+  } catch (err) {
+    console.error(`\nFAILED: ${err.message}`);
+    console.log("\n=== MISMATCH - investigate before announcing ===");
+    return 1;
+  }
 }
 
-const size = statSync(filePath).size;
-const localSha = sha256OfFile(filePath);
-console.log("=== local artefact ===");
-console.log(`  file   : ${filePath}`);
-console.log(`  size   : ${size} bytes`);
-console.log(`  sha256 : ${localSha}`);
-console.log(`  target : ${domain} :: ${remotePath}`);
-if (dryRun) {
-  console.log("\n  --dry-run: stopping before any network call.");
-  process.exit(0);
-}
-
-try {
-  console.log("\n=== uploading and verifying ===");
-  const result = await uploadFileToHostinger({
-    domain,
-    token: TOKEN,
-    remotePath,
-    filePath,
-    log: (line) => console.log(line),
-  });
-  console.log(`\n  HEAD ${result.publicUrl} -> served, content-length ${result.size}`);
-  console.log("\n=== UPLOAD VERIFIED ===");
-  process.exit(0);
-} catch (err) {
-  console.error(`\nFAILED: ${err.message}`);
-  console.log("\n=== MISMATCH - investigate before announcing ===");
-  process.exit(1);
-}
+await runToExitCode(main);

@@ -141,7 +141,8 @@ async function main() {
   }
 }
 
+// process.exitCode, not process.exit(): exiting after a fetch aborts Node 24 on Windows (V32).
 main().catch((err) => {
   console.error("Backfill failed:", err?.message || err);
-  process.exit(1);
+  process.exitCode = 1;
 });

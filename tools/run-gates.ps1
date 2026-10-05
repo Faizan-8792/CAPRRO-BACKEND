@@ -847,6 +847,11 @@ try {
         # ping the way a saturated pool does - a promise that neither resolves nor rejects. It skips
         # itself with a reason when no local Mongo is up, rather than passing on nothing.
         "health-failure-semantics.test",
+        # V32: process.exit() after a fetch aborts Node 24 on Windows (0xC0000409), turning a passing
+        # suite or tool into a crash code. Fails on any process.exit() in a file under tools/, tests/,
+        # scripts/ (and the sibling folders it lists) that makes requests, so a thirty-first file cannot
+        # appear. Parses the code rather than grepping it.
+        "no-exit-after-network-contract",
         # Added the day the super panel sorting bug was fixed. The panel had a sidebar
         # router and sortable tables in production with nothing asserting either, so a
         # date column that sorted by the American field order shipped unnoticed.

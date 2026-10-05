@@ -180,9 +180,10 @@ try {
   if (fail > 0) console.log(`failing: ${failures.join(", ")}`);
   console.log(fail === 0 ? "LOCAL MAINTENANCE MECHANISM DRILL OK (not a substitute for the production drill)" : "LOCAL MAINTENANCE MECHANISM DRILL FAILED");
   await cleanup();
-  process.exit(fail === 0 ? 0 : 1);
+  // process.exitCode, not process.exit(): exiting after a fetch aborts Node 24 on Windows (V32).
+  process.exitCode = fail === 0 ? 0 : 1;
 } catch (error) {
   console.error("FATAL", error);
   await cleanup();
-  process.exit(1);
+  process.exitCode = 1;
 }

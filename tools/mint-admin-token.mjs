@@ -27,6 +27,7 @@ import "dotenv/config";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import { runToExitCode } from "./lib/exit-code.mjs";
 
 const API = process.env.CAPRO_API_BASE || "https://api.caprotoolkit.in";
 const EMAIL = "saifullahfaizan786@gmail.com";
@@ -52,65 +53,72 @@ async function post(path, body) {
   return { status: res.status, json, text };
 }
 
-let otp = flag("--otp");
+// Runs inside main(), which RETURNS the exit code: nothing here calls process.exit(), which aborts
+// Node 24 on Windows after a fetch (V32, tools/lib/exit-code.mjs).
+async function main() {
+  let otp = flag("--otp");
 
-if (!otp) {
-  console.log(`Requesting an OTP for ${EMAIL} ...`);
-  const sent = await post("/api/auth/send-otp", { email: EMAIL });
-  if (sent.status !== 200 || !sent.json?.ok) {
-    console.error(`send-otp failed: HTTP ${sent.status} ${sent.text.slice(0, 200)}`);
-    process.exit(1);
+  if (!otp) {
+    console.log(`Requesting an OTP for ${EMAIL} ...`);
+    const sent = await post("/api/auth/send-otp", { email: EMAIL });
+    if (sent.status !== 200 || !sent.json?.ok) {
+      console.error(`send-otp failed: HTTP ${sent.status} ${sent.text.slice(0, 200)}`);
+      return 1;
+    }
+    console.log("Sent. Check that inbox.\n");
+
+    const rl = createInterface({ input: stdin, output: stdout });
+    otp = (await rl.question("Enter the 6-digit code: ")).trim();
+    rl.close();
   }
-  console.log("Sent. Check that inbox.\n");
 
-  const rl = createInterface({ input: stdin, output: stdout });
-  otp = (await rl.question("Enter the 6-digit code: ")).trim();
-  rl.close();
+  const verified = await post("/api/auth/verify-otp", { email: EMAIL, otp: String(otp).trim() });
+
+  if (verified.status !== 200 || !verified.json?.token) {
+    console.error(`\nverify-otp failed: HTTP ${verified.status}`);
+    console.error(verified.json?.error || verified.text.slice(0, 300));
+    console.error("\nA wrong or expired code is the usual cause. Re-run to get a fresh one.");
+    return 1;
+  }
+
+  const token = verified.json.token;
+  const role = verified.json.user?.role;
+
+  console.log("\nSigned in.");
+  console.log(`  role : ${role}`);
+  if (role !== "SUPER_ADMIN") {
+    console.error(
+      `\nWARNING: this account's role is ${role}, not SUPER_ADMIN. The token will authenticate but ` +
+      "every admin-panel route will answer 403, which looks like the panel is broken when it is not.",
+    );
+  }
+
+  if (printOnly) {
+    console.log("\n--- token (do not paste this into a chat, an issue, or a commit) ---");
+    console.log(token);
+    return 0;
+  }
+
+  // Write into .env, replacing any existing value for the key rather than appending a duplicate.
+  let env = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, "utf8") : "";
+  const line = `${ENV_KEY}=${token}`;
+  const pattern = new RegExp(`^${ENV_KEY}=.*$`, "m");
+
+  if (pattern.test(env)) {
+    env = env.replace(pattern, line);
+    console.log(`\nUpdated ${ENV_KEY} in capro-backend/.env`);
+  } else {
+    env = env.replace(/\s*$/, "\n") + line + "\n";
+    console.log(`\nAdded ${ENV_KEY} to capro-backend/.env`);
+  }
+  writeFileSync(ENV_PATH, env, "utf8");
+
+  console.log("\nFor the browser admin panel, open https://api.caprotoolkit.in/admin/super.html,");
+  console.log("then in DevTools -> Console run:");
+  console.log(`  localStorage.setItem("caproadminjwt", "<the token>")`);
+  console.log("and reload. Re-run this script with --print if you need it on screen for that.");
+  console.log("\nThe token expires. If panel calls start returning 401, mint a new one.");
+  return 0;
 }
 
-const verified = await post("/api/auth/verify-otp", { email: EMAIL, otp: String(otp).trim() });
-
-if (verified.status !== 200 || !verified.json?.token) {
-  console.error(`\nverify-otp failed: HTTP ${verified.status}`);
-  console.error(verified.json?.error || verified.text.slice(0, 300));
-  console.error("\nA wrong or expired code is the usual cause. Re-run to get a fresh one.");
-  process.exit(1);
-}
-
-const token = verified.json.token;
-const role = verified.json.user?.role;
-
-console.log("\nSigned in.");
-console.log(`  role : ${role}`);
-if (role !== "SUPER_ADMIN") {
-  console.error(
-    `\nWARNING: this account's role is ${role}, not SUPER_ADMIN. The token will authenticate but ` +
-    "every admin-panel route will answer 403, which looks like the panel is broken when it is not.",
-  );
-}
-
-if (printOnly) {
-  console.log("\n--- token (do not paste this into a chat, an issue, or a commit) ---");
-  console.log(token);
-  process.exit(0);
-}
-
-// Write into .env, replacing any existing value for the key rather than appending a duplicate.
-let env = existsSync(ENV_PATH) ? readFileSync(ENV_PATH, "utf8") : "";
-const line = `${ENV_KEY}=${token}`;
-const pattern = new RegExp(`^${ENV_KEY}=.*$`, "m");
-
-if (pattern.test(env)) {
-  env = env.replace(pattern, line);
-  console.log(`\nUpdated ${ENV_KEY} in capro-backend/.env`);
-} else {
-  env = env.replace(/\s*$/, "\n") + line + "\n";
-  console.log(`\nAdded ${ENV_KEY} to capro-backend/.env`);
-}
-writeFileSync(ENV_PATH, env, "utf8");
-
-console.log("\nFor the browser admin panel, open https://api.caprotoolkit.in/admin/super.html,");
-console.log("then in DevTools -> Console run:");
-console.log(`  localStorage.setItem("caproadminjwt", "<the token>")`);
-console.log("and reload. Re-run this script with --print if you need it on screen for that.");
-console.log("\nThe token expires. If panel calls start returning 401, mint a new one.");
+await runToExitCode(main);

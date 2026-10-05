@@ -142,4 +142,5 @@ if (fail > 0) {
   console.log("If CORS-localhost and NO-STACK failed together, the cause is almost certainly one");
   console.log("thing: NODE_ENV is not \"production\" on the deployed host (app.js:219). See O17.");
 }
-process.exit(fail === 0 ? 0 : 1);
+// process.exitCode, not process.exit(): exiting after a fetch aborts Node 24 on Windows (V32).
+process.exitCode = fail === 0 ? 0 : 1;

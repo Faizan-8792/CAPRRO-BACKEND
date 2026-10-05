@@ -116,4 +116,5 @@ try {
 }
 
 console.log(`=== client-version floor: ${pass} passed, ${fail} failed ===`);
-process.exit(fail > 0 ? 1 : 0);
+// process.exitCode, not process.exit(): exiting after a fetch aborts Node 24 on Windows (V32).
+process.exitCode = fail > 0 ? 1 : 0;

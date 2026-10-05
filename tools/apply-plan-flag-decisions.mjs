@@ -22,6 +22,8 @@
 //   attestation that they have. The script refuses to guess.
 // --dry-run: print exactly what would change, make no network write.
 
+import { ExitRequest, runToExitCode } from "./lib/exit-code.mjs";
+
 const BASE = process.env.CAPRO_API_BASE || "https://api.caprotoolkit.in";
 const TOKEN = process.env.CAPRO_SUPER_ADMIN_JWT;
 
@@ -59,115 +61,120 @@ const dryRun = process.argv.includes("--dry-run");
 const t1t3Verified = process.argv.includes("--t1-t3-verified");
 const only = (arg("only") || "T4").split(",").map((s) => s.trim());
 
-if (!TOKEN) {
-  console.error("CAPRO_SUPER_ADMIN_JWT is not set. Set it for this one command; it is never stored.");
-  process.exit(2);
-}
-
-for (const key of only) {
-  if (!PLAN[key]) {
-    console.error(`Unknown task '${key}'. Valid: ${Object.keys(PLAN).join(", ")}.`);
-    process.exit(2);
+// Every step runs inside main(), which RETURNS the exit code (or throws an ExitRequest); nothing here
+// calls process.exit(), which aborts Node 24 on Windows after a fetch (V32, tools/lib/exit-code.mjs).
+async function main() {
+  if (!TOKEN) {
+    console.error("CAPRO_SUPER_ADMIN_JWT is not set. Set it for this one command; it is never stored.");
+    return 2;
   }
-}
 
-const toApply = only.map((key) => ({ key, ...PLAN[key] }));
+  for (const key of only) {
+    if (!PLAN[key]) {
+      console.error(`Unknown task '${key}'. Valid: ${Object.keys(PLAN).join(", ")}.`);
+      return 2;
+    }
+  }
 
-console.log("=== plan-flag-decisions: what this run will do ===");
-for (const t of toApply) {
-  const skip = t.requiresVerification && !t1t3Verified;
-  console.log(
-    `  ${t.key}: ${t.flag} -> ${t.value}${skip ? "  [SKIPPED -- needs --t1-t3-verified]" : ""}`
-  );
-  console.log(`       ${t.why}`);
-}
-if (dryRun) {
-  console.log("\n--dry-run: stopping before any network call.");
-  process.exit(0);
-}
+  const toApply = only.map((key) => ({ key, ...PLAN[key] }));
 
-const authed = {
-  Authorization: `Bearer ${TOKEN}`,
-  "Content-Type": "application/json",
-};
+  console.log("=== plan-flag-decisions: what this run will do ===");
+  for (const t of toApply) {
+    const skip = t.requiresVerification && !t1t3Verified;
+    console.log(
+      `  ${t.key}: ${t.flag} -> ${t.value}${skip ? "  [SKIPPED -- needs --t1-t3-verified]" : ""}`
+    );
+    console.log(`       ${t.why}`);
+  }
+  if (dryRun) {
+    console.log("\n--dry-run: stopping before any network call.");
+    return 0;
+  }
 
-function fail(step, detail) {
-  console.error(`\nFAILED at ${step}: ${detail}`);
-  process.exit(1);
-}
+  const authed = {
+    Authorization: `Bearer ${TOKEN}`,
+    "Content-Type": "application/json",
+  };
 
-async function getConfig() {
-  const res = await fetch(`${BASE}/api/app-config`);
-  if (!res.ok) fail("getConfig", `HTTP ${res.status}`);
-  return res.json();
-}
+  function fail(step, detail) {
+    throw new ExitRequest(1, `\nFAILED at ${step}: ${detail}`);
+  }
 
-console.log("\n=== 1. current production feature-flag state ===");
-const before = await getConfig();
-console.log(JSON.stringify(before.config.featureFlags, null, 2));
+  async function getConfig() {
+    const res = await fetch(`${BASE}/api/app-config`);
+    if (!res.ok) fail("getConfig", `HTTP ${res.status}`);
+    return res.json();
+  }
 
-const applicable = toApply.filter((t) => !t.requiresVerification || t1t3Verified);
-const skipped = toApply.filter((t) => t.requiresVerification && !t1t3Verified);
-if (skipped.length) {
-  console.log(
-    `\nSkipping (needs --t1-t3-verified, an explicit attestation T2/T3 were actually checked): ${skipped
-      .map((t) => t.key)
-      .join(", ")}`
-  );
-}
+  console.log("\n=== 1. current production feature-flag state ===");
+  const before = await getConfig();
+  console.log(JSON.stringify(before.config.featureFlags, null, 2));
 
-if (applicable.length && applicable.some((t) => t.requiresVerification)) {
-  console.log("\n=== 2. independently probing T1's monitoring endpoint before trusting the attestation ===");
-  const probe = await fetch(`${BASE}/api/super/reminder-delivery-health`, { headers: authed });
-  if (!probe.ok) {
-    fail(
-      "probeT1",
-      `T1's endpoint returned HTTP ${probe.status} -- refusing to turn on reliableReminderDelivery/complianceGenerationShadow with no working monitoring behind them.`
+  const applicable = toApply.filter((t) => !t.requiresVerification || t1t3Verified);
+  const skipped = toApply.filter((t) => t.requiresVerification && !t1t3Verified);
+  if (skipped.length) {
+    console.log(
+      `\nSkipping (needs --t1-t3-verified, an explicit attestation T2/T3 were actually checked): ${skipped
+        .map((t) => t.key)
+        .join(", ")}`
     );
   }
-  const probeBody = await probe.json();
-  if (!probeBody?.ok || typeof probeBody?.delivery?.issueCount !== "number") {
-    fail("probeT1", `T1's endpoint responded but with an unexpected shape: ${JSON.stringify(probeBody).slice(0, 300)}`);
+
+  if (applicable.length && applicable.some((t) => t.requiresVerification)) {
+    console.log("\n=== 2. independently probing T1's monitoring endpoint before trusting the attestation ===");
+    const probe = await fetch(`${BASE}/api/super/reminder-delivery-health`, { headers: authed });
+    if (!probe.ok) {
+      fail(
+        "probeT1",
+        `T1's endpoint returned HTTP ${probe.status} -- refusing to turn on reliableReminderDelivery/complianceGenerationShadow with no working monitoring behind them.`
+      );
+    }
+    const probeBody = await probe.json();
+    if (!probeBody?.ok || typeof probeBody?.delivery?.issueCount !== "number") {
+      fail("probeT1", `T1's endpoint responded but with an unexpected shape: ${JSON.stringify(probeBody).slice(0, 300)}`);
+    }
+    console.log(`  T1 live and responding. Current fleet-wide issueCount: ${probeBody.delivery.issueCount}`);
   }
-  console.log(`  T1 live and responding. Current fleet-wide issueCount: ${probeBody.delivery.issueCount}`);
+
+  if (!applicable.length) {
+    console.log("\nNothing to apply. Exiting.");
+    return 0;
+  }
+
+  console.log("\n=== 3. applying ===");
+  const featureFlags = {};
+  for (const t of applicable) {
+    if (NEVER_TOUCH.has(t.flag)) fail("safety", `${t.flag} is hardcoded as never-touch. This should be unreachable.`);
+    featureFlags[t.flag] = t.value;
+  }
+
+  const patchRes = await fetch(`${BASE}/api/app-config/features`, {
+    method: "PATCH",
+    headers: authed,
+    body: JSON.stringify({ featureFlags }),
+  });
+  if (!patchRes.ok) {
+    fail("patch", `HTTP ${patchRes.status} ${(await patchRes.text()).slice(0, 300)}`);
+  }
+  console.log(`  PATCH accepted: ${JSON.stringify(featureFlags)}`);
+
+  console.log("\n=== 4. reading back to confirm the write actually landed ===");
+  const after = await getConfig();
+  let allMatch = true;
+  for (const t of applicable) {
+    const got = after.config.featureFlags[t.flag];
+    const ok = got === t.value;
+    allMatch = allMatch && ok;
+    console.log(`  ${t.flag}: expected ${t.value}, got ${got} -- ${ok ? "PASS" : "FAIL"}`);
+  }
+  if (NEVER_TOUCH.has("complianceGenerationLive")) {
+    const stillOff = after.config.featureFlags.complianceGenerationLive === false;
+    console.log(`  complianceGenerationLive still false (never touched): ${stillOff ? "PASS" : "FAIL -- INVESTIGATE IMMEDIATELY"}`);
+    allMatch = allMatch && stillOff;
+  }
+
+  console.log(`\n=== ${allMatch ? "ALL CONFIRMED" : "MISMATCH -- DO NOT REPORT SUCCESS"} ===`);
+  return allMatch ? 0 : 1;
 }
 
-if (!applicable.length) {
-  console.log("\nNothing to apply. Exiting.");
-  process.exit(0);
-}
-
-console.log("\n=== 3. applying ===");
-const featureFlags = {};
-for (const t of applicable) {
-  if (NEVER_TOUCH.has(t.flag)) fail("safety", `${t.flag} is hardcoded as never-touch. This should be unreachable.`);
-  featureFlags[t.flag] = t.value;
-}
-
-const patchRes = await fetch(`${BASE}/api/app-config/features`, {
-  method: "PATCH",
-  headers: authed,
-  body: JSON.stringify({ featureFlags }),
-});
-if (!patchRes.ok) {
-  fail("patch", `HTTP ${patchRes.status} ${(await patchRes.text()).slice(0, 300)}`);
-}
-console.log(`  PATCH accepted: ${JSON.stringify(featureFlags)}`);
-
-console.log("\n=== 4. reading back to confirm the write actually landed ===");
-const after = await getConfig();
-let allMatch = true;
-for (const t of applicable) {
-  const got = after.config.featureFlags[t.flag];
-  const ok = got === t.value;
-  allMatch = allMatch && ok;
-  console.log(`  ${t.flag}: expected ${t.value}, got ${got} -- ${ok ? "PASS" : "FAIL"}`);
-}
-if (NEVER_TOUCH.has("complianceGenerationLive")) {
-  const stillOff = after.config.featureFlags.complianceGenerationLive === false;
-  console.log(`  complianceGenerationLive still false (never touched): ${stillOff ? "PASS" : "FAIL -- INVESTIGATE IMMEDIATELY"}`);
-  allMatch = allMatch && stillOff;
-}
-
-console.log(`\n=== ${allMatch ? "ALL CONFIRMED" : "MISMATCH -- DO NOT REPORT SUCCESS"} ===`);
-process.exit(allMatch ? 0 : 1);
+await runToExitCode(main);

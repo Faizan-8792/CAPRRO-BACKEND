@@ -2908,4 +2908,5 @@ record(
 );
 
 console.log(`Result: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+// process.exitCode, not process.exit(): exiting after a fetch aborts Node 24 on Windows (V32).
+if (failed > 0) process.exitCode = 1;

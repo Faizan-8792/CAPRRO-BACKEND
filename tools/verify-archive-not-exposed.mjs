@@ -25,40 +25,44 @@ const domain = arg("domain", "api.caprotoolkit.in");
 const remote = arg("remote", "capro-backend.zip");
 const archiveFile = arg("archive-file");
 
-let archiveSha256 = null;
-if (archiveFile) {
+// main() RETURNS the exit code and the module sets process.exitCode; nothing here calls process.exit().
+// Calling it killed the process while undici was still closing the connection this check had just
+// used, and Node aborted with "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)" and exit code
+// -1073740791 - so a check that had already printed SAFE looked to its caller like a crash (V32,
+// tools/lib/exit-code.mjs).
+async function main() {
+  let archiveSha256 = null;
+  if (archiveFile) {
+    try {
+      archiveSha256 = createHash("sha256").update(readFileSync(archiveFile)).digest("hex");
+    } catch (err) {
+      console.error(`could not read ${archiveFile}: ${String(err)}`);
+      return 1;
+    }
+  }
+
+  console.log(`checking https://${domain}/${remote}`);
+  if (archiveSha256) {
+    console.log(`comparing against ${archiveFile}`);
+    console.log(`  sha256 ${archiveSha256}`);
+  }
+
   try {
-    archiveSha256 = createHash("sha256").update(readFileSync(archiveFile)).digest("hex");
+    const result = await assertArchivePathNotExposed({
+      domain,
+      remotePath: remote,
+      archiveSha256,
+      createHash,
+      log: (message) => console.log(message),
+    });
+    console.log("");
+    console.log(`SAFE: ${result.reason}`);
+    return 0;
   } catch (err) {
-    console.error(`could not read ${archiveFile}: ${String(err)}`);
-    process.exit(1);
+    console.error("");
+    console.error(String(err).replace(/^Error:\s*/, ""));
+    return 1;
   }
 }
 
-console.log(`checking https://${domain}/${remote}`);
-if (archiveSha256) {
-  console.log(`comparing against ${archiveFile}`);
-  console.log(`  sha256 ${archiveSha256}`);
-}
-
-try {
-  const result = await assertArchivePathNotExposed({
-    domain,
-    remotePath: remote,
-    archiveSha256,
-    createHash,
-    log: (message) => console.log(message),
-  });
-  console.log("");
-  console.log(`SAFE: ${result.reason}`);
-  // process.exitCode, not process.exit(). Calling process.exit() here killed the process while
-  // undici was still closing the connection this check had just used, and Node aborted with
-  // "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)" and exit code -1073740791 - so a
-  // check that had already printed SAFE looked to its caller like a crash. Setting the code and
-  // letting Node finish is the whole fix.
-  process.exitCode = 0;
-} catch (err) {
-  console.error("");
-  console.error(String(err).replace(/^Error:\s*/, ""));
-  process.exitCode = 1;
-}
+process.exitCode = await main();

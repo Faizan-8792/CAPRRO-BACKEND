@@ -376,5 +376,6 @@ console.log(`\nCase OCR route behaviour: ${passed}/${total}`);
 
 if (passed !== total) {
   console.error(`\n${total - passed} check(s) failed.`);
-  process.exit(1);
+  // process.exitCode, not process.exit(): exiting after a fetch aborts Node 24 on Windows (V32).
+  process.exitCode = 1;
 }

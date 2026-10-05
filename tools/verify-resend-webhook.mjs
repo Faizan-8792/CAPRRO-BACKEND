@@ -91,6 +91,8 @@ if (SECRET) {
     unsigned.status === 401,
     `got ${unsigned.status} ${JSON.stringify(unsigned.json)}`,
   );
+  await checkSignedEvents();
+  console.log(`\nwebhook verify: ${pass} passed, ${fail} failed`);
 } else {
   check(
     "unconfigured: unsigned input is fail-closed 503",
@@ -99,76 +101,79 @@ if (SECRET) {
   );
   console.log("\nRESEND_WEBHOOK_SECRET is not set — the endpoint is fail-closed by design.");
   console.log("Set the Resend dashboard signing secret in .env, redeploy, and re-run this tool.");
-  process.exit(fail > 0 ? 1 : 0);
 }
 
-const now = Math.floor(Date.now() / 1000);
-const syntheticId = `evt_test_${randomUUID()}`;
-const sentPayload = JSON.stringify({
-  type: "email.sent",
-  created_at: new Date().toISOString(),
-  data: { email_id: syntheticId, to: ["webhook-verify@example.com"], from: "verify@caprotoolkit.in" },
-});
+// Checks 2-6, which need the signing secret. A function rather than a flat run of statements so the
+// unconfigured case can stop here without calling process.exit() (see the end of this file).
+async function checkSignedEvents() {
+  const now = Math.floor(Date.now() / 1000);
+  const syntheticId = `evt_test_${randomUUID()}`;
+  const sentPayload = JSON.stringify({
+    type: "email.sent",
+    created_at: new Date().toISOString(),
+    data: { email_id: syntheticId, to: ["webhook-verify@example.com"], from: "verify@caprotoolkit.in" },
+  });
 
-// --- 2. valid signature, unknown id → accepted, nothing transitions --------
-const goodHeaders = signedHeaders({ secret: SECRET, id: randomUUID(), timestamp: now, payload: sentPayload });
-const accepted = await post(sentPayload, goodHeaders);
-check(
-  "signed event (unknown id) accepted 200, transitioned:false",
-  accepted.status === 200 && accepted.json?.ok === true && accepted.json?.transitioned === false,
-  `got ${accepted.status} ${JSON.stringify(accepted.json)}`,
-);
+  // --- 2. valid signature, unknown id → accepted, nothing transitions --------
+  const goodHeaders = signedHeaders({ secret: SECRET, id: randomUUID(), timestamp: now, payload: sentPayload });
+  const accepted = await post(sentPayload, goodHeaders);
+  check(
+    "signed event (unknown id) accepted 200, transitioned:false",
+    accepted.status === 200 && accepted.json?.ok === true && accepted.json?.transitioned === false,
+    `got ${accepted.status} ${JSON.stringify(accepted.json)}`,
+  );
 
-// --- 3. replay → identical, idempotent -------------------------------------
-const replay = await post(sentPayload, goodHeaders);
-check(
-  "replayed identical request stays 200 (idempotent)",
-  replay.status === 200 && replay.json?.ok === true && replay.json?.transitioned === false,
-  `got ${replay.status} ${JSON.stringify(replay.json)}`,
-);
+  // --- 3. replay → identical, idempotent -------------------------------------
+  const replay = await post(sentPayload, goodHeaders);
+  check(
+    "replayed identical request stays 200 (idempotent)",
+    replay.status === 200 && replay.json?.ok === true && replay.json?.transitioned === false,
+    `got ${replay.status} ${JSON.stringify(replay.json)}`,
+  );
 
-// --- 4. tampered payload → 401 ----------------------------------------------
-const tamperedPayload = JSON.stringify({
-  type: "email.delivered",
-  created_at: new Date().toISOString(),
-  data: { email_id: syntheticId, to: ["webhook-verify@example.com"] },
-});
-const tampered = await post(tamperedPayload, goodHeaders);
-check(
-  "tampered payload under the original signature refused 401",
-  tampered.status === 401,
-  `got ${tampered.status} ${JSON.stringify(tampered.json)}`,
-);
+  // --- 4. tampered payload → 401 ----------------------------------------------
+  const tamperedPayload = JSON.stringify({
+    type: "email.delivered",
+    created_at: new Date().toISOString(),
+    data: { email_id: syntheticId, to: ["webhook-verify@example.com"] },
+  });
+  const tampered = await post(tamperedPayload, goodHeaders);
+  check(
+    "tampered payload under the original signature refused 401",
+    tampered.status === 401,
+    `got ${tampered.status} ${JSON.stringify(tampered.json)}`,
+  );
 
-// --- 5. stale timestamp → 401 ------------------------------------------------
-const staleHeaders = signedHeaders({
-  secret: SECRET,
-  id: randomUUID(),
-  timestamp: now - 6 * 60,
-  payload: sentPayload,
-});
-const stale = await post(sentPayload, staleHeaders);
-check(
-  "stale timestamp (>5 min) refused 401 despite valid signature",
-  stale.status === 401,
-  `got ${stale.status} ${JSON.stringify(stale.json)}`,
-);
+  // --- 5. stale timestamp → 401 ------------------------------------------------
+  const staleHeaders = signedHeaders({
+    secret: SECRET,
+    id: randomUUID(),
+    timestamp: now - 6 * 60,
+    payload: sentPayload,
+  });
+  const stale = await post(sentPayload, staleHeaders);
+  check(
+    "stale timestamp (>5 min) refused 401 despite valid signature",
+    stale.status === 401,
+    `got ${stale.status} ${JSON.stringify(stale.json)}`,
+  );
 
-// --- 6. out-of-model type → acknowledged, ignored ----------------------------
-const otherPayload = JSON.stringify({
-  type: "email.opened",
-  created_at: new Date().toISOString(),
-  data: { email_id: syntheticId },
-});
-const other = await post(
-  otherPayload,
-  signedHeaders({ secret: SECRET, id: randomUUID(), timestamp: now, payload: otherPayload }),
-);
-check(
-  "out-of-model event type acknowledged as ignored",
-  other.status === 200 && other.json?.ok === true && other.json?.ignored === "email.opened",
-  `got ${other.status} ${JSON.stringify(other.json)}`,
-);
+  // --- 6. out-of-model type → acknowledged, ignored ----------------------------
+  const otherPayload = JSON.stringify({
+    type: "email.opened",
+    created_at: new Date().toISOString(),
+    data: { email_id: syntheticId },
+  });
+  const other = await post(
+    otherPayload,
+    signedHeaders({ secret: SECRET, id: randomUUID(), timestamp: now, payload: otherPayload }),
+  );
+  check(
+    "out-of-model event type acknowledged as ignored",
+    other.status === 200 && other.json?.ok === true && other.json?.ignored === "email.opened",
+    `got ${other.status} ${JSON.stringify(other.json)}`,
+  );
+}
 
-console.log(`\nwebhook verify: ${pass} passed, ${fail} failed`);
-process.exit(fail > 0 ? 1 : 0);
+// process.exitCode, not process.exit(): exiting after a fetch aborts Node 24 on Windows (V32).
+process.exitCode = fail > 0 ? 1 : 0;

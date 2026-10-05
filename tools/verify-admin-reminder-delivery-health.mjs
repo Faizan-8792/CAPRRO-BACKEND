@@ -145,4 +145,5 @@ await withBrowser(async (page) => {
 console.log("");
 console.log(`=== admin reminder-delivery-health card: ${pass} passed, ${fail} failed ===`);
 if (failures.length) console.log(`  failed: ${failures.join(", ")}`);
-process.exit(fail === 0 ? 0 : 1);
+// process.exitCode, not process.exit(): exiting after a fetch aborts Node 24 on Windows (V32).
+process.exitCode = fail === 0 ? 0 : 1;

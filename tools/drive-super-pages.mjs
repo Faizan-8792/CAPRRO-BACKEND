@@ -396,6 +396,8 @@ console.log("");
 console.log(`passed: ${pass}  failed: ${fail}`);
 if (fail > 0) {
   console.log(`failing checks: ${failures.join(", ")}`);
-  process.exit(1);
+  // process.exitCode, not process.exit(): exiting after a fetch aborts Node 24 on Windows (V32).
+  process.exitCode = 1;
+} else {
+  console.log("SUPER PAGES DRIVE OK");
 }
-console.log("SUPER PAGES DRIVE OK");
