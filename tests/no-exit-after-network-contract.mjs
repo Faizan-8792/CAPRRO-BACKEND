@@ -8,17 +8,19 @@
 // 3221226505 (0xC0000409) and "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file
 // src\win\async.c, line 76". fetch() makes V8 compile undici's WebAssembly HTTP parser in the
 // background the first time a response is parsed, and exiting while that compile is still running
-// trips libuv. Measured 2026-10-05, 12 runs each against a loopback stand-in for the endpoint:
-// tools/verify-resend-webhook.mjs as committed (process.exit at the end, straight after the last
-// response) ended in the crash code 12 of 12 with every check passed; ending with process.exitCode
-// instead exited 0 12 of 12. node --liftoff-only, waiting 3 s before the exit, and http.get in place
-// of fetch also exit cleanly; --no-wasm-tier-up does not help.
+// trips libuv. Measured 2026-10-05 against loopback stand-ins for the endpoints: the upload tool
+// every deploy starts with (tools/hostinger-upload-file.mjs, process.exit(0) straight after it read
+// the uploaded file back) ended in the crash code 10 runs of 10, and tools/verify-resend-webhook.mjs
+// 12 of 12; ending with process.exitCode instead, both exited 0 every time. node --liftoff-only,
+// waiting 3 s before the exit, and http.get in place of fetch also exit cleanly; --no-wasm-tier-up
+// does not help.
 //
 // So a gate suite that had PASSED could report a crash, and an operator tool could report a crash
-// code for a clean run or hide a failure's real code (the deploy tool's 2 and 1) behind it. Thirty
-// files and 72 call sites had the pattern, and every one was fixed by hand; this is what stops the
-// next one. The way to end such a script is process.exitCode and a natural end, closing the servers
-// and connections it opened - or, to stop a long flow early from inside a helper, an ExitRequest
+// code for a clean run or hide a failure's real code (the deploy tool's 2 and 1) behind it. The
+// ledger counted thirty files and 72 call sites by text search; parsing the code found 34 files and
+// 79 call sites, and every one was fixed by hand. This is what stops the next one. The way to end
+// such a script is process.exitCode and a natural end, closing the servers and connections it
+// opened - or, to stop a long flow early from inside a helper, an ExitRequest
 // (tools/lib/exit-code.mjs).
 //
 // WHAT IS CHECKED
