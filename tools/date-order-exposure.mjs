@@ -12,6 +12,10 @@
 // Usage:
 //   node tools/date-order-exposure.mjs                 (uses process.env.MONGODB_URI)
 //   MONGODB_URI="mongodb://..." node tools/date-order-exposure.mjs
+//   node tools/date-order-exposure.mjs --summary-only  (counts only: no firm, batch, GSTIN, TAN
+//                                                       or file name is printed - the form to use
+//                                                       when the report is read by anyone but the
+//                                                       owner, an agent included)
 
 import mongoose from "mongoose";
 import ImportBatch from "../src/models/ImportBatch.js";
@@ -70,9 +74,13 @@ async function main() {
     console.log(`ImportBatch documents with missing/empty dateOrder (pre-C3, date-bearing kinds only): ${batches.length}`);
     console.log("");
 
+    const summaryOnly = process.argv.includes("--summary-only");
     let fullyGuessedCount = 0;
     let partiallyExposedCount = 0;
     let totalExposedRows = 0;
+    // Counts a summary may carry without naming anyone: firms touched, and batches by kind.
+    const exposedFirms = new Set();
+    const exposedByKind = new Map();
 
     for (const batch of batches) {
       const isGst = GST_KINDS_WITH_DATES.has(batch.kind);
@@ -98,6 +106,9 @@ async function main() {
       } else {
         partiallyExposedCount += 1;
       }
+      exposedFirms.add(String(batch.firmId));
+      exposedByKind.set(batch.kind, (exposedByKind.get(batch.kind) || 0) + 1);
+      if (summaryOnly) continue;
 
       const identifier = batch.gstin || batch.tan || "(no gstin/tan)";
       console.log(
@@ -123,6 +134,10 @@ async function main() {
     console.log(`batches fully guessed (highest exposure): ${fullyGuessedCount}`);
     console.log(`batches partially exposed (lower, not zero, exposure): ${partiallyExposedCount}`);
     console.log(`total individual date values <=12 across all exposed batches: ${totalExposedRows}`);
+    console.log(`distinct firms with an exposed batch: ${exposedFirms.size}`);
+    const kinds = [...exposedByKind.entries()].sort(([a], [b]) => a.localeCompare(b));
+    console.log(`exposed batches by kind: ${kinds.length ? kinds.map(([kind, n]) => `${kind} ${n}`).join(", ") : "none"}`);
+    if (summaryOnly) console.log("(--summary-only: per-batch lines withheld; run without it to list them)");
     console.log("");
     console.log(
       "REMINDER: the original day-first/month-first reading is NOT recoverable from stored data."
