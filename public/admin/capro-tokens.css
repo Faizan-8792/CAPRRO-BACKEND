@@ -5,21 +5,34 @@
 
 :root {
   color-scheme: light dark;
-  --capro-canvas: #FBF7F0;
+  --capro-canvas: #FBFAF7;
   --capro-surface: #FFFFFF;
-  --capro-border: #8E8477;
-  --capro-skeleton: #E4DCCD;
-  --capro-accent: #0F766E;
-  --capro-accent-soft: #E1F1EF;
-  --capro-muted: #6B6257;
-  --capro-critical: #B42318;
-  --capro-ink: #1B1A17;
+  --capro-subtle: #F4F1E8;
+  --capro-raised: #FFFFFF;
+  --capro-element: #EFECE2;
+  --capro-element-hover: #EAE6DB;
+  --capro-element-active: #E6E1D4;
+  --capro-border-subtle: #E0DBCD;
+  --capro-border: #8D8677;
+  --capro-border-hover: #7F7768;
+  --capro-skeleton: #E6E1D4;
+  --capro-ink: #13262C;
+  --capro-muted: #6B6357;
+  --capro-accent: #177184;
+  --capro-accent-hover: #106678;
+  --capro-accent-pressed: #0F5260;
+  --capro-accent-soft: #E4F0F2;
+  --capro-accent-text: #1E6373;
   --capro-on-accent: #FFFFFF;
-  --capro-success: #15803D;
-  --capro-warning: #92610E;
-  --capro-needs-review: #B45309;
-  --capro-provisional: #6D28D9;
-  --capro-info: #1D4ED8;
+  --capro-focus: #177184;
+  --capro-brand-navy: #183C84;
+  --capro-brand-emerald: #119D75;
+  --capro-success: #0B7155;
+  --capro-warning: #7C5200;
+  --capro-needs-review: #A74700;
+  --capro-critical: #B12C31;
+  --capro-provisional: #6C3BBC;
+  --capro-info: #395A99;
   --capro-success-soft: color-mix(in srgb, var(--capro-success) 12%, var(--capro-surface));
   --capro-warning-soft: color-mix(in srgb, var(--capro-warning) 14%, var(--capro-surface));
   --capro-critical-soft: color-mix(in srgb, var(--capro-critical) 10%, var(--capro-surface));
@@ -28,21 +41,30 @@
   --capro-info-soft: color-mix(in srgb, var(--capro-info) 10%, var(--capro-surface));
   --capro-accent-deep: color-mix(in srgb, var(--capro-accent) 82%, var(--capro-ink));
 
-  --capro-font-ui: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --capro-gradient-brand: linear-gradient(90deg, #183C84 0%, #177184 50%, #119D75 100%);
+  --capro-shadow-1: 0 1px 2px rgba(19, 38, 44, 0.06), 0 1px 3px rgba(19, 38, 44, 0.04);
+  --capro-shadow-2: 0 2px 4px rgba(19, 38, 44, 0.06), 0 4px 12px rgba(19, 38, 44, 0.08);
+  --capro-shadow-3: 0 4px 8px rgba(19, 38, 44, 0.08), 0 12px 28px rgba(19, 38, 44, 0.12);
+  --capro-shadow-4: 0 8px 16px rgba(19, 38, 44, 0.10), 0 24px 56px rgba(19, 38, 44, 0.18);
+
+  --capro-font-ui: "IBM Plex Sans", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --capro-font-mono: "IBM Plex Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
   --capro-weight-regular: 400;
   --capro-weight-semibold: 600;
   --capro-text-caption: 12px;
   --capro-text-body: 14px;
-  --capro-text-body-large: 18px;
-  --capro-text-subtitle: 20px;
-  --capro-text-title: 28px;
-  --capro-text-title-large: 40px;
+  --capro-text-body-large: 16px;
+  --capro-text-subtitle: 18px;
+  --capro-text-title: 20px;
+  --capro-text-title-large: 24px;
+  --capro-text-display: 28px;
   --capro-leading-caption: 16px;
   --capro-leading-body: 20px;
   --capro-leading-body-large: 24px;
-  --capro-leading-subtitle: 28px;
-  --capro-leading-title: 36px;
-  --capro-leading-title-large: 52px;
+  --capro-leading-subtitle: 24px;
+  --capro-leading-title: 28px;
+  --capro-leading-title-large: 32px;
+  --capro-leading-display: 36px;
 
   --capro-space-1: 4px;
   --capro-space-2: 8px;
@@ -51,32 +73,50 @@
   --capro-space-5: 24px;
   --capro-space-6: 32px;
   --capro-space-7: 48px;
-  --capro-radius-control: 4px;
-  --capro-radius-card: 8px;
+  --capro-radius-xs: 4px;
+  --capro-radius-sm: 6px;
+  --capro-radius-md: 8px;
+  --capro-radius-lg: 12px;
+  --capro-radius-xl: 14px;
   --capro-radius-pill: 999px;
-  --capro-duration-faster: 83ms;
-  --capro-duration-fast: 167ms;
-  --capro-duration-normal: 250ms;
-  --capro-ease-standard: cubic-bezier(0, 0, 0, 1);
+  --capro-duration-fast: 100ms;
+  --capro-duration-moderate: 150ms;
+  --capro-duration-slow: 250ms;
+  --capro-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --capro-ease-enter: cubic-bezier(0, 0, 0, 1);
+  --capro-ease-exit: cubic-bezier(0.3, 0, 1, 1);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --capro-canvas: #1B1A17;
-    --capro-surface: #24231F;
-    --capro-border: #7D796F;
-    --capro-skeleton: #3A3831;
-    --capro-accent: #5EEAD4;
-    --capro-accent-soft: #123531;
-    --capro-muted: #B7AE9F;
-    --capro-critical: #FF9C8A;
-    --capro-ink: #F5F1E8;
-    --capro-on-accent: #1B1A17;
-    --capro-success: #4ADE80;
-    --capro-warning: #E8B45C;
-    --capro-needs-review: #FB923C;
-    --capro-provisional: #D8B4FE;
-    --capro-info: #93C5FD;
+    --capro-canvas: #0A171B;
+    --capro-surface: #101E23;
+    --capro-subtle: #0E1B20;
+    --capro-raised: #13262C;
+    --capro-element: #13262C;
+    --capro-element-hover: #1D2E33;
+    --capro-element-active: #25353B;
+    --capro-border-subtle: #2F4045;
+    --capro-border: #6E7E83;
+    --capro-border-hover: #7A898E;
+    --capro-skeleton: #1D2E33;
+    --capro-ink: #EAE6DB;
+    --capro-muted: #AFA99B;
+    --capro-accent: #57B9CC;
+    --capro-accent-hover: #69C4D6;
+    --capro-accent-pressed: #4BA7B9;
+    --capro-accent-soft: #11353B;
+    --capro-accent-text: #63B2C1;
+    --capro-on-accent: #0A171B;
+    --capro-focus: #57B9CC;
+    --capro-brand-navy: #789DE9;
+    --capro-brand-emerald: #55CA9D;
+    --capro-success: #5AB892;
+    --capro-warning: #E6BE61;
+    --capro-needs-review: #F19458;
+    --capro-critical: #EF827C;
+    --capro-provisional: #C79BEF;
+    --capro-info: #86A6E8;
     --capro-success-soft: color-mix(in srgb, var(--capro-success) 16%, var(--capro-surface));
     --capro-warning-soft: color-mix(in srgb, var(--capro-warning) 18%, var(--capro-surface));
     --capro-critical-soft: color-mix(in srgb, var(--capro-critical) 16%, var(--capro-surface));
@@ -84,13 +124,18 @@
     --capro-provisional-soft: color-mix(in srgb, var(--capro-provisional) 16%, var(--capro-surface));
     --capro-info-soft: color-mix(in srgb, var(--capro-info) 16%, var(--capro-surface));
     --capro-accent-deep: color-mix(in srgb, var(--capro-accent) 78%, var(--capro-ink));
+    --capro-gradient-brand: linear-gradient(90deg, #5B7EC8 0%, #3F9AAD 50%, #3CAF87 100%);
+    --capro-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.32);
+    --capro-shadow-2: 0 2px 4px rgba(0, 0, 0, 0.30), 0 4px 12px rgba(0, 0, 0, 0.28);
+    --capro-shadow-3: 0 4px 8px rgba(0, 0, 0, 0.36), 0 12px 28px rgba(0, 0, 0, 0.40);
+    --capro-shadow-4: 0 8px 16px rgba(0, 0, 0, 0.40), 0 24px 56px rgba(0, 0, 0, 0.55);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   :root {
-    --capro-duration-faster: 0ms;
     --capro-duration-fast: 0ms;
-    --capro-duration-normal: 0ms;
+    --capro-duration-moderate: 0ms;
+    --capro-duration-slow: 0ms;
   }
 }
