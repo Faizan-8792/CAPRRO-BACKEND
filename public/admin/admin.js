@@ -145,6 +145,23 @@ function cleanRequestId(value) {
     return /^[A-Za-z0-9._:-]{1,96}$/.test(requestId) ? requestId : '';
 }
 
+// DS24: questions go through the shared CA PRO dialog (ui/capro-ui.js) - named buttons, the safe
+// one focused on anything destructive, Esc cancels, focus returns. Without the library a question
+// answers no. A row action's outcome is a toast; a card's is its status line, in its tone.
+function adminAsk(options) {
+    return window.CaproUI ? window.CaproUI.confirm(options) : Promise.resolve(false);
+}
+
+function adminToast(message, tone = 'success') {
+    if (window.CaproUI) window.CaproUI.toast({ message, tone });
+}
+
+function adminStatus(el, text, tone = 'muted') {
+    if (!el) return;
+    el.textContent = text || '';
+    el.dataset.tone = tone;
+}
+
 function safeUserMessage(error, fallback = 'The request could not be completed. Try again.') {
     const status = Number(error?.status || 0);
     let message = fallback;
@@ -216,7 +233,7 @@ async function api(path, opts) {
     }
 
     if (!res.ok) {
-        const msg = data?.error || data?.message || `Request failed (${res.status})`;
+        const msg = data?.error || data?.message || safeUserMessage({ status: res.status, isRemoteRequest: true });
         const err = new Error(msg);
         err.isRemoteRequest = true;
         err.status = res.status;
@@ -269,8 +286,9 @@ function onHashChange() {
 
     // Tasks page open hone par board init/refresh
     if (hash === '#tasks') {
+        // initTaskBoard refreshes the board itself; calling refreshTaskBoard as well fetched it twice.
         if (window.initTaskBoard) window.initTaskBoard();
-        if (window.refreshTaskBoard) window.refreshTaskBoard();
+        else if (window.refreshTaskBoard) window.refreshTaskBoard();
     }
 
     // Assistant page open hone par load assistant
@@ -629,49 +647,8 @@ async function initAdminPage() {
 
     let currentFirm = null; // Store firm globally for delete operations
 
-    async function loadAndRenderUsers() {
-        if (!currentFirm || !currentFirm._id) return;
-        
-        const tbody = qs('usersTbody');
-        if (!tbody) return;
-
-        try {
-            const usersResp = await api(`/firms/${currentFirm._id}/users`);
-            const users = usersResp?.users || [];
-
-            // Update KPI
-            if (qs('kpiTotalUsers')) qs('kpiTotalUsers').textContent = String(users.length);
-            const activeCount = users.filter(u => u.isActive !== false).length;
-            if (qs('kpiActiveUsers')) qs('kpiActiveUsers').textContent = String(activeCount);
-
-            // Render team members
-            if (!users.length) {
-                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No team members found.</td></tr>';
-            } else {
-                tbody.innerHTML = users.map(u => `
-                    <tr>
-                        <td>${escapeHtml(u.name)}</td>
-                        <td>${escapeHtml(u.email)}</td>
-                        <td><span class="badge bg-${u.role === 'FIRM_ADMIN' ? 'warning' : 'secondary'}">${escapeHtml(formatEnumLabel(u.role))}</span></td>
-                        <td>${escapeHtml(formatEnumLabel(u.accountType))}</td>
-                        <td>${u.isActive !== false ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-warning">Inactive</span>'}</td>
-                        <td>${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : ''}</td>
-                        <td>
-                            <button type="button" class="btn btn-sm btn-outline-danger delete-user-btn" data-userid="${u._id}">
-                                Remove
-                            </button>
-                        </td>
-                    </tr>
-                `).join('');
-            }
-        } catch (error) {
-            console.error('Team member load error:', error);
-            if (tbody) {
-                const message = escapeHtml(safeUserMessage(error, 'Team members could not be loaded. Refresh and try again.'));
-                tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">${message}</td></tr>`;
-            }
-        }
-    }
+    // DS24: loadAndRenderUsers, a second copy of the users table that nothing called, is gone;
+    // renderUsersTable below is the one renderer.
 
     try {
         // Non-admin access denied
@@ -734,6 +711,10 @@ async function initAdminPage() {
                 if (firmResp?.ok && firmResp.firm) {
                     firm = firmResp.firm;
                     currentFirm = firm;
+                    // DS24: render it now. swrApi hands back fresh data on a cache miss without calling
+                    // its onFresh, so a first visit used to keep "Loading firm..." and a "-" firm name
+                    // until some later revalidation.
+                    hydrateFirm(firm);
                 }
                 if (usersResp?.users) {
                     renderUsersTable(usersResp.users);
@@ -760,7 +741,7 @@ async function initAdminPage() {
             if (qs('topSub')) qs('topSub').textContent = `Firm: ${f.displayName} (@${f.handle})`;
             if (qs('kpiFirmName')) qs('kpiFirmName').textContent = f.displayName || 'Individual';
             if (qs('kpiFirmHandle')) qs('kpiFirmHandle').textContent = f.handle || '';
-            if (qs('kpiPlanType')) qs('kpiPlanType').textContent = 'FREE';
+            if (qs('kpiPlanType')) qs('kpiPlanType').textContent = 'Free';
             if (qs('kpiPlanExpiry')) qs('kpiPlanExpiry').textContent = 'All tools included';
         }
 
@@ -778,9 +759,9 @@ async function initAdminPage() {
                 <tr>
                     <td>${escapeHtml(u.name)}</td>
                     <td>${escapeHtml(u.email)}</td>
-                    <td><span class="badge bg-${u.role === 'FIRM_ADMIN' ? 'warning' : 'secondary'}">${escapeHtml(formatEnumLabel(u.role))}</span></td>
+                    <td><span class="cp-badge"${u.role === 'FIRM_ADMIN' ? ' data-tone="accent"' : ''}>${escapeHtml(formatEnumLabel(u.role))}</span></td>
                     <td>${escapeHtml(formatEnumLabel(u.accountType))}</td>
-                    <td>${u.isActive !== false ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-warning">Inactive</span>'}</td>
+                    <td>${u.isActive !== false ? '<span class="cp-badge" data-tone="success">Active</span>' : '<span class="cp-badge" data-tone="warning">Inactive</span>'}</td>
                     <td>${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : ''}</td>
                     <td>
                         <button type="button" class="btn btn-sm btn-outline-danger delete-user-btn" data-userid="${u._id}">
@@ -815,7 +796,8 @@ async function initAdminPage() {
         function renderJoin() {
             if (!joinField || !firm?.joinCode) return;
             joinField.value = revealed ? firm.joinCode : firm.joinCode.slice(0, 2) + '...';
-            if (editJoinInput) editJoinInput.value = firm.joinCode;
+            // The custom-code field used to hold the full code while the field above masked it,
+            // which undid the masking. It starts empty; a new code is typed into it.
         }
 
         renderJoin();
@@ -836,12 +818,9 @@ async function initAdminPage() {
             copyBtn.addEventListener('click', async () => {
                 try {
                     await navigator.clipboard.writeText(firm.joinCode);
-                    if (statusEl) {
-                        statusEl.textContent = 'Copied!';
-                        setTimeout(() => statusEl.textContent = '', 2000);
-                    }
+                    adminToast('Join code copied.');
                 } catch {
-                    if (statusEl) statusEl.textContent = 'Copy failed.';
+                    adminToast('The join code could not be copied. Press Reveal and copy it by hand.', 'critical');
                 }
             });
         }
@@ -850,19 +829,25 @@ async function initAdminPage() {
         const rotateBtn = qs('rotateJoinBtn');
         if (me.isActive && rotateBtn && firm && firm._id) {
             rotateBtn.addEventListener('click', async () => {
+                // A new code replaces the old one at once, so this asks first (DS24).
+                const rotate = await adminAsk({
+                    title: 'Make a new join code?',
+                    body: 'The current code stops working at once. Anyone you have given it to will need the new one.',
+                    confirmLabel: 'Make a new code',
+                    cancelLabel: 'Keep the current code',
+                    tone: 'warning',
+                });
+                if (!rotate) return;
                 try {
-                    if (statusEl) statusEl.textContent = 'Rotating join code...';
+                    adminStatus(statusEl, 'Making a new join code...', 'muted');
                     const resp = await api(`/firms/${firm._id}/join-code/rotate`, { method: 'POST' });
                     firm.joinCode = resp.joinCode;
                     revealed = false;
                     renderJoin();
-                    if (statusEl) {
-                        statusEl.textContent = 'New join code generated!';
-                        setTimeout(() => statusEl.textContent = '', 2000);
-                    }
+                    adminStatus(statusEl, 'A new join code is ready. The previous code no longer works.', 'success');
                 } catch (e) {
                     console.error('Rotate error:', e);
-                    if (statusEl) statusEl.textContent = safeUserMessage(e, 'The join code could not be rotated. Try again.');
+                    adminStatus(statusEl, safeUserMessage(e, 'The join code could not be rotated. Try again.'), 'critical');
                 }
             });
         }
@@ -873,15 +858,15 @@ async function initAdminPage() {
             saveJoinCodeBtn.addEventListener('click', async () => {
                 const newCode = editJoinInput?.value.trim();
                 if (!newCode) {
-                    if (statusEl) statusEl.textContent = 'Join code cannot be empty.';
+                    adminStatus(statusEl, 'Type the new join code first.', 'critical');
                     return;
                 }
                 if (!/^[A-Za-z0-9]{4,10}$/.test(newCode)) {
-                    if (statusEl) statusEl.textContent = 'Use 4–10 letters/numbers only.';
+                    adminStatus(statusEl, 'Use 4 to 10 letters or numbers, with no spaces.', 'critical');
                     return;
                 }
                 try {
-                    if (statusEl) statusEl.textContent = 'Saving custom join code...';
+                    adminStatus(statusEl, 'Saving the join code...', 'muted');
                     const resp = await api(`/firms/${firm._id}`, {
                         method: 'PATCH',
                         body: { joinCode: newCode }
@@ -889,13 +874,11 @@ async function initAdminPage() {
                     firm.joinCode = resp.firm?.joinCode || newCode;
                     revealed = true;
                     renderJoin();
-                    if (statusEl) {
-                        statusEl.textContent = 'Custom join code saved!';
-                        setTimeout(() => statusEl.textContent = '', 2000);
-                    }
+                    if (editJoinInput) editJoinInput.value = '';
+                    adminStatus(statusEl, 'Join code saved. The previous code no longer works.', 'success');
                 } catch (error) {
                     console.error('Custom join code save error:', error);
-                    if (statusEl) statusEl.textContent = safeUserMessage(error, 'The custom join code could not be saved. Try again.');
+                    adminStatus(statusEl, safeUserMessage(error, 'The custom join code could not be saved. Try again.'), 'critical');
                 }
             });
         }
@@ -905,7 +888,7 @@ async function initAdminPage() {
             const firmStatus = qs('firmStatus');
             if (!firm || !firm._id || !me.isActive) return;
             try {
-                if (firmStatus) firmStatus.textContent = 'Saving...';
+                adminStatus(firmStatus, 'Saving...', 'muted');
                 const displayName = qs('firmDisplayName')?.value.trim();
                 const description = qs('firmDescription')?.value.trim();
                 const practiceAreas = qs('firmPracticeAreas')?.value.split(',')
@@ -915,13 +898,10 @@ async function initAdminPage() {
                     method: 'PATCH',
                     body: { displayName, description, practiceAreas }
                 });
-                if (firmStatus) {
-                    firmStatus.textContent = 'Saved!';
-                    setTimeout(() => firmStatus.textContent = '', 2000);
-                }
+                adminStatus(firmStatus, 'Firm details saved.', 'success');
             } catch (error) {
                 console.error('Firm profile save error:', error);
-                if (firmStatus) firmStatus.textContent = safeUserMessage(error, 'Firm details could not be saved. Try again.');
+                adminStatus(firmStatus, safeUserMessage(error, 'Firm details could not be saved. Try again.'), 'critical');
             }
         });
 
@@ -932,10 +912,15 @@ async function initAdminPage() {
 
             const userId = removeButton.dataset.userid;
             const memberName = removeButton.closest('tr')?.querySelector('td')?.textContent?.trim() || 'this team member';
-            const confirmed = confirm(`Remove ${memberName} from this firm? They will lose access to the firm's workspace.`);
+            const confirmed = await adminAsk({
+                title: `Remove ${memberName} from this firm?`,
+                body: "They will lose access to the firm's workspace.",
+                confirmLabel: 'Remove from firm',
+                cancelLabel: 'Keep them',
+                tone: 'danger',
+            });
             if (!confirmed) return;
 
-            const firmStatus = qs('firmStatus');
             try {
                 removeButton.textContent = 'Removing...';
                 removeButton.disabled = true;
@@ -943,12 +928,10 @@ async function initAdminPage() {
                 cacheBust(`firms/${firm._id}/users`);
                 const usersResp = await api(`/firms/${firm._id}/users`);
                 if (usersResp?.users) renderUsersTable(usersResp.users);
-                if (firmStatus) firmStatus.textContent = `${memberName} was removed from the firm.`;
+                adminToast(`${memberName} was removed from the firm.`);
             } catch (error) {
                 console.error('Team member removal error:', error);
-                if (firmStatus) {
-                    firmStatus.textContent = safeUserMessage(error, 'The team member could not be removed. Try again.');
-                }
+                adminToast(safeUserMessage(error, 'The team member could not be removed. Try again.'), 'critical');
             } finally {
                 removeButton.disabled = false;
                 removeButton.textContent = 'Remove';

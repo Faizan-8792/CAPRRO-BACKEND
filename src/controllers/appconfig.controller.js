@@ -1,6 +1,6 @@
 // src/controllers/appconfig.controller.js
 import { randomUUID } from "node:crypto";
-import AppConfig, { DEFAULT_FEATURE_FLAGS } from "../models/AppConfig.js";
+import AppConfig, { CONTROL_CHANGE_LIMIT, CONTROL_REASON_MAX, DEFAULT_FEATURE_FLAGS } from "../models/AppConfig.js";
 import { validateDesktopReleasePatch } from "../services/desktop-release.service.js";
 import { assertCaseIndexesReady } from "../services/case-index-readiness.service.js";
 import { assertEngagementIndexesReady } from "../services/engagement-index-readiness.service.js";
@@ -15,6 +15,26 @@ function assertSuper(user) {
     err.statusCode = 403;
     throw err;
   }
+}
+
+// DS24: the reason the super panel asks for before a platform-wide switch moves. Optional here,
+// so a script that calls these routes keeps working; anything sent must be text, and it is kept
+// trimmed to CONTROL_REASON_MAX characters.
+function readControlReason(body) {
+  const raw = body?.reason;
+  if (raw === undefined || raw === null) return { ok: true, reason: "" };
+  if (typeof raw !== "string") return { ok: false, error: "The reason must be text." };
+  return { ok: true, reason: raw.trim().slice(0, CONTROL_REASON_MAX) };
+}
+
+// One history entry, pushed with the change itself so the two cannot disagree.
+function controlChangePush(req, kind, summary, reason) {
+  return {
+    controlChanges: {
+      $each: [{ at: new Date(), byUserId: req.user.id, byEmail: req.user.email || "", kind, summary, reason }],
+      $slice: -CONTROL_CHANGE_LIMIT,
+    },
+  };
 }
 
 // Additive key #2 on this route (see the comment on dataRetention below for #1). Returns null
@@ -152,6 +172,10 @@ export const updateFeatureFlags = async (req, res, next) => {
   try {
     assertSuper(req.user);
     const { featureFlags } = req.body || {};
+    const reasonRead = readControlReason(req.body);
+    if (!reasonRead.ok) {
+      return res.status(400).json({ ok: false, error: reasonRead.error });
+    }
 
     if (
       !featureFlags ||
@@ -227,10 +251,15 @@ export const updateFeatureFlags = async (req, res, next) => {
       update["featureFlagPublicationFences.auditWorkingPapers"] = randomUUID();
     }
     update.updatedBy = req.user.id;
+    const flagSummary = Object.keys(DEFAULT_FEATURE_FLAGS)
+      .filter((key) => Object.prototype.hasOwnProperty.call(featureFlags, key))
+      .map((key) => `${key} ${featureFlags[key] ? "on" : "off"}`)
+      .join(", ");
     await AppConfig.findByIdAndUpdate(
       "singleton",
       {
         $set: update,
+        $push: controlChangePush(req, "featureFlags", `Set ${flagSummary}`, reasonRead.reason),
         ...(Object.keys(versionIncrements).length
           ? { $inc: versionIncrements }
           : {}),
@@ -253,6 +282,10 @@ export const updateMaintenance = async (req, res, next) => {
   try {
     assertSuper(req.user);
     const { maintenanceMode, maintenanceMessage } = req.body || {};
+    const reasonRead = readControlReason(req.body);
+    if (!reasonRead.ok) {
+      return res.status(400).json({ ok: false, error: reasonRead.error });
+    }
 
     const update = {};
     if (typeof maintenanceMode === "boolean")
@@ -264,10 +297,14 @@ export const updateMaintenance = async (req, res, next) => {
       return res.status(400).json({ ok: false, error: "Nothing to update" });
     }
     update.updatedBy = req.user.id;
+    const maintenanceSummary = [
+      ...("maintenanceMode" in update ? [`Set maintenance mode ${update.maintenanceMode ? "on" : "off"}`] : []),
+      ...("maintenanceMessage" in update ? ["Changed the maintenance message"] : []),
+    ].join("; ");
 
     await AppConfig.findByIdAndUpdate(
       "singleton",
-      { $set: update },
+      { $set: update, $push: controlChangePush(req, "maintenance", maintenanceSummary, reasonRead.reason) },
       { upsert: true, new: true },
     );
     AppConfig.invalidateCache();
@@ -278,6 +315,28 @@ export const updateMaintenance = async (req, res, next) => {
       maintenanceMode: fresh.maintenanceMode,
       maintenanceMessage: fresh.maintenanceMessage,
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Super-only: the platform-wide switch history (DS24), newest first. Read straight from the
+// database rather than the 30-second instance cache, so a change shows the moment it is made.
+export const getControlChanges = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    const doc = await AppConfig.findById("singleton").select("controlChanges").lean();
+    const changes = (doc?.controlChanges || [])
+      .slice()
+      .reverse()
+      .map((entry) => ({
+        at: entry.at,
+        byEmail: entry.byEmail || "",
+        kind: entry.kind,
+        summary: entry.summary || "",
+        reason: entry.reason || "",
+      }));
+    return res.json({ ok: true, changes, limit: CONTROL_CHANGE_LIMIT });
   } catch (err) {
     next(err);
   }

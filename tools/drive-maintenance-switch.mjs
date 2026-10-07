@@ -19,8 +19,11 @@
 // The scratch database is dropped at the end, including when a check fails. Nothing here can reach
 // api.caprotoolkit.in.
 //
-// window.confirm is replaced inside the page with a recorder that answers as told, so the drive
-// sees exactly what the panel asks and what it sends after each answer.
+// DS24: the panel asks through the shared CA PRO dialog (ui/capro-ui.js), not window.confirm. The
+// drive answers the REAL dialog the way a person does - reads it, types into its fields, presses
+// its buttons - so what is under test is the panel and the dialog together: that it asks, that
+// turning maintenance on needs a reason and the environment's name typed, that declining sends
+// nothing, and that the reason reaches the server's record of the change.
 //
 // USAGE
 //   node tools/drive-maintenance-switch.mjs            # headless
@@ -77,7 +80,7 @@ assertLoopback("API base", base);
 const panelUrl = `${base}/admin/super.html`;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-console.log("local maintenance-switch drive (DS6)");
+console.log("local maintenance-switch drive (DS6, DS24)");
 console.log(`  api      ${base}`);
 console.log(`  mongo    ${MONGO_URI}`);
 console.log("");
@@ -96,6 +99,7 @@ async function cleanup() {
 }
 
 const storedMode = async () => Boolean((await AppConfig.findById("singleton").lean())?.maintenanceMode);
+const storedChanges = async () => (await AppConfig.findById("singleton").lean())?.controlChanges || [];
 
 try {
   await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 8000 });
@@ -144,11 +148,29 @@ try {
     const onControls = await page.evaluate(`!document.getElementById("page-controls").hidden`);
     check("controls-reachable", onControls === true, `Controls shown after choosing it: ${onControls}`);
 
-    // A recorder in place of confirm(), answering as the drive tells it.
-    await page.evaluate(`(() => {
-      window.__asked = [];
-      window.__answer = false;
-      window.confirm = (message) => { window.__asked.push(String(message)); return window.__answer === true; };
+    // The dialog as a person sees it: its title and body, its fields, its buttons.
+    const dialog = async () => JSON.parse(await page.evaluate(`JSON.stringify((() => {
+      const d = document.querySelector("dialog.cp-dialog");
+      if (!d) return null;
+      const buttons = [...d.querySelectorAll(".cp-dialog__footer button")];
+      return {
+        open: d.open,
+        text: (d.querySelector(".cp-dialog__title")?.textContent || "") + " | " + (d.querySelector(".cp-dialog__body")?.textContent || "").replace(/\\s+/g, " ").trim(),
+        fields: [...d.querySelectorAll("label.cp-label")].map((l) => l.textContent),
+        buttons: buttons.map((b) => ({ label: b.textContent, disabled: b.disabled })),
+      };
+    })())`));
+    // Types into the dialog's nth field the way a keyboard would (value, then an input event).
+    const type = (index, text) => page.evaluate(`(() => {
+      const box = document.querySelectorAll("dialog.cp-dialog input")[${index}];
+      box.value = ${JSON.stringify("")} + ${JSON.stringify(text)};
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+    const press = (label) => page.evaluate(`(() => {
+      const b = [...document.querySelectorAll("dialog.cp-dialog .cp-dialog__footer button")].find((x) => x.textContent === ${JSON.stringify(label)});
+      if (!b) return false;
+      b.click();
       return true;
     })()`);
     const maintenancePatches = () =>
@@ -157,31 +179,53 @@ try {
     // ─── 1. Declining sends nothing ──────────────────────────────────
     page.clearRequests();
     await page.evaluate(`document.getElementById("maintenanceToggle").click(); true`);
-    await sleep(1500);
-    const declined = JSON.parse(await page.evaluate(`JSON.stringify({
-      asked: window.__asked.slice(),
-      checked: document.getElementById("maintenanceToggle").checked,
-    })`));
-    check("asks-before-turning-on", declined.asked.length === 1 && /Every user will see the maintenance screen/.test(declined.asked[0]), `asked ${declined.asked.length} time(s): ${JSON.stringify(declined.asked[0] || "")}`);
+    await sleep(600);
+    const asked = await dialog();
+    check("asks-before-turning-on", asked?.open === true && /Every user will see the maintenance screen/.test(asked.text), `dialog: ${JSON.stringify(asked?.text || null)}`);
+    check("asks-for-a-reason-and-the-environment", asked?.fields.length === 2 && /Reason/.test(asked.fields[0]) && /Type local to confirm/.test(asked.fields[1]), `fields: ${JSON.stringify(asked?.fields || [])}`);
+    const turnOn = asked?.buttons.find((b) => b.label === "Turn on maintenance");
+    check("turn-on-is-off-until-both-are-filled", turnOn?.disabled === true, `Turn on maintenance disabled before typing: ${turnOn?.disabled}`);
+    await press("Keep it off");
+    await sleep(1200);
+    const declined = JSON.parse(await page.evaluate(`JSON.stringify({ checked: document.getElementById("maintenanceToggle").checked, open: !!document.querySelector("dialog.cp-dialog") })`));
+    check("declining-closes-the-dialog", declined.open === false, `dialog still open: ${declined.open}`);
     check("declining-sends-no-patch", maintenancePatches().length === 0, `${maintenancePatches().length} PATCH to /app-config/maintenance after declining (expected 0)`);
     check("declining-leaves-switch-off", declined.checked === false, `switch checked after declining: ${declined.checked}`);
-    check("declining-changes-nothing-stored", (await storedMode()) === false, `stored maintenanceMode after declining: ${await storedMode()}`);
+    check("declining-changes-nothing-stored", (await storedMode()) === false && (await storedChanges()).length === 0, `stored maintenanceMode after declining: ${await storedMode()}, history ${(await storedChanges()).length}`);
 
-    // ─── 2. Accepting turns it on, once ──────────────────────────────
+    // ─── 2. The word alone is not enough; the reason and the word turn it on, once ─────
     page.clearRequests();
-    await page.evaluate(`window.__answer = true; window.__asked = []; document.getElementById("maintenanceToggle").click(); true`);
+    await page.evaluate(`document.getElementById("maintenanceToggle").click(); true`);
+    await sleep(600);
+    await type(1, "local");
+    const wordOnly = (await dialog())?.buttons.find((b) => b.label === "Turn on maintenance");
+    check("the-word-alone-is-not-enough", wordOnly?.disabled === true, `Turn on maintenance disabled with no reason: ${wordOnly?.disabled}`);
+    const REASON_ON = "Database upgrade, about 15 minutes (local drive)";
+    await type(0, REASON_ON);
+    const both = (await dialog())?.buttons.find((b) => b.label === "Turn on maintenance");
+    check("the-reason-and-the-word-turn-it-on", both?.disabled === false, `Turn on maintenance disabled with both: ${both?.disabled}`);
+    await press("Turn on maintenance");
     await sleep(2000);
     const label = await page.evaluate(`document.getElementById("maintenanceLabel").textContent.trim()`);
+    const scopeChip = await page.evaluate(`!document.getElementById("superScopeMaintenance").hidden`);
     check("accepting-sends-one-patch", maintenancePatches().length === 1, `${maintenancePatches().length} PATCH after accepting (expected 1)`);
-    check("accepted-on-is-stored", (await storedMode()) === true, `stored maintenanceMode: ${await storedMode()}, label ${JSON.stringify(label)}`);
+    check("accepted-on-is-stored", (await storedMode()) === true && label === "Maintenance mode: ON", `stored maintenanceMode: ${await storedMode()}, label ${JSON.stringify(label)}`);
+    const afterOn = await storedChanges();
+    check("the-reason-is-recorded-with-the-change", afterOn.length === 1 && afterOn[0].reason === REASON_ON && afterOn[0].summary === "Set maintenance mode on" && afterOn[0].byEmail === SUPER_EMAIL, `history: ${JSON.stringify(afterOn.map((c) => [c.summary, c.reason]))}`);
+    check("the-scope-bar-says-maintenance-is-on", scopeChip === true, `scope bar maintenance chip shown: ${scopeChip}`);
 
     // ─── 3. Turning it off asks too, and names the effect ────────────
     page.clearRequests();
-    await page.evaluate(`window.__asked = []; document.getElementById("maintenanceToggle").click(); true`);
+    await page.evaluate(`document.getElementById("maintenanceToggle").click(); true`);
+    await sleep(600);
+    const offAsked = await dialog();
+    check("asks-before-turning-off", offAsked?.open === true && /full access again/.test(offAsked.text) && offAsked.fields.length === 1, `dialog: ${JSON.stringify(offAsked?.text || null)}, fields ${JSON.stringify(offAsked?.fields || [])}`);
+    await type(0, "Upgrade finished (local drive)");
+    await press("Turn off maintenance");
     await sleep(2000);
-    const offAsked = await page.evaluate(`window.__asked.slice()`);
-    check("asks-before-turning-off", offAsked.length === 1 && /full access again/.test(offAsked[0]), `asked: ${JSON.stringify(offAsked[0] || "")}`);
     check("accepted-off-is-stored", maintenancePatches().length === 1 && (await storedMode()) === false, `${maintenancePatches().length} PATCH; stored maintenanceMode: ${await storedMode()}`);
+    const history = await page.evaluate(`[...document.querySelectorAll("#controlChangesList .control-change__why")].map((n) => n.textContent.trim())`);
+    check("the-panel-lists-the-changes-with-their-reasons", Array.isArray(history) && history[0] === "Upgrade finished (local drive)" && history[1] === REASON_ON, `listed: ${JSON.stringify(history)}`);
   }, { headless: !SHOW });
 } finally {
   await cleanup();

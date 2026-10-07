@@ -7,14 +7,17 @@
  *
  *   CaproUI.confirm({ title, body, confirmLabel, cancelLabel, tone, requireText, details }) -> Promise<boolean>
  *   CaproUI.alert({ title, body, okLabel, tone })                                         -> Promise<void>
- *   CaproUI.prompt({ title, body, label, value, placeholder, confirmLabel, cancelLabel })  -> Promise<string|null>
+ *   CaproUI.prompt({ title, body, label, value, placeholder, required, maxLength,
+ *                    requireText, confirmLabel, cancelLabel })                             -> Promise<string|null>
  *   CaproUI.toast({ message, tone, actionLabel, onAction, timeout })                      -> { close() }
  *   CaproUI.icon(name, { size, label, className })                                        -> SVGElement
  *
  * The rules (DS17 research): a dialog says what will happen to what, and its buttons name the action
  * ("Turn on maintenance", never "OK"); a destructive dialog opens on the safe button and Enter never
  * confirms it; a firm-wide or irreversible action can ask for a word to be typed first; Esc and the
- * close button cancel; focus returns to whatever opened it; one dialog at a time. A toast confirms
+ * close button cancel; focus returns to whatever opened it; one dialog at a time. A prompt given
+ * requireText asks for both its value (the reason for a change, say) and the typed word, in two
+ * fields, and resolves with the value. A toast confirms
  * something just done: success and information leave by themselves after six seconds (and wait
  * while hovered or focused), a problem stays until it is dismissed.
  */
@@ -105,22 +108,32 @@
       }
       if (body.childNodes.length && !spec.details) dialog.setAttribute("aria-describedby", body.id);
 
-      var input = null;
-      if (spec.kind === "prompt" || spec.requireText) {
+      // A prompt's value and a typed confirmation are separate fields, so one dialog can ask for
+      // a reason and for the word; it resolves with the reason, never with the word.
+      function textField(suffix, labelText) {
         var field = el("div", "cp-field");
-        var label = el("label", "cp-label", spec.requireText ? (spec.requireLabel || "Type " + spec.requireText + " to confirm") : (spec.label || ""));
-        label.htmlFor = id + "-input";
-        input = el("input", "cp-input");
-        input.id = id + "-input";
-        input.type = "text";
-        input.autocomplete = "off";
-        input.spellcheck = false;
+        var label = el("label", "cp-label", labelText);
+        label.htmlFor = id + suffix;
+        var box = el("input", "cp-input");
+        box.id = id + suffix;
+        box.type = "text";
+        box.autocomplete = "off";
+        box.spellcheck = false;
+        field.appendChild(label);
+        field.appendChild(box);
+        body.appendChild(field);
+        return box;
+      }
+      var input = null;
+      if (spec.kind === "prompt") {
+        input = textField("-input", spec.label || "");
         if (spec.placeholder) input.placeholder = spec.placeholder;
         if (spec.value) input.value = String(spec.value);
-        field.appendChild(label);
-        field.appendChild(input);
-        body.appendChild(field);
+        if (spec.maxLength) input.maxLength = Number(spec.maxLength);
+        if (spec.required) input.required = true;
       }
+      var typed = null;
+      if (spec.requireText) typed = textField("-typed", spec.requireLabel || "Type " + spec.requireText + " to confirm");
       dialog.appendChild(body);
 
       var footer = el("div", "cp-dialog__footer");
@@ -138,7 +151,7 @@
 
       function typedOk() {
         if (!spec.requireText) return true;
-        return input && input.value.trim() === String(spec.requireText);
+        return typed !== null && typed.value.trim() === String(spec.requireText);
       }
 
       function syncConfirm() {
@@ -178,16 +191,15 @@
           return;
         }
         // Enter confirms only where confirming is the safe default: never in a destructive dialog.
-        if (event.key === "Enter" && event.target === input && tone !== "danger" && !confirm.disabled) {
+        if (event.key === "Enter" && (event.target === input || event.target === typed) && tone !== "danger" && !confirm.disabled) {
           event.preventDefault();
           confirm.click();
         }
       });
 
-      if (input) {
-        input.addEventListener("input", syncConfirm);
-        syncConfirm();
-      }
+      if (input) input.addEventListener("input", syncConfirm);
+      if (typed) typed.addEventListener("input", syncConfirm);
+      if (input || typed) syncConfirm();
 
       document.body.appendChild(dialog);
       try {
@@ -197,7 +209,7 @@
       }
 
       // A destructive dialog opens on the safe button; a typed confirmation on its field.
-      var first = input || (tone === "danger" ? cancel || confirm : confirm);
+      var first = input || typed || (tone === "danger" ? cancel || confirm : confirm);
       setTimeout(function () { if (!settled) first.focus(); }, 0);
     });
   }
@@ -209,6 +221,8 @@
 
   function alertDialog(options) {
     var spec = Object.assign({ kind: "alert", tone: "info" }, options || {});
+    // okLabel is the documented name for the one button; confirmLabel is honoured as well.
+    if (spec.okLabel && !spec.confirmLabel) spec.confirmLabel = spec.okLabel;
     return enqueue(function () { return openDialog(spec); });
   }
 

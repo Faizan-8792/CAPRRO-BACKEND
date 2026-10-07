@@ -66,7 +66,7 @@ await withBrowser(async (page) => {
   const card = await page.evaluate(`(() => {
     const status = document.getElementById("providerUsageStatus");
     const grid = document.getElementById("providerUsageGrid");
-    const heads = Array.from(document.querySelectorAll("h6"));
+    const heads = Array.from(document.querySelectorAll("h2, h3, h6"));
     const heading = heads.find(h => /Provider Usage/i.test(h.textContent || ""));
     return {
       headingPresent: !!heading,
@@ -103,11 +103,11 @@ await withBrowser(async (page) => {
   // card's text for a digit. Both of today's counts are legitimately 0 right now, and "0" appears all
   // over a page; a substring search would pass on a card that rendered nothing meaningful. So each
   // provider column is walked and its two labelled figures extracted, then compared to the exact
-  // API values. Shape (super.js:660-682): #providerUsageGrid > .col-md-6, an h6 label, then a
+  // API values. Shape (super.js loadProviderUsageStats): #providerUsageGrid > .col-md-6, an h3 label, then a
   // .d-flex holding two divs, each a value followed by its caption.
   const cells = await page.evaluate(`(() => {
     return Array.from(document.querySelectorAll("#providerUsageGrid > div")).map(col => {
-      const label = (col.querySelector("h6")?.textContent || "").trim();
+      const label = (col.querySelector("h3, h6")?.textContent || "").trim();
       const figures = Array.from(col.querySelectorAll(".d-flex > div")).map(d => ({
         value: (d.children[0]?.textContent || "").trim(),
         caption: (d.children[1]?.textContent || "").trim(),

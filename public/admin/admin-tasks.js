@@ -41,7 +41,7 @@ async function apiTasks(path, opts) {
   } catch {}
 
   if (!res.ok) {
-    const msg = data?.error || data?.message || 'Request failed';
+    const msg = data?.error || data?.message || 'The request could not be completed. Try again.';
     const err = new Error(msg);
     err.status = res.status;
     err.data = data;
@@ -58,14 +58,15 @@ let __firmUsersCache = []; // [{id,email,name}]
 function renderTaskColumn(title, key, items) {
   const list = items || [];
   const count = list.length;
-  const colorMap = {
-    NOT_STARTED: 'secondary',
+  // The column's count in the tone of its state (the library's badge, DS24).
+  const toneMap = {
+    NOT_STARTED: '',
     WAITING_DOCS: 'warning',
-    IN_PROGRESS: 'info',
+    IN_PROGRESS: 'accent',
     FILED: 'success',
-    CLOSED: 'dark',
+    CLOSED: 'info',
   };
-  const badgeColor = colorMap[key] || 'secondary';
+  const tone = toneMap[key] || '';
 
   const cardsHtml = list
     .map((t) => {
@@ -74,22 +75,16 @@ function renderTaskColumn(title, key, items) {
 
       return `
         <div class="task-card task-card-compact" data-task-id="${esc(t.id)}">
-          <div class="task-summary">
+          <div class="task-summary" role="button" tabindex="0" aria-expanded="false">
             <div class="task-summary-left">
               <p class="task-summary-title">${esc(t.title)} — ${esc(t.clientName)}</p>
               <div class="task-summary-sub">
                 ${esc(t.serviceType)} • Due ${esc(due)} • ${esc(staff)}
               </div>
             </div>
-
-            <div class="task-actions">
-              <button class="btn btn-outline-danger btn-sm task-delete-btn"
-                      type="button"
-                      data-task-id="${esc(t.id)}">Delete</button>
-            </div>
           </div>
 
-          <div class="task-details mt-2">
+          <div class="task-details">
             <div class="task-meta">
               <div><strong>Client:</strong> ${esc(t.clientName)}</div>
               <div><strong>Service:</strong> ${esc(t.serviceType)}</div>
@@ -98,13 +93,19 @@ function renderTaskColumn(title, key, items) {
             </div>
 
             <div class="mt-2">
-              <select class="form-select form-select-sm task-status-select" data-task-id="${esc(t.id)}">
+              <select class="form-select form-select-sm task-status-select" data-task-id="${esc(t.id)}" aria-label="Status of ${esc(t.title)}">
                 <option value="NOT_STARTED" ${t.status === 'NOT_STARTED' ? 'selected' : ''}>Not started</option>
                 <option value="WAITING_DOCS" ${t.status === 'WAITING_DOCS' ? 'selected' : ''}>Waiting for docs</option>
                 <option value="IN_PROGRESS" ${t.status === 'IN_PROGRESS' ? 'selected' : ''}>In progress</option>
                 <option value="FILED" ${t.status === 'FILED' ? 'selected' : ''}>Filed</option>
                 <option value="CLOSED" ${t.status === 'CLOSED' ? 'selected' : ''}>Closed</option>
               </select>
+            </div>
+
+            <div class="task-actions">
+              <button class="btn btn-outline-danger btn-sm task-delete-btn"
+                      type="button"
+                      data-task-id="${esc(t.id)}">Delete task</button>
             </div>
           </div>
         </div>
@@ -117,9 +118,9 @@ function renderTaskColumn(title, key, items) {
       <div class="task-column">
         <div class="task-column-header">
           <span>${esc(title)}</span>
-          <span class="badge bg-${badgeColor}">${count}</span>
+          <span class="cp-badge"${tone ? ` data-tone="${tone}"` : ''}>${count}</span>
         </div>
-        ${cardsHtml || `<div class="text-muted small">No tasks</div>`}
+        ${cardsHtml || `<div class="text-muted small">No tasks here.</div>`}
       </div>
     </div>
   `;
@@ -131,7 +132,7 @@ async function refreshTaskBoard() {
   if (!columnsEl) return;
 
   try {
-    if (statusEl) statusEl.textContent = 'Loading tasks...';
+    taskStatus(statusEl, 'Loading tasks...', 'muted');
 
     const qsService = qs('taskFilterService');
     const qsStaff = qs('taskFilterStaff');
@@ -156,22 +157,39 @@ async function refreshTaskBoard() {
 
     columnsEl.innerHTML = colHtml;
 
-    if (statusEl) {
-      statusEl.textContent = 'All task tools and filters are available free during the current rollout.';
-    }
+    taskStatus(statusEl, '', 'muted');
 
     attachStatusChangeHandlers();
     attachCardToggleHandlers();
     attachDeleteHandlers();
   } catch (e) {
     console.error('refreshTaskBoard error:', e);
-    if (statusEl) statusEl.textContent = e.message || 'Failed to load task board.';
+    taskStatus(statusEl, e.message || 'The task board could not be loaded. Reload the page.', 'critical');
   }
+}
+
+// DS24: questions through the shared CA PRO dialog, outcomes as toasts (ui/capro-ui.js). Without
+// the library a question answers no, so nothing is deleted unasked.
+function taskAsk(options) {
+  return window.CaproUI ? window.CaproUI.confirm(options) : Promise.resolve(false);
+}
+
+function taskToast(message, tone = 'success') {
+  if (window.CaproUI) window.CaproUI.toast({ message, tone });
+}
+
+function taskStatus(el, text, tone = 'muted') {
+  if (!el) return;
+  el.textContent = text || '';
+  el.dataset.tone = tone;
 }
 
 function attachStatusChangeHandlers() {
   const selects = document.querySelectorAll('.task-status-select');
   selects.forEach((sel) => {
+    // What the server holds, so a refused change does not leave the select showing a status
+    // that was never saved.
+    sel.dataset.saved = sel.value;
     sel.addEventListener('change', async (e) => {
       const taskId = e.target.getAttribute('data-task-id');
       const newStatus = e.target.value;
@@ -184,20 +202,30 @@ function attachStatusChangeHandlers() {
         await refreshTaskBoard();
       } catch (err) {
         console.error('Status update error:', err);
-        alert(err.message || 'Failed to update task status');
+        e.target.value = e.target.dataset.saved || e.target.value;
+        taskToast(err.message || 'The status could not be changed. Try again.', 'critical');
       }
     });
   });
 }
 
+// The card's summary opens and closes it - by mouse, or by Enter or Space from the keyboard; the
+// summary says whether it is open. Clicks inside the opened part (the status, the delete) leave it be.
 function attachCardToggleHandlers() {
   document.querySelectorAll('.task-card').forEach((card) => {
     card.classList.remove('task-card-expanded');
-
-    card.addEventListener('click', (e) => {
-      if (e.target.closest('.task-delete-btn')) return;
-      if (e.target.closest('.task-status-select')) return;
-      card.classList.toggle('task-card-expanded');
+    const summary = card.querySelector('.task-summary');
+    if (!summary) return;
+    const toggle = () => {
+      const open = card.classList.toggle('task-card-expanded');
+      summary.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    summary.addEventListener('click', toggle);
+    summary.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggle();
+      }
     });
   });
 }
@@ -211,15 +239,25 @@ function attachDeleteHandlers() {
       const taskId = btn.getAttribute('data-task-id');
       if (!taskId) return;
 
-      const ok = confirm('Delete this task?');
+      // The server archives the task (archiveTask: isActive false); nothing in this panel brings
+      // it back, so the dialog says so.
+      const title = btn.closest('.task-card')?.querySelector('.task-summary-title')?.textContent?.trim();
+      const ok = await taskAsk({
+        title: title ? `Delete the task "${title}"?` : 'Delete this task?',
+        body: 'It leaves the task board for everyone in the firm, and cannot be brought back from this panel.',
+        confirmLabel: 'Delete task',
+        cancelLabel: 'Keep the task',
+        tone: 'danger',
+      });
       if (!ok) return;
 
       try {
         await apiTasks(`/tasks/${taskId}`, { method: 'DELETE' });
+        taskToast(title ? `Deleted "${title}".` : 'Task deleted.');
         await refreshTaskBoard();
       } catch (err) {
         console.error('Delete error:', err);
-        alert(err.message || 'Failed to delete task');
+        taskToast(err.message || 'The task could not be deleted. Try again.', 'critical');
       }
     });
   });
@@ -314,7 +352,7 @@ async function createTaskFromAdminUI() {
   const status = qs('addTaskStatusSelect')?.value?.trim() || 'NOT_STARTED';
 
   if (!clientName || !title || !dueDate) {
-    if (statusEl) statusEl.textContent = 'Client, Title, Due date required.';
+    taskStatus(statusEl, 'Enter the client name, the title and the due date.', 'critical');
     return;
   }
 
@@ -322,18 +360,22 @@ async function createTaskFromAdminUI() {
   // midnight here sent the previous UTC day from any browser east of UTC (India included).
   const dueDateISO = dueDate;
 
+  // One task per press: the button stays disabled until the server has answered, so a double
+  // click cannot send the create twice.
+  const addButton = qs('addTaskBtn');
+  if (addButton?.disabled) return;
+  if (addButton) addButton.disabled = true;
+
   try {
-    if (statusEl) statusEl.textContent = 'Creating task...';
+    taskStatus(statusEl, 'Creating the task...', 'muted');
 
     const body = { clientName, serviceType, title, dueDateISO, status };
     if (assignedTo) body.assignedTo = assignedTo;
 
     await apiTasks('/tasks', { method: 'POST', body });
 
-    if (statusEl) statusEl.textContent = 'Task created!';
-    setTimeout(() => {
-      if (statusEl) statusEl.textContent = '';
-    }, 1500);
+    taskStatus(statusEl, '', 'muted');
+    taskToast(`Task created for ${clientName}.`);
 
     if (qs('addTaskClient')) qs('addTaskClient').value = '';
     if (qs('addTaskTitle')) qs('addTaskTitle').value = '';
@@ -344,7 +386,9 @@ async function createTaskFromAdminUI() {
     await refreshTaskBoard();
   } catch (e) {
     console.error('Create task error:', e);
-    if (statusEl) statusEl.textContent = e.message || 'Failed to create task.';
+    taskStatus(statusEl, e.message || 'The task could not be created. Try again.', 'critical');
+  } finally {
+    if (addButton) addButton.disabled = false;
   }
 }
 
@@ -356,12 +400,19 @@ function initAddTaskUI() {
 
 // -------------------- INIT --------------------
 
+// initTaskBoard runs on every visit to #tasks. The buttons are wired once: each visit used to add
+// another click listener, so after three visits one click on Add task created three tasks (DS24).
+let taskBoardWired = false;
+
 async function initTaskBoard() {
   await loadFirmUsersCache();
   fillStaffFilterDropdown();
   fillAssignDropdown();
-  initTaskFilters();
-  initAddTaskUI();
+  if (!taskBoardWired) {
+    initTaskFilters();
+    initAddTaskUI();
+    taskBoardWired = true;
+  }
   await refreshTaskBoard();
 }
 

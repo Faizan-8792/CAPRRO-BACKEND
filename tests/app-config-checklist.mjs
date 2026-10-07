@@ -174,10 +174,13 @@ check(
   "Controls present"
 );
 
+// DS24: the question is the shared dialog, which also takes the reason the server records and,
+// to turn maintenance on, the environment's name typed. Declining still returns before the PATCH.
 check(
-  "Super JS wires toggle change → confirm → PATCH /app-config/maintenance",
-  /maintenanceToggle[\s\S]{0,2000}window\.confirm\(question\)[\s\S]{0,600}\/app-config\/maintenance/.test(superJs),
-  "The toggle asks first (DS6), then persists"
+  "Super JS wires toggle change → ask (reason, and the environment typed to turn it on) → PATCH /app-config/maintenance",
+  /maintenanceToggle[\s\S]{0,2000}const reason = await superAskText\([\s\S]{0,900}requireText: scope\.word,[\s\S]{0,1200}if \(reason === null\) \{\s*toggle\.checked = prev;\s*return;\s*\}[\s\S]{0,400}\/app-config\/maintenance",\s*\{\s*method: "PATCH",\s*body: \{ maintenanceMode: want, reason \}/.test(superJs) &&
+    !/window\.(confirm|prompt|alert)\(/.test(superJs),
+  "The toggle asks first (DS6, DS24), sends the reason with the change, and declining sends nothing"
 );
 
 check(

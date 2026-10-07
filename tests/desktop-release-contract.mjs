@@ -550,15 +550,18 @@ check(
   /\/app-config\/desktop-release\/notify/.test(superJs)
 );
 
+// DS24: both gates are one shared dialog whose Notify button stays off until the version is typed
+// exactly. The check reads the handler itself - from its addEventListener to the POST - so it cannot
+// pass on a dialog elsewhere in the file, and it refuses any native dialog left in super.js.
 check(
-  "super.js gates that notify POST behind a window.confirm or window.prompt call earlier in the same handler",
+  "super.js gates that notify POST behind a dialog that requires the version typed, earlier in the same handler",
   (() => {
+    const start = superJs.indexOf('notifyDesktopReleaseBtn.addEventListener("click"');
     const idx = superJs.indexOf("/app-config/desktop-release/notify");
-    if (idx === -1) return false;
-    // Look back a generous window for the handler's own start, not the whole file,
-    // so this cannot pass merely because SOME confirm/prompt exists anywhere above.
-    const before = superJs.slice(Math.max(0, idx - 1500), idx);
-    return /window\.confirm\(/.test(before) || /window\.prompt\(/.test(before);
+    if (start === -1 || idx === -1 || idx < start) return false;
+    const handler = superJs.slice(start, idx);
+    return /const confirmed = await superAsk\(\{[\s\S]*?requireText: version,[\s\S]*?\}\);\s*if \(!confirmed\) return;/.test(handler) &&
+      !/window\.(confirm|prompt|alert)\(/.test(superJs);
   })(),
   "A rollback/re-announce click must require typed operator confirmation before the network call fires"
 );

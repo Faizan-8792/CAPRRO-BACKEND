@@ -183,7 +183,14 @@ try {
     await page.evaluate(
       `localStorage.setItem("caproadminjwt", ${JSON.stringify(superToken)}); true`,
     );
-    await page.goto(panelUrl, { waitMs: 3500 });
+    // The release card is on App controls, and since DS10 (2026-10-04) it stays disabled until
+    // that page has read the saved release - a click on a disabled card's Save sends nothing. The
+    // drive opened the default page and so had been failing since then; it goes where a person goes.
+    await page.goto(`${panelUrl}#controls`, { waitMs: 2500 });
+    for (let waited = 0; waited < 6000; waited += 200) {
+      if (await page.evaluate(`document.getElementById("desktopReleaseSet") && !document.getElementById("desktopReleaseSet").disabled`)) break;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
 
     const origin = await page.evaluate(
       `JSON.stringify({ origin: location.origin, href: location.href })`,

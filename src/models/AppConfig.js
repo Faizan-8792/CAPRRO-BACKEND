@@ -25,6 +25,23 @@ export const DEFAULT_FEATURE_FLAGS = Object.freeze({
   weeklySummary: false,
 });
 
+// DS24: the platform-wide switches (maintenance mode, the feature flags) keep a short history of
+// who changed them, what was set and why. The newest CONTROL_CHANGE_LIMIT entries are kept.
+export const CONTROL_CHANGE_LIMIT = 50;
+export const CONTROL_REASON_MAX = 300;
+export const CONTROL_CHANGE_KINDS = Object.freeze(["maintenance", "featureFlags"]);
+
+const ControlChangeSchema = new mongoose.Schema(
+  {
+    at: { type: Date, required: true },
+    byUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    byEmail: { type: String, trim: true, maxlength: 320, default: "" },
+    kind: { type: String, enum: CONTROL_CHANGE_KINDS, required: true },
+    summary: { type: String, trim: true, maxlength: 600, default: "" },
+    reason: { type: String, trim: true, maxlength: CONTROL_REASON_MAX, default: "" },
+  },
+  { _id: false },
+);
 
 const AppConfigSchema = new mongoose.Schema(
   {
@@ -119,6 +136,10 @@ const AppConfigSchema = new mongoose.Schema(
     // the hosting platform's environment cannot be managed through its API and
     // every file under the served root is publicly downloadable between deploys.
     resendWebhookSecret: { type: String, trim: true, maxlength: 512, default: null },
+    // DS24: see ControlChangeSchema above. Admin-facing only, read through the super-only
+    // GET /api/app-config/control-changes; the public /api/app-config route names its keys and
+    // does not name this one.
+    controlChanges: { type: [ControlChangeSchema], default: [] },
   },
   { timestamps: true, _id: false }
 );

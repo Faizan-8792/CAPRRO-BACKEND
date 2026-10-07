@@ -17,6 +17,9 @@ function escapeHtml(s) {
     .replaceAll("'", '&#39;');
 }
 
+// A level in words; an unknown level is shown as the engine gave it.
+const PRIORITY_LABELS = { CRITICAL: 'Critical', HIGH: 'High', MEDIUM: 'Medium', LOW: 'Low' };
+
 async function api(path) {
   const token = localStorage.getItem('caproadminjwt');
   const res = await fetch(`${API_BASE}${path}`, {
@@ -47,8 +50,10 @@ async function loadAdminComplianceAssistant() {
 
     const today = enriched.filter(t => t.score >= 30);
 
+    // These count priority levels. The first was labelled "Overdue" while it counted every task
+    // scoring 90 or more, which includes work due today (DS24).
     qs('caOverdueCount').textContent =
-      `Overdue: ${today.filter(t => t.score >= 90).length}`;
+      `Critical: ${today.filter(t => t.priority === 'CRITICAL').length}`;
     qs('caTodayCount').textContent =
       `High: ${today.filter(t => t.priority === 'HIGH').length}`;
     qs('caUpcomingCount').textContent =
@@ -56,7 +61,7 @@ async function loadAdminComplianceAssistant() {
 
     if (!today.length) {
       tbody.innerHTML =
-        `<tr><td colspan="5" class="text-center text-muted">No critical work today 🎉</td></tr>`;
+        `<tr><td colspan="5" class="text-center text-muted">Nothing needs attention today.</td></tr>`;
       statusEl.textContent = '';
       return;
     }
@@ -71,21 +76,21 @@ async function loadAdminComplianceAssistant() {
           <td>${escapeHtml(window.formatDueDay(t.dueDateISO))}</td>
           <td>${escapeHtml(t.assignedTo?.email || 'Unassigned')}</td>
           <td>
-            <span class="badge bg-${t.priority === 'CRITICAL' ? 'danger' :
-                                   t.priority === 'HIGH' ? 'warning' :
-                                   'secondary'}">
-              ${t.priority}
+            <span class="cp-badge" data-tone="${t.priority === 'CRITICAL' ? 'critical' :
+                                   t.priority === 'HIGH' ? 'warning' : ''}">
+              ${escapeHtml(PRIORITY_LABELS[t.priority] || t.priority)}
             </span>
           </td>
         </tr>
       `)
       .join('');
 
-    statusEl.textContent = `Showing top ${today.length} priority tasks`;
+    statusEl.textContent = today.length > 10 ? `Showing the 10 most urgent of ${today.length}.` : '';
 
   } catch (e) {
     console.error(e);
-    statusEl.textContent = 'Failed to load compliance assistant';
+    statusEl.textContent = "Today's priorities could not be loaded. Reload the page.";
+    statusEl.dataset.tone = 'critical';
   }
 }
 

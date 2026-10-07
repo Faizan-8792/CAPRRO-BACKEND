@@ -66,6 +66,16 @@ function escapeHtml(s) {
     .replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
+// What a failed request says when the server sent no message of its own: plain words and the
+// next step, never a status code (DS24).
+function superPlainError(status) {
+  if (status === 401) return "Your session has ended. Sign in again to continue.";
+  if (status === 403) return "This account is not allowed to do that.";
+  if (status === 404) return "That item no longer exists. Reload the page.";
+  if (status === 429) return "Too many requests in a short time. Wait a minute, then try again.";
+  return "The server could not complete that request. Try again in a moment.";
+}
+
 async function api(path, opts = {}) {
   const token = getToken();
   const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
@@ -81,7 +91,7 @@ async function api(path, opts = {}) {
   try { data = await res.json(); } catch { /* ignore */ }
 
   if (!res.ok) {
-    const msg = data?.error || data?.message || `Request failed (${res.status})`;
+    const msg = data?.error || data?.message || superPlainError(res.status);
     const err = new Error(msg);
     err.status = res.status;
     err.data = data;
@@ -92,6 +102,109 @@ async function api(path, opts = {}) {
 
 function requireSuperAdmin(user) {
   return user.role === "SUPER_ADMIN" || user.email === "saifullahfaizan786@gmail.com";
+}
+
+// ─── Dialogs, status lines and scope (DS24) ─────────────────────────
+// Every question this panel asks goes through the shared CA PRO dialog (ui/capro-ui.js): its
+// buttons name the action, a destructive one opens on the safe button and Enter never confirms
+// it, Esc cancels and focus returns to the button that asked. If the library did not load, a
+// question answers no, so nothing destructive runs unasked. Nothing here calls alert, confirm
+// or prompt.
+function superAsk(options) {
+  return window.CaproUI ? window.CaproUI.confirm(options) : Promise.resolve(false);
+}
+
+function superAskText(options) {
+  return window.CaproUI ? window.CaproUI.prompt(options) : Promise.resolve(null);
+}
+
+// The outcome of an action taken in a table row: success leaves by itself, a problem stays
+// until it is dismissed.
+function superToast(message, tone = "success") {
+  if (window.CaproUI) window.CaproUI.toast({ message, tone });
+}
+
+// A card's status line: the outcome of the last thing done on that card, in its tone. The old
+// lines set an inline colour that admin.css's `.small-label { color: ... !important }` beat, so
+// every error showed in the same grey as the help text beside it.
+function superStatus(el, text, tone = "muted") {
+  if (!el) return;
+  el.textContent = text || "";
+  el.dataset.tone = tone;
+}
+
+// Where a platform-wide change lands. Shown above every page, and typed to confirm the switches
+// that reach every user, so a change on production cannot be confirmed by habit.
+function superScope() {
+  const host = window.location.hostname;
+  const local = host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host.endsWith(".localhost");
+  return local
+    ? { word: "local", label: "Local backend", host: window.location.host }
+    : { word: "production", label: "Production", host };
+}
+
+function superRenderScope() {
+  const scope = superScope();
+  const bar = qs("superScope");
+  if (bar) bar.dataset.scope = scope.word;
+  if (qs("superScopeName")) qs("superScopeName").textContent = scope.label;
+  if (qs("superScopeHost")) qs("superScopeHost").textContent = scope.host;
+}
+
+// Maintenance mode is a state, not an event: it shows on the switch's card and, once the Controls
+// page has read it, in the scope bar above every page for as long as it is on. Startup does not
+// read it separately: it asks only for the signed-in user and the page on screen (DS10).
+function superRenderMaintenance(on) {
+  const label = qs("maintenanceLabel");
+  if (label) label.textContent = `Maintenance mode: ${on ? "ON" : "OFF"}`;
+  const chip = qs("superScopeMaintenance");
+  if (chip) chip.hidden = !on;
+  const card = qs("maintenanceCard");
+  if (card) card.dataset.state = on ? "on" : "off";
+}
+
+
+// SNAKE_CASE values in words ("FIRM_USER" -> "Firm user"); empty is a dash. An unknown value keeps
+// its own words rather than being folded into a known one.
+function superEnumLabel(value) {
+  const words = String(value || "").trim().toLowerCase().split("_").filter(Boolean).join(" ");
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "—";
+}
+
+// "12,34,567": counts read in the Indian grouping the rest of the product uses.
+function superCount(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toLocaleString("en-IN") : "—";
+}
+
+// ─── Control changes (DS24) ─────────────────────────────────────────
+// Who moved maintenance mode or a feature flag, what was set and the reason they gave. The server
+// records an entry with every change (GET /api/app-config/control-changes, super only).
+async function loadControlChanges() {
+  const list = qs("controlChangesList");
+  const status = qs("controlChangesStatus");
+  if (!list) return;
+  try {
+    const data = await api("/app-config/control-changes");
+    const changes = Array.isArray(data.changes) ? data.changes : [];
+    superStatus(status, changes.length ? "" : "No change recorded yet. Changes made from now on are listed here with their reason.", "muted");
+    list.innerHTML = changes
+      .slice(0, 8)
+      .map((change) => {
+        const when = change.at ? new Date(change.at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—";
+        const reason = change.reason ? escapeHtml(change.reason) : '<span class="control-change__none">No reason given</span>';
+        return `
+          <li class="control-change">
+            <div class="control-change__what">${escapeHtml(change.summary || "Change")}</div>
+            <div class="control-change__why">${reason}</div>
+            <div class="control-change__meta">${escapeHtml(change.byEmail || "Actor not recorded")} · ${escapeHtml(when)}</div>
+          </li>`;
+      })
+      .join("");
+  } catch (err) {
+    list.innerHTML = "";
+    superStatus(status, err.message || "The change history could not be read. Reload the page.", "critical");
+  }
 }
 
 // ─── App Config (maintenance + welcome) ────────────────────────────
@@ -162,13 +275,12 @@ function reportFeatureFlagLoadFailure(reason) {
     const box = featureFlagCheckbox(key);
     if (box) box.disabled = true;
   }
-  const status = qs("featureFlagsStatus");
-  if (status) {
-    status.textContent =
-      `Feature flags could not be loaded (${reason}). The checkboxes above are NOT showing the ` +
-      "real state and have been disabled so they cannot be saved over it. Reload the page.";
-    status.style.color = "#b44545";
-  }
+  superStatus(
+    qs("featureFlagsStatus"),
+    `Feature flags could not be loaded (${reason}). The checkboxes above are NOT showing the ` +
+      "real state and have been disabled so they cannot be saved over it. Reload the page.",
+    "critical",
+  );
 }
 
 // A Controls card shows the server's settings, so its form stays disabled (a fieldset in
@@ -202,10 +314,9 @@ async function loadAppConfigSection() {
     const c = r.config;
 
     const toggle = qs("maintenanceToggle");
-    const label = qs("maintenanceLabel");
     const msg = qs("maintenanceMessageInput");
     if (toggle) toggle.checked = !!c.maintenanceMode;
-    if (label) label.textContent = `Maintenance mode: ${c.maintenanceMode ? "ON" : "OFF"}`;
+    superRenderMaintenance(!!c.maintenanceMode);
     if (msg) msg.value = c.maintenanceMessage || "";
     setControlsCardReady("maintenanceSet", true);
 
@@ -282,7 +393,6 @@ function renderDesktopReleaseLive(d) {
 
 function bindAppConfigHandlers() {
   const toggle = qs("maintenanceToggle");
-  const label = qs("maintenanceLabel");
   const msgInput = qs("maintenanceMessageInput");
   const saveMsgBtn = qs("saveMaintenanceBtn");
   const msgStatus = qs("maintenanceStatus");
@@ -291,14 +401,46 @@ function bindAppConfigHandlers() {
     toggle.addEventListener("change", async () => {
       const want = toggle.checked;
       const prev = !want;
-      // A platform-wide switch: ON puts every user behind the maintenance screen.
-      // It used to PATCH production on the first click, on the page this panel
-      // opened to. Like every other destructive action here it asks first, and
-      // declining makes NO network request (DS6).
-      const question = want
-        ? "Turn maintenance mode ON?\n\nEvery user will see the maintenance screen and cannot work until it is turned off."
-        : "Turn maintenance mode OFF?\n\nEvery user gets full access again.";
-      if (!window.confirm(question)) {
+      // The switch stays where the server has it while the question is open, and moves only once
+      // the change is saved: it read "on" behind a dialog asking whether to turn it on.
+      toggle.checked = prev;
+      // A platform-wide switch: ON puts every user behind the maintenance screen and the API
+      // refuses their work. It used to PATCH production on the first click, on the page this
+      // panel opened to. It asks first, and declining makes NO network request (DS6). DS24: the
+      // reason is required and recorded with the change, and turning it on also asks for the
+      // environment's name to be typed.
+      const scope = superScope();
+      const where = `${scope.label.toLowerCase()}, ${scope.host}`;
+      const reason = await superAskText(
+        want
+          ? {
+              title: "Turn on maintenance mode?",
+              body: [
+                `Every user will see the maintenance screen and cannot work until it is turned off (${where}).`,
+                "Signing in, unsubscribe links and this panel keep working.",
+              ],
+              label: "Reason (recorded with the change)",
+              placeholder: "For example: database upgrade, about 15 minutes",
+              required: true,
+              maxLength: 300,
+              requireText: scope.word,
+              confirmLabel: "Turn on maintenance",
+              cancelLabel: "Keep it off",
+              tone: "danger",
+            }
+          : {
+              title: "Turn off maintenance mode?",
+              body: `Every user gets full access again (${where}).`,
+              label: "Reason (recorded with the change)",
+              placeholder: "For example: upgrade finished",
+              required: true,
+              maxLength: 300,
+              confirmLabel: "Turn off maintenance",
+              cancelLabel: "Keep it on",
+              tone: "warning",
+            },
+      );
+      if (reason === null) {
         toggle.checked = prev;
         return;
       }
@@ -306,25 +448,25 @@ function bindAppConfigHandlers() {
       try {
         const r = await api("/app-config/maintenance", {
           method: "PATCH",
-          body: { maintenanceMode: want },
+          body: { maintenanceMode: want, reason },
         });
         if (r.ok) {
-          if (label) label.textContent = `Maintenance mode: ${r.maintenanceMode ? "ON" : "OFF"}`;
-          if (msgStatus) {
-            msgStatus.textContent = r.maintenanceMode
+          toggle.checked = !!r.maintenanceMode;
+          superRenderMaintenance(!!r.maintenanceMode);
+          superStatus(
+            msgStatus,
+            r.maintenanceMode
               ? "Maintenance mode is now ON. All users will see the maintenance screen."
-              : "Maintenance mode is OFF. Users have full access.";
-            msgStatus.style.color = r.maintenanceMode ? "#b8782e" : "#2d7a55";
-          }
+              : "Maintenance mode is OFF. Users have full access.",
+            r.maintenanceMode ? "warning" : "success",
+          );
+          loadControlChanges();
         } else {
           toggle.checked = prev;
         }
       } catch (err) {
         toggle.checked = prev;
-        if (msgStatus) {
-          msgStatus.textContent = err.message || "Failed to update.";
-          msgStatus.style.color = "#b44545";
-        }
+        superStatus(msgStatus, err.message || "Maintenance mode could not be changed. Try again.", "critical");
       } finally {
         toggle.disabled = false;
       }
@@ -341,18 +483,13 @@ function bindAppConfigHandlers() {
           method: "PATCH",
           body: { maintenanceMessage: message },
         });
-        if (msgStatus) {
-          msgStatus.textContent = "Saved.";
-          msgStatus.style.color = "#2d7a55";
-        }
+        superStatus(msgStatus, "Message saved. Users see it while maintenance mode is on.", "success");
+        loadControlChanges();
       } catch (err) {
-        if (msgStatus) {
-          msgStatus.textContent = err.message || "Save failed.";
-          msgStatus.style.color = "#b44545";
-        }
+        superStatus(msgStatus, err.message || "The message could not be saved. Try again.", "critical");
       } finally {
         saveMsgBtn.disabled = false;
-        saveMsgBtn.textContent = "Save Message";
+        saveMsgBtn.textContent = "Save message";
       }
     });
   }
@@ -373,18 +510,12 @@ function bindAppConfigHandlers() {
             enabled: !!qs("welcomeEnabled")?.checked,
           },
         });
-        if (welcomeStatus) {
-          welcomeStatus.textContent = "Saved. Users with a different seen-version will see this on next popup open.";
-          welcomeStatus.style.color = "#2d7a55";
-        }
+        superStatus(welcomeStatus, "Saved. Users with a different seen-version will see this on next popup open.", "success");
       } catch (err) {
-        if (welcomeStatus) {
-          welcomeStatus.textContent = err.message || "Save failed.";
-          welcomeStatus.style.color = "#b44545";
-        }
+        superStatus(welcomeStatus, err.message || "The announcement could not be saved. Try again.", "critical");
       } finally {
         saveWelcomeBtn.disabled = false;
-        saveWelcomeBtn.textContent = "Save Announcement";
+        saveWelcomeBtn.textContent = "Save announcement";
       }
     });
   }
@@ -412,13 +543,13 @@ function bindAppConfigHandlers() {
       //
       // "I do not know the current state" must therefore mean STOP, not "write my guess".
       if (!lastFeatureFlags) {
-        if (featureFlagsStatus) {
-          featureFlagsStatus.textContent =
-            "Not saved. The current flag values could not be loaded, so the checkboxes above are " +
+        superStatus(
+          featureFlagsStatus,
+          "Not saved. The current flag values could not be loaded, so the checkboxes above are " +
             "not showing the real state and saving them would overwrite it. Reload the page. If " +
-            "that does not help, your session has probably expired -- sign in again.";
-          featureFlagsStatus.style.color = "#b44545";
-        }
+            "that does not help, your session has probably expired -- sign in again.",
+          "critical",
+        );
         return;
       }
 
@@ -433,43 +564,58 @@ function bindAppConfigHandlers() {
           changed[key] = box.checked;
         }
       }
-      if (!Object.keys(changed).length) {
-        if (featureFlagsStatus) {
-          featureFlagsStatus.textContent = "No changes to save.";
-          featureFlagsStatus.style.color = "var(--muted)";
-        }
+      const changedKeys = Object.keys(changed);
+      if (!changedKeys.length) {
+        superStatus(featureFlagsStatus, "No changes to save.", "muted");
         return;
       }
+
+      // DS24: a flag reaches every firm, so the change is confirmed with a reason the server
+      // records and the environment's name typed. Declining sends nothing.
+      const scope = superScope();
+      const count = changedKeys.length === 1 ? "1 feature flag" : `${changedKeys.length} feature flags`;
+      const turnsOff = changedKeys.some((key) => changed[key] === false);
+      const reason = await superAskText({
+        title: `Change ${count}?`,
+        body: `The change applies to every firm and every user (${scope.label.toLowerCase()}, ${scope.host}).`,
+        details: changedKeys.map((key) => `${key}: turn ${changed[key] ? "on" : "off"}`),
+        label: "Reason (recorded with the change)",
+        placeholder: "For example: TDS health is ready for firms",
+        required: true,
+        maxLength: 300,
+        requireText: scope.word,
+        confirmLabel: changedKeys.length === 1 ? "Change 1 flag" : `Change ${changedKeys.length} flags`,
+        cancelLabel: "Keep the current flags",
+        tone: turnsOff ? "danger" : "warning",
+      });
+      if (reason === null) return;
 
       saveFeatureFlagsBtn.disabled = true;
       saveFeatureFlagsBtn.textContent = "Saving...";
       try {
         const r = await api("/app-config/features", {
           method: "PATCH",
-          body: { featureFlags: changed },
+          body: { featureFlags: changed, reason },
         });
         loadFeatureFlagsSection(r.featureFlags);
-        if (featureFlagsStatus) {
-          // Render the flag map the server echoes back verbatim (textContent, not innerHTML --
-          // no escaping needed and none of this can carry markup).
-          featureFlagsStatus.textContent = `Saved.\n${JSON.stringify(r.featureFlags, null, 2)}`;
-          featureFlagsStatus.style.color = "#2d7a55";
-        }
+        superStatus(
+          featureFlagsStatus,
+          `Saved: ${changedKeys.map((key) => `${key} ${r.featureFlags?.[key] ? "on" : "off"}`).join(", ")}.`,
+          "success",
+        );
+        loadControlChanges();
       } catch (err) {
-        if (featureFlagsStatus) {
-          if (err.status === 403) {
-            featureFlagsStatus.textContent = "Only the super-admin account may change feature flags.";
-          } else {
-            // Covers the index-readiness rejection for noticeCases/assuranceEngagements/
-            // auditWorkingPapers (and any other server error): show the server's own message
-            // verbatim rather than inventing a generic one client-side.
-            featureFlagsStatus.textContent = err.message || "Save failed.";
-          }
-          featureFlagsStatus.style.color = "#b44545";
-        }
+        // 403 says who may do this; anything else - the index-readiness rejection for
+        // noticeCases/assuranceEngagements/auditWorkingPapers included - is the server's own
+        // message, verbatim, rather than one invented here.
+        superStatus(
+          featureFlagsStatus,
+          err.status === 403 ? "Only the super-admin account may change feature flags." : err.message || "The flags could not be saved. Try again.",
+          "critical",
+        );
       } finally {
         saveFeatureFlagsBtn.disabled = false;
-        saveFeatureFlagsBtn.textContent = "Save Feature Flags";
+        saveFeatureFlagsBtn.textContent = "Save feature flags";
       }
     });
   }
@@ -500,19 +646,16 @@ function bindAppConfigHandlers() {
         });
         lastDesktopReleaseDraft = r.desktopRelease || lastDesktopReleaseDraft;
         renderDesktopReleaseLive(lastDesktopReleaseDraft);
-        if (desktopReleaseStatus) {
-          desktopReleaseStatus.textContent =
-            "Saved. Nothing has been sent to users yet -- press Notify all users when you are ready.";
-          desktopReleaseStatus.style.color = "#2d7a55";
-        }
+        superStatus(
+          desktopReleaseStatus,
+          "Saved. Nothing has been sent to users yet -- press Notify all users when you are ready.",
+          "success",
+        );
       } catch (err) {
-        if (desktopReleaseStatus) {
-          desktopReleaseStatus.textContent = err.message || "Save failed.";
-          desktopReleaseStatus.style.color = "#b44545";
-        }
+        superStatus(desktopReleaseStatus, err.message || "The release could not be saved. Try again.", "critical");
       } finally {
         saveDesktopReleaseBtn.disabled = false;
-        saveDesktopReleaseBtn.textContent = "Save Release";
+        saveDesktopReleaseBtn.textContent = "Save release";
       }
     });
   }
@@ -528,46 +671,48 @@ function bindAppConfigHandlers() {
         !!lastDesktopReleaseDraft?.announcementId &&
         lastDesktopReleaseDraft?.latestVersion === version;
 
-      let confirmMsg = `Notify every CA PRO desktop user that version ${version} is available? This cannot be undone.`;
-      if (alreadyAnnounced) {
-        confirmMsg =
-          `Version ${version} has already been announced -- notifying again will re-alert users who already dismissed it. ` +
-          confirmMsg;
-      }
-
-      // Gate 1: plain confirm. Declining must make NO network request.
-      if (!window.confirm(confirmMsg)) return;
-
-      // Gate 2: typed confirm. Anything but an exact match must also make NO network request.
-      const typed = window.prompt(`Type the version number exactly (${version}) to confirm.`);
-      if (typed !== version) {
-        if (desktopReleaseStatus) {
-          desktopReleaseStatus.textContent = "Cancelled -- the version did not match.";
-          desktopReleaseStatus.style.color = "#b44545";
-        }
+      if (!version) {
+        superStatus(desktopReleaseStatus, "Enter the version to announce, and save the release, before notifying.", "critical");
         return;
       }
+
+      // Both gates in one dialog (U5, DS24): it says what happens and to whom, and its Notify
+      // button stays off until the version is typed exactly. Cancel, Esc, or anything but the
+      // exact version makes NO network request.
+      const confirmed = await superAsk({
+        title: `Notify every desktop user about version ${version}?`,
+        body: [
+          ...(alreadyAnnounced
+            ? [`Version ${version} has already been announced -- notifying again will re-alert users who already dismissed it.`]
+            : []),
+          "Every CA PRO desktop app on an older build shows the update banner within a few minutes, and a Windows notification once. This cannot be undone.",
+        ],
+        requireText: version,
+        requireLabel: `Type the version number exactly (${version}) to confirm`,
+        confirmLabel: "Notify all users",
+        cancelLabel: "Cancel",
+        tone: "danger",
+      });
+      if (!confirmed) return;
 
       notifyDesktopReleaseBtn.disabled = true;
       notifyDesktopReleaseBtn.textContent = "Notifying...";
       try {
         await api("/app-config/desktop-release/notify", { method: "POST" });
-        if (desktopReleaseStatus) {
-          desktopReleaseStatus.textContent =
-            "Notified. Every desktop on an older build will see the update banner within a few minutes, and a Windows notification once.";
-          desktopReleaseStatus.style.color = "#2d7a55";
-        }
+        superStatus(
+          desktopReleaseStatus,
+          "Notified. Every desktop on an older build will see the update banner within a few minutes, and a Windows notification once.",
+          "success",
+        );
         await loadAppConfigSection();
       } catch (err) {
-        if (desktopReleaseStatus) {
-          if (err.status === 409 && err.data?.code === "RELEASE_INCOMPLETE") {
-            desktopReleaseStatus.textContent =
-              "Release is incomplete -- save a complete release (latest version, download URL, SHA-256, size) before notifying.";
-          } else {
-            desktopReleaseStatus.textContent = err.message || "Notify failed.";
-          }
-          desktopReleaseStatus.style.color = "#b44545";
-        }
+        superStatus(
+          desktopReleaseStatus,
+          err.status === 409 && err.data?.code === "RELEASE_INCOMPLETE"
+            ? "Release is incomplete -- save a complete release (latest version, download URL, SHA-256, size) before notifying."
+            : err.message || "The notification could not be sent. Try again.",
+          "critical",
+        );
       } finally {
         notifyDesktopReleaseBtn.disabled = false;
         notifyDesktopReleaseBtn.textContent = "Notify all users";
@@ -592,43 +737,43 @@ async function loadUsageStats() {
     if (grid) {
       grid.innerHTML = `
         <div class="stat-card stat-primary">
-          <div class="stat-label">DAU (Last 24h)</div>
-          <div class="stat-value">${u.dau}</div>
-          <div class="stat-sub">Active in last day</div>
+          <div class="stat-label">Active, last 24 hours</div>
+          <div class="stat-value">${superCount(u.dau)}</div>
+          <div class="stat-sub">Daily active users</div>
         </div>
         <div class="stat-card stat-gold">
-          <div class="stat-label">WAU (Last 7d)</div>
-          <div class="stat-value">${u.wau}</div>
-          <div class="stat-sub">Active in last week</div>
+          <div class="stat-label">Active, last 7 days</div>
+          <div class="stat-value">${superCount(u.wau)}</div>
+          <div class="stat-sub">Weekly active users</div>
         </div>
         <div class="stat-card stat-success">
-          <div class="stat-label">MAU (Last 30d)</div>
-          <div class="stat-value">${u.mau}</div>
-          <div class="stat-sub">Active in last month</div>
+          <div class="stat-label">Active, last 30 days</div>
+          <div class="stat-value">${superCount(u.mau)}</div>
+          <div class="stat-sub">Monthly active users</div>
         </div>
         <div class="stat-card stat-primary">
-          <div class="stat-label">QAU (Last 90d)</div>
-          <div class="stat-value">${u.qau}</div>
-          <div class="stat-sub">Active in last quarter</div>
+          <div class="stat-label">Active, last 90 days</div>
+          <div class="stat-value">${superCount(u.qau)}</div>
+          <div class="stat-sub">Quarterly active users</div>
         </div>
         <div class="stat-card stat-gold">
-          <div class="stat-label">Activation Rate</div>
+          <div class="stat-label">Activation rate</div>
           <div class="stat-value">${u.activationRate}%</div>
-          <div class="stat-sub">${u.totalEverActive} of ${u.totalUsers} users</div>
+          <div class="stat-sub">${superCount(u.totalEverActive)} of ${superCount(u.totalUsers)} users</div>
         </div>
         <div class="stat-card stat-success">
-          <div class="stat-label">7-day Retention</div>
+          <div class="stat-label">7-day retention</div>
           <div class="stat-value">${u.retentionRate}%</div>
           <div class="stat-sub">Of activated users</div>
         </div>
         <div class="stat-card stat-primary">
-          <div class="stat-label">Total API Calls</div>
-          <div class="stat-value">${(u.totalApiCalls || 0).toLocaleString("en-IN")}</div>
-          <div class="stat-sub">Lifetime tracked</div>
+          <div class="stat-label">API calls</div>
+          <div class="stat-value">${superCount(u.totalApiCalls || 0)}</div>
+          <div class="stat-sub">Since tracking began</div>
         </div>
         <div class="stat-card stat-gold">
-          <div class="stat-label">Total Users</div>
-          <div class="stat-value">${u.totalUsers}</div>
+          <div class="stat-label">Users</div>
+          <div class="stat-value">${superCount(u.totalUsers)}</div>
           <div class="stat-sub">Ever signed up</div>
         </div>
       `;
@@ -647,17 +792,17 @@ async function loadUsageStats() {
     if (topUsersEl) {
       const top = u.topUsers || [];
       if (!top.length) {
-        topUsersEl.innerHTML = `<div style="color:var(--muted);font-style:italic;">No active users yet</div>`;
+        topUsersEl.innerHTML = `<div class="admin-empty-line">No active users yet.</div>`;
       } else {
         topUsersEl.innerHTML = top
           .map(
-            (user, i) => `
-              <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:${i < top.length - 1 ? "1px solid var(--border)" : "none"};">
-                <div style="flex:1;min-width:0;">
-                  <div style="font-weight:600;color:var(--text);text-overflow:ellipsis;overflow:hidden;white-space:nowrap;">${escapeHtml(user.email || "—")}</div>
-                  <div style="font-size:12px;color:var(--muted);">${escapeHtml(user.role || "USER")}${user.firmId?.handle ? " · @" + escapeHtml(user.firmId.handle) : ""}</div>
+            (user) => `
+              <div class="provider-top__row">
+                <div class="provider-top__who">
+                  <div class="fw-semibold text-truncate">${escapeHtml(user.email || "—")}</div>
+                  <div class="provider-figure__caption">${escapeHtml(superEnumLabel(user.role || "USER"))}${user.firmId?.handle ? " · @" + escapeHtml(user.firmId.handle) : ""}</div>
                 </div>
-                <div style="font-weight:600;color:var(--teal-dark);font-size:13px;margin-left:8px;">${user.totalApiCalls}</div>
+                <div class="provider-top__calls">${superCount(user.totalApiCalls)}</div>
               </div>
             `
           )
@@ -705,11 +850,11 @@ function renderClientSplit(u) {
       const desktop = c.split?.desktop ?? 0;
       const extension = c.split?.extension ?? 0;
       return `
-        <div style="flex:1;min-width:140px;border:1px solid var(--border);border-radius:8px;padding:10px 12px;">
-          <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;font-weight:600;">${c.label}</div>
-          <div style="display:flex;gap:14px;margin-top:4px;">
-            <div><span style="font-size:18px;font-weight:600;color:var(--text);">${desktop}</span><span style="font-size:12px;color:var(--muted);display:block;">🖥 Desktop</span></div>
-            <div><span style="font-size:18px;font-weight:600;color:var(--text);">${extension}</span><span style="font-size:12px;color:var(--muted);display:block;">🧩 Extension</span></div>
+        <div class="stat-card flex-fill" style="min-width:140px">
+          <div class="stat-label">${c.label}</div>
+          <div class="d-flex gap-3">
+            <div><span class="provider-figure__value">${superCount(desktop)}</span><span class="provider-figure__caption d-block">Desktop</span></div>
+            <div><span class="provider-figure__value">${superCount(extension)}</span><span class="provider-figure__caption d-block">Extension</span></div>
           </div>
         </div>
       `;
@@ -837,17 +982,17 @@ function renderWorkflowBreakdown(rows) {
   const el = qs("workflowBreakdownList");
   if (!el) return;
   if (!rows.length) {
-    el.innerHTML = `<div style="color:var(--muted);font-style:italic;">No workflow usage recorded yet</div>`;
+    el.innerHTML = `<div class="admin-empty-line">No workflow usage recorded yet.</div>`;
     return;
   }
   el.innerHTML = rows
     .map(
-      (row, i) => `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:${i < rows.length - 1 ? "1px solid var(--border)" : "none"};">
-          <div>${escapeHtml(WORKFLOW_USAGE_LABELS[row.workflow] || row.workflow)}</div>
-          <div style="text-align:right;">
-            <span style="font-weight:600;color:var(--teal-dark);">${row.weekActive}</span>
-            <span style="font-size:12px;color:var(--muted);margin-left:4px;">users · ${row.totalCounts} runs${row.errorCounts ? ` · ${row.errorCounts} errored` : ""}</span>
+      (row) => `
+        <div class="provider-top__row">
+          <div class="provider-top__who">${escapeHtml(WORKFLOW_USAGE_LABELS[row.workflow] || row.workflow)}</div>
+          <div class="text-end">
+            <span class="provider-top__calls">${superCount(row.weekActive)}</span>
+            <span class="provider-figure__caption ms-1">users · ${superCount(row.totalCounts)} runs${row.errorCounts ? ` · ${superCount(row.errorCounts)} errored` : ""}</span>
           </div>
         </div>`,
     )
@@ -868,9 +1013,10 @@ const EMAIL_TYPE_LABELS = {
   reminder_alert: "Delivery alert", rollout_notice: "Rollout notice",
   campaign: "Campaign", other: "Other",
 };
-const EMAIL_STATUS_CLASSES = {
-  sent: "text-muted", delivered: "text-success", queued: "text-muted",
-  bounced: "text-danger", complained: "text-danger", failed: "text-danger",
+// A delivery state as a badge tone; an unknown state is shown as sent, in the neutral badge.
+const EMAIL_STATUS_TONES = {
+  sent: "", delivered: "success", queued: "",
+  bounced: "critical", complained: "critical", failed: "critical",
 };
 
 async function sha256Hex(text) {
@@ -953,7 +1099,7 @@ function renderEmailsRows(rows) {
   const body = qs("emailsBody");
   if (!body) return;
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="8" class="text-muted" style="font-style:italic;">No emails in this window. Adjust the filters, or note that records start from this release (Resend keeps only 30 days of history).</td></tr>`;
+    body.innerHTML = `<tr><td colspan="8" class="text-muted">No emails in this window. Adjust the filters, or note that records start from this release (Resend keeps only 30 days of history).</td></tr>`;
     return;
   }
   body.innerHTML = rows
@@ -961,7 +1107,7 @@ function renderEmailsRows(rows) {
       const when = row.sentAt || row.createdAt;
       const time = when ? new Date(when).toISOString().slice(0, 16).replace("T", " ") : "—";
       const firm = row.firmId?.handle || (row.firmId?.displayName ? String(row.firmId.displayName) : "—");
-      const statusClass = EMAIL_STATUS_CLASSES[row.status] || "";
+      const statusTone = EMAIL_STATUS_TONES[row.status] || "";
       const providerId = row.providerMessageId || "";
       return `
         <tr>
@@ -969,10 +1115,10 @@ function renderEmailsRows(rows) {
           <td>${EMAIL_TYPE_LABELS[row.type] || escapeHtml(row.type)}</td>
           <td>••••${escapeHtml(row.recipientEmailLast4 || "")}</td>
           <td>${escapeHtml(firm)}</td>
-          <td class="${statusClass}" style="font-weight:600;">${escapeHtml(row.status || "—")}</td>
+          <td><span class="cp-badge"${statusTone ? ` data-tone="${statusTone}"` : ""}>${escapeHtml(row.status || "—")}</span></td>
           <td>${escapeHtml(row.errorClass || "—")}</td>
-          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(providerId)}">${providerId ? `${escapeHtml(providerId.slice(0, 10))}…` : "—"}</td>
-          <td><button class="btn btn-sm btn-outline-secondary email-detail-btn" data-id="${String(row._id)}">Details</button></td>
+          <td class="usage-email" title="${escapeHtml(providerId)}">${providerId ? `<code>${escapeHtml(providerId.slice(0, 10))}…</code>` : "—"}</td>
+          <td><button class="btn btn-sm btn-outline-secondary email-detail-btn" type="button" data-id="${String(row._id)}">Details</button></td>
         </tr>`;
     })
     .join("");
@@ -1000,10 +1146,10 @@ async function openEmailDetail(id) {
         <dt class="col-5">Status</dt><dd class="col-7">${escapeHtml(row.status)}</dd>
         <dt class="col-5">Error class</dt><dd class="col-7">${escapeHtml(row.errorClass || "—")}</dd>
         <dt class="col-5">To (suffix only)</dt><dd class="col-7">••••${escapeHtml(row.recipientEmailLast4 || "")}</dd>
-        <dt class="col-5">Provider id</dt><dd class="col-7" style="word-break:break-all;">${escapeHtml(row.providerMessageId || "—")}</dd>
+        <dt class="col-5">Provider id</dt><dd class="col-7 text-break">${escapeHtml(row.providerMessageId || "—")}</dd>
         <dt class="col-5">Source</dt><dd class="col-7">${row.backfilled ? "Backfilled from provider history" : "Recorded at send time"}</dd>
       </dl>
-      <h6 style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:var(--muted);">Timeline</h6>
+      <h3 class="admin-section-title">Timeline</h3>
       <ul class="mb-0">${timeline || "<li>No events recorded</li>"}</ul>
     `;
   } catch (err) {
@@ -1020,7 +1166,7 @@ async function loadEmailSuppressions() {
     const rows = data.suppressions || [];
     emailsPageState.suppressionsLoaded = true;
     if (!rows.length) {
-      body.innerHTML = `<tr><td colspan="4" class="text-muted" style="font-style:italic;">No suppressed addresses.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="4" class="text-muted">No suppressed addresses.</td></tr>`;
       return;
     }
     body.innerHTML = rows
@@ -1029,18 +1175,26 @@ async function loadEmailSuppressions() {
           <td>${escapeHtml(row.reason)}</td>
           <td>${row.createdAt ? new Date(row.createdAt).toISOString().slice(0, 10) : "—"}</td>
           <td>${row.firmId ? "This firm" : "Global"}</td>
-          <td><button class="btn btn-sm btn-outline-danger suppression-remove-btn" data-id="${String(row.id)}">Remove</button></td>
+          <td><button class="btn btn-sm btn-outline-danger suppression-remove-btn" type="button" data-id="${String(row.id)}">Remove</button></td>
         </tr>`)
       .join("");
     body.querySelectorAll(".suppression-remove-btn").forEach((btn) => {
       btn.addEventListener("click", async () => {
-        if (!window.confirm("Remove this do-not-email record? Future emails to this address will no longer be blocked.")) return;
+        const remove = await superAsk({
+          title: "Remove this address from the do-not-email list?",
+          body: "Future emails to this address will no longer be blocked. The removal is recorded.",
+          confirmLabel: "Remove from the list",
+          cancelLabel: "Keep it blocked",
+          tone: "danger",
+        });
+        if (!remove) return;
         btn.disabled = true;
         try {
           await api(`/super/emails/suppressions/${encodeURIComponent(btn.getAttribute("data-id"))}`, { method: "DELETE" });
+          superToast("Removed from the do-not-email list.");
           await loadEmailSuppressions();
         } catch (err) {
-          alert(err.message || "Failed to remove suppression.");
+          superToast(err.message || "The address could not be removed. Try again.", "critical");
           btn.disabled = false;
         }
       });
@@ -1092,7 +1246,7 @@ function renderPerUserUsage(rows) {
   const body = qs("perUserUsageBody");
   if (!body) return;
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="6" style="color:var(--muted);font-style:italic;">No usage rows yet — data appears as workflows run after this release</td></tr>`;
+    body.innerHTML = `<tr><td colspan="6" class="text-muted">No usage recorded yet. Rows appear as people run workflows.</td></tr>`;
     return;
   }
   body.innerHTML = rows
@@ -1100,12 +1254,12 @@ function renderPerUserUsage(rows) {
       const lastSeen = row.lastSeenAt ? new Date(row.lastSeenAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : "—";
       return `
         <tr>
-          <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(row.email || row.name || String(row.userId))}</td>
-          <td>${row.desktopCount || 0}</td>
-          <td>${row.extensionCount || 0}</td>
-          <td style="font-weight:600;color:var(--teal-dark);">${row.totalCount || 0}</td>
-          <td>${row.workflows || 0}</td>
-          <td style="color:var(--muted);">${lastSeen}</td>
+          <td class="usage-email" title="${escapeHtml(row.email || row.name || String(row.userId))}">${escapeHtml(row.email || row.name || String(row.userId))}</td>
+          <td>${superCount(row.desktopCount || 0)}</td>
+          <td>${superCount(row.extensionCount || 0)}</td>
+          <td class="usage-total">${superCount(row.totalCount || 0)}</td>
+          <td>${superCount(row.workflows || 0)}</td>
+          <td class="text-muted">${lastSeen}</td>
         </tr>`;
     })
     .join("");
@@ -1116,14 +1270,14 @@ const PROVIDER_USAGE_LABELS = { DEEPSEEK: "DeepSeek", OCR_SPACE: "OCR.space" };
 
 function renderProviderUsageTopUsers(rows) {
   if (!rows.length) {
-    return `<div style="color:var(--muted);font-style:italic;font-size:12px;">No calls yet today</div>`;
+    return `<div class="admin-empty-line">No calls yet today.</div>`;
   }
   return rows
     .map(
-      (row, i) => `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:${i < rows.length - 1 ? "1px solid var(--border)" : "none"};">
-          <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(row.email || "—")}</div>
-          <div style="font-weight:600;color:var(--teal-dark);font-size:12.5px;margin-left:8px;">${Number(row.calls) || 0}</div>
+      (row) => `
+        <div class="provider-top__row">
+          <div class="provider-top__who">${escapeHtml(row.email || "—")}</div>
+          <div class="provider-top__calls">${superCount(Number(row.calls) || 0)}</div>
         </div>`,
     )
     .join("");
@@ -1147,19 +1301,19 @@ async function loadProviderUsageStats() {
           const topUsers = Array.isArray(u.topUsersToday?.[provider]) ? u.topUsersToday[provider] : [];
           return `
             <div class="col-md-6">
-              <div class="card p-3">
-                <h6 class="mb-2" style="font-size: 12.5px; font-weight: 600;">${escapeHtml(PROVIDER_USAGE_LABELS[provider])}</h6>
+              <div class="card p-3 mb-0 h-100">
+                <h3 class="admin-section-title">${escapeHtml(PROVIDER_USAGE_LABELS[provider])}</h3>
                 <div class="d-flex gap-4 mb-2">
                   <div>
-                    <div style="font-size:20px;font-weight:600;color:var(--text);">${today}</div>
-                    <div style="font-size:12px;color:var(--muted);">calls today</div>
+                    <div class="provider-figure__value">${superCount(today)}</div>
+                    <div class="provider-figure__caption">calls today</div>
                   </div>
                   <div>
-                    <div style="font-size:20px;font-weight:600;color:var(--text);">${month}</div>
-                    <div style="font-size:12px;color:var(--muted);">calls this month</div>
+                    <div class="provider-figure__value">${superCount(month)}</div>
+                    <div class="provider-figure__caption">calls this month</div>
                   </div>
                 </div>
-                <div style="font-size:12px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.04em;">Top users today</div>
+                <div class="provider-top__heading">Top users today</div>
                 ${renderProviderUsageTopUsers(topUsers)}
               </div>
             </div>`;
@@ -1177,11 +1331,11 @@ async function loadProviderUsageStats() {
 // One definition of "a reminder has a delivery problem" lives server-side in
 // reminder.controller.js's deliveryHealth(); this card only renders what
 // GET /api/super/reminder-delivery-health already classified.
-const REMINDER_DELIVERY_STATUS_COLORS = {
-  RETRY_SCHEDULED: "bg-warning",
-  DELIVERY_STATE_UNCONFIRMED: "bg-danger",
-  STALE_CLAIM: "bg-danger",
-  HISTORICAL_ATTEMPTS_PRESENT: "bg-secondary",
+const REMINDER_DELIVERY_STATUS_TONES = {
+  RETRY_SCHEDULED: "warning",
+  DELIVERY_STATE_UNCONFIRMED: "critical",
+  STALE_CLAIM: "critical",
+  HISTORICAL_ATTEMPTS_PRESENT: "",
 };
 
 // dueDateISO is a statutory reminder date, not an activity timestamp -- converting it through
@@ -1196,7 +1350,8 @@ function formatReminderDueDateUtc(iso) {
 function renderReminderDeliveryHealthRow(row) {
   const issues = Array.isArray(row.issues) ? row.issues : [];
   const lastError = issues.map((i) => i.lastError).find((e) => e) || "";
-  const statusBadge = `<span class="badge ${REMINDER_DELIVERY_STATUS_COLORS[row.status] || "bg-secondary"}">${escapeHtml(row.status || "—")}</span>`;
+  const tone = REMINDER_DELIVERY_STATUS_TONES[row.status] || "";
+  const statusBadge = `<span class="cp-badge"${tone ? ` data-tone="${tone}"` : ""}>${escapeHtml(row.status || "—")}</span>`;
   return `
     <tr>
       <td>${formatReminderDueDateUtc(row.dueDateISO)}</td>
@@ -1225,23 +1380,23 @@ async function loadReminderDeliveryHealthStats() {
 
     if (bodyEl) {
       const headline = `
-        <div style="display:flex; align-items:baseline; gap:8px; margin-bottom:10px;">
-          <div style="font-size:22px;font-weight:600;color:var(--text);">${countText}</div>
-          <div style="font-size:12px;color:var(--muted);">reminder${countText === "1" ? "" : "s"} with a delivery problem${truncated ? ` (of ${(Number(d.candidatesScanned) || 0).toLocaleString("en-IN")} scanned -- scan capped, more may exist)` : ""}</div>
+        <div class="delivery-headline">
+          <div class="delivery-headline__count">${countText}</div>
+          <div class="delivery-headline__caption">reminder${countText === "1" ? "" : "s"} with a delivery problem${truncated ? ` (of ${(Number(d.candidatesScanned) || 0).toLocaleString("en-IN")} scanned -- scan capped, more may exist)` : ""}</div>
         </div>`;
 
       let body;
       if (!sample.length) {
         body = truncated
-          ? `<div style="color:var(--muted);font-style:italic;font-size:12px;">No delivery issues found among the candidates scanned before the scan hit its limit -- more reminders may exist beyond it and were not checked.</div>`
-          : `<div style="color:var(--muted);font-style:italic;font-size:12px;">No delivery problems right now.</div>`;
+          ? `<div class="admin-empty-line">No delivery issues found among the candidates scanned before the scan hit its limit -- more reminders may exist beyond it and were not checked.</div>`
+          : `<div class="admin-empty-line">No delivery problems right now.</div>`;
       } else {
         const truncatedNote = d.sampleTruncated
-          ? `<div class="text-muted" style="font-size:12px;margin-top:6px;">Showing ${sample.length} of ${countText} -- soonest due first.</div>`
+          ? `<div class="admin-hint">Showing ${sample.length} of ${countText} -- soonest due first.</div>`
           : "";
         body = `
           <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0" style="font-size:12.5px;">
+            <table class="table table-sm table-hover align-middle mb-0">
               <thead class="table-light">
                 <tr>
                   <th scope="col">Due date</th>
@@ -1283,60 +1438,61 @@ async function loadDashboardStats() {
     // Main stats cards
     grid.innerHTML = `
       <div class="stat-card stat-primary">
-        <div class="stat-label">Total Users</div>
-        <div class="stat-value">${s.users.total}</div>
-        <div class="stat-sub">Active: ${s.users.active} · Inactive: ${s.users.inactive}</div>
+        <div class="stat-label">Users</div>
+        <div class="stat-value">${superCount(s.users.total)}</div>
+        <div class="stat-sub">Active ${superCount(s.users.active)} · inactive ${superCount(s.users.inactive)}</div>
       </div>
       <div class="stat-card stat-gold">
-        <div class="stat-label">Total Firms</div>
-        <div class="stat-value">${s.firms.total}</div>
-        <div class="stat-sub">Active: ${s.firms.active}</div>
+        <div class="stat-label">Firms</div>
+        <div class="stat-value">${superCount(s.firms.total)}</div>
+        <div class="stat-sub">Active ${superCount(s.firms.active)}</div>
       </div>
       <div class="stat-card stat-success">
-        <div class="stat-label">Total Tasks</div>
-        <div class="stat-value">${s.tasks.active}</div>
-        <div class="stat-sub">All time: ${s.tasks.total}</div>
+        <div class="stat-label">Open tasks</div>
+        <div class="stat-value">${superCount(s.tasks.active)}</div>
+        <div class="stat-sub">All time ${superCount(s.tasks.total)}</div>
       </div>
       <div class="stat-card stat-danger">
-        <div class="stat-label">Pending Admins</div>
-        <div class="stat-value">${s.users.pendingAdmins}</div>
+        <div class="stat-label">Pending firm admins</div>
+        <div class="stat-value">${superCount(s.users.pendingAdmins)}</div>
         <div class="stat-sub">Awaiting approval</div>
       </div>
       <div class="stat-card stat-primary">
-        <div class="stat-label">Firm Admins</div>
-        <div class="stat-value">${s.users.firmAdmins}</div>
+        <div class="stat-label">Firm admins</div>
+        <div class="stat-value">${superCount(s.users.firmAdmins)}</div>
         <div class="stat-sub">Active firm admins</div>
       </div>
       <div class="stat-card stat-gold">
-        <div class="stat-label">Product Access</div>
+        <div class="stat-label">Product access</div>
         <div class="stat-value">Free</div>
-        <div class="stat-sub">All ${s.firms.total} firms</div>
+        <div class="stat-sub">All ${superCount(s.firms.total)} firms</div>
       </div>
       <div class="stat-card stat-success">
         <div class="stat-label">Reminders</div>
-        <div class="stat-value">${s.reminders.total}</div>
-        <div class="stat-sub">Total scheduled</div>
+        <div class="stat-value">${superCount(s.reminders.total)}</div>
+        <div class="stat-sub">Scheduled in total</div>
       </div>
       <div class="stat-card stat-primary">
-        <div class="stat-label">Recent (7d)</div>
-        <div class="stat-value">${s.users.recentSignups}</div>
-        <div class="stat-sub">New signups · ${s.tasks.recentTasks} tasks</div>
+        <div class="stat-label">Last 7 days</div>
+        <div class="stat-value">${superCount(s.users.recentSignups)}</div>
+        <div class="stat-sub">New sign-ups · ${superCount(s.tasks.recentTasks)} tasks</div>
       </div>
     `;
 
-    // Task status breakdown
-    const statusColors = {
-      NOT_STARTED: "bg-secondary", WAITING_DOCS: "bg-warning",
-      IN_PROGRESS: "bg-primary", FILED: "bg-success", CLOSED: "bg-dark",
+    // Task status breakdown: the state in words and a tone; an unknown state is shown as sent.
+    const statusTones = {
+      NOT_STARTED: ["Not started", ""], WAITING_DOCS: ["Waiting for documents", "warning"],
+      IN_PROGRESS: ["In progress", "accent"], FILED: ["Filed", "success"], CLOSED: ["Closed", "info"],
     };
     if (taskBreakdownEl) {
       const breakdown = s.tasks.statusBreakdown || [];
       if (!breakdown.length) {
         taskBreakdownEl.innerHTML = '<span class="text-muted small">No tasks yet</span>';
       } else {
-        taskBreakdownEl.innerHTML = breakdown.map(item =>
-          `<span class="badge ${statusColors[item._id] || 'bg-secondary'}">${escapeHtml(item._id)}: ${item.count}</span>`
-        ).join("");
+        taskBreakdownEl.innerHTML = breakdown.map((item) => {
+          const [label, tone] = statusTones[item._id] || [String(item._id ?? "—"), ""];
+          return `<span class="cp-badge"${tone ? ` data-tone="${tone}"` : ""}>${escapeHtml(label)} · ${superCount(item.count)}</span>`;
+        }).join("");
       }
     }
 
@@ -1346,8 +1502,8 @@ async function loadDashboardStats() {
       if (!services.length) {
         serviceBreakdownEl.innerHTML = '<span class="text-muted small">No tasks yet</span>';
       } else {
-        serviceBreakdownEl.innerHTML = services.map(item =>
-          `<span class="badge bg-primary">${escapeHtml(item._id)}: ${item.count}</span>`
+        serviceBreakdownEl.innerHTML = services.map((item) =>
+          `<span class="cp-badge" data-tone="accent">${escapeHtml(item._id)} · ${superCount(item.count)}</span>`
         ).join("");
       }
     }
@@ -1379,14 +1535,14 @@ function renderPendingRow(user) {
     : user.firmId || "—";
 
   return `
-    <tr data-id="${escapeHtml(user._id)}">
+    <tr data-id="${escapeHtml(user._id)}" data-email="${escapeHtml(user.email || "")}">
       <td>${escapeHtml(user.email || "—")}</td>
       <td>${escapeHtml(user.name || "—")}</td>
       <td>${escapeHtml(firmId)}</td>
       <td>${escapeHtml(created)}</td>
-      <td>
-        <button class="btn btn-sm btn-success approve-btn" type="button">Approve</button>
-        <button class="btn btn-sm btn-danger revoke-btn ms-1" type="button">Revoke</button>
+      <td class="row-actions">
+        <button class="btn btn-sm btn-primary approve-btn" type="button">Approve</button>
+        <button class="btn btn-sm btn-outline-danger revoke-btn" type="button">Decline</button>
       </td>
     </tr>
   `;
@@ -1401,6 +1557,8 @@ function attachPendingHandlers(tbody) {
     const userId = row.getAttribute("data-id");
     if (!userId) return;
 
+    const email = row.dataset.email || "this account";
+
     if (btn.classList.contains("approve-btn")) {
       btn.disabled = true;
       btn.textContent = "Approving...";
@@ -1408,26 +1566,37 @@ function attachPendingHandlers(tbody) {
         await approveAdmin(userId);
         row.classList.add("table-success");
         row.querySelectorAll("button").forEach(b => { b.disabled = true; });
-        btn.textContent = "Approved ✓";
+        btn.textContent = "Approved";
+        superToast(`${email} is now a firm admin.`);
       } catch (err) {
-        alert(err.message || "Failed to approve");
+        superToast(err.message || "The request could not be approved. Try again.", "critical");
         btn.disabled = false;
         btn.textContent = "Approve";
       }
     }
 
     if (btn.classList.contains("revoke-btn")) {
+      // Declining used to happen on the first click, with nothing asked (DS24).
+      const decline = await superAsk({
+        title: `Decline ${email}'s request to be a firm admin?`,
+        body: "Their account stays, as an individual account with no firm. Its active or suspended state does not change.",
+        confirmLabel: "Decline request",
+        cancelLabel: "Keep it pending",
+        tone: "danger",
+      });
+      if (!decline) return;
       btn.disabled = true;
-      btn.textContent = "Revoking...";
+      btn.textContent = "Declining...";
       try {
         await revokeAdmin(userId);
         row.classList.add("table-warning");
         row.querySelectorAll("button").forEach(b => { b.disabled = true; });
-        btn.textContent = "Revoked";
+        btn.textContent = "Declined";
+        superToast(`Declined ${email}'s request.`);
       } catch (err) {
-        alert(err.message || "Failed to revoke");
+        superToast(err.message || "The request could not be declined. Try again.", "critical");
         btn.disabled = false;
-        btn.textContent = "Revoke";
+        btn.textContent = "Decline";
       }
     }
   });
@@ -1470,14 +1639,14 @@ async function deleteFirmApi(firmId) {
   // The server refuses an erase without this exact confirmation token in the
   // body (super.controller deleteFirmForSuper) — sending it is what makes the
   // typed-confirmation flow below reach the endpoint instead of a 400.
-  await api(`/super/firms/${encodeURIComponent(firmId)}`, { method: "DELETE", body: { confirmation: "ERASE_FIRM_DATA" } });
+  return api(`/super/firms/${encodeURIComponent(firmId)}`, { method: "DELETE", body: { confirmation: "ERASE_FIRM_DATA" } });
 }
 
 function renderFirmRow(firm) {
-  const accessBadge = `<span class="badge good">FREE · ALL TOOLS</span>`;
+  const accessBadge = `<span class="cp-badge" data-tone="accent">Free · all tools</span>`;
   const activeBadge = firm.isActive
-    ? `<span class="badge good">Active</span>`
-    : `<span class="badge warn">Inactive</span>`;
+    ? `<span class="cp-badge" data-tone="success">Active</span>`
+    : `<span class="cp-badge" data-tone="warning">Inactive</span>`;
   const ownerEmail = firm.owner?.email || "—";
   const ownerName = firm.owner?.name || "";
   const ownerDisplay = ownerName
@@ -1485,16 +1654,16 @@ function renderFirmRow(firm) {
     : escapeHtml(ownerEmail);
 
   return `
-    <tr data-firm-id="${escapeHtml(firm._id)}">
+    <tr data-firm-id="${escapeHtml(firm._id)}" data-firm-name="${escapeHtml(firm.displayName || "")}" data-firm-handle="${escapeHtml(firm.handle || "")}" data-active="${firm.isActive ? "1" : "0"}">
       <td><strong>${escapeHtml(firm.displayName || "—")}</strong></td>
       <td><code>@${escapeHtml(firm.handle || "—")}</code></td>
       <td>${ownerDisplay}</td>
       <td>${accessBadge}</td>
       <td>${activeBadge}</td>
-      <td>
-        <button class="btn btn-sm btn-outline-primary me-1 firm-users-btn" type="button">Users</button>
-        <button class="btn btn-sm btn-outline-secondary me-1 firm-plan-btn" type="button">Edit access</button>
-        <button class="btn btn-sm btn-outline-danger firm-delete-btn" type="button">Delete</button>
+      <td class="row-actions">
+        <button class="btn btn-sm btn-outline-primary firm-users-btn" type="button">Users</button>
+        <button class="btn btn-sm btn-outline-secondary firm-plan-btn" type="button">${firm.isActive ? "Deactivate" : "Activate"}</button>
+        <button class="btn btn-sm btn-outline-danger firm-delete-btn" type="button">Erase</button>
       </td>
     </tr>
   `;
@@ -1507,24 +1676,22 @@ function renderFirmUsersRows(firmId, users) {
   return users.map(u => {
     const created = u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—";
     const isFirmAdmin = u.role === "FIRM_ADMIN";
-    const activeBadge = u.isActive ? `<span class="badge good">Yes</span>` : `<span class="badge warn">No</span>`;
-    const roleBadge = isFirmAdmin ? `<span class="badge good">FIRM_ADMIN</span>` : `<span class="badge bg-secondary">USER</span>`;
+    const activeBadge = u.isActive
+      ? `<span class="cp-badge" data-tone="success">Active</span>`
+      : `<span class="cp-badge" data-tone="warning">Inactive</span>`;
+    const roleBadge = userRoleBadge(u.role);
 
     return `
-      <tr data-user-id="${escapeHtml(u._id)}" data-firm-id="${escapeHtml(firmId)}">
+      <tr data-user-id="${escapeHtml(u._id)}" data-firm-id="${escapeHtml(firmId)}" data-role="${escapeHtml(u.role || "")}" data-active="${u.isActive ? "1" : "0"}" data-email="${escapeHtml(u.email || "")}">
         <td>${escapeHtml(u.email || "—")}</td>
         <td>${escapeHtml(u.name || "—")}</td>
         <td>${roleBadge}</td>
-        <td>${escapeHtml(u.accountType || "—")}</td>
+        <td>${escapeHtml(superEnumLabel(u.accountType))}</td>
         <td>${activeBadge}</td>
         <td>${escapeHtml(created)}</td>
-        <td>
-          <button class="btn btn-sm btn-outline-primary me-1 firm-user-toggle-admin" type="button">
-            ${isFirmAdmin ? "Remove Admin" : "Make Admin"}
-          </button>
-          <button class="btn btn-sm btn-outline-secondary me-1 firm-user-toggle-active" type="button">
-            ${u.isActive ? "Deactivate" : "Activate"}
-          </button>
+        <td class="row-actions">
+          <button class="btn btn-sm btn-outline-primary firm-user-toggle-admin" type="button">${isFirmAdmin ? "Remove admin role" : "Make admin"}</button>
+          <button class="btn btn-sm btn-outline-secondary firm-user-toggle-active" type="button">${u.isActive ? "Deactivate" : "Activate"}</button>
           <button class="btn btn-sm btn-outline-danger firm-user-delete" type="button">Delete</button>
         </td>
       </tr>
@@ -1630,52 +1797,102 @@ function attachFirmUsersHandlers() {
     const userId = row.getAttribute("data-user-id");
     if (!firmId || !userId) return;
 
+    // The row says what it is (data-role, data-active); reading the state back out of the
+    // rendered badges broke the moment the badges read as words instead of enum names.
+    const email = row.dataset.email || "this user";
+
     if (btn.classList.contains("firm-user-toggle-admin")) {
-      const isCurrentlyAdmin = row.innerHTML.includes("FIRM_ADMIN");
+      const isCurrentlyAdmin = row.dataset.role === "FIRM_ADMIN";
       const newRole = isCurrentlyAdmin ? "USER" : "FIRM_ADMIN";
-      const confirmMsg = isCurrentlyAdmin ? "Remove this user's FIRM_ADMIN role?" : "Make this user FIRM_ADMIN?";
-      if (!window.confirm(confirmMsg)) return;
+      const confirmed = await superAsk(
+        isCurrentlyAdmin
+          ? {
+              title: `Remove ${email}'s firm admin role?`,
+              body: "They keep their account and lose the firm admin role.",
+              confirmLabel: "Remove admin role",
+              cancelLabel: "Keep the role",
+              tone: "danger",
+            }
+          : {
+              title: `Make ${email} a firm admin?`,
+              body: "They get the firm admin role and the firm admin panel.",
+              confirmLabel: "Make admin",
+              cancelLabel: "Cancel",
+            },
+      );
+      if (!confirmed) return;
 
       btn.disabled = true;
       btn.textContent = "Updating...";
       try {
         await updateFirmUserApi(firmId, userId, { role: newRole });
-        // Refresh modal
+        superToast(isCurrentlyAdmin ? `${email} is no longer a firm admin.` : `${email} is now a firm admin.`);
         await handleViewFirmUsers(firmId);
       } catch (err) {
-        alert(err.message || "Failed to update role.");
+        superToast(err.message || "The role could not be changed. Try again.", "critical");
         btn.disabled = false;
       }
       return;
     }
 
     if (btn.classList.contains("firm-user-toggle-active")) {
-      const isCurrentlyActive = row.innerHTML.includes(">Yes<");
+      const isCurrentlyActive = row.dataset.active === "1";
       const newActive = !isCurrentlyActive;
-      const confirmMsg = newActive ? "Activate this user?" : "Deactivate this user?";
-      if (!window.confirm(confirmMsg)) return;
+      const confirmed = await superAsk(
+        newActive
+          ? {
+              title: `Activate ${email}?`,
+              body: "They can sign in and work again.",
+              confirmLabel: "Activate account",
+              cancelLabel: "Cancel",
+            }
+          : {
+              title: `Deactivate ${email}?`,
+              body: "Every request they make is refused from now on, until the account is activated again. Nothing of theirs is deleted.",
+              confirmLabel: "Deactivate account",
+              cancelLabel: "Keep it active",
+              tone: "danger",
+            },
+      );
+      if (!confirmed) return;
 
       btn.disabled = true;
       btn.textContent = "Updating...";
       try {
         await updateFirmUserApi(firmId, userId, { isActive: newActive });
+        superToast(newActive ? `${email} is active again.` : `${email} is deactivated.`);
         await handleViewFirmUsers(firmId);
       } catch (err) {
-        alert(err.message || "Failed to update.");
+        superToast(err.message || "The account could not be changed. Try again.", "critical");
         btn.disabled = false;
       }
       return;
     }
 
     if (btn.classList.contains("firm-user-delete")) {
-      if (!window.confirm("Delete this user permanently? This cannot be undone.")) return;
+      // Irreversible, so the address is typed (design rule 4). The server tombstones the account
+      // rather than removing the row (deleteFirmUserForSuper), and the copy says so.
+      const confirmed = await superAsk({
+        title: `Delete ${email}'s account?`,
+        body: [
+          "Their name and email are cleared from the account, every session they have ends at once, and they are removed from every firm they belong to.",
+          "Records of work they did stay with the firms, without their name. This cannot be undone.",
+        ],
+        requireText: row.dataset.email || "DELETE",
+        requireLabel: row.dataset.email ? `Type ${row.dataset.email} to confirm` : "Type DELETE to confirm",
+        confirmLabel: "Delete account",
+        cancelLabel: "Keep the account",
+        tone: "danger",
+      });
+      if (!confirmed) return;
       btn.disabled = true;
       btn.textContent = "Deleting...";
       try {
         await deleteFirmUserApi(firmId, userId);
         row.remove();
+        superToast(`${email}'s account was deleted.`);
       } catch (err) {
-        alert(err.message || "Failed to delete user.");
+        superToast(err.message || "The account could not be deleted. Try again.", "critical");
         btn.disabled = false;
         btn.textContent = "Delete";
       }
@@ -1684,40 +1901,73 @@ function attachFirmUsersHandlers() {
 }
 
 async function handleEditFirmPlan(firmId, rowEl) {
-  const currentActiveCell = rowEl.querySelector("td:nth-child(5)");
-  const currentActive = currentActiveCell?.innerText.trim().toLowerCase() === "active";
-  const activeInput = window.prompt(
-    "Keep this firm account active? (yes/no):",
-    currentActive ? "yes" : "no"
+  // The button names the one change it makes; the old prompt asked the admin to type yes or no.
+  const currentActive = rowEl.dataset.active === "1";
+  const name = rowEl.dataset.firmName || "this firm";
+  const confirmed = await superAsk(
+    currentActive
+      ? {
+          title: `Deactivate ${name}?`,
+          body: "Its members can no longer switch into the firm's workspace, and its join code stops working. Its data is kept, and you can activate it again.",
+          confirmLabel: "Deactivate firm",
+          cancelLabel: "Keep it active",
+          tone: "danger",
+        }
+      : {
+          title: `Activate ${name}?`,
+          body: "Its members can switch into the firm's workspace again, and its join code works again.",
+          confirmLabel: "Activate firm",
+          cancelLabel: "Cancel",
+        },
   );
-  if (activeInput === null) return;
-  const normalized = activeInput.trim().toLowerCase();
-  if (!["yes", "y", "no", "n"].includes(normalized)) {
-    alert("Enter yes or no.");
-    return;
-  }
-  const isActive = normalized.startsWith("y");
+  if (!confirmed) return;
 
   try {
-    const updated = await updateFirmPlanApi(firmId, { isActive });
+    const updated = await updateFirmPlanApi(firmId, { isActive: !currentActive });
     rowEl.outerHTML = renderFirmRow(updated);
+    superToast(updated.isActive ? `${name} is active.` : `${name} is deactivated.`);
   } catch (err) {
-    alert(err.message || "Failed to update firm access.");
+    superToast(err.message || "The firm could not be changed. Try again.", "critical");
   }
 }
 
 async function handleDeleteFirm(firmId, rowEl) {
-  // The server's erase cascades every firm-scoped collection and is irreversible;
-  // the typed token below is the same token the server validates.
-  if (!window.confirm("Erase this firm and ALL of its data (tasks, reminders, imports, reconciliations, members' access)? This cannot be undone.")) return;
-  const text = window.prompt("Type ERASE_FIRM_DATA to confirm:", "");
-  if (text !== "ERASE_FIRM_DATA") { alert("Cancelled (you did not type ERASE_FIRM_DATA)."); return; }
+  // The server's erase cascades every firm-scoped collection and is irreversible. The admin types
+  // the firm's handle (design rule 4: the name of what is being destroyed, not a stock word);
+  // deleteFirmApi then sends the ERASE_FIRM_DATA token the server itself checks.
+  const name = rowEl.dataset.firmName || "this firm";
+  const handle = rowEl.dataset.firmHandle || "";
+  const word = handle || "ERASE";
+  const confirmed = await superAsk({
+    title: `Erase ${name} and all of its data?`,
+    body: "Everything the firm holds is erased or anonymised, and its members lose access to it:",
+    details: [
+      "Tasks, reminders and notices",
+      "Imports, reconciliations and their results",
+      "Members' access to the firm",
+      "This cannot be undone.",
+    ],
+    requireText: word,
+    requireLabel: handle ? `Type the firm's handle (${handle}) to confirm` : "Type ERASE to confirm",
+    confirmLabel: "Erase firm",
+    cancelLabel: "Keep the firm",
+    tone: "danger",
+  });
+  if (!confirmed) return;
 
   try {
-    await deleteFirmApi(firmId);
+    const data = await deleteFirmApi(firmId);
+    // The server keeps the firm row when the cascade stops part-way, so that running it again
+    // resumes it (deleteFirmForSuper answers ok: false with the receipt). Showing that as done
+    // would claim an erasure that did not finish.
+    if (data && data.ok === false) {
+      superToast(`The erasure of ${name} stopped part-way. The firm is still listed: run Erase again to finish it.`, "critical");
+      return;
+    }
     rowEl.remove();
+    superToast(`${name} and its data were erased.`);
   } catch (err) {
-    alert(err.message || "Failed to delete firm.");
+    superToast(err.message || "The firm could not be erased. Try again.", "critical");
   }
 }
 
@@ -1735,9 +1985,11 @@ const userDir = {
 let userDirDebounce = null;
 
 function userRoleBadge(role) {
-  if (role === "SUPER_ADMIN") return `<span class="badge bg-dark">Super admin</span>`;
-  if (role === "FIRM_ADMIN") return `<span class="badge good">Firm admin</span>`;
-  return `<span class="badge bg-secondary">User</span>`;
+  if (role === "SUPER_ADMIN") return `<span class="cp-badge" data-tone="provisional">Super admin</span>`;
+  if (role === "FIRM_ADMIN") return `<span class="cp-badge" data-tone="accent">Firm admin</span>`;
+  if (role === "USER" || !role) return `<span class="cp-badge">User</span>`;
+  // An unknown role is shown as the server sent it, never folded into "User".
+  return `<span class="cp-badge">${escapeHtml(role)}</span>`;
 }
 
 function renderUserDirectoryRow(u, index) {
@@ -1753,14 +2005,14 @@ function renderUserDirectoryRow(u, index) {
   const dormant = u.lastActiveAt && Number(u.daysSinceActive) > 30;
   const never = !u.lastActiveAt;
   const lastActiveCell = never
-    ? `<span class="badge warn">Never active</span>`
+    ? `<span class="cp-badge" data-tone="warning">Never active</span>`
     : `${escapeHtml(lastActive)}${sinceLabel ? ` <span class="${dormant ? "text-danger" : "text-muted"} small">${escapeHtml(sinceLabel)}</span>` : ""}`;
   const statusBadge = u.isActive
-    ? `<span class="badge good">Active</span>`
-    : `<span class="badge warn">Disabled</span>`;
+    ? `<span class="cp-badge" data-tone="success">Active</span>`
+    : `<span class="cp-badge" data-tone="warning">Disabled</span>`;
   const apiCalls = Number(u.totalApiCalls || 0).toLocaleString("en-IN");
   const firmCell = u.activeFirm
-    ? `${escapeHtml(u.activeFirm.displayName || "—")} <span class="text-muted small">@${escapeHtml(u.activeFirm.handle || "")}</span>${u.activeFirm.kind === "PERSONAL" ? ` <span class="badge bg-secondary">personal</span>` : ""}`
+    ? `${escapeHtml(u.activeFirm.displayName || "—")} <span class="text-muted small">@${escapeHtml(u.activeFirm.handle || "")}</span>${u.activeFirm.kind === "PERSONAL" ? ` <span class="cp-badge">Personal</span>` : ""}`
     : `<span class="text-muted small">—</span>`;
 
   const cell = (label, value) => `<div class="col-md-3 col-6"><span class="text-muted d-block">${label}</span>${value}</div>`;
@@ -2182,7 +2434,7 @@ async function loadFirmsSection() {
 // for the signed-in user and the page on screen.
 const SUPER_PAGE_LOADERS = {
   overview: () => loadDashboardStats(),
-  controls: () => Promise.all([loadAppConfigSection(), loadProviderUsageStats(), loadReminderDeliveryHealthStats()]),
+  controls: () => Promise.all([loadAppConfigSection(), loadProviderUsageStats(), loadReminderDeliveryHealthStats(), loadControlChanges()]),
   analytics: () => loadUsageStats(),
   emails: () => Promise.all([loadEmailsPage(), loadEmailSuppressions()]),
   users: () => loadUserDirectory(),
@@ -2238,6 +2490,7 @@ async function initSuperPage() {
   try {
     if (!requireSuperAdmin(me)) { window.location.href = "/admin/admin.html"; return; }
     if (qs("superEmail")) qs("superEmail").textContent = me.email || "—";
+    superRenderScope();
 
     bindAppConfigHandlers();
     bindUserDirectoryControls();
@@ -2592,7 +2845,7 @@ function updateSelfTestControls() {
   const confirmation = qs("selfTestConfirm");
   if (!button) return;
   button.disabled = selfTestIsRunning || !confirmation?.checked;
-  button.textContent = selfTestIsRunning ? "Review Running" : "Run Deep Review";
+  button.textContent = selfTestIsRunning ? "Review running" : "Run deep review";
 }
 
 function stopSelfTestPolling() {
@@ -2819,23 +3072,17 @@ async function sendTestEmailNow() {
   btn.disabled = true;
   const original = btn.textContent;
   btn.textContent = "Sending…";
-  if (status) { status.textContent = "Sending a test email…"; status.style.color = "var(--muted)"; }
+  superStatus(status, "Sending a test email…", "muted");
   try {
     const data = await api("/super/send-test-email", { method: "POST" });
-    if (status) {
-      if (data.ok) {
-        status.textContent = `✓ Test email sent to ${data.to}. Check that inbox (also spam) to confirm delivery.`;
-        status.style.color = "#166534";
-      } else {
-        status.textContent = `✗ Email provider rejected the send: ${escapeHtml(data.error || "unknown error")}`;
-        status.style.color = "#b91c1c";
-      }
+    // textContent: the provider's words are shown as text, so they are not escaped twice.
+    if (data.ok) {
+      superStatus(status, `Test email sent to ${data.to}. Check that inbox (and its spam folder) to confirm it arrived.`, "success");
+    } else {
+      superStatus(status, `The email provider refused the send: ${data.error || "no reason given"}`, "critical");
     }
   } catch (err) {
-    if (status) {
-      status.textContent = `✗ Test email failed: ${escapeHtml(err.message || "request failed")}`;
-      status.style.color = "#b91c1c";
-    }
+    superStatus(status, `The test email was not sent: ${err.message || "try again in a moment"}`, "critical");
   } finally {
     btn.disabled = false;
     btn.textContent = original;

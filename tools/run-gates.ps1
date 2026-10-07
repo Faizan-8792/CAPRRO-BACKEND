@@ -818,6 +818,8 @@ try {
         "portal-map-contract",
         # C15 (2026-10-07): a due date typed in the admin panel is saved and shown as its UTC day.
         "due-day-utc-contract",
+        # DS24 (2026-10-07): a platform-wide switch records who moved it, what was set and why.
+        "control-change-reason",
         # Added 2026-08-26. These six existed in tests/ and passed, but were NEVER in this list, so a
         # regression in any of them would have shipped silently. Found by diffing the suite files on
         # disk (50) against the names in this array (40) -- the same class of hole as the
@@ -942,6 +944,7 @@ try {
         "super-emails-controller-contract" = "scratch-gates-super-emails"
         "api-not-found-contract" = "scratch-gates-api-not-found"
         "gst-downloads-contract" = "scratch-gates-gst-downloads"
+        "control-change-reason" = "scratch-gates-control-change"
     }
     # Probed once, not assumed. On a machine with no local Mongo the behaviour is unchanged from
     # before -- the variable stays unset and the suites run their Mongo-free subset -- but the

@@ -26,10 +26,12 @@
       message.innerHTML = "";
       const text = document.createElement("p");
       text.textContent = "Daily digest is active.";
-      const link = document.createElement("a");
-      link.href = "/admin/admin.html#digests";
-      link.textContent = "Open your digest inbox";
-      message.append(text, link);
+      // DS24: this used to link to /admin/admin.html#digests, a section the firm admin panel does
+      // not have, on a panel that turns away anyone who is not a firm admin. Say where digests are.
+      const where = document.createElement("p");
+      where.textContent =
+        "It arrives by email. You can also read your digests under Digests in the CA PRO desktop app and in the extension's workspace.";
+      message.append(text, where);
       button.remove();
     } catch (error) {
       message.textContent = error.message || "Activation could not be completed. Please try again.";

@@ -55,7 +55,7 @@ await withBrowser(async (page) => {
   const card = await page.evaluate(`(() => {
     const status = document.getElementById("reminderDeliveryHealthStatus");
     const body = document.getElementById("reminderDeliveryHealthBody");
-    const heads = Array.from(document.querySelectorAll("h6"));
+    const heads = Array.from(document.querySelectorAll("h2, h3, h6"));
     const heading = heads.find(h => /Reminder Delivery Health/i.test(h.textContent || ""));
     return {
       headingPresent: !!heading,

@@ -2,7 +2,8 @@
 //
 // admin.css (the firm panel and the super panel share it) sets no text
 // below 12px, uses regular (400) and semibold (600) only, a 14px body, a font
-// stack led by Segoe UI Variable with no web font fetched from another host,
+// stack led by IBM Plex Sans (DS24: the design system's, served from this site) with no web font
+// fetched from another host,
 // and tabular figures for the panel's figures so digits line up. The
 // extension's pages are held to the same rules by
 // audit-nlp-extension/tests/type-scale.focused.test.mjs.
@@ -33,8 +34,20 @@ check("regular and semibold only", weights.length === 0, `found ${weights.join("
 
 const body = css.slice(css.indexOf("\nbody {"));
 check("a 14px body", /^[^}]*font-size:\s*14px/.test(body.slice(0, body.indexOf("}") + 1)));
-check("the stack is led by Segoe UI Variable", /--font:\s*"Segoe UI Variable", "Segoe UI", system-ui,/.test(css));
-check("no web font fetched from another host", !/@import\s+url\(['"]?https?:/.test(css));
+// DS24 moved the panels onto the design system's face: admin.css names the token, the token sheet
+// leads it with IBM Plex Sans and keeps the system faces behind it, and both pages load the font
+// sheet, whose files sit beside it on this site.
+const tokenSheet = readFileSync(join(HERE, "..", "public", "admin", "capro-tokens.css"), "utf8");
+const fontSheet = readFileSync(join(HERE, "..", "public", "admin", "ui", "capro-fonts.css"), "utf8");
+const pages = ["admin.html", "super.html"].map((name) => readFileSync(join(HERE, "..", "public", "admin", name), "utf8"));
+check("the stack is the design system's, led by IBM Plex Sans",
+  /--font:\s*var\(--capro-font-ui\);/.test(css) &&
+    /--capro-font-ui:\s*"IBM Plex Sans", "Segoe UI Variable", "Segoe UI", system-ui,/.test(tokenSheet) &&
+    pages.every((page) => /href="ui\/capro-fonts\.css(\?v=\d+)?"/.test(page)));
+const fontSources = [...fontSheet.matchAll(/url\(\s*['"]?([^'")]+)/g)].map((m) => m[1]);
+check("no web font fetched from another host",
+  !/@import\s+url\(['"]?https?:/.test(css) && fontSources.length > 0 && fontSources.every((src) => /^fonts\//.test(src)),
+  `font files: ${fontSources.join(", ")}`);
 
 for (const selector of [".kpi-value", ".st-group-count"]) {
   const at = css.indexOf(`${selector} {`);

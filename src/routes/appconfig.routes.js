@@ -12,6 +12,7 @@ import {
   updateDesktopRelease,
   notifyDesktopRelease,
   getDesktopReleaseDraft,
+  getControlChanges,
 } from "../controllers/appconfig.controller.js";
 
 const router = Router();
@@ -32,6 +33,8 @@ router.post("/dismiss-desktop-update", authRequired, dismissDesktopUpdate);
 // /api/super), swept onto one shared definition in rate-limit.middleware.js.
 router.patch("/features", authRequired, superLimiter, updateFeatureFlags);
 router.patch("/maintenance", authRequired, superLimiter, updateMaintenance);
+// DS24: who moved maintenance mode or a feature flag, what was set and the reason given.
+router.get("/control-changes", authRequired, superLimiter, getControlChanges);
 router.patch("/welcome", authRequired, superLimiter, updateWelcomeAnnouncement);
 router.get("/desktop-release", authRequired, superLimiter, getDesktopReleaseDraft);
 router.patch("/desktop-release", authRequired, superLimiter, updateDesktopRelease);

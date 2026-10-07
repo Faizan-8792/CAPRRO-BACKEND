@@ -22,13 +22,11 @@
 //
 // HOW THE HUMAN ANSWER IS SUPPLIED, stated plainly so nobody has to guess whether this is a real test
 // -----------------------------------------------------------------------------------------------
-// The panel asks the operator through `window.confirm` and `window.prompt`. This script replaces
-// those two browser primitives with stubs returning the answer a tester would give, then lets the
-// panel's own code run untouched. What is under test is the panel's branch logic and its decision to
-// issue or not issue a request -- `if (!window.confirm(msg)) return;` and
-// `if (typed !== version) { ...; return; }` -- both of which execute for real. The stub stands in for
-// the human's keystroke, nothing else. It also records that each dialog was actually opened and with
-// what message, so a panel that silently skipped its own confirmation would fail rather than pass.
+// Since DS24 the panel asks through the shared CA PRO dialog (ui/capro-ui.js): one dialog whose
+// Notify button stays off until the version is typed exactly. Nothing is stubbed. The script answers
+// the REAL dialog as an operator would - presses Cancel, or types a wrong version and tries Enter and
+// the button - and counts the requests that follow. A panel that silently skipped its own question
+// would open no dialog, and the checks below fail on that rather than pass.
 //
 // USAGE
 //   CAPRO_ADMIN_TOKEN=<super-admin jwt> node tools/verify-admin-desktop-release.mjs
@@ -79,7 +77,14 @@ await withBrowser(async (page) => {
   // localStorage is origin-scoped, so the origin has to be loaded before the token can be planted.
   await page.goto(PANEL_URL, { waitMs: 1500 });
   await page.evaluate(`localStorage.setItem("caproadminjwt", ${JSON.stringify(token)}); true`);
-  await page.goto(PANEL_URL, { waitMs: 4000 });
+  // The release card is on App controls, and since DS10 (2026-10-04) a Controls card stays disabled
+  // until that page has read its settings: the Notify button inside a disabled card does nothing, so
+  // the drive goes where an operator goes and waits for the card to open.
+  await page.goto(`${PANEL_URL}#controls`, { waitMs: 3000 });
+  for (let waited = 0; waited < 8000; waited += 250) {
+    if (await page.evaluate(`document.getElementById("desktopReleaseSet") && !document.getElementById("desktopReleaseSet").disabled && document.getElementById("featureFlagsSet") && !document.getElementById("featureFlagsSet").disabled`)) break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
 
   console.log("=== bullet 1: the card renders, below Welcome Announcement, matching the API ===");
 
@@ -87,7 +92,7 @@ await withBrowser(async (page) => {
     const notify = document.getElementById("notifyDesktopReleaseBtn");
     const live = document.getElementById("desktopReleaseLive");
     const version = document.getElementById("desktopLatestVersion");
-    const headings = Array.from(document.querySelectorAll("h6"));
+    const headings = Array.from(document.querySelectorAll("h2, h3, h6"));
     const welcome = headings.find(h => /Welcome Announcement/i.test(h.textContent || ""));
     const desktop = headings.find(h => /Desktop release/i.test(h.textContent || ""));
     const top = el => el ? el.getBoundingClientRect().top + window.scrollY : null;
@@ -119,62 +124,84 @@ await withBrowser(async (page) => {
     `form field ${JSON.stringify(layout.versionValue)} vs live ${JSON.stringify(liveRelease?.latestVersion ?? null)}`);
 
   console.log("");
-  console.log("=== bullet 2, gate 1: DECLINING the first confirm issues zero requests ===");
+  console.log("=== bullet 2, gate 1: DECLINING the dialog issues zero requests ===");
 
-  // Stub the dialogs and record that they were opened. A panel that never asked would leave
-  // dialogs.confirm empty, and the assertion below would fail rather than silently pass.
-  await page.evaluate(`(() => {
-    window.__dialogs = { confirm: [], prompt: [] };
-    window.confirm = (msg) => { window.__dialogs.confirm.push(String(msg)); return window.__confirmAnswer; };
-    window.prompt = (msg) => { window.__dialogs.prompt.push(String(msg)); return window.__promptAnswer; };
-    return true;
+  // The dialog as an operator sees it, and the two ways to answer it.
+  const dialogNow = async () => JSON.parse(await page.evaluate(`JSON.stringify((() => {
+    const d = document.querySelector("dialog.cp-dialog");
+    if (!d) return null;
+    const notify = [...d.querySelectorAll(".cp-dialog__footer button")].find((b) => b.textContent === "Notify all users");
+    return {
+      text: ((d.querySelector(".cp-dialog__title")?.textContent || "") + " | " + (d.querySelector(".cp-dialog__body")?.textContent || "")).replace(/\\s+/g, " ").trim(),
+      field: d.querySelector("label.cp-label")?.textContent || "",
+      notifyDisabled: notify ? notify.disabled : null,
+    };
+  })())`));
+  const pressInDialog = (label) => page.evaluate(`(() => {
+    const b = [...document.querySelectorAll("dialog.cp-dialog .cp-dialog__footer button")].find((x) => x.textContent === ${JSON.stringify("")} + ${JSON.stringify(label)});
+    if (b) b.click();
+    return !!b;
   })()`);
+  let dialogsOpened = 0;
 
-  await page.evaluate(`window.__confirmAnswer = false; window.__promptAnswer = null; true`);
   page.clearRequests();
   await page.evaluate(`document.getElementById("notifyDesktopReleaseBtn").click(); true`);
+  await new Promise((r) => setTimeout(r, 800));
+  const asked = await dialogNow();
+  if (asked) dialogsOpened += 1;
+  await pressInDialog("Cancel");
   await new Promise((r) => setTimeout(r, 1500));
 
   const afterDecline = page.requests();
-  const declineDialogs = await page.evaluate(`JSON.stringify(window.__dialogs)`);
-  const declineParsed = JSON.parse(declineDialogs);
   const declineNotify = afterDecline.filter((r) => r.url.includes(NOTIFY_PATH));
   const declinePosts = afterDecline.filter((r) => r.method === "POST");
+  const stillOpen = await page.evaluate(`!!document.querySelector("dialog.cp-dialog")`);
 
-  check("U5-decline-asked-first", declineParsed.confirm.length === 1,
-    `the panel opened ${declineParsed.confirm.length} confirm dialog(s); message: ${JSON.stringify((declineParsed.confirm[0] || "").slice(0, 90))}`);
+  check("U5-decline-asked-first", asked !== null && /Notify every desktop user/.test(asked.text),
+    `the panel opened ${asked ? "its" : "no"} dialog; it reads ${JSON.stringify((asked?.text || "").slice(0, 110))}`);
+  check("U5-decline-asks-for-the-version-typed", asked !== null && /Type the version number exactly/.test(asked.field) && asked.notifyDisabled === true,
+    `field ${JSON.stringify(asked?.field || "")}; Notify all users disabled before typing: ${asked?.notifyDisabled}`);
   check("U5-decline-zero-notify-requests", declineNotify.length === 0,
     `${declineNotify.length} request(s) to ${NOTIFY_PATH} after declining (want 0)`);
   check("U5-decline-zero-posts", declinePosts.length === 0,
     `${declinePosts.length} POST request(s) of any kind after declining (want 0); total requests observed: ${afterDecline.length}`);
-  check("U5-decline-no-prompt", declineParsed.prompt.length === 0,
-    `declining the first confirm must not reach the typed confirmation; prompts opened: ${declineParsed.prompt.length}`);
+  check("U5-decline-closes-the-dialog", stillOpen === false, `dialog still open after Cancel: ${stillOpen}`);
 
   console.log("");
-  console.log("=== bullet 2, gate 2: accepting, then typing the WRONG version, issues zero requests ===");
+  console.log("=== bullet 2, gate 2: typing the WRONG version leaves Notify off and issues zero requests ===");
 
   const realVersion = layout.versionValue || liveRelease?.latestVersion || "0.0.0";
   const wrongVersion = `${realVersion}-not-the-version`;
 
-  await page.evaluate(`window.__dialogs = { confirm: [], prompt: [] }; window.__confirmAnswer = true; window.__promptAnswer = ${JSON.stringify(wrongVersion)}; true`);
   page.clearRequests();
   await page.evaluate(`document.getElementById("notifyDesktopReleaseBtn").click(); true`);
+  await new Promise((r) => setTimeout(r, 800));
+  if (await dialogNow()) dialogsOpened += 1;
+  // Type the wrong version, then try both ways an operator might push it through: Enter in the
+  // field (a destructive dialog never confirms on Enter) and a click on the Notify button itself.
+  await page.evaluate(`(() => {
+    const box = document.querySelector("dialog.cp-dialog input");
+    box.value = ${JSON.stringify(wrongVersion)};
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+    box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    return true;
+  })()`);
+  const wrongDialog = await dialogNow();
+  await pressInDialog("Notify all users");
   await new Promise((r) => setTimeout(r, 1500));
-
   const afterWrong = page.requests();
-  const wrongParsed = JSON.parse(await page.evaluate(`JSON.stringify(window.__dialogs)`));
   const wrongNotify = afterWrong.filter((r) => r.url.includes(NOTIFY_PATH));
   const wrongPosts = afterWrong.filter((r) => r.method === "POST");
-  const statusText = await page.evaluate(`(document.getElementById("desktopReleaseStatus")||{}).textContent || ""`);
+  const openAfterWrong = await page.evaluate(`!!document.querySelector("dialog.cp-dialog")`);
+  await pressInDialog("Cancel");
+  await new Promise((r) => setTimeout(r, 500));
 
-  check("U5-wrong-reached-typed-confirm", wrongParsed.prompt.length === 1,
-    `accepting the first confirm reached the typed confirmation; prompts opened: ${wrongParsed.prompt.length}, message ${JSON.stringify((wrongParsed.prompt[0] || "").slice(0, 90))}`);
+  check("U5-wrong-notify-stays-off", wrongDialog !== null && wrongDialog.notifyDisabled === true && openAfterWrong === true,
+    `with ${JSON.stringify(wrongVersion)} typed: Notify all users disabled ${wrongDialog?.notifyDisabled}, dialog still open after Enter and a click: ${openAfterWrong}`);
   check("U5-wrong-zero-notify-requests", wrongNotify.length === 0,
     `${wrongNotify.length} request(s) to ${NOTIFY_PATH} after a mistyped version (want 0)`);
   check("U5-wrong-zero-posts", wrongPosts.length === 0,
     `${wrongPosts.length} POST request(s) of any kind after a mistyped version (want 0); total requests observed: ${afterWrong.length}`);
-  check("U5-wrong-says-cancelled", /cancel/i.test(statusText) && /match/i.test(statusText),
-    `status line reads ${JSON.stringify(statusText.trim().slice(0, 120))}`);
 
   console.log("");
   console.log("=== bullet 5: invalid input surfaces the server's own message, and writes nothing ===");
@@ -263,8 +290,8 @@ await withBrowser(async (page) => {
   const controlPosts = controlAll.filter((r) => r.method === "POST");
   check("U5-control-log-records-posts", controlPosts.length >= 1,
     `${controlPosts.length} POST request(s) recorded for a deliberately-issued POST - proves the "0 POST" counts above are real observations from a working log, not a blind one`);
-  check("U5-control-button-live", (wrongParsed.confirm.length + declineParsed.confirm.length) === 2,
-    `the Notify button's handler fired on both clicks (${declineParsed.confirm.length + wrongParsed.confirm.length} confirms across 2 clicks) - proves "zero requests" came from the refusal branch, not from a dead button`);
+  check("U5-control-button-live", dialogsOpened === 2,
+    `the Notify button's handler fired on both clicks (${dialogsOpened} dialogs across 2 clicks) - proves "zero requests" came from the refusal branch, not from a dead button`);
 }, { headless: true });
 
 console.log("");

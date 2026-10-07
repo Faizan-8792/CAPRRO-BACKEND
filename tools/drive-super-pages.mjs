@@ -116,6 +116,7 @@ if (STUB) {
     } });
   });
   stub.get("/api/app-config/desktop-release", answer({ ok: true, desktopRelease: {} }));
+  stub.get("/api/app-config/control-changes", answer({ ok: true, changes: [], limit: 50 }));
   stub.get("/api/super/provider-usage", answer({ ok: true, usage: { today: {}, thisMonth: {}, topUsersToday: {} } }));
   stub.get("/api/super/reminder-delivery-health", answer({ ok: true, delivery: { issueCount: 0, sample: [], candidatesScanned: 0, candidatesScanTruncated: false } }));
   stub.get("/api/super/emails", answer({ ok: true, rows: [], summary: {}, pagination: { page: 1, pages: 1, total: 0 } }));
@@ -222,7 +223,8 @@ const RECORDER = `(() => {
 // What each page asks for the first time it is opened.
 const PAGE_ENDPOINTS = {
   overview: ["/api/super/dashboard-stats"],
-  controls: ["/api/app-config", "/api/app-config/desktop-release", "/api/super/provider-usage", "/api/super/reminder-delivery-health"],
+  // DS24 added the history of changes to the platform switches.
+  controls: ["/api/app-config", "/api/app-config/control-changes", "/api/app-config/desktop-release", "/api/super/provider-usage", "/api/super/reminder-delivery-health"],
   analytics: ["/api/super/usage-stats"],
   emails: ["/api/super/emails", "/api/super/emails/suppressions"],
   users: ["/api/super/users"],
@@ -302,7 +304,7 @@ try {
         ticks: [...chart.querySelectorAll(".day-chart__tick")].map((tick) => Number(tick.textContent)),
         bars: chart.querySelectorAll(".day-chart__day").length,
         legend: [...chart.querySelectorAll(".day-chart__legend li")].map((li) => li.textContent.trim()),
-        heading: chart.closest(".card").querySelector("h6").textContent.trim(),
+        heading: chart.closest(".card").querySelector("h2, h3, h6").textContent.trim(),
         note: chart.closest(".card").querySelector("p").textContent.trim(),
         sortable: chart.querySelectorAll(".super-sortable").length,
       };
