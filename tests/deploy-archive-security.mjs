@@ -2017,7 +2017,9 @@ const expectedManifestReasonByName = new Map([
     "valid-length transitive integrity substitution is refused",
     // 2026-09-28: the fixture digest moved with the base lock (pdfjs-dist addition). The
     // mutation and the refusal reason are unchanged.
-    "package-lock.json canonical SHA-256 does not match the trusted lock (8579abdf07873e2e489fc5d69c6475c257e14a38d20073fa49389cc017296429)",
+    // 2026-10-07: moved again with the base lock (the audited npm audit fix, trusted digest
+    // 5c02c9d7...); the mutation and the refusal reason are unchanged.
+    "package-lock.json canonical SHA-256 does not match the trusted lock (f381ab79694f70f9f76ebebd05988ee36067294da22fff0c46d14c2d10a621a0)",
   ],
   [
     "runtime package classified as development-only is refused",
@@ -2032,7 +2034,8 @@ const expectedManifestReasonByName = new Map([
     // a transitive range to "*" is still refused, and still by the digest check.
     "widened transitive dependency range is refused",
     // 2026-09-28: fixture digest moved with the base lock; reason unchanged.
-    "package-lock.json canonical SHA-256 does not match the trusted lock (a49007e5c30a3549a7e4c4d78f0bed827bb7314fdcac3be63dcff6e5b9ac0711)",
+    // 2026-10-07: moved again with the base lock (trusted digest 5c02c9d7...); reason unchanged.
+    "package-lock.json canonical SHA-256 does not match the trusted lock (09c031e332e1051c80dfd3a6de96d7522d6df40c7f90caa0a51b377fc18279c9)",
   ],
   [
     "unsupported semver OR alternative is refused before digest validation",
