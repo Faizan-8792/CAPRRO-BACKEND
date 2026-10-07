@@ -69,7 +69,7 @@ function renderTaskColumn(title, key, items) {
 
   const cardsHtml = list
     .map((t) => {
-      const due = t.dueDateISO ? new Date(t.dueDateISO).toLocaleDateString('en-IN') : '';
+      const due = t.dueDateISO ? formatDueDay(t.dueDateISO) : '';
       const staff = t.assignedTo?.name || t.assignedTo?.email || 'Unassigned';
 
       return `
@@ -318,7 +318,9 @@ async function createTaskFromAdminUI() {
     return;
   }
 
-  const dueDateISO = new Date(dueDate + 'T00:00:00').toISOString();
+  // The picker's own YYYY-MM-DD: the server stores it as that day in UTC. Building local
+  // midnight here sent the previous UTC day from any browser east of UTC (India included).
+  const dueDateISO = dueDate;
 
   try {
     if (statusEl) statusEl.textContent = 'Creating task...';

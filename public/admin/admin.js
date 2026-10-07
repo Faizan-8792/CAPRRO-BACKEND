@@ -111,6 +111,16 @@ function escapeHtml(s) {
         .replaceAll("'", '&#39;');
 }
 
+// A due date is a statutory day, kept as that day in UTC on both clients and the server
+// (CLAUDE.md section 8). Rendering it in the viewer's own zone would move it across a day
+// boundary west of UTC, and an instant saved as Indian local midnight would read a day early.
+// admin-tasks.js and compliance-assistant/assistant.js use this same function.
+function formatDueDay(iso) {
+    const date = new Date(iso);
+    if (!iso || Number.isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('en-IN', { timeZone: 'UTC' });
+}
+
 function formatEnumLabel(value) {
     const labels = {
         FIRM_ADMIN: 'Firm administrator',
@@ -296,8 +306,7 @@ async function loadTodayReminders() {
 
         listEl.innerHTML = reminders
             .map(r => {
-                const dt = new Date(r.dueDateISO);
-                const when = dt.toLocaleDateString('en-IN');
+                const when = formatDueDay(r.dueDateISO);
                 const status = formatEnumLabel(r.status);
                 return `<li>${escapeHtml(status)} · ${escapeHtml(r.clientLabel || r.typeId)} · due ${escapeHtml(when)}</li>`;
             })
@@ -315,7 +324,7 @@ async function loadTodayReminders() {
 // --- Clients to Chase Today ---
 function buildReminderMessage(item, type) {
     const dueText = item.dueDateISO
-        ? new Date(item.dueDateISO).toLocaleDateString('en-IN')
+        ? formatDueDay(item.dueDateISO)
         : 'the upcoming due date';
     const clientName = item.clientName || 'Client';
     const serviceName = formatEnumLabel(item.serviceType) || 'compliance work';

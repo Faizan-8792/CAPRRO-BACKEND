@@ -816,6 +816,8 @@ try {
         # gate-suite-coverage reported; portal-map-contract is GD28 (the signed portal map).
         "admin-type-scale",
         "portal-map-contract",
+        # C15 (2026-10-07): a due date typed in the admin panel is saved and shown as its UTC day.
+        "due-day-utc-contract",
         # Added 2026-08-26. These six existed in tests/ and passed, but were NEVER in this list, so a
         # regression in any of them would have shipped silently. Found by diffing the suite files on
         # disk (50) against the names in this array (40) -- the same class of hole as the

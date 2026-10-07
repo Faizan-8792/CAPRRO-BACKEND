@@ -68,7 +68,7 @@ async function loadAdminComplianceAssistant() {
         <tr>
           <td>${escapeHtml(t.clientName)}</td>
           <td>${escapeHtml(t.serviceType)}</td>
-          <td>${new Date(t.dueDateISO).toLocaleDateString('en-IN')}</td>
+          <td>${escapeHtml(window.formatDueDay(t.dueDateISO))}</td>
           <td>${escapeHtml(t.assignedTo?.email || 'Unassigned')}</td>
           <td>
             <span class="badge bg-${t.priority === 'CRITICAL' ? 'danger' :
