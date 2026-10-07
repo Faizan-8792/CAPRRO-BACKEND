@@ -2391,9 +2391,13 @@ if (listed.status !== 0 || listed.error) {
   // and src/routes/gst-downloads.routes.js (the signed-in member's own firm, from req.user).
   // 207 -> 208 on 2026-10-04 for GD33, the filing board (decision D4), confirmed clean by this
   // scan before the pin moved: src/models/FilingStatusObservation.js (a schema, the class only).
+  // 208 -> 209 on 2026-10-07 for DS17, the shared UI library: public/admin/ui/capro-ui.js, generated
+  // from design/ui by design/build-ui.mjs and confirmed clean by this scan before the pin moved. It
+  // is DOM code for dialogs, toasts and icons: no network call, no storage, no secret, no
+  // configuration value, and it never parses what a caller passes as HTML.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 208 && result.status === 0,
+    files.length === 209 && result.status === 0,
     result,
   );
 }
