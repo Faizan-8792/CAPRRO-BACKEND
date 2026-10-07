@@ -52,8 +52,24 @@ const EXPECTED_ACORN_VERSION = "8.18.0";
 // reports "up to date", so the lock is the deterministic graph package.json
 // describes. The bank-statement contracts that exercise the parser
 // (bank-statement-intake/xlsx/normalization/end-to-end) run green against it.
+//
+// UPDATED 2026-10-07, from 6ba2371cbd59c0cba8e3ee2f3b82afdeeed41afab4ddf9e038a70baa444ac3c4.
+// The change it blesses (capro-backend 7973347, `npm audit fix --omit=dev`, no --force), and what
+// was checked before blessing it. Advisories published since the last gate run had taken
+// `npm audit --omit=dev` to 1 high and 1 critical:
+//   compression 1.8.1  -> 1.8.2    HIGH: memory-leak DoS on a prematurely closed response
+//   proxy-addr  2.0.7  -> 2.0.8    CRITICAL: IP spoofing via an IPv4-mapped IPv6 trust subnet
+//   qs          6.15.3 -> 6.16.0   two moderates (array-limit bypass, isBuffer DoS); the same
+//                                  6.16.0 body-parser already nested, so that nested copy is gone
+//   express     4.22.2 -> 4.22.3   takes qs ~6.16.0 and path-to-regexp ~0.1.13 (already 0.1.13)
+//   morgan      1.12.0 -> 1.12.1   moderate: log injection via an unescaped double quote
+// Nothing else changed (the full git diff of package-lock.json read hunk by hunk: those five
+// entries, compression's added dependency on destroy 1.2.0, which the lock already held, and two
+// funding blocks). Every entry still resolves to registry.npmjs.org with sha512 integrity;
+// `npm install --dry-run` changes nothing; `npm audit --omit=dev --audit-level=high` is clean (one
+// moderate remains: multer, which needs a range change in package.json).
 const EXPECTED_PACKAGE_LOCK_SHA256 =
-  "6ba2371cbd59c0cba8e3ee2f3b82afdeeed41afab4ddf9e038a70baa444ac3c4";
+  "5c02c9d7cf2f1f3c509ec87620b0244ed6bef0d6c3b2ee39b6499daf7a1064f3";
 const MAX_INPUT_BYTES = 32 * 1024 * 1024;
 const MAX_STATIC_DECODE_BYTES = 1024 * 1024;
 const UNKNOWN = Symbol("unknown static value");
