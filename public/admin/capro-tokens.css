@@ -27,6 +27,8 @@
   --capro-focus: #177184;
   --capro-brand-navy: #183C84;
   --capro-brand-emerald: #119D75;
+  --capro-brand-cream: #F4EFDC;
+  --capro-scrim: #0A171B;
   --capro-success: #0B7155;
   --capro-warning: #7C5200;
   --capro-needs-review: #A74700;
@@ -111,6 +113,8 @@
     --capro-focus: #57B9CC;
     --capro-brand-navy: #789DE9;
     --capro-brand-emerald: #55CA9D;
+    --capro-brand-cream: #E9E3CF;
+    --capro-scrim: #000000;
     --capro-success: #5AB892;
     --capro-warning: #E6BE61;
     --capro-needs-review: #F19458;
