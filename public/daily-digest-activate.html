@@ -3,24 +3,30 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
     <title>Activate Daily Digest | CA PRO Toolkit</title>
-    <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#f8fafc; color:#111827; margin:0; }
-      main { max-width: 580px; margin: 8vh auto; padding: 24px; background:#fff; border:1px solid #e5e7eb; border-radius:12px; }
-      button { background:#1d4ed8; border:0; border-radius:6px; color:#fff; cursor:pointer; font:inherit; padding:10px 14px; }
-      button:disabled { opacity:.65; cursor:wait; }
-      #message { color:#4b5563; line-height:1.5; }
-      #message a { color:#1d4ed8; }
-    </style>
+    <!-- DS25: the design system the admin panels wear, from this site. -->
+    <link rel="stylesheet" href="/admin/capro-tokens.css?v=2" />
+    <link rel="stylesheet" href="/admin/ui/capro-fonts.css?v=1" />
+    <link rel="stylesheet" href="/admin/ui/capro-ui.css?v=1" />
+    <link rel="stylesheet" href="/capro-public.css?v=1" />
+    <link rel="icon" type="image/png" href="/logo.png" />
     <!-- The behaviour lives in an external script: the app CSP (script-src
          'self') refuses inline scripts, so an inline version of this logic
          silently did nothing. See daily-digest-activate.js. -->
   </head>
-  <body>
-    <main>
-      <h1>Activate daily digest?</h1>
-      <p id="message">Daily digest email will be sent to this address. Reminders, OTPs, and important compliance emails are already unchanged.</p>
-      <button id="activate" type="button">Activate Daily Digest</button>
+  <body class="public-page">
+    <main class="public-card" aria-labelledby="activateTitle">
+      <div class="public-card__rule" aria-hidden="true"></div>
+      <div class="public-card__body">
+        <div class="public-brand">
+          <span class="public-brand__mark"><img src="/admin/ui/capro-mark.png" alt="" width="26" height="26" /></span>
+          <span class="public-brand__name">CA PRO Toolkit</span>
+        </div>
+        <h1 class="public-title" id="activateTitle">Activate daily digest?</h1>
+        <div id="message" class="public-lede" role="status" aria-live="polite">Daily digest email will be sent to this address. Reminders, OTPs, and important compliance emails are already unchanged.</div>
+        <button id="activate" class="cp-btn cp-btn--primary cp-btn--block" type="button">Activate Daily Digest</button>
+      </div>
     </main>
     <script src="daily-digest-activate.js"></script>
   </body>

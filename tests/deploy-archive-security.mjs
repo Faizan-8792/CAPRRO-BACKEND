@@ -2395,9 +2395,13 @@ if (listed.status !== 0 || listed.error) {
   // from design/ui by design/build-ui.mjs and confirmed clean by this scan before the pin moved. It
   // is DOM code for dialogs, toasts and icons: no network call, no storage, no secret, no
   // configuration value, and it never parses what a caller passes as HTML.
+  // 209 -> 210 on 2026-10-08 for DS25, the one branded email layout: src/services/email-layout.js,
+  // confirmed clean by this scan before the pin moved. Pure string building - an escape helper,
+  // the UTC due-day formatter and the table layout - with no network call, no storage, no secret
+  // and no configuration value; its one URL is the public logo mark on api.caprotoolkit.in.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 209 && result.status === 0,
+    files.length === 210 && result.status === 0,
     result,
   );
 }

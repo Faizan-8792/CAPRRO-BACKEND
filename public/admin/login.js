@@ -71,22 +71,30 @@ async function initLoginPage() {
   const goVerify = document.getElementById("goVerify");
   const verifyBtn = document.getElementById("verifyOtp");
 
+  // One status line, in the tone of what happened; always text, never markup (DS25).
+  const say = (text, tone = "") => {
+    statusEl.textContent = text;
+    statusEl.dataset.tone = tone;
+  };
+
   // ---------- UI handlers ----------
 
   goVerify?.addEventListener("click", () => {
     otpBlock.style.display = "block";
-    statusEl.textContent = "Enter OTP and verify.";
+    say("Enter the OTP from your email, then verify.");
+    otpEl.focus();
   });
 
   sendOtpBtn.addEventListener("click", async () => {
     try {
       const email = emailEl.value.trim();
       if (!email) {
-        statusEl.textContent = "Email required.";
+        say("Enter your email first.", "critical");
+        emailEl.focus();
         return;
       }
 
-      statusEl.textContent = "Sending OTP...";
+      say("Sending the OTP...");
 
       const res = await fetch(`${API_BASE}/auth/send-otp`, {
         method: "POST",
@@ -100,10 +108,11 @@ async function initLoginPage() {
       }
 
       otpBlock.style.display = "block";
-      statusEl.textContent = "OTP sent. Check your email.";
+      say("OTP sent. Check your email.", "success");
+      otpEl.focus();
     } catch (e) {
       console.error("Send OTP error:", e);
-      statusEl.textContent = e.message || "Failed to send OTP.";
+      say(e.message || "The OTP could not be sent. Try again.", "critical");
     }
   });
 
@@ -113,11 +122,11 @@ async function initLoginPage() {
       const otpCode = otpEl.value.trim();
 
       if (!email || !otpCode) {
-        statusEl.textContent = "Email & OTP required.";
+        say("Enter your email and the OTP.", "critical");
         return;
       }
 
-      statusEl.textContent = "Verifying OTP...";
+      say("Checking the OTP...");
 
       const res = await fetch(`${API_BASE}/auth/verify-otp`, {
         method: "POST",
@@ -144,13 +153,13 @@ async function initLoginPage() {
       console.log("Login successful user:", user);
 
       if (isSuperAdmin(user)) {
-        statusEl.textContent = "Super Admin login successful. Redirecting...";
+        say("Signed in as the super admin. Opening the panel...", "success");
         setTimeout(() => {
           window.location.href = "/admin/super.html";
         }, 800);
         return;
       } else if (user.role === "FIRM_ADMIN" && user.isActive === true) {
-        statusEl.textContent = "Firm Admin login successful. Redirecting...";
+        say("Signed in as a firm admin. Opening the panel...", "success");
         setTimeout(() => {
           window.location.href = "/admin/admin.html#dashboard";
         }, 800);
@@ -161,18 +170,19 @@ async function initLoginPage() {
       //    firm-admin request and a suspension, and the API refuses every call
       //    either way, so do not claim success and do not open the dashboard.
       if (user.isActive === false) {
-        statusEl.innerHTML =
+        say(
           "This account is not active on the server, so the admin panel cannot load. " +
           "If you asked to become a Firm Admin, the request is waiting for Super Admin approval at " +
-          "saifullahfaizan786@gmail.com.";
+          "saifullahfaizan786@gmail.com.",
+          "critical",
+        );
         clearToken();
         return;
       }
 
       // 2) USER with NO firm → truly new person
       if (user.role === "USER" && !user.firmId) {
-        statusEl.innerHTML =
-          "First create a firm from the admin panel, then come back to this page to sign in as Firm Admin.";
+        say("First create a firm from the admin panel, then come back to this page to sign in as Firm Admin.", "critical");
         clearToken();
         return;
       }
@@ -180,23 +190,19 @@ async function initLoginPage() {
       // 3) USER already linked to a firm → yahan se admin request create karenge
       if (user.role === "USER" && user.firmId && user.isActive === true) {
         try {
-          statusEl.textContent = "Creating Firm Admin request...";
+          say("Creating Firm Admin request...");
           const resp = await api("/firms/request-admin", { method: "POST" });
 
           if (resp.ok && resp.alreadyPending) {
-            statusEl.textContent =
-              "A Firm Admin request for this account is already waiting for Super Admin approval.";
+            say("A Firm Admin request for this account is already waiting for Super Admin approval.", "success");
           } else if (resp.ok) {
-            statusEl.textContent =
-              "Firm Admin request sent. It is waiting for Super Admin approval.";
+            say("Firm Admin request sent. It is waiting for Super Admin approval.", "success");
           } else {
-            statusEl.textContent =
-              resp.error || "Failed to create Firm Admin request.";
+            say(resp.error || "The Firm Admin request could not be created. Try again.", "critical");
           }
         } catch (err) {
           console.error("request-admin error:", err);
-          statusEl.textContent =
-            err.message || "Failed to create Firm Admin request.";
+          say(err.message || "The Firm Admin request could not be created. Try again.", "critical");
         }
 
         clearToken();
@@ -209,17 +215,16 @@ async function initLoginPage() {
         user.firmId &&
         user.isActive === false
       ) {
-        statusEl.textContent =
-          "Request as Firm Admin has been successfully sent. Please wait for approval from your existing admin.";
+        say("Request as Firm Admin has been successfully sent. Please wait for approval from your existing admin.", "success");
         return;
       }
 
       // fallback
       clearToken();
-      statusEl.textContent = "";
+      say("");
     } catch (e) {
       console.error("Login / verify OTP error:", e);
-      statusEl.textContent = e.message || "Login failed.";
+      say(e.message || "Signing in did not work. Try again.", "critical");
       clearToken();
     }
   });

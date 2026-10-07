@@ -657,18 +657,14 @@ async function initAdminPage() {
                 window.location.href = '/admin/super.html';
                 return;
             }
+            // The public pages' card (DS25), so a signed-in account without the role sees the same
+            // product it signed in to, and a way back to the sign-in page.
             document.body.innerHTML = `
-              <div class="container" style="padding-top: 40px">
-                <div class="card p-4 mx-auto" style="max-width: 500px">
-                  <div class="text-center mb-4">
-                    <h3>Access denied</h3>
-                    <p class="text-muted">This email does not have Firm Admin access.</p>
-                  </div>
-                  <div class="text-center">
-                    <a href="/index.html" class="btn btn-primary">Login</a>
-                  </div>
-                </div>
-              </div>
+              <main class="admin-denied card p-4 mx-auto" aria-labelledby="deniedTitle">
+                <h1 class="admin-page-title" id="deniedTitle">This account is not a firm admin</h1>
+                <p class="admin-page-lede">This email does not have Firm Admin access.</p>
+                <a href="/index.html" class="btn btn-primary">Sign in with another account</a>
+              </main>
             `;
             return;
         }

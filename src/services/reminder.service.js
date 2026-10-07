@@ -3,17 +3,62 @@
 // The compliance-reminder send routes through the shared mailer
 // (services/mailer.js) — one Resend client, suppression checking, and an
 // EmailDelivery row per send (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1).
+//
+// DS25: the reminder is built by buildComplianceReminderEmail - a pure function,
+// in the one branded email layout - and only sent here. Its due date is read as
+// the stored UTC day: toDateString() read the server's own time zone, so west
+// of UTC a date stored at that day's UTC midnight came out as the day before.
 
 import { sendEmail as recordAndSend } from "./mailer.js";
+import {
+  escapeEmailHtml as escHtml,
+  formatDueDayForEmail,
+  renderEmailLayout,
+} from "./email-layout.js";
 
-// ---------- Helper ----------
-function escHtml(s) {
-  return String(s ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+// ---------- The email itself (pure: no send, no database) ----------
+export function buildComplianceReminderEmail({ title, clientLabel, dueDateISO, daysLeft }) {
+  const dueText = formatDueDayForEmail(dueDateISO);
+
+  let whenLine;
+  if (daysLeft < 0) {
+    whenLine = `Overdue by ${Math.abs(daysLeft)} day(s)`;
+  } else if (daysLeft === 0) {
+    whenLine = "Due today";
+  } else if (daysLeft === 1) {
+    whenLine = "Due tomorrow";
+  } else {
+    whenLine = `${daysLeft} day(s) left`;
+  }
+
+  const clientLine = clientLabel ? `Client: ${clientLabel}` : "";
+
+  const text = [
+    "Compliance Reminder",
+    `Title: ${title}`,
+    clientLine,
+    `When: ${whenLine}`,
+    `Due date: ${dueText}`,
+    "",
+    "This is an automated reminder from CA PRO Toolkit.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const row = (label, value) =>
+    `<p style="margin:0 0 8px;"><strong>${label}:</strong> ${escHtml(value)}</p>`;
+  const html = renderEmailLayout({
+    title: "Compliance Reminder",
+    bodyHtml: [
+      row("Title", title),
+      clientLabel ? row("Client", clientLabel) : "",
+      row("When", whenLine),
+      row("Due date", dueText),
+    ].join(""),
+    footerLines: ["This is an automated reminder from CA PRO Toolkit."],
+  });
+
+  return { subject: `Compliance Reminder: ${title}`, html, text };
 }
 
 // ---------- Provider-bound delivery (through the shared mailer) ----------
@@ -37,55 +82,7 @@ export async function sendComplianceReminderEmail({
     throw new Error("sendComplianceReminderEmail: idempotencyKey is required");
   }
 
-  const due = new Date(dueDateISO);
-  const dueText = Number.isNaN(due.getTime())
-    ? String(dueDateISO)
-    : due.toDateString();
-
-  let whenLine;
-  if (daysLeft < 0) {
-    whenLine = `Overdue by ${Math.abs(daysLeft)} day(s)`;
-  } else if (daysLeft === 0) {
-    whenLine = "Due today";
-  } else if (daysLeft === 1) {
-    whenLine = "Due tomorrow";
-  } else {
-    whenLine = `${daysLeft} day(s) left`;
-  }
-
-  const clientLine = clientLabel ? `Client: ${clientLabel}` : "";
-
-  const subject = `Compliance Reminder: ${title}`;
-
-  const text = [
-    "Compliance Reminder",
-    `Title: ${title}`,
-    clientLine,
-    `When: ${whenLine}`,
-    `Due date: ${dueText}`,
-    "",
-    "This is an automated reminder from CA PRO Toolkit.",
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  const html = `
-    <div style="font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding:16px; color:#111827;">
-      <h2 style="margin-top:0; color:#111827;">Compliance Reminder</h2>
-      <p><strong>Title:</strong> ${escHtml(title)}</p>
-      ${
-        clientLabel
-          ? `<p><strong>Client:</strong> ${escHtml(clientLabel)}</p>`
-          : ""
-      }
-      <p><strong>When:</strong> ${escHtml(whenLine)}</p>
-      <p><strong>Due date:</strong> ${escHtml(dueText)}</p>
-      <hr style="margin:16px 0; border:none; border-top:1px solid #e5e7eb;" />
-      <p style="font-size:12px; color:#6b7280;">
-        This is an automated reminder from CA PRO Toolkit.
-      </p>
-    </div>
-  `;
+  const { subject, html, text } = buildComplianceReminderEmail({ title, clientLabel, dueDateISO, daysLeft });
 
   const result = await recordAndSend({
     to: toEmail,

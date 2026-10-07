@@ -5,145 +5,70 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Unsubscribe — CA PRO Toolkit</title>
-  <style>
-    :root {
-      --cream: #f4efdb;
-      --teal: #176e87;
-      --teal-dark: #0e4f60;
-      --teal-lighter: #d4ebf2;
-      --gold: #c8924b;
-      --text: #1a3540;
-      --muted: #708590;
-      --ok: #2d7a55;
-      --danger: #b44545;
-      --border: rgba(23, 110, 135, 0.18);
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background: var(--cream);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-      color: var(--text);
-    }
-    .card {
-      width: 100%;
-      max-width: 460px;
-      background: #ffffff;
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 32px 28px;
-      box-shadow: 0 12px 40px rgba(23, 110, 135, 0.12);
-    }
-    h1 {
-      font-size: 19px;
-      margin: 0 0 6px;
-      color: var(--teal-dark);
-    }
-    p.subtitle {
-      margin: 0 0 22px;
-      font-size: 13px;
-      color: var(--muted);
-    }
-    .row {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 8px 0;
-      border-bottom: 1px solid #eef2f5;
-      font-size: 13px;
-    }
-    .row span:first-child { color: var(--muted); }
-    .row span:last-child { font-weight: 600; text-align: right; word-break: break-word; }
-    fieldset {
-      border: none;
-      margin: 18px 0 8px;
-      padding: 0;
-    }
-    label.choice {
-      display: block;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 12px 14px;
-      margin-bottom: 10px;
-      cursor: pointer;
-      font-size: 13px;
-    }
-    label.choice:hover { border-color: var(--teal); }
-    label.choice input { margin-right: 8px; }
-    label.choice .desc { display: block; margin-left: 22px; color: var(--muted); font-size: 12px; margin-top: 2px; }
-    button {
-      width: 100%;
-      border: none;
-      border-radius: 10px;
-      padding: 12px 16px;
-      font-size: 14px;
-      font-weight: 700;
-      cursor: pointer;
-      background: var(--teal);
-      color: #fff;
-      margin-top: 8px;
-    }
-    button:disabled { opacity: 0.6; cursor: default; }
-    button:hover:not(:disabled) { background: var(--teal-dark); }
-    .status {
-      margin-top: 16px;
-      font-size: 13px;
-      padding: 12px 14px;
-      border-radius: 10px;
-      display: none;
-    }
-    .status.ok { display: block; background: var(--teal-lighter); color: var(--teal-dark); }
-    .status.error { display: block; background: #fbeaea; color: var(--danger); }
-    .hidden { display: none; }
-  </style>
+  <!-- DS25: the design system the admin panels wear, from this site. -->
+  <link rel="stylesheet" href="/admin/capro-tokens.css?v=2" />
+  <link rel="stylesheet" href="/admin/ui/capro-fonts.css?v=1" />
+  <link rel="stylesheet" href="/admin/ui/capro-ui.css?v=1" />
+  <link rel="stylesheet" href="/capro-public.css?v=1" />
+  <link rel="icon" type="image/png" href="/logo.png" />
 </head>
-<body>
-  <div class="card">
-    <div id="loading">
-      <h1>Checking your link…</h1>
-      <p class="subtitle">One moment.</p>
-    </div>
+<body class="public-page">
+  <main class="public-card" aria-live="polite">
+    <div class="public-card__rule" aria-hidden="true"></div>
+    <div class="public-card__body">
+      <div class="public-brand">
+        <span class="public-brand__mark"><img src="/admin/ui/capro-mark.png" alt="" width="26" height="26" /></span>
+        <span class="public-brand__name">CA PRO Toolkit</span>
+      </div>
 
-    <div id="form" class="hidden">
-      <h1>Unsubscribe</h1>
-      <p class="subtitle" id="account-line"></p>
-      <div class="row"><span>Email</span><span id="email-value">—</span></div>
-      <div class="row"><span>Digest</span><span id="kind-value">—</span></div>
-      <fieldset id="scope-fields">
-        <label class="choice">
-          <input type="radio" name="scope" value="THIS_KIND" checked />
-          Stop <span id="kind-inline">this</span> email only
-          <span class="desc">Other CA PRO Toolkit digest emails, if any, keep sending.</span>
-        </label>
-        <label class="choice">
-          <input type="radio" name="scope" value="ALL" />
-          Stop all digest emails
-          <span class="desc">Turns off email delivery for both the daily and weekly digest.</span>
-        </label>
-      </fieldset>
-      <button id="confirm-btn" type="button">Unsubscribe</button>
-    </div>
+      <div id="loading">
+        <h1 class="public-title">Checking your link…</h1>
+        <p class="public-lede">One moment.</p>
+      </div>
 
-    <div id="result" class="hidden">
-      <h1 id="result-title">Done</h1>
-      <p class="subtitle" id="result-subtitle"></p>
-    </div>
+      <div id="form" class="hidden">
+        <h1 class="public-title">Unsubscribe</h1>
+        <p class="public-lede" id="account-line"></p>
+        <dl class="public-facts">
+          <div><dt>Email</dt><dd id="email-value">—</dd></div>
+          <div><dt>Digest</dt><dd id="kind-value">—</dd></div>
+        </dl>
+        <fieldset id="scope-fields" class="public-choices">
+          <legend class="cp-visually-hidden">What to stop</legend>
+          <label class="public-choice">
+            <input type="radio" name="scope" value="THIS_KIND" checked />
+            <span>
+              Stop <span id="kind-inline">this</span> email only
+              <span class="public-choice__desc">Other CA PRO Toolkit digest emails, if any, keep sending.</span>
+            </span>
+          </label>
+          <label class="public-choice">
+            <input type="radio" name="scope" value="ALL" />
+            <span>
+              Stop all digest emails
+              <span class="public-choice__desc">Turns off email delivery for both the daily and weekly digest.</span>
+            </span>
+          </label>
+        </fieldset>
+        <button id="confirm-btn" class="cp-btn cp-btn--primary cp-btn--block" type="button">Unsubscribe</button>
+      </div>
 
-    <div id="error" class="hidden">
-      <h1>This link isn't working</h1>
-      <p class="subtitle" id="error-message">
-        It may have expired or already been used. You can change your email preferences any time
-        from inside CA PRO Toolkit under Settings.
-      </p>
-    </div>
+      <div id="result" class="hidden">
+        <h1 class="public-title" id="result-title">Done</h1>
+        <p class="public-lede" id="result-subtitle"></p>
+      </div>
 
-    <div id="status" class="status" role="status"></div>
-  </div>
+      <div id="error" class="hidden">
+        <h1 class="public-title">This link isn't working</h1>
+        <p class="public-lede" id="error-message">
+          It may have expired or already been used. You can change your email preferences any time
+          from inside CA PRO Toolkit under Settings.
+        </p>
+      </div>
+
+      <div id="status" class="public-status" role="status"></div>
+    </div>
+  </main>
 
   <script src="/unsubscribe.js"></script>
 </body>

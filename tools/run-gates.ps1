@@ -820,6 +820,8 @@ try {
         "due-day-utc-contract",
         # DS24 (2026-10-07): a platform-wide switch records who moved it, what was set and why.
         "control-change-reason",
+        # DS25 (2026-10-07): every email in one branded layout, with a text part and its own words.
+        "email-layout-contract",
         # Added 2026-08-26. These six existed in tests/ and passed, but were NEVER in this list, so a
         # regression in any of them would have shipped silently. Found by diffing the suite files on
         # disk (50) against the names in this array (40) -- the same class of hole as the

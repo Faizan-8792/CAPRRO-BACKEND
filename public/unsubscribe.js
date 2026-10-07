@@ -19,15 +19,11 @@ function show(id) {
   }
 }
 
+// One status line, in the tone of what happened (DS25: capro-public.css draws the tones).
 function setStatus(message, kind) {
   const el = document.getElementById("status");
-  if (!message) {
-    el.className = "status";
-    el.textContent = "";
-    return;
-  }
-  el.className = `status ${kind}`;
-  el.textContent = message;
+  el.textContent = message || "";
+  el.dataset.tone = !message ? "" : kind === "ok" ? "success" : "critical";
 }
 
 function paramsFromUrl() {

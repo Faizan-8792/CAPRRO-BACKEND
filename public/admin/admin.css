@@ -1475,3 +1475,7 @@ th.super-sortable[aria-sort="descending"]::after { content: "↓"; opacity: 1; }
   .content { padding: 0; }
   .card { border: 1px solid #ccc; box-shadow: none; }
 }
+
+/* The screen a signed-in account without the firm admin role sees (admin.js). */
+.admin-denied { max-width: 480px; margin: 12vh auto 0; }
+.admin-denied .admin-page-lede { margin: 0 0 16px; }

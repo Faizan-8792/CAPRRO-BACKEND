@@ -5,43 +5,69 @@
 // (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1). This module keeps only what its
 // callers and tests care about: content building, validation, and the
 // call-signature contract.
+//
+// DS25: every email is built by a pure build* function and framed by the one
+// branded layout (services/email-layout.js), with a plain-text part. The send*
+// functions add the recipient and hand the result to the mailer, so each email
+// can be checked and photographed without sending anything
+// (tests/email-layout-contract.mjs, tools/snap-emails.mjs). The layout frames;
+// the words of each email are the ones it always carried.
 
 import {
   sendEmail as recordAndSend,
 } from "./mailer.js";
+import {
+  EMAIL_PALETTE,
+  emailButton,
+  escapeEmailHtml as escapeHtml,
+  renderEmailLayout,
+} from "./email-layout.js";
+
+const PARA = "margin:0 0 12px;";
 
 /**
  * ================================
  * OTP EMAIL
  * ================================
  */
+export function buildOtpEmail(otp) {
+  const code = String(otp);
+  const title = "CA PRO Toolkit – Login OTP";
+  return {
+    subject: "Your CA PRO Toolkit OTP",
+    html: renderEmailLayout({
+      title,
+      bodyHtml: `
+        <p style="${PARA}">Your One-Time Password (OTP) is:</p>
+        <p style="margin:0 0 12px;font-family:'IBM Plex Mono',Consolas,'Courier New',monospace;font-size:28px;line-height:36px;font-weight:600;letter-spacing:4px;">${escapeHtml(code)}</p>
+        <p style="${PARA}">This OTP is valid for <b>10 minutes</b>.</p>`,
+      footerLines: ["If you did not request this OTP, you can safely ignore this email."],
+    }),
+    text: [
+      title,
+      "",
+      `Your One-Time Password (OTP) is: ${code}`,
+      "This OTP is valid for 10 minutes.",
+      "",
+      "If you did not request this OTP, you can safely ignore this email.",
+    ].join("\n"),
+  };
+}
+
 export async function sendOtpEmail(toEmail, otp) {
   try {
     if (!toEmail || !otp) {
       throw new Error("sendOtpEmail: toEmail and otp are required");
     }
 
-    const html = `
-        <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding:16px; color:#111827;">
-          <h2 style="margin-top:0;">CA PRO Toolkit – Login OTP</h2>
-          <p>Your One-Time Password (OTP) is:</p>
-          <p style="font-size:24px; font-weight:bold; letter-spacing:2px;">
-            ${otp}
-          </p>
-          <p>This OTP is valid for <b>10 minutes</b>.</p>
-          <hr style="margin:16px 0;" />
-          <p style="font-size:12px; color:#6b7280;">
-            If you did not request this OTP, you can safely ignore this email.
-          </p>
-        </div>
-      `;
-
+    const { subject, html, text } = buildOtpEmail(otp);
     const result = await recordAndSend({
       to: toEmail,
       type: "otp",
       subjectTemplateName: "otp_code",
-      subject: "Your CA PRO Toolkit OTP",
+      subject,
       html,
+      text,
     });
 
     console.log(`📧 OTP email sent to: ${toEmail}`, result.providerMessageId || "");
@@ -57,85 +83,10 @@ export async function sendOtpEmail(toEmail, otp) {
   }
 }
 
-/**
- * ================================
- * COMPLIANCE / TASK REMINDER EMAIL
- * ================================
- */
-export async function sendComplianceReminderEmail({
-  toEmail,
-  title,
-  clientLabel,
-  dueDateISO,
-  daysLeft,
-}) {
-  try {
-    if (!toEmail) {
-      throw new Error("sendComplianceReminderEmail: toEmail is required");
-    }
-
-    const due = new Date(dueDateISO);
-    const dueText = Number.isNaN(due.getTime())
-      ? String(dueDateISO)
-      : due.toDateString();
-
-    let whenLine;
-    if (daysLeft === 0) whenLine = "Due today";
-    else if (daysLeft === 1) whenLine = "Due tomorrow";
-    else whenLine = `${daysLeft} day(s) left`;
-
-    const subject = `Compliance Reminder: ${title}`;
-
-    const html = `
-      <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding:16px; color:#111827;">
-        <h2 style="margin-top:0;">Compliance Reminder</h2>
-
-        <p><strong>Title:</strong> ${escapeHtml(title)}</p>
-        ${
-          clientLabel
-            ? `<p><strong>Client:</strong> ${escapeHtml(clientLabel)}</p>`
-            : ""
-        }
-        <p><strong>When:</strong> ${escapeHtml(whenLine)}</p>
-        <p><strong>Due date:</strong> ${escapeHtml(dueText)}</p>
-
-        <hr style="margin:16px 0;" />
-
-        <p style="font-size:12px; color:#6b7280;">
-          This is an automated reminder from CA PRO Toolkit.
-        </p>
-      </div>
-    `;
-
-    const result = await recordAndSend({
-      to: toEmail,
-      type: "reminder",
-      subjectTemplateName: "compliance_reminder",
-      subject,
-      html,
-    });
-
-    console.log(`📧 Compliance reminder sent to: ${toEmail}`, result.providerMessageId || "");
-    return result;
-  } catch (err) {
-    console.error("❌ Resend reminder error:", err);
-    throw err;
-  }
-}
-
-/**
- * ================================
- * HTML ESCAPE HELPER
- * ================================
- */
-function escapeHtml(s) {
-  return String(s ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
+// The compliance reminder is built and sent by services/reminder.service.js
+// (buildComplianceReminderEmail, sendComplianceReminderEmail). This module had
+// a second copy of that template that nothing imported - one that said "-3
+// day(s) left" for an overdue task - removed in DS25 rather than restyled.
 
 // A bare, unstyled http(s) URL only - one of these is placed verbatim inside
 // a List-Unsubscribe header (a strict mail-header value, no HTML/quoting
@@ -187,35 +138,25 @@ export function buildDigestEmailContent({
     label: String(line?.label || "").slice(0, 120),
     value: String(line?.value ?? "").slice(0, 240),
   }));
-  const html = `
-    <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding:16px; color:#111827;">
-      <h2 style="margin-top:0;">${escapeHtml(heading)}</h2>
-      ${
-        periodLabel
-          ? `<p style="color:#4b5563;">${escapeHtml(periodLabel)}</p>`
-          : ""
-      }
-      <table style="border-collapse:collapse; width:100%; max-width:640px;">
-        <tbody>
-          ${safeLines
-            .map(
-              (line) => `
-                <tr>
-                  <th scope="row" style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">${escapeHtml(line.label)}</th>
-                  <td style="text-align:right; padding:8px; border-bottom:1px solid #e5e7eb;">${escapeHtml(line.value)}</td>
-                </tr>`,
-            )
-            .join("")}
-        </tbody>
-      </table>
-      <p style="font-size:12px; color:#6b7280; margin-top:16px;">
-        Operational counts only. Review source records in CA PRO Toolkit before acting.
-      </p>
-      <p style="font-size:12px; color:#6b7280; margin-top:8px;">
-        <a href="${escapeHtml(safePageUrl)}" style="color:#6b7280;">Unsubscribe from this email</a>
-      </p>
-    </div>
-  `;
+  const rows = safeLines
+    .map(
+      (line) => `
+        <tr>
+          <th scope="row" style="text-align:left;padding:10px 0;border-bottom:1px solid ${EMAIL_PALETTE.border};font-weight:400;color:${EMAIL_PALETTE.ink};">${escapeHtml(line.label)}</th>
+          <td style="text-align:right;padding:10px 0;border-bottom:1px solid ${EMAIL_PALETTE.border};font-weight:600;color:${EMAIL_PALETTE.ink};">${escapeHtml(line.value)}</td>
+        </tr>`,
+    )
+    .join("");
+  const html = renderEmailLayout({
+    title: heading,
+    bodyHtml: `
+      ${periodLabel ? `<p style="margin:0 0 12px;color:${EMAIL_PALETTE.muted};">${escapeHtml(periodLabel)}</p>` : ""}
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 16px;">
+        <tbody>${rows}</tbody>
+      </table>`,
+    footerLines: ["Operational counts only. Review source records in CA PRO Toolkit before acting."],
+    footerHtml: `<a href="${escapeHtml(safePageUrl)}" style="color:${EMAIL_PALETTE.muted};text-decoration:underline;">Unsubscribe from this email</a>`,
+  });
   // Plain-text alternative: some mail clients render text/plain by default,
   // and a text part is also what a screen reader or a low-bandwidth client
   // falls back to. safeLines are already length-bounded above.
@@ -306,6 +247,22 @@ export async function sendDigestEmail({
   }
 }
 
+export function buildDailyDigestActivationEmail({ activationUrl }) {
+  const safeUrl = requireUnsubscribeUrl(activationUrl, "activationUrl");
+  return {
+    subject: "CA PRO Toolkit: Daily Digest is now off",
+    html: renderEmailLayout({
+      title: "Daily Digest is now off",
+      bodyHtml: `
+        <p style="${PARA}">To reduce unnecessary email, CA PRO Toolkit has turned off daily digest email by default.</p>
+        <p style="${PARA}">If you want to receive your personal daily work digest, choose it yourself:</p>
+        ${emailButton(safeUrl, "Activate Daily Digest")}`,
+      footerLines: ["The button opens a confirmation page. No reminder, OTP, or important compliance email has been turned off."],
+    }),
+    text: `Daily Digest is now off by default. To activate your personal daily work digest, open this link and confirm: ${safeUrl}\n\nReminders, OTPs, and important compliance emails are unchanged.`,
+  };
+}
+
 export async function sendDailyDigestActivationEmail({
   toEmail,
   activationUrl,
@@ -314,21 +271,14 @@ export async function sendDailyDigestActivationEmail({
   if (!toEmail || !activationUrl || !idempotencyKey) {
     throw new Error("sendDailyDigestActivationEmail requires recipient, activation URL, and idempotency key");
   }
-  const safeUrl = requireUnsubscribeUrl(activationUrl, "activationUrl");
+  const { subject, html, text } = buildDailyDigestActivationEmail({ activationUrl });
   const result = await recordAndSend({
     to: toEmail,
     type: "digest_activation",
     subjectTemplateName: "digest_activation_notice",
-    subject: "CA PRO Toolkit: Daily Digest is now off",
-    html: `
-        <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;padding:16px;color:#111827;">
-          <h2 style="margin-top:0;">Daily Digest is now off</h2>
-          <p>To reduce unnecessary email, CA PRO Toolkit has turned off daily digest email by default.</p>
-          <p>If you want to receive your personal daily work digest, choose it yourself:</p>
-          <p><a href="${escapeHtml(safeUrl)}" style="display:inline-block;background:#1d4ed8;color:#fff;padding:10px 14px;border-radius:6px;text-decoration:none;">Activate Daily Digest</a></p>
-          <p style="font-size:12px;color:#6b7280;">The button opens a confirmation page. No reminder, OTP, or important compliance email has been turned off.</p>
-        </div>`,
-    text: `Daily Digest is now off by default. To activate your personal daily work digest, open this link and confirm: ${safeUrl}\n\nReminders, OTPs, and important compliance emails are unchanged.`,
+    subject,
+    html,
+    text,
     idempotencyKey: String(idempotencyKey).slice(0, 256),
   });
   return result;
@@ -341,21 +291,30 @@ export async function sendDailyDigestActivationEmail({
  * Sends a small "it works" email so an admin can confirm the email pipeline
  * (Resend key + verified domain) is delivering. Returns the provider response.
  */
+export function buildTestEmail({ sentAt }) {
+  const title = "Email delivery is working ✅";
+  const lead = "This is a test email from CA PRO Toolkit, triggered from the Super Admin panel.";
+  return {
+    subject: "CA PRO Toolkit — test email",
+    html: renderEmailLayout({
+      title,
+      bodyHtml: `<p style="${PARA}">${escapeHtml(lead)}</p>`,
+      footerLines: [`Sent at ${sentAt}`],
+    }),
+    text: [title, "", lead, "", `Sent at ${sentAt}`].join("\n"),
+  };
+}
+
 export async function sendTestEmail(toEmail) {
   if (!toEmail) throw new Error("sendTestEmail: toEmail is required");
-  const sentAt = new Date().toISOString();
+  const { subject, html, text } = buildTestEmail({ sentAt: new Date().toISOString() });
   const result = await recordAndSend({
     to: toEmail,
     type: "test_email",
     subjectTemplateName: "test_email",
-    subject: "CA PRO Toolkit — test email",
-    html: `
-      <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding:16px; color:#111827;">
-        <h2 style="margin-top:0;">Email delivery is working ✅</h2>
-        <p>This is a test email from CA PRO Toolkit, triggered from the Super Admin panel.</p>
-        <p style="font-size:12px; color:#6b7280;">Sent at ${escapeHtml(sentAt)}</p>
-      </div>
-    `,
+    subject,
+    html,
+    text,
   });
   console.log(`📧 Test email sent to: ${toEmail}`, result.providerMessageId || "");
   return result;
@@ -370,16 +329,12 @@ export async function sendTestEmail(toEmail) {
  * count crosses a threshold. Never sent to a client -- toEmail is always
  * SUPER_ADMIN_EMAIL, supplied by the caller.
  */
-export async function sendReminderDeliveryAlertEmail({
-  toEmail,
+export function buildReminderDeliveryAlertEmail({
   issueCount,
   candidatesScanned,
   candidatesScanTruncated,
   generatedAt,
 }) {
-  if (!toEmail) {
-    throw new Error("sendReminderDeliveryAlertEmail: toEmail is required");
-  }
   const generatedAtText =
     generatedAt instanceof Date
       ? generatedAt.toISOString()
@@ -390,21 +345,48 @@ export async function sendReminderDeliveryAlertEmail({
   const countText = candidatesScanTruncated
     ? `${issueCount}+`
     : String(issueCount);
+  const scannedText = `Candidates scanned: ${String(candidatesScanned)}${candidatesScanTruncated ? " (scan capped — the real total may be higher)" : ""}`;
+  const smallPrint =
+    "This is a secondary signal only and takes no action. Review the full list in the Super Admin panel (GET /api/super/reminder-delivery-health) before acting.";
 
-  const subject = `CA PRO Toolkit — ${countText} reminders with a delivery problem`;
-  const html = `
-    <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding:16px; color:#111827;">
-      <h2 style="margin-top:0;">Reminder delivery health alert</h2>
-      <p><strong>${escapeHtml(countText)}</strong> active reminder(s) currently have an unresolved delivery problem (a failed send, an unconfirmed provider outcome, or a stale processing claim).</p>
-      <p>Candidates scanned: ${escapeHtml(String(candidatesScanned))}${candidatesScanTruncated ? " (scan capped — the real total may be higher)" : ""}</p>
-      <p>Generated at: ${escapeHtml(generatedAtText)}</p>
-      <hr style="margin:16px 0;" />
-      <p style="font-size:12px; color:#6b7280;">
-        This is a secondary signal only and takes no action. Review the full list in the
-        Super Admin panel (GET /api/super/reminder-delivery-health) before acting.
-      </p>
-    </div>
-  `;
+  return {
+    subject: `CA PRO Toolkit — ${countText} reminders with a delivery problem`,
+    html: renderEmailLayout({
+      title: "Reminder delivery health alert",
+      bodyHtml: `
+        <p style="${PARA}"><strong>${escapeHtml(countText)}</strong> active reminder(s) currently have an unresolved delivery problem (a failed send, an unconfirmed provider outcome, or a stale processing claim).</p>
+        <p style="${PARA}">${escapeHtml(scannedText)}</p>
+        <p style="${PARA}">Generated at: ${escapeHtml(generatedAtText)}</p>`,
+      footerLines: [smallPrint],
+    }),
+    text: [
+      "Reminder delivery health alert",
+      "",
+      `${countText} active reminder(s) currently have an unresolved delivery problem (a failed send, an unconfirmed provider outcome, or a stale processing claim).`,
+      scannedText,
+      `Generated at: ${generatedAtText}`,
+      "",
+      smallPrint,
+    ].join("\n"),
+  };
+}
+
+export async function sendReminderDeliveryAlertEmail({
+  toEmail,
+  issueCount,
+  candidatesScanned,
+  candidatesScanTruncated,
+  generatedAt,
+}) {
+  if (!toEmail) {
+    throw new Error("sendReminderDeliveryAlertEmail: toEmail is required");
+  }
+  const { subject, html, text } = buildReminderDeliveryAlertEmail({
+    issueCount,
+    candidatesScanned,
+    candidatesScanTruncated,
+    generatedAt,
+  });
 
   const result = await recordAndSend({
     to: toEmail,
@@ -412,6 +394,7 @@ export async function sendReminderDeliveryAlertEmail({
     subjectTemplateName: "reminder_alert",
     subject,
     html,
+    text,
   });
   console.log(
     `📧 Reminder delivery alert sent to: ${toEmail}`,

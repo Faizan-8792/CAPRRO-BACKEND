@@ -3322,9 +3322,9 @@ function superInitNavigation() {
   window.addEventListener("hashchange", () => {
     superLoadPage(superShowPage(window.location.hash));
     // Landing on a section should start at its top, not wherever the previous
-    // section happened to be scrolled to.
-    const content = document.querySelector(".content");
-    if (content) content.scrollTop = 0;
+    // section happened to be scrolled to. The page scrolls, not .content (it never had a
+    // height to scroll within), so its scrollTop reset did nothing (found in DS25).
+    window.scrollTo(0, 0);
   });
 }
 
