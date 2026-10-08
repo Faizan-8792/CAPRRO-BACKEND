@@ -17,6 +17,7 @@ import taskRoutes from "./routes/task.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
 import taxworkerRoutes from "./routes/taxworker.routes.js";
 import appConfigRoutes from "./routes/appconfig.routes.js";
+import gstCaptchaRoutes from "./routes/gst-captcha.routes.js";
 import complianceRoutes from "./routes/compliance.routes.js";
 import homeRoutes from "./routes/home.routes.js";
 import importRoutes from "./routes/import.routes.js";
@@ -573,6 +574,7 @@ app.get("/admin", (req, res) =>
 app.use("/api/auth", authRoutes);
 // App-config (maintenance/welcome) — registered FIRST so maintenance check runs before others
 app.use("/api/app-config", appConfigRoutes);
+app.use("/api/gst-captcha", gstCaptchaRoutes);
 
 // Maintenance gate — applies to all subsequent /api/* routes except the allowlist
 app.use(maintenanceGate);
