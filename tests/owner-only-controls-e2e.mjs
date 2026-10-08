@@ -3,8 +3,9 @@
 // Both clients now offer these two buttons by role: Rotate the join code to the owner alone, Leave to
 // everybody but the owner. This suite pins the server behaviour those choices follow, against the
 // real routes: rotateJoinCode accepts only the confirmed owner, and leaveFirm accepts every member
-// except the owner of a shared firm, whom it answers with 409 - and no route transfers ownership,
-// so for the owner Leave could never succeed.
+// except the owner of a shared firm, whom it answers with 409 - so for the owner Leave cannot
+// succeed until ownership is transferred (R27: POST /api/firms/:firmId/transfer-ownership, pinned by
+// tests/ownership-transfer-e2e.mjs).
 //
 // leaveFirm runs in a MongoDB transaction, so this suite needs the scratch replica set; run-gates.ps1
 // lists it with the other replica-set suites, which skip (not fail) when nothing listens on 27118.
@@ -186,13 +187,27 @@ async function runSuite() {
       }
     }
 
-    // No route transfers ownership, which is why Leave is never worth offering the owner.
+    // Leave is not worth offering the owner: the owner leaves only after ownership has moved, and
+    // exactly one route moves it (R27). With every other member gone there is nobody to move it to.
     const { default: firmRoutes } = await import(toFileUrl("src", "routes", "firm.routes.js"));
-    const paths = (firmRoutes.stack || []).map((layer) => layer.route?.path).filter(Boolean);
+    const routes = (firmRoutes.stack || []).map((layer) => layer.route).filter(Boolean);
+    const transferRoutes = routes.filter((route) => /transfer|owner/i.test(route.path));
     check(
-      "no firm route transfers ownership",
-      paths.length > 5 && !paths.some((path) => /transfer|owner/i.test(path)),
-      `${paths.length} firm routes`,
+      "exactly one firm route transfers ownership: POST /:firmId/transfer-ownership",
+      routes.length > 5
+        && transferRoutes.length === 1
+        && transferRoutes[0].path === "/:firmId/transfer-ownership"
+        && transferRoutes[0].methods?.post === true,
+      `${routes.length} firm routes, ${transferRoutes.length} transferring`,
+    );
+    const nobody = await call("POST", `api/firms/${id}/transfer-ownership`, tokenFor(callers[0].user), {
+      toUserId: String(callers[1].user._id),
+      confirmHandle: "owner-controls",
+    });
+    check(
+      "owner: with every other member gone, a transfer to a former member is refused 404",
+      nobody.status === 404 && /not an active member/i.test(String(nobody.json?.error || "")),
+      `status ${nobody.status}, "${nobody.json?.error || ""}"`,
     );
   } catch (error) {
     check("the harness ran to completion", false, error?.message || String(error));

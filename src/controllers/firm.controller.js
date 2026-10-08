@@ -11,6 +11,7 @@ import {
 } from "../services/firm-provisioning.service.js";
 import workspaceOperationService from "../services/workspace-operation.service.js";
 import { resolveAdmissionCode } from "../services/firm-admission.service.js";
+import { recordActivity } from "../services/activity.service.js";
 import { userFacingMessage } from "../utils/user-facing-error.js";
 
 const MEMBERSHIP_TRANSACTION_OPTIONS = {
@@ -593,6 +594,169 @@ async function removeFirmMemberInTransaction(
   });
 }
 
+// A personal workspace belongs to one person and is never handed on. The persisted kind decides
+// first; the two markers catch a legacy firm saved before `kind` existed, which a hydrated document
+// reports as the SHARED default.
+function isPersonalWorkspaceOf(firm, ownerMembership, owner) {
+  return (
+    firm?.kind === "PERSONAL" ||
+    Boolean(ownerMembership?.isPersonal) ||
+    (Boolean(owner?.personalFirmId) &&
+      String(owner.personalFirmId) === String(firm?._id))
+  );
+}
+
+// POST /api/firms/:firmId/transfer-ownership hands a shared firm to another ACTIVE member (R27).
+//
+// Owner-only and never a SUPER_ADMIN bypass: like assertFirmAdmin, both Firm.ownerUserId and an
+// ACTIVE OWNER membership must name the caller. Every refusal is decided before the first write,
+// and the move itself is one transaction: the firm's owner pointer (moved only while it still names
+// the caller, so two transfers at once cannot both land), the new owner's membership, the previous
+// owner's (ADMIN - still an administrator, and now free to leave), the account role of a person
+// whose active firm this is (what setActiveWorkspace would set at their next switch), and the
+// activity event. Records keep their own ownerUserId: that is who created or answers for a record,
+// not who owns the firm, and firm data is scoped by firmId.
+async function transferOwnershipInTransaction(
+  actorUserId,
+  firmId,
+  { toUserId, confirmHandle },
+  requestId,
+) {
+  return withMembershipTransaction(async (session) => {
+    const firm = await Firm.findById(firmId).session(session);
+    if (!firm || firm.isActive === false) {
+      throw membershipLifecycleError(404, "Workspace not found");
+    }
+
+    const actor = await User.findById(actorUserId).session(session);
+    assertActiveLifecycleUser(actor, "User not found");
+    const ownerMembership = await FirmMembership.findOne({ userId: actorUserId, firmId: firm._id, status: "ACTIVE", role: "OWNER" }).session(session);
+    if (!ownerMembership || String(firm.ownerUserId) !== String(actorUserId)) {
+      throw membershipLifecycleError(
+        403,
+        "Only the workspace owner can transfer ownership",
+      );
+    }
+    if (isPersonalWorkspaceOf(firm, ownerMembership, actor)) {
+      throw membershipLifecycleError(
+        400,
+        "Your personal workspace cannot be transferred",
+      );
+    }
+
+    const targetId = typeof toUserId === "string" ? toUserId.trim() : "";
+    if (!mongoose.Types.ObjectId.isValid(targetId)) {
+      throw membershipLifecycleError(
+        400,
+        "Choose the member who will own this workspace",
+      );
+    }
+    const typedHandle =
+      typeof confirmHandle === "string"
+        ? confirmHandle.trim().replace(/^@/, "").toLowerCase()
+        : "";
+    if (!typedHandle) {
+      throw membershipLifecycleError(
+        400,
+        "Type the workspace handle to confirm the transfer",
+      );
+    }
+    if (typedHandle !== String(firm.handle || "").toLowerCase()) {
+      throw membershipLifecycleError(
+        400,
+        "The handle you typed is not this workspace's handle",
+      );
+    }
+    if (targetId === String(actorUserId)) {
+      throw membershipLifecycleError(409, "You already own this workspace");
+    }
+
+    const targetMembership = await FirmMembership.findOne({ userId: targetId, firmId: firm._id, status: "ACTIVE" }).session(session);
+    const target = targetMembership
+      ? await User.findById(targetId).session(session)
+      : null;
+    if (!targetMembership || !target) {
+      throw membershipLifecycleError(
+        404,
+        "That person is not an active member of this workspace",
+      );
+    }
+    if (target.isActive === false) {
+      throw membershipLifecycleError(
+        409,
+        "That person's account is not active, so ownership cannot pass to them",
+      );
+    }
+
+    const moved = await Firm.updateOne(
+      { _id: firm._id, ownerUserId: actor._id },
+      { $set: { ownerUserId: target._id } },
+      { session },
+    );
+    if (moved.modifiedCount !== 1) {
+      throw membershipLifecycleError(
+        409,
+        "Ownership of this workspace changed before the transfer completed",
+      );
+    }
+    firm.ownerUserId = target._id;
+
+    const previousTargetRole = targetMembership.role;
+    targetMembership.role = "OWNER";
+    await targetMembership.save({ session });
+    ownerMembership.role = "ADMIN";
+    await ownerMembership.save({ session });
+
+    for (const person of [target, actor]) {
+      if (
+        String(person.firmId || "") === String(firm._id) &&
+        person.role !== "SUPER_ADMIN" &&
+        person.role !== "FIRM_ADMIN"
+      ) {
+        person.role = "FIRM_ADMIN";
+        await person.save({ session });
+      }
+    }
+
+    await recordActivity({
+      firmId: firm._id,
+      actorUserId: actor._id,
+      source: "USER",
+      action: "FIRM_OWNERSHIP_TRANSFERRED",
+      entityType: "Firm",
+      entityId: String(firm._id),
+      beforeSummary: { ownerUserId: String(actor._id), newOwnerRole: previousTargetRole },
+      afterSummary: { ownerUserId: String(target._id), previousOwnerRole: "ADMIN" },
+      requestId,
+      session,
+    });
+
+    return Object.freeze({
+      firm: Object.freeze({
+        id: firm._id,
+        displayName: firm.displayName,
+        handle: firm.handle,
+        kind: firm.kind || "SHARED",
+        ownerUserId: target._id,
+      }),
+      previousOwner: Object.freeze({ userId: actor._id, role: "ADMIN" }),
+      newOwner: Object.freeze({
+        userId: target._id,
+        name: target.name || null,
+        email: target.email || null,
+        previousRole: previousTargetRole,
+        role: "OWNER",
+      }),
+      workspace: await workspaceSummary(
+        firm,
+        ownerMembership,
+        actor.firmId,
+        session,
+      ),
+    });
+  });
+}
+
 // POST /api/firms
 export const createFirm = async (req, res, next) => {
   try {
@@ -966,12 +1130,22 @@ export const listFirmMembers = async (req, res, next) => {
 
     const userIds = memberships.map((m) => m.userId);
     const users = await User.find({ _id: { $in: userIds } })
-      .select("name email lastActiveAt")
+      .select("name email lastActiveAt isActive personalFirmId")
       .lean();
     const userById = new Map(users.map((u) => [String(u._id), u]));
 
+    // The transfer route's own refusals, answered on the read the clients already make (R27), so
+    // neither client offers Transfer, or lists a member, that the route would turn down.
+    const callerMembership = memberships.find(
+      (m) => String(m.userId) === String(userId),
+    );
+    const canTransferOwnership =
+      hasActiveOwnerAuthority(firm, callerMembership, userId) &&
+      !isPersonalWorkspaceOf(firm, callerMembership, userById.get(String(userId)));
+
     const members = memberships.map((m) => {
       const u = userById.get(String(m.userId)) || {};
+      const isYou = String(m.userId) === String(userId);
       return {
         userId: m.userId,
         name: u.name || null,
@@ -979,7 +1153,9 @@ export const listFirmMembers = async (req, res, next) => {
         role: m.role,
         joinedAt: m.joinedAt,
         lastActiveAt: u.lastActiveAt || null,
-        isYou: String(m.userId) === String(userId),
+        isYou,
+        canReceiveOwnership:
+          canTransferOwnership && !isYou && Boolean(u._id) && u.isActive !== false,
       };
     });
 
@@ -991,6 +1167,7 @@ export const listFirmMembers = async (req, res, next) => {
         handle: firm.handle,
         kind: firm.kind || "SHARED",
       },
+      canTransferOwnership,
       members,
     });
   } catch (err) {
@@ -1011,6 +1188,28 @@ export const leaveFirm = async (req, res, next) => {
       req.params.firmId,
     );
     return res.json({ ok: true, activeWorkspace });
+  } catch (err) {
+    if (err?.statusCode) {
+      return res.status(err.statusCode).json({ ok: false, error: err.message });
+    }
+    next(err);
+  }
+};
+
+// POST /api/firms/:firmId/transfer-ownership  { toUserId, confirmHandle }
+// The owner hands a shared firm to another active member and stays on as an administrator (R27).
+export const transferFirmOwnership = async (req, res, next) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(String(req.params.firmId || ""))) {
+      return res.status(404).json({ ok: false, error: "Workspace not found" });
+    }
+    const result = await transferOwnershipInTransaction(
+      req.user.id,
+      req.params.firmId,
+      req.body || {},
+      req.id,
+    );
+    return res.json({ ok: true, ...result });
   } catch (err) {
     if (err?.statusCode) {
       return res.status(err.statusCode).json({ ok: false, error: err.message });
@@ -1568,4 +1767,5 @@ export default {
   switchWorkspace,
   listFirmMembers,
   leaveFirm,
+  transferFirmOwnership,
 };

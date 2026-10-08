@@ -30,6 +30,7 @@ import {
   switchWorkspace,
   listFirmMembers,
   leaveFirm,
+  transferFirmOwnership,
 } from "../controllers/firm.controller.js";
 
 const router = express.Router();
@@ -66,6 +67,8 @@ router.post("/:firmId/join-code/rotate", rotateJoinCode); // POST /api/firms/:fi
 // Firm members (any active member can view teammates)
 router.get("/:firmId/members", listFirmMembers); // GET /api/firms/:firmId/members
 router.post("/:firmId/leave", leaveFirm); // POST /api/firms/:firmId/leave
+// The owner hands a shared firm to another active member (R27). Owner-only, decided in the controller.
+router.post("/:firmId/transfer-ownership", transferFirmOwnership);
 
 // Per-member designation. Owner or admin, with two owner-only edges: changing an existing
 // administrator, and appointing a new one. Enforced in the controller from resolveFirmAuthority,
