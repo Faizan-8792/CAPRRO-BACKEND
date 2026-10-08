@@ -922,7 +922,10 @@ try {
         "cross-tenant-isolation",
         "erasure-request-route",
         "firm-erasure-contract",
-        "firm-erasure-e2e"
+        "firm-erasure-e2e",
+        # Who may rotate a firm's join code and who may leave it - leaving runs in a transaction.
+        # Both clients offer those buttons by this answer (R26).
+        "owner-only-controls-e2e"
     )
     # Suites that hold EXTRA assertions behind "if (process.env.MONGODB_URI)". This runner never
     # set that variable, so those assertions had never run in a single gate execution. Measured
