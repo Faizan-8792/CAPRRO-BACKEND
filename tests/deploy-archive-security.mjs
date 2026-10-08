@@ -2399,9 +2399,14 @@ if (listed.status !== 0 || listed.error) {
   // confirmed clean by this scan before the pin moved. Pure string building - an escape helper,
   // the UTC due-day formatter and the table layout - with no network call, no storage, no secret
   // and no configuration value; its one URL is the public logo mark on api.caprotoolkit.in.
+  // 210 -> 211 on 2026-10-08 for the GST auto sign-in's captcha relay:
+  // src/routes/gst-captcha.routes.js, confirmed clean by this scan before the pin moved. A
+  // signed-in-only POST that forwards a small inline image to captchakings.com under the server's
+  // own CAPTCHA_API read at call time - the key is never logged, never returned, and the rate
+  // limit and payload bounds are in the same file.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 210 && result.status === 0,
+    files.length === 211 && result.status === 0,
     result,
   );
 }
