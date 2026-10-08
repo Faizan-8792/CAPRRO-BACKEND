@@ -10,6 +10,7 @@ import AppConfig from "../models/AppConfig.js";
 import CaseMatter from "../models/CaseMatter.js";
 import Client from "../models/Client.js";
 import Engagement from "../models/Engagement.js";
+import FirmMembership from "../models/FirmMembership.js";
 import EngagementFinding, {
   FINDING_RISKS,
   FINDING_STATUSES,
@@ -329,15 +330,44 @@ async function validateFirmUsers(ids, firmId) {
   return new Map(users.map((user) => [String(user._id), user]));
 }
 
-function assertReviewerRole(usersById, reviewerUserId) {
+// R15 (.kiro/finalreleasefix.md): a firm's own OWNER/ADMIN carries exactly the authority the app
+// already trusts them with elsewhere (removing a member, rotating the join code), so that
+// membership role now satisfies this check too. The formal, super-admin-approved FIRM_ADMIN
+// account role stays valid as well, for a firm that has one. Before this change a brand-new
+// firm had no member who could ever pass this check -- there was no path, self-service or
+// otherwise, to acquire the FIRM_ADMIN role from inside the product -- so no firm could ever
+// create an engagement. Async because the OWNER/ADMIN check reads FirmMembership.
+async function assertReviewerRole(usersById, reviewerUserId, firmId) {
   const reviewer = usersById.get(String(reviewerUserId));
-  if (!reviewer || reviewer.role !== "FIRM_ADMIN") {
+  if (!reviewer) {
     throw httpError(
       400,
-      "The assigned reviewer must be an active FIRM_ADMIN under the current authorization model",
+      "The assigned reviewer must be an active member of this firm",
       "ENGAGEMENT_REVIEWER_ROLE_REQUIRED"
     );
   }
+
+  if (reviewer.role === "FIRM_ADMIN") {
+    return;
+  }
+
+  const membership = await FirmMembership.findOne({
+    userId: reviewer._id,
+    firmId,
+    status: "ACTIVE",
+  })
+    .select("role")
+    .lean();
+
+  if (membership && (membership.role === "OWNER" || membership.role === "ADMIN")) {
+    return;
+  }
+
+  throw httpError(
+    400,
+    "The assigned reviewer must be this firm's owner, an administrator, or an active FIRM_ADMIN",
+    "ENGAGEMENT_REVIEWER_ROLE_REQUIRED"
+  );
 }
 
 function assertAssignedReviewer(engagement, user) {
@@ -973,7 +1003,7 @@ async function createEngagement({
       [ownerUserId, reviewerUserId, ...teamUserIds],
       firmId
     );
-    assertReviewerRole(users, reviewerUserId);
+    await assertReviewerRole(users, reviewerUserId, firmId);
     const linkedTaskIds = parseIdArray(input.linkedTaskIds, "linkedTaskIds", 200);
     const linkedTaxWorkSessionIds = parseIdArray(
       input.linkedTaxWorkSessionIds,
@@ -1415,7 +1445,7 @@ async function updateEngagement({
       : embeddedOwnerIds,
     firmId
   );
-  if (assignmentChanged) assertReviewerRole(users, nextReviewerUserId);
+  if (assignmentChanged) await assertReviewerRole(users, nextReviewerUserId, firmId);
 
   const beforeSummary = {
     status: engagement.status,

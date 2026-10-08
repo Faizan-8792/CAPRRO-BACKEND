@@ -1,0 +1,858 @@
+# Operations runbook
+
+**Last reviewed:** 2026-08-23
+
+Seeded by `.kiro/finalreleasefix.md` **O9** (deploy, rollback, fix-under-pressure). Extended to
+O5's full section list on 2026-08-23. Four sections below — Database, Credential custody, Backup
+and restore, and Observability — are **deliberately incomplete**, because their content is facts
+only the owner holds (O3, O4, O7). Each states exactly what is missing and who must supply it,
+rather than being omitted, so a reader can tell the difference between "not written down" and
+"not decided". Do not create a second runbook file; add to this one.
+
+**Re-run and re-date at every release:** O4's restore drill and O9's rollback rehearsal. A runbook
+whose last drill is a year old is a document, not a capability.
+
+---
+
+## What this is
+
+CA PRO runs as four surfaces. `api.caprotoolkit.in` is a Node/Express app on Hostinger, executed
+under Phusion Passenger — `src/server.js` calls `app.listen` synchronously and defers the database
+connection, rollout readiness and schedulers into an async `bootstrap()`, specifically because
+Passenger does not reliably support top-level `await` in the entry module; health stays *degraded*
+rather than *ready* until both the database and background readiness checks complete. It is
+deployed **from an uploaded archive, not from git** — `tools/make-deploy-archive.ps1` builds it.
+`caprotoolkit.in` is a static site served from `ca-pro-website/`. The admin panel lives at
+`/admin` (`super.html` + `super.js`) and is gated by `assertSuper` in
+`src/controllers/appconfig.controller.js`, which requires BOTH `role === "SUPER_ADMIN"` AND
+`email === saifullahfaizan786@gmail.com` — both, not either, so the panel cannot be reached by
+granting the role alone. The fourth surface is the Windows desktop app, which talks only to
+`api.caprotoolkit.in`.
+
+## Database
+
+**Supplied 2026-08-23 (PLAN.md section 39), completed 2026-08-27 (owner instruction).**
+
+| Field | Value |
+|---|---|
+| Provider | MongoDB Atlas |
+| Tier | **M0 (free)** |
+| Region | Mumbai, India |
+| Cluster name | **Cluster0** |
+| Database name | **test** |
+| Backup | Hostinger (`api.caprotoolkit.in` > Files > Backups), daily automated, verified good 2026-08-26 19:34, PLUS CA PRO's own application-level dump (below) scheduled separately via Windows Task Scheduler. Nominal gap between the two nightly mechanisms: ~24h. |
+| RPO / RTO | **24h / 4h** — owner-approved policy, 2026-08-27 |
+
+The M0 tier itself still has no built-in backup facility (see below) — the "Backup" row above is
+what compensates for that, not a property of the cluster.
+
+Connection string comes from `MONGODB_URI`; pool sizing from `MONGO_POOL_MIN` / `MONGO_POOL_MAX`.
+
+**Read this before you assume there is a way back.** An Atlas **M0 free tier has no backup facility
+at all** — no snapshots, no point-in-time restore, no restore-to-scratch-cluster — and a 512 MB
+storage cap. That is why the dump-and-encrypt path in this document exists at all: the cluster
+itself will not save you.
+
+**Corrected 2026-08-26.** This paragraph used to end "There is currently **no copy of the production
+database anywhere**." That is no longer true and must not be quoted. A production backup has been
+taken, encrypted, copied off-host, and — crucially — **restored and verified**: 43 collections
+compared against the manifest, 0 mismatches, backend health 200 against the restored data. The full
+record is in `backup-recovery-status.md`.
+
+What remains true, and is now the real risk: **every backup so far has been run by hand.** No
+scheduled task exists yet (`schtasks /Query /TN "CAPRO nightly backup"` finds nothing). A manual
+backup proves the mechanism; a scheduled one proves the habit, and it is the habit that is there at
+3 a.m. See the `schtasks /Create` line below.
+
+**The desktop's `EncryptedCache` is not a replica and is not a backup.** It is a per-machine local
+cache of what one signed-in user last saw. It cannot reconstruct the database and no recovery plan
+may treat it as a copy.
+
+## Credential custody
+
+**INCOMPLETE — blocked on O3.** This section names *custodians and vault locations, never values*.
+Required: who holds each credential, in which vault, and the succession path if that person is
+unreachable. The credentials in scope are the ones named under "Provider accounts and cost" below,
+plus `MONGODB_URI`, `JWT_SECRET`, `DIGEST_UNSUBSCRIBE_SECRET`, `TDS_ACTION_PLAN_SECRET` and
+`TDS_IMPORT_PREVIEW_SECRET`.
+
+Standing rule, already load-bearing: two provider keys leaked once through a `capro-backend.zip`
+committed at the repo root (O1). Both were rotated. No credential value belongs in this file, in
+the repository, or in a deploy archive.
+
+## Backup and restore
+
+Both scripts exist and the whole path has been drilled end to end. **What has NOT happened yet is a
+run against production**, because that needs the Atlas credential and an off-host destination (O3).
+Read the "Still outstanding" note at the end of this section before assuming you are covered.
+
+### Taking a backup
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\backup-database.ps1
+```
+
+It reads the connection string from `$env:CAPRO_BACKUP_URI` and the gpg recipient from
+`$env:CAPRO_BACKUP_RECIPIENT`, so neither is ever typed on a command line or visible in a process
+list. Useful switches: `-OutputDirectory`, `-OffHostDirectory`, `-Retain` (default 14),
+`-WhatIfNoUpload`, `-GpgPath`.
+
+What it does, in order: reads per-collection document counts **before** dumping (the restore drill
+has nothing to compare against otherwise), runs `mongodump --gzip --archive`, refuses any archive
+under 1 KB, refuses an archive whose size moved by more than 10x against the previous run,
+encrypts with gpg to the recipient, **deletes the plaintext dump**, writes a manifest beside the
+archive, copies both off-host, and prunes beyond `-Retain`.
+
+### Running the drill
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\restore-drill.ps1 `
+    -ArchivePath <the .archive.gz.gpg> `
+    -ScratchUri  "mongodb://127.0.0.1:27017/scratch-drill" `
+    -HealthUri   "mongodb://127.0.0.1:27117/scratch-drill" `
+    -IncludeHealthCheck
+```
+
+**The drill refuses to run unless the database in `-ScratchUri` starts with `scratch-`**, and it
+checks that before decrypting anything. It exits **2** for that refusal and **1** for a genuine
+drill failure, so a script can tell them apart. This guard is the only thing between a mistyped URI
+and `mongorestore --drop` deleting a live database.
+
+### Three traps this environment has already sprung, all real
+
+- **Two different addresses for one database.** The mongo tools run inside the
+  `capro-mongo-dev` container and see Mongo on **27017**; the health-check backend runs on the host
+  and must use the published **27117**. Getting this wrong does not error, it just leaves
+  `db.state` at `"connecting"` until the drill times out. That is why `-HealthUri` exists.
+- **A database name in the restore URI silently defeats `--nsFrom`/`--nsTo`.** mongorestore treats
+  it as an implicit `--db`, scopes the restore to a namespace the archive does not contain, and
+  exits **0** having written nothing. The script strips it; do not add it back.
+- **gpg is usually not on PATH.** Git for Windows ships one under `usr\bin` that only Git Bash
+  sees. The script searches the known locations, and `-GpgPath` overrides. If you use Git's gpg,
+  `GNUPGHOME` must be a POSIX-style path (`/c/...`), not `C:\...`.
+
+### Scheduling it
+
+Not yet scheduled. When the credential exists, register it as a daily task:
+
+```
+schtasks /Create /TN "CAPRO nightly backup" /SC DAILY /ST 02:30 /RL HIGHEST /RU SYSTEM ^
+  /TR "powershell -NoProfile -ExecutionPolicy Bypass -File D:\CA-PRO-Toolkit\CA-PRO-Toolkit\capro-backend\tools\backup-database.ps1"
+```
+
+A task running as SYSTEM does not inherit a user's environment, so set `CAPRO_BACKUP_URI` and
+`CAPRO_BACKUP_RECIPIENT` as **machine-level** variables (`setx /M`) or the task will fail on its
+first night with "No MongoDB URI". Prefer a scheduler on the hosting side over this if one is
+available: a backup that depends on one developer's PC being powered on is a backup that stops the
+first time that PC is off.
+
+### Last drill
+
+| | |
+|---|---|
+| Date | 2026-08-23 |
+| Source | `capro-o4-backup-source` on the local `capro-mongo-dev` container |
+| Archive | `capro-capro-o4-backup-source-20260823-064106.archive.gz.gpg` (5,641 bytes ciphertext, 5,008 plaintext) |
+| Collections compared | **39** |
+| Mismatches | **0** |
+| Non-zero collections | clients 23, tasks 41, firmmemberships 11, users 7, firms 3, engagements 1 |
+| App health | `{"status":"ok","uptime":2,"db":{"state":"connected","ping_ms":2},"background":"ready"}` |
+| Guard test | pointed at a non-`scratch-` database, refused with exit 2, nothing decrypted, mongorestore never called |
+| Result | **PASS** (exit 0), scratch database dropped afterwards |
+
+### Still outstanding
+
+- **The drill has never run against production.** It ran against a local container database.
+  Needs the Atlas credential from O3.
+- **No off-host destination.** Until `-OffHostDirectory` points somewhere, an archive lives on the
+  same machine that made it and does not survive losing that machine.
+- **Not scheduled**, so no backup happens unless someone runs it by hand.
+- Until those three are done, the honest statement remains: **there is no verified restore path for
+  production data.** Re-run the drill after any change to the model set in `capro-backend/src/models/`.
+
+## Deploy
+
+Hostinger deploys from an uploaded archive, not from git (`tools/make-deploy-archive.ps1:3`) — a
+`git push` alone never changes the live API. The pre-deploy gate already exists
+(`tools/run-gates.ps1`); this section makes running it non-optional, not a new pipeline.
+
+**Every command below is run from `capro-backend/` (this repository's own root, the folder this
+file lives inside) unless stated otherwise.** `.env`, `tools/...` and every other bare path in this
+section is relative to that directory.
+
+1. **Commit everything.** `make-deploy-archive.ps1`'s archive validation is commit-pinned: it
+   resolves the current `HEAD` commit, then requires `git status --porcelain=v1
+   --untracked-files=no` inside `capro-backend/` to be empty, and refuses with `"tracked backend
+   files differ from HEAD; commit or restore them first"` if it is not (re-checked again after
+   validation, refusing with `"backend HEAD changed during archive validation"` if the worktree
+   moved mid-run). A dirty tracked worktree cannot produce an archive at all.
+2. **Run the full gate, without skipping the archive check.**
+   ```
+   powershell -NoProfile -ExecutionPolicy Bypass -File tools/run-gates.ps1
+   ```
+   This runs `node --check` over all of `src/` and `public/`, then the named test suites, then
+   `npm audit --omit=dev --audit-level=high`, then `make-deploy-archive.ps1 -ValidateOnly`. It
+   prints a `===== SUMMARY =====` block ending in one of three literal lines:
+   `ALL RELEASE GATES GREEN`, `GATES FAILED - DO NOT DEPLOY`, or (if archive validation was
+   skipped) neither — read `failing gates: N` and `deployment ready: true|false` above it, and do
+   not deploy unless it says `ALL RELEASE GATES GREEN`. `-SkipDeployArchiveValidation` is a
+   pre-commit development convenience; using it before a production deploy is a procedure
+   violation, not a shortcut — the summary will honestly read `deployment ready: false` in that
+   case.
+3. **Build the archive for real** (no `-ValidateOnly`):
+   ```
+   powershell -NoProfile -ExecutionPolicy Bypass -File tools/make-deploy-archive.ps1
+   ```
+   Note the printed `commit`, `sha256` and `archive` path. Every real run leaves a new file named
+   `capro-backend_<commit>_<timestamp>.zip` in the output directory (`D:\CA-PRO-Toolkit\` by
+   default) and never overwrites an older one — that accumulation *is* the rollback mechanism (see
+   below), pruned to the 5 most recent automatically after each successful, non-`-ValidateOnly` run
+   (`-RetainCount`, default 5). **The archive this run just produced is your new "current" — before
+   you upload it, make a note of which archive was live until now** (the second-newest file in that
+   directory, by write time, right before this run — list them newest-first with
+   `Get-ChildItem D:\CA-PRO-Toolkit\capro-backend_*.zip | Sort-Object LastWriteTime -Descending |
+   Select-Object -First 5 Name,LastWriteTime`); you will need its filename if this deploy has to be
+   rolled back.
+4. **Upload and deploy.** Two ways; prefer Method A, because it is repeatable and leaves evidence.
+
+   **Method A — from this machine (no panel):**
+   ```
+   # Load the token into the environment only. Never paste it on a command line or into a file.
+   $env:HOSTINGER_API_TOKEN = (Select-String -Path .env -Pattern '^HOSTINGER_API_TOKEN=' |
+       ForEach-Object { $_.Line -replace '^HOSTINGER_API_TOKEN=', '' }).Trim('"', "'")
+
+   node tools/hostinger-upload-file.mjs --domain api.caprotoolkit.in `
+       --file "D:/CA-PRO-Toolkit/capro-backend_<commit>_<timestamp>.zip" `
+       --remote "capro-backend.zip"
+
+   node tools/hostinger-deploy-backend.mjs --node-version 22
+   ```
+   The upload tool re-downloads the file afterwards and compares SHA-256 before reporting success.
+   The deploy tool reads the build settings off the uploaded archive on the server (it never invents
+   an entry file), triggers the build, waits for a terminal state, and then asks the running app for
+   `/api/app-config` — a completed build is not the same as a healthy service. Add `--dry-run` to
+   see the settings a deploy would use without triggering one.
+
+   **Every way out of the deploy tool covers the uploaded archive**, not only a deploy that succeeds
+   (O26): a failed lookup, a failed settings read, a refused trigger, a failed build and `--dry-run`
+   all overwrite `capro-backend.zip` with the placeholder and prove it before exiting. So **after a
+   dry run, upload the archive again before the real deploy.** The one exception is a build that
+   times out, because it may still be reading the archive: the tool leaves it and prints the command
+   that covers it once the build has ended, which is the same tool with `--cover-only`.
+
+   **`--node-version` is not optional in practice.** The settings endpoint infers a Node major from
+   the archive and has been observed inferring **20** while production runs **22**. Deploying new
+   code and a new runtime major together makes any failure ambiguous, so pin the version that is
+   already serving and change one thing at a time. **As of 2026-08-27, that is 22 — pass
+   `--node-version 22` unless something in this runbook has since said otherwise.** If a future
+   change genuinely needs to confirm the running version first rather than trusting this line: the
+   Hostinger MCP tool `hosting_listJsDeployments` can read it directly, but that tool exists only
+   inside a session with the Hostinger MCP server connected (the owner's own authenticated session
+   — not available to every agent by default); otherwise use the panel fallback below. **The exact
+   panel URL and click path are not yet written down anywhere in this repository** — owner-only gap,
+   since only the owner holds the Hostinger login; record it here the first time someone walks it.
+
+   **Through the Hostinger panel** is the fallback if the API is unavailable: upload the same
+   archive as `capro-backend.zip`, then trigger the Node app build and restart. (See the URL gap
+   noted just above — until it is filled in, this fallback needs the owner at the keyboard.)
+
+   **RESTARTS — measured 2026-09-28, and worth reading before the next deploy.** The deploy tool
+   triggers a build and polls it to `completed`; the platform's restart after a completed build is
+   asynchronous and can lag by minutes. Two rules follow from a real incident that day:
+
+   1. **`completed` is not `restarted`.** After the 2026-09-28 deploy, the build reported
+      `completed` while `/health` uptime kept climbing (the old process still serving, the new
+      route still absent from the catch-all). The deploy tool's own app-config probe cannot catch
+      this — the OLD process answers app-config too. After step 4, ALWAYS verify the restart with
+      uptime, not app-config: `/health` uptime must DROP to near zero. A discriminating probe for
+      a new route: it must answer with its OWN body, not the authenticated catch-all's
+      `Missing or invalid Authorization header`.
+   2. **Never call the manual restart to "fix" a lagging deploy.** `POST
+      /api/hosting/v1/accounts/{username}/websites/{domain}/nodejs/server/restart` (developers
+      .hostinger.com API, returns `{"message":"Request accepted"}`) restarts the process without
+      rebuilding — but calling it while the platform is still finalising a build WEDGED the app
+      for ~20 minutes on 2026-09-28: the process never bound again (platform 503 HTML on every
+      route) until the NEXT full build completed and its own restart brought it up in under a
+      minute. If a restart seems stuck: do nothing for 5 minutes, then re-run the deploy tool
+      with the SAME archive (a fresh build + its automatic restart recovers it — proven twice
+      that day). App stdout remains unreachable (the O7 gap), so there is no way to tell a crash
+      loop from a wedged spawn except by which body answers.
+
+   Either way, expect the service to answer `/api/app-config` within seconds but `/health` to report
+   `"status":"degraded"` with `"background":"initializing"` for a while after the restart — see the
+   readiness note in step 5.
+5. **Run the post-deploy smoke**, all four, in order:
+   - `curl -si https://api.caprotoolkit.in/health` -> `200`, body contains `"status":"ok"` and
+     `"db":{"state":"connected"`.
+   - `curl -si https://api.caprotoolkit.in/api/app-config` -> `200`, body contains `"ok":true` and
+     a `featureFlags` object. This is the one route both the desktop app and the browser extension
+     fetch at startup — its failure breaks every client, not just this deploy's own feature.
+   - `curl -si https://api.caprotoolkit.in/` -> `200`.
+   - One authenticated read with a real token (any `GET` route behind `authRequired`) -> `200`.
+     Obtain the token with `node tools/mint-admin-token.mjs` (mints a real session token through
+     the ordinary OTP login and stores it in `.env`) if `.env` does not already hold a current one;
+     then e.g. `curl -si https://api.caprotoolkit.in/api/auth/me -H "Authorization: Bearer <token>"`.
+
+   All four verified live on 2026-08-22 against a deploy that had already landed:
+   `GET /health` -> `200` `{"status":"ok","uptime":7973,"db":{"state":"connected","ping_ms":77},
+   "background":"ready"}`; `GET /` -> `200`.
+
+   **Do not read the first `/health` as a failure.** `server.js` starts accepting connections before
+   `bootstrap()` finishes, and readiness is only set true after connect -> provision-indexes ->
+   rollout-flags -> feature-index-readiness -> digest-startup all complete. Until then `/health`
+   honestly reports `"status":"degraded"`, `"background":"initializing"` while `db.state` is already
+   `connected`. Measured on 2026-08-24 across three real deploys: **roughly 60-90 s** for a deploy
+   that changes only code, and **about 3.5 minutes** (uptime 202 s at the moment it flipped) for the
+   deploy that introduced a new collection, because provisioning that collection's indexes on the
+   Atlas **M0 free tier** is slow. Poll until `"status":"ok"` before declaring the deploy good, and
+   only treat it as a failure if it has not settled after roughly 5 minutes.
+
+   **A code-only deploy can take about 6 minutes when digest recovery is mid-run.** Measured
+   2026-10-08 (commit 3b8dc46): `/health` stayed `degraded` with `"backgroundStage":"digest-startup"`,
+   `"backgroundError":"DIGEST_RECOVERY_BUSY"` and `"backgroundDetail":"Digest recovery is already
+   running"` - the previous process's recovery pass still held its lease - and flipped to `ok` at
+   uptime 355 s with no action, because `server.js` retries the bootstrap on its own. Read that
+   error as "wait", not as a failed deploy; only past roughly 8 minutes is it worth investigating.
+
+   **One thing to check on the first deploy after 2026-08-24.** Index provisioning now covers the
+   GST storage collections (ImportBatch, ImportRow, ReconciliationRun and friends), which it did not
+   before -- a fresh database could not commit a GST import at all. Provisioning builds a UNIQUE
+   index over existing data, and a unique index cannot be built over duplicates. If production
+   already holds duplicate rows under one of those keys, the build refuses and the collection is
+   recorded in the provisioning result's `failures` list; boot continues rather than aborting, so
+   this fails QUIETLY. After that deploy, confirm GST still imports rather than assuming it: commit
+   one small import. (The provisioning result is also written to the boot log, but this repository
+   does not yet document where Hostinger/Passenger's stdout for this app actually lands — the same
+   open question O7 raised for finding a `requestId` in server logs. Until that is answered, the
+   real import is the only confirmation method that does not need log access.)
+
+   `node tools/verify-live-posture.mjs` runs the health check plus the CORS and error-envelope
+   checks in one pass; a clean result is `8 passed, 0 failed, 2 skipped` (the 2 skips need a
+   super-admin token in `CAPRO_TOKEN`).
+
+## Rollback
+
+**The rollback restores code, not data.** If the bad deploy ran a destructive migration, rolling
+the code back alone leaves the database in the new shape — that case needs O4's restore, and O3's
+RTO applies instead of this section.
+
+1. Identify the last-known-good archive: the file noted in Deploy step 3 before this deploy (or,
+   if that note was not kept, the second-newest `capro-backend_*.zip` in the output directory by
+   write time, per the `Get-ChildItem` line in Deploy step 3 — the newest is the one just rolled
+   back from). **Copy that archive somewhere outside the output directory before doing anything
+   else.** Deploy step 3's automatic prune keeps only the 5 most recent archives on every
+   non-`-ValidateOnly` run, by write time — not "how long ago the code it holds was live" — so an
+   old rollback target can be silently deleted by later deploys before you ever need it. This is
+   not hypothetical: it is the reason a rehearsal target has to be chosen with the prune window in
+   mind (see the 2026-08-27 rehearsal note below).
+2. Re-upload that archive: the two `node tools/...` commands from Deploy step 4 Method A
+   (`hostinger-upload-file.mjs`, then `hostinger-deploy-backend.mjs --node-version 22`) — NOT the
+   `$env:HOSTINGER_API_TOKEN` line above them, which only needs re-running in a fresh shell where
+   the token is not already loaded. Point `--file` at the older archive; nothing else changes,
+   `--remote capro-backend.zip` is always the same destination, so a rollback is a normal deploy of
+   an older archive rather than a special path.
+3. Re-run the same four-item post-deploy smoke from Deploy step 5. All four must pass before the
+   incident is considered contained.
+4. Record the wall-clock time this took, end to end, in this section (the next entry below) — an
+   unrehearsed, untimed rollback procedure is a paragraph, not a capability.
+
+**Rehearsal log** (append one entry per real rehearsal or real incident rollback; do not leave
+this list empty for a release that claims this procedure is trustworthy):
+
+The 2026-08-24 rows' `Smoke result` column is **3 of 4 on both legs**, not 4. Read the note below
+before quoting those rows: the fourth check (an authenticated read returning 200) did not run on
+either leg that day, for want of a production bearer token. This line exists because the
+roll-forward row said “4 of 4” until 2026-08-26 while the paragraph under the table said the
+opposite — a reader skimming only the table would have concluded the rollback was proved for
+authenticated behaviour. The **2026-08-27 rehearsal closed that gap**: all four checks ran and
+passed on both legs, the fourth against `GET /api/auth/me` with a real super-admin bearer token.
+
+| Date | Operator | From commit | To commit | Wall-clock | Smoke result |
+|---|---|---|---|---|---|
+| 2026-08-24 | agent (Opus 5), rehearsal | `0ea0bcb` | `10bf147` | **89 s** | 3 of 4 pass — see note |
+| 2026-08-24 | agent (Opus 5), roll-forward | `10bf147` | `0ea0bcb` | **52 s** | 3 of 4 pass — see note |
+| 2026-08-27 | agent (Fable 5), rehearsal | `e000d87` | `0a0e5dc` | **47 s** | **4 of 4 pass** |
+| 2026-08-27 | agent (Fable 5), roll-forward | `0a0e5dc` | `e000d87` | **67 s** (+ ~2.5 min to `background:ready`) | **4 of 4 pass** |
+| 2026-10-04 | agent (Opus 5.5), **incident rollback** | `61bd367` | `ee091cb` | **38 s** to answering (+ 78 s to `background:ready`) | **4 of 4 pass** |
+
+**The 2026-10-04 incident.** The deploy of `61bd367` (GD83: one query filter, nothing that runs at
+startup) finished its Hostinger build at 10:21:21Z and the Node app never answered again: the CDN
+looped a 307 to the same path on every API route, then timed out (504), while static files in the
+same root were still served. The same rollback path brought `ee091cb` up in seconds, so the cause
+looks like the platform's restart of that build rather than the code - unproven, because the build
+logs were not reachable that session. Outage about 37 minutes (10:21Z-10:58Z), noticed at about
+10:52Z. Two tool defects made it worse, both fixed in `tools/hostinger-deploy-backend.mjs`: its
+health poll fetched with no timeout, so twelve attempts against a silent origin took about half an
+hour to report failure (now 15 s each); and on that failure it exited before closing the archive
+exposure, so the backend source stayed downloadable throughout (now closed on every path, then the
+failure reported). Rollback: upload 10:57:30Z, answering 10:58:08Z, `ok` 10:59:26Z; health, app-config,
+the extension preflight (204, origin reflected) and an authenticated `GET /api/auth/me` (200) all pass.
+
+**The same day, again, and what actually fixed it.** From about 11:20Z api.caprotoolkit.in hung
+again, and stayed down through more builds (seven completed that day, the known-good `ee091cb`
+among them) while the website's temporary domain (`lightcoral-hornet-860563.hostingersite.com`)
+answered `/health` with 200. The runtime log named the cause: Hostinger runs **one** Node process per
+website, and each start logged by the `[STARTUP]` line (added to `src/server.js` for this) bound
+`/usr/local/lsws/extapp-sock/lightcoral-hornet-860563.hostingersite.com:_.sock` - the temporary
+domain's virtual host. The CDN edges completed TLS for api.caprotoolkit.in and then waited for a
+first byte that never came (`connect` 0.05 s, `tls` 0.11 s, no byte in 20 s), while the same edges
+served the temporary domain in 0.35 s. At 17:33:42Z `POST
+api/hosting/v1/accounts/{user}/websites/api.caprotoolkit.in/nodejs/server/restart` (documented:
+"does not rebuild or redeploy ... recover a hung application") answered 200; at 17:33:44Z the new
+process bound `.../api.caprotoolkit.in:_.sock`; `/health` answered 503 while starting at 17:34:13Z
+and 200 at 17:34:43Z, and the temporary domain stopped answering at that moment - one process, one
+host. Smoke 4 of 4 (health, app-config, the extension preflight 204 with its origin reflected, an
+authenticated `GET /api/auth/me` 200). Outage about 6 h 14 min (11:20Z-17:34Z), on top of the
+morning's 37 minutes.
+
+So, when the API's own domain hangs and nothing in the runtime log says the app crashed:
+
+1. Read the newest `[STARTUP]` line in the runtime log. A socket named after anything other than
+   `api.caprotoolkit.in` is this failure.
+2. **Restart, do not rebuild**: the endpoint above, with the deploy token. After 11:20Z every
+   attempt was a rebuild (the "restart" at 12:00Z was a redeploy of `ee091cb`) and none brought
+   the domain back; the first use of this endpoint did. Why a start lands on one host or the other
+   is Hostinger's to explain and was not established.
+3. Do not use the temporary domain as evidence the API is up. It proves a process runs, not that
+   clients can reach it.
+
+`tools/hostinger-deploy-backend.mjs` now does step 2 itself: if `/api/app-config` on the API's own
+domain stays silent after twelve bounded probes, it restarts the process **once** through that
+endpoint and probes again, and only then reports the deploy failed. The archive is now covered
+before that check, not after it, so a slow check no longer lengthens the exposure. The decision is
+in `tools/lib/deploy-serving-check.mjs`, pinned by seven checks in `tests/deploy-archive-security.mjs`.
+
+**What the 2026-08-27 rehearsal did.** Both legs were confirmed by content, not by the deploy
+reporting success: the two builds differ observably only in the served `public/admin/super.js`
+(the O18 same-origin base landed in `da5c47f`), so after the rollback the live file carried the
+absolute `https://api.caprotoolkit.in/api` base exactly once, and after the roll-forward it
+carried none and the relative `"/api"` form once. `/health` uptime reset on both legs. The
+rollback target was chosen so the restored build post-dates the `94a4779` feature-flag panel fix,
+per the constraint recorded on 2026-08-26. The extension preflight
+(`chrome-extension://emimafaefblkocfndndcgghbliodhnkp` → 204 with the origin reflected) was
+re-checked after the roll-forward. Note the roll-forward's `background:ready` took ~2.5 minutes —
+inside the documented window; do not read an interim `"status":"degraded"` as a failed leg.
+
+**What that rehearsal actually did**, so the numbers above are readable rather than decorative. It
+was a real rollback against production, not a described one: the live API was moved back to the
+previous archive and then forward again, both through the tooling in Deploy step 4.
+
+The rollback was confirmed by content, not by the deploy reporting success — after it, the live
+`accountDeletion` string was **466 characters** (the previous build's text) and after the
+roll-forward it was **768** and byte-identical to the repository's. That comparison is the reliable
+check: **an HTTP 401 does not prove a route is deployed.** `/api/super/*` sits behind router-level
+authentication that runs before route matching, so a path that does not exist in the deployed build
+still answers `401`, not `404`. Anything asserting "the new routes are live" from a 401 is asserting
+nothing.
+
+**Smoke coverage, stated honestly.** Of Deploy step 5's four checks, three ran on both legs of the
+2026-08-24 rehearsal and passed: `/health` (after the readiness wait), `/api/app-config`
+(`ok:true`, `featureFlags` present) and `GET /`. The fourth — an authenticated read returning `200`
+— was **not run** on either leg, for want of a production bearer token.
+
+**Update 2026-08-26: the fourth check is no longer unrunnable.** `tools/mint-admin-token.mjs` mints
+a real session token through the ordinary OTP login and stores it in `.env`, so an authenticated
+read is now part of any deploy's smoke. It ran on the 2026-08-26 deploy of commit `94a4779`:
+`GET /api/auth/me` -> **200**, alongside `/api/app-config` 200, `GET /` 200, and `/health` reaching
+`{"status":"ok","background":"ready"}` after 151 seconds. **Four of four.**
+
+What that does and does not close: the *capability* gap is gone, and every future deploy can smoke
+all four. The 2026-08-24 **rollback rehearsal** itself still shows 3 of 4, because that is what was
+actually observed on those two legs, and a rehearsal cannot be improved retroactively. Re-running it
+was deliberately not done on 2026-08-26: the archive it would have rolled back to contains the
+feature-flag panel defect fixed in `94a4779`, and briefly restoring a build that can wipe production
+flags — while the owner is working in the panel — is a worse trade than leaving the rehearsal at 3
+of 4 until a calmer pair of archives exists.
+
+**Prune interaction, worth knowing before an incident.** `-RetainCount` defaults to 5 and prunes by
+write time after each real build. A rollback deploys an *older* archive but does not re-create it,
+so the file's mtime does not move and it stays as old as it was — five further deploys after a
+rollback will prune the very archive you rolled back to. If you are sitting on a known-good archive
+during an incident, copy it somewhere outside the output directory before continuing to deploy.
+
+## Withdrawing a desktop release
+
+**Start from what a desktop rollback cannot do.** The backend rollback above restores code that runs
+on one server. A desktop release does not: once an installer has been downloaded, it is on other
+people's machines and there is no mechanism in this product — and no ethical one — to reach in and
+remove it. Withdrawing a release therefore means two separate things, and confusing them wastes the
+first hour of an incident:
+
+1. **Stop new installs of the bad build.** Fully within your control, effective immediately.
+2. **Get users already on it onto something better.** Only partly within your control, and the
+   levers that reach installed apps are the blunt ones.
+
+### The four levers, in order of reach
+
+| # | Lever | Reaches | Effect |
+|---|---|---|---|
+| 1 | `download/CA-PRO-Setup-<version>-x64.exe` | New downloads | The file itself. Remove or replace it and the link 404s |
+| 2 | `download/latest.json` | The website, and the download page when the API is unreachable | Advertises version, URL, SHA-256 and size |
+| 3 | `desktopRelease` on the AppConfig singleton | Installed apps' update banner | Stops advertising the bad version in-app |
+| 4 | `desktopRelease.minSupportedVersion` | Installed apps, forcibly | Locks out builds below the floor |
+
+**Levers 1 and 2 are the rollback.** Do both, in that order — the file first, then the manifest, so
+there is never a window where `latest.json` advertises a URL that 404s. Re-upload the previous
+installer and restore the previous `latest.json` (its `latestVersion`, `downloadUrl`, `sha256` and
+`sizeBytes` must all move together; a stale hash beside a new file is worse than either alone,
+because the download page tells users to verify against it). Both go up with the same tool the
+website uses:
+
+```
+node tools/hostinger-upload-file.mjs --domain caprotoolkit.in     --file "<path to the previous installer>" --remote "download/CA-PRO-Setup-<previous>-x64.exe"
+node tools/hostinger-upload-file.mjs --domain caprotoolkit.in     --file "ca-pro-website/download/latest.json" --remote "download/latest.json"
+```
+
+The upload tool re-downloads and compares SHA-256 before reporting success, so a half-finished
+upload does not read as a rollback.
+
+**Lever 3 stops the in-app nag.** `PATCH /api/app-config/desktop-release` as the super administrator,
+setting `enabled: false` (or repointing it at the previous version). Installed apps stop offering
+the bad update on their next `/api/app-config` read. This does not un-install anything; it stops the
+product recommending a build you have withdrawn, which is the part that would otherwise keep
+generating new victims after the download link is already fixed.
+
+**Lever 4 is the only one that reaches an already-installed bad build, and it is a lockout.** Raising
+`minSupportedVersion` above the bad version makes the API answer `426` to those clients: they stop
+working until the user updates. Use it only when running the bad build is worse than not running the
+product at all — data corruption, a privacy leak, a wrong figure shown as authoritative. For a
+cosmetic or partial fault it is the wrong trade: you have taken the product away from people who
+were getting value from it. Note the deliberate fail-open in the middleware: a request carrying **no**
+version header is allowed through, so the floor never locks out the browser extension or an older
+client that does not send one.
+
+### Is maintenance mode the lever? Usually not
+
+Maintenance mode is a **server-side** switch. It stops the API for every client — the Chrome
+extension, every desktop build including the good ones, every firm. It is the right lever when the
+fault is in the backend and everyone is affected anyway.
+
+It is the **wrong** lever for a bad desktop build, and reaching for it is a common instinct worth
+naming: it punishes every user on a good version to contain a fault they do not have. Use levers 1-3
+for a desktop problem, and lever 4 only under the test above.
+
+If you do engage it, remember the allowlist in `maintenance.middleware.js`: `/api/auth/*`,
+`/api/app-config`, `/api/super/*`, `/health` and `/api/digests/unsubscribe` stay reachable, which is
+what keeps the admin panel usable so you can lift it again.
+
+### What to tell users
+
+Say it in these three places, in this order, and say the same thing in each:
+
+1. **The download page** — the visible statement. Name the affected version, say plainly what goes
+   wrong, and say what to do. A user who has already installed it needs an instruction, not an
+   apology.
+2. **`releaseNotes` in `latest.json`** — the download page renders it, so it reaches someone
+   mid-download.
+3. **`desktopRelease.releaseNotes`** — reaches installed apps through the update banner.
+
+Write it as: what is wrong, which version, what a user should do now, and when a fix is expected. Do
+not describe a withdrawn build as "an issue" — a chartered accountant deciding whether their filing
+figures were affected needs to know whether the fault touched data or only display. If you do not
+yet know, say that, and say when you will know.
+
+**Do not silently replace the artefact at the same URL.** The download page publishes a SHA-256 and
+tells users to verify against it. A user who checks and finds a mismatch has been given a reason to
+distrust the whole distribution. Withdraw the version, publish the replacement under its own version
+and its own hash.
+
+### Rehearsal status
+
+The **backend** rollback is rehearsed and timed — see the log above. This desktop-side procedure is
+**written but not rehearsed**: no version has yet been withdrawn from the live site. The two are not
+interchangeable evidence, and this section should not be read as tested until an entry appears below.
+
+| Date | Operator | Version withdrawn | Levers used | Wall-clock | Outcome |
+|---|---|---|---|---|---|
+| _(none yet)_ | | | | | |
+
+## Kill switches
+
+Two independent mechanisms, both driven from the admin panel and both read through
+`AppConfig.getInstance()`.
+
+**Maintenance mode** — `PATCH /api/app-config/maintenance` from `super.html`. When on,
+`src/middleware/maintenance.middleware.js` answers protected API routes with `503` and
+`{ ok: false, error: "maintenance" }`. Three properties matter when you are using it under
+pressure:
+
+- It **allowlists** `/api/auth/*`, `/api/app-config`, `/api/super/*`, `/health` and
+  `/api/digests/unsubscribe`. The first three are what let an admin sign in and turn maintenance
+  back off — that is why they are exempt. The unsubscribe route is exempt on purpose: a
+  recipient's right to stop receiving mail must not depend on the site being up.
+- It **fails OPEN.** If the config read throws, the middleware calls `next()` and traffic flows.
+  A database blip therefore does *not* silently take the API down — but it also means maintenance
+  mode cannot be relied on as a security control.
+- `AppConfig.getInstance()` caches for **30 seconds** (`CACHE_MS = 30_000`). Engaging and lifting
+  maintenance both take **up to 30 s** to be observed by every process. Wait it out; do not assume
+  the toggle failed and click again.
+
+**Per-feature rollout flags** — `PATCH /api/app-config/features`, enforced by
+`src/middleware/rollout.middleware.js`. A disabled flag makes the route answer **404** with
+`{ ok: false, error: "Feature unavailable", featureFlag: "<name>" }` and a `requestId`. A 404
+carrying a `featureFlag` key is a deliberately-disabled feature, not a missing route — that
+distinction is the first thing to check when a user reports a page "disappeared". The same 30 s
+cache applies.
+
+## Observability
+
+**INCOMPLETE — blocked on O7, an owner decision (free-tier uptime monitor and error aggregator).**
+Required when it lands: what is watched, who is paged, and the escalation path.
+
+What already works and should be carried into that section: every error response carries a
+`requestId`, and the desktop surfaces it to the user as a selectable `Reference: <id>` line. That
+id is the join key — a user quotes it from their screen or from a saved diagnostics file, and it
+matches the server log line for the same request. Until O7 exists, `GET /health` polled by hand is
+the only uptime signal, and there is no alerting of any kind: **an outage is noticed when a user
+reports one.** Say that plainly to whoever takes an on-call rotation.
+
+## Support
+
+The inbound support address is **`support@caprotoolkit.in`**, and the published response window is
+**30 days**.
+
+*Corrected 2026-08-28: this line still read `[OWNER TO COMPLETE — O8/L1]` long after the mailbox
+was provisioned. It was stale, not open. Verified three ways rather than assumed —
+`SupportContact.cs:40` carries `SupportAddress = "support@caprotoolkit.in"` (and `:51` the same for
+the grievance address, deliberately, since the proprietor is the grievance officer); the live
+`caprotoolkit.in/privacy.html` serves that address; and `OWNER-TODO.md`'s "already supplied" table
+records the mailbox as live. The reason the placeholder was paired with a matching one in
+`SupportContact` — so the two could not silently disagree — was sound, and it is exactly why this
+had to be fixed in both places or neither.*
+
+What a diagnostics bundle contains, so you can tell a worried user honestly: app version, Windows
+version, runtime version, whether they are signed in, whether a workspace is active, last sync
+time, online state, up to 20 recent failure descriptions, recent request ids, and the crash log.
+
+What it **excludes by construction, not by redaction**: there is no field anywhere in
+`DiagnosticsSnapshot` for a client name or a firm name, so one cannot be included even by mistake.
+Free-text that does pass through is filtered by `CrashLog.Redact`. Nothing is uploaded — the file
+is written only when the user chooses Save, and it goes wherever they put it. That is the whole
+answer to "what are you sending about my clients": nothing, and the record has no place to put it.
+
+## Provider accounts and cost
+
+Four external providers. Each row is: what it does, its env var, and where it is administered.
+
+| Provider | Purpose | Env var(s) | Console |
+|---|---|---|---|
+| DeepSeek | AI analysis of submitted text | `DEEPSEEK_API_KEY`, `DEEPSEEK_URL`, `DEEPSEEK_MODEL` (+ `_FALLBACK`, `_CLASSIFIER_MODEL`, `_INSIGHTS_MODEL`) | DeepSeek platform account |
+| OCR.space | Text extraction from images/scans | `OCR_SPACE_API_KEY` | OCR.space account |
+| Resend | Outbound transactional email | `RESEND_API_KEY` | Resend dashboard |
+| Google | Sign-in (web + desktop OAuth clients) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_IDS`, `GOOGLE_DESKTOP_CLIENT_ID`, `GOOGLE_DESKTOP_CLIENT_SECRET` | Google Cloud console |
+
+**Who pays each account, and on which card, is [OWNER TO COMPLETE — O3/O11].**
+
+Spend is capped in code (O10), so a runaway loop costs calls rather than money. Defaults, all
+overridable by env var:
+
+**The cap figures live in ONE place: the Observability section's table further down**, which names
+each env var beside its default. They were duplicated here as a bare summary and the copy went
+stale the moment the DeepSeek per-user caps were raised on 2026-08-27 (60 -> 200 per day,
+800 -> 2700 per month) — this table still read 60/800 while the authoritative one read 200/2700.
+A second copy of a number nobody updates is worse than no copy, so the duplicate is removed rather
+than re-synchronised. See **Observability → provider spend caps** below for the live figures.
+
+Raising a cap is an env-var change plus a redeploy, not a code change. Note the global caps are the
+real budget control — the per-user caps only stop one account from consuming everything.
+
+### Resend webhook — configured and live (2026-09-29 evening)
+
+The webhook exists in Resend (endpoint `https://api.caprotoolkit.in/api/webhooks/resend`, events
+email.sent/delivered/bounced/complained) and its signing secret is stored server-side in AppConfig
+through the write-only super-admin route — the hosting platform exposes no environment management
+through its API, and every file under the served root is publicly downloadable between deploys,
+which is exactly how the first secret leaked (it was rotated by recreating the webhook; the
+leaked value is dead).
+
+Operate it like this:
+
+- **Configure / rotate:** `PUT /api/super/config/resend-webhook-secret` with
+  `{"secret": "whsec_..."}` and a super-admin token. `DELETE` unconfigures; `GET` answers only
+  `configured` and the source — the value never travels back out of the server.
+- **Verify after any deploy or rotation:** `node tools/verify-resend-webhook.mjs` — signed
+  accept, replay idempotent, tampered/stale/unsigned refused (6 checks).
+- **End-to-end:** send a test email (panel or `POST /api/super/send-test-email`) and watch the
+  Emails page: the row must move sent -> delivered within seconds of Resend dispatching.
+- **Backfill:** `node scripts/backfill-email-deliveries.mjs --production` — idempotent; also
+  refines the types of rows it inserted earlier. Resend keeps 30 days.
+
+Header note for anyone touching the verifier: Resend signs with svix-prefixed headers, not the
+webhook- form the standardwebhooks spec names — the controller accepts both, and the e2e pins
+the svix shape.
+
+## Fix needed under pressure — decision order
+
+Do not improvise this at 1am. In order:
+
+1. **If the fault is one module:** turn its feature flag off via the admin panel
+   (`https://api.caprotoolkit.in/admin/super.html`, Feature flags card). No deploy. Effect is
+   immediate for `tdsHealth`, `noticeCases`, `assuranceEngagements`, `auditWorkingPapers`
+   (`rollout.middleware.js` passes `fresh:true` for these four); the other 15 flags take up to 30
+   seconds (`AppConfig.CACHE_MS`).
+2. **If the fault is broad:** engage maintenance mode from the same admin panel. No deploy.
+   `maintenance.middleware.js` blocks every `/api/*` route EXCEPT `/api/auth/*`,
+   `/api/app-config`, `/api/super/*`, `/health`, and `/api/digests/unsubscribe` — so the admin
+   panel itself, sign-in, and the health check all stay reachable while everything else answers
+   `503` with the configured maintenance message. **Honest limitation, verified by reading the
+   code (`maintenance.middleware.js`'s `catch` block calls `next()`):** if the config read itself
+   fails, the gate fails OPEN — a database blip disables maintenance mode rather than engaging it.
+   Maintenance mode is an availability lever, not a security control; never rely on it to contain
+   a data-exposure incident.
+3. **If the fault came from the last deploy:** roll back per the Rollback section above.
+4. **Only then attempt a forward fix**, and never skip `run-gates.ps1` to save time — the exact
+   suites it runs (`production-readiness-checklist`, `production-error-envelope`,
+   `error-contract-invariants`, `deploy-archive-security`, `deploy-archive-boundary`) are the ones
+   most likely to catch a panic-edit before it becomes a second incident.
+
+## Paid provider caps
+
+Six figures decide how much CA PRO can spend with a paid provider before it refuses. They are read
+from the environment and fall back to the defaults below, which are what production runs on today
+because none of the six variables is set.
+
+| Provider | Scope | Env var | Default |
+|---|---|---|---|
+| DeepSeek | per user, per day | `DEEPSEEK_DAILY_CALL_CAP_PER_USER` | **200** |
+| DeepSeek | per user, per month | `DEEPSEEK_MONTHLY_CALL_CAP_PER_USER` | **2700** |
+| DeepSeek | all users, per day | `DEEPSEEK_GLOBAL_DAILY_CALL_CAP` | **1500** |
+| OCR.space | **per user, per WEEK** | `OCR_SPACE_WEEKLY_CALL_CAP_PER_USER` | **300** |
+| OCR.space | all users, per day | `OCR_SPACE_GLOBAL_DAILY_CALL_CAP` | **600** |
+
+**OCR is metered per user per WEEK, and only per week.** `OCR_SPACE_DAILY_CALL_CAP_PER_USER` and
+`OCR_SPACE_MONTHLY_CALL_CAP_PER_USER` no longer exist: setting either does nothing, because the
+service does not pass them. They were removed on 2026-08-28 rather than left alongside the weekly
+cap, because both silently contradicted it — 25/day allows at most 175 in a week, and 300/month
+allows 300 in week one and nothing afterwards, so under either the stated 300/week could never
+actually be reached. A documented limit that the code never applies is the defect, not the
+paperwork.
+
+**OCR is LIVE in production as of 2026-08-28 (O15, owner decision).** `OCR_SPACE_API_KEY` is set in
+the Hostinger environment — confirmed by probe, not assumed: `POST /api/cases/ocr` as the super
+admin returns `502 OCR_PROCESSING_FAILED`, which `ocr-space.service.js:86` only throws *after* the
+provider has been reached and replied, whereas an absent key throws `503 OCR_PROVIDER_UNAVAILABLE`
+at line 37 before any network call. The `noticeCases` flag is `true`, so the feature is on for
+every signed-in user.
+
+**The exposure this creates, stated plainly because it is the reason O15 asked for a ceiling.**
+A-13.04 established that the OCR route has **no per-firm write gate** and that `requireFirmMember`
+cannot refuse any authenticated account — a personal firm is provisioned mid-request. So **every
+signed-in account can reach OCR.space usage**, bounded only by the consent flag and the caps above.
+
+### OCR allowance and policy — SETTLED 2026-08-28 by the owner
+
+| Fact | Value |
+|---|---|
+| Provider allowance | **3,000 free OCR requests** (owner-confirmed 2026-08-28) |
+| Per-user cap | **300 calls per user per WEEK** — `OCR_SPACE_WEEKLY_CALL_CAP_PER_USER` |
+| Scope of that cap | **Per user.** Not per firm, not shared, not pooled |
+| Provider-wide backstop | 600 calls/day across everyone — `OCR_SPACE_GLOBAL_DAILY_CALL_CAP` |
+| Cost in rupees | **Not stated anywhere, because none has been verified.** Do not add one |
+
+**What bounds a single user.** The weekly counter is checked and atomically incremented *before*
+the paid call, against a compound-unique index, so a user cannot exceed 300 in a week even by
+firing concurrent requests — 20 simultaneous calls at cap-minus-one yield exactly one success
+(`tests/provider-quota-contract.mjs`, Part E, run against a real replica set). The counter is keyed
+by ISO week in **UTC**, so it rolls on Monday 00:00 UTC and does not shift with a user's timezone
+or a machine's local clock. Restarts do not reset it; it lives in MongoDB, not memory.
+
+**The arithmetic the owner should know, stated in calls because calls are what is verified.**
+3,000 free requests ÷ 300 per user per week = **10 user-weeks of full-cap usage** before the free
+allowance is exhausted. One user at full tilt takes 10 weeks to spend it; ten users at full tilt
+take one week. The 600/day provider-wide backstop is *higher* than the free allowance can sustain
+(600 × 7 = 4,200 in a week), so **the global cap is not what protects the 3,000 — the per-user
+weekly cap and the number of active users are.** That is recorded as a fact rather than silently
+"fixed" by lowering the global cap: the owner set the per-user number, and changing an unrelated
+control to compensate would be exactly the kind of quiet reinterpretation this policy forbids. If
+the free allowance starts running down faster than expected, the lever to reach for is the global
+daily cap, and this paragraph is why.
+
+**The reasoning, so a future operator can argue with it rather than guess at it.**
+
+**DeepSeek's per-user daily cap, 200, is an owner-set anti-abuse ceiling, not a usage estimate**
+(raised from 60 on 2026-08-27, owner instruction: the product is free, and the number should be
+generous headroom rather than a ration). A CA doing genuine review will not come close to it in a
+day — a single notice triggers only a handful of calls (refine + insights + a coverage follow-up +
+a reminder message) — so it is not there to limit normal use. It is there so a runaway loop, a
+stuck retry, or one compromised account cannot spend a month's budget in an afternoon.
+
+**OCR.space is metered differently on purpose, and its number is the owner's, not an estimate.**
+It is **300 per user per WEEK** (owner decision, 2026-08-28), against a known allowance of 3,000
+free requests — see the OCR allowance table above for the full arithmetic. It has no per-user daily
+or monthly cap at all; both were removed the same day because either would have bound before
+300/week could be reached, making the stated limit unreachable. Do not "restore" them.
+
+The DeepSeek monthly per-user cap is deliberately **not** 30x the daily figure (2700, not 6000)
+— the same ratio DeepSeek's cap has always used (~13.3x the daily figure, i.e. a sustained average
+of ~44% of the daily peak), scaled up with the 2026-08-27 daily change so raising the daily number
+did not silently make the monthly tier the only real constraint, or silently stop being one. A user
+who hits their daily cap every day for a month is not doing accountancy, and the monthly ceiling is
+what notices that pattern.
+
+The global daily caps are the ones that actually bound the bill. They are set above the sum of a
+realistic day's use across the current user base and well below anything that would be a surprise on
+an invoice. **They are the figures to revisit as the user count grows** — the per-user caps scale
+with users automatically, the global ones do not, so the global cap is what will start refusing real
+work first if it is left where it is. Concretely, after the 2026-08-27 per-user change: at the
+DeepSeek global ceiling of 1500/day, roughly 7-8 users simultaneously at the new 200/day personal
+cap would exhaust the whole app's shared daily budget for everyone else. Left as-is deliberately —
+raising it is a real recurring-cost decision on the owner's own DeepSeek bill, not a per-user
+abuse-protection one — but worth a look once the active user count approaches that range.
+
+All six are enforced atomically against a compound unique index on `ProviderUsage`, so twenty
+concurrent calls at cap-minus-one produce exactly one success and nineteen refusals — proved live,
+not assumed (`tests/provider-quota-contract.mjs`, Part E). Without that index the counter is
+advisory and every concurrent call is allowed; `index-provisioning.service.js` creates it at every
+boot.
+
+**Where to see the spend.** The admin panel's Provider usage card reads
+`GET /api/super/provider-usage`, which reports today and this month per provider plus the top users
+today.
+
+## Staging
+
+**Declined — owner decision, 2026-08-27.** No second Hostinger app on a subdomain pointed at a
+scratch database will be stood up. Verbatim: *"run-gates.ps1 is the sole pre-deploy gate; the
+rehearsed rollback is the compensating control."* This is a final decision, not a placeholder for
+one — do not re-raise it as an open question.
+
+Consequence, stated so a future operator does not have to re-derive it: `run-gates.ps1` reporting
+`ALL RELEASE GATES GREEN` is the *only* gate before a production deploy, which makes step 2 of the
+Deploy section (running it WITHOUT `-SkipDeployArchiveValidation` and requiring the green result)
+load-bearing rather than advisory. The compensating control for the risk staging would otherwise
+have covered is the rehearsed rollback procedure above — retained last-known-good archives (kept
+automatically, 5 most recent) plus a rollback that has actually been performed against production
+in both directions with all four post-deploy smoke checks passing on each leg (O9's evidence,
+.kiro/finalreleasefix.md), not merely described. A bad deploy is therefore recoverable in under two
+minutes rather than prevented before it ships; that trade is the one this decision accepts.
+
+## Known limitation: one developer's PC
+
+`run-gates.ps1` and `make-deploy-archive.ps1` both default `-RepoRoot` to
+`D:\CA-PRO-Toolkit\CA-PRO-Toolkit\capro-backend` and require `node`, `npm` and `git` resolvable on
+`PATH`. Deploys today can only originate from this one machine. A second machine that needed to
+deploy would need: the repo cloned to the same relative structure (or both scripts' `-RepoRoot`
+passed explicitly), Node/npm/git on `PATH`, the Hostinger panel credentials, and — since the
+archive scanner shells out via a self-authorizing nested-process launch — a real interactive
+Windows console session; it is not yet confirmed to run under CI or a fully headless session.
+
+## Known operational limits
+
+An honest list. Every item here is a real constraint a new operator will hit, not a caveat.
+
+- **No CI for the backend.** `.github/` carries a desktop workflow only (V10). Backend correctness
+  before a deploy rests entirely on `run-gates.ps1` run by hand.
+- **No staging.** See the Staging section above — this is an unrecorded owner cost decision.
+- **Single region, single instance.** One Hostinger app, one database. There is no failover.
+- **Deploys originate from one developer's PC.** See "Known limitation: one developer's PC".
+- **No backup of production yet.** The database is an Atlas M0 free tier, which has no snapshot
+  or point-in-time facility of its own. `toolsackup-database.ps1` and `tools
+estore-drill.ps1`
+  now exist and the whole path was drilled end to end on 2026-08-23 (39/39 collections, app
+  health 200) -- but against a LOCAL database, not production, and nothing is scheduled. Until
+  the Atlas credential and an off-host destination exist, production still has no restorable
+  copy. This remains the one item on this list that can lose a customer's work irrecoverably.
+- **No alerting.** See Observability — blocked on O7. Outages are user-reported.
+- **The installer is unsigned, by owner decision.** There is no paid code-signing certificate, so
+  Windows SmartScreen warns on first install and the user must click "More info -> Run anyway".
+  This is expected behaviour, not a compromised download, and the download page says so.

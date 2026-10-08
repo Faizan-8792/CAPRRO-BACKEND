@@ -1,0 +1,188 @@
+// The single source of truth for how each firm-scoped collection is treated during an erasure.
+//
+// L12 step 1 is explicit that the surface must be enumerated mechanically, "because a hand-written
+// list is how 28 collections got missed the first time". This module is imported by BOTH
+// `tools/enumerate-erasure-surface.mjs` (the coverage gate) and `firm-erasure.service.js` (the
+// cascade), so the gate can never pass while the cascade is working from a different list. Two
+// copies of this table would reproduce the original defect in a new place.
+//
+// Strategies, from the L9 decision recorded in PLAN.md ("Erasure model — DECIDED 2026-08-22,
+// owner-delegated"):
+//
+//   PURGE         delete the documents outright
+//   PSEUDONYMISE  keep the row, erase the identity that points at a person
+//   RETAIN        keep intact as professional/statutory record
+//
+// L9 point 6 is the line that decides the hard cases: statutory retention of work product must NOT
+// be used to justify keeping the person's own name and email forever. So a collection may be
+// RETAIN only if it carries no identity of its own; if it does, it is PSEUDONYMISE instead.
+
+export const STRATEGY = Object.freeze({
+  PURGE: "PURGE",
+  PSEUDONYMISE: "PSEUDONYMISE",
+  RETAIN: "RETAIN",
+});
+
+// Reasons for every collection whose strategy is not derivable from its schema. Each entry MUST
+// carry a reason; the enumerator treats a missing reason as unclassified and fails.
+export const REASONS = Object.freeze({
+  User: {
+    strategy: STRATEGY.PSEUDONYMISE,
+    reason:
+      "The account is the subject of the request, not firm work product. L9 point 5 requires identity to be erasable independently of retained work, and point 6 forbids work-product retention being used to keep the name and email forever.",
+  },
+  FirmMembership: {
+    strategy: STRATEGY.PURGE,
+    reason: "Join rows carry no work product, and leaving them orphans the firm guards.",
+  },
+  FirmInvite: {
+    strategy: STRATEGY.PURGE,
+    reason:
+      "An admission credential for a firm that is being erased, so there is nothing left to admit anybody to. Classified explicitly rather than left to the derived PURGE default because it does NOT match that default's description: it carries three identities of its own (createdBy, revokedBy, and a userId plus decidedBy on every acceptance), which under L9 point 6 also rules RETAIN out - statutory retention of work product may not be used to keep a person's identity forever, and an invitation code is not work product in any case. Purged whole rather than pseudonymised because pseudonymising would leave a live code and a use count for a firm that no longer exists.",
+  },
+  ActivityEvent: {
+    strategy: STRATEGY.PSEUDONYMISE,
+    reason:
+      "rejectMutation, append-only. The events themselves are the professional record and are kept, but each carries actorUserId pointing at a person, and L9 point 6 says that link must be erasable. Cleared: actorUserId, plus the free-form beforeSummary/afterSummary/metadata payload. The payload goes because those fields are Mixed and sanitizeSummary redacts only credential-shaped keys, so an entity snapshot otherwise preserves the erased user's name and email, and a purged Client's PAN and GSTIN, on an event that survives. The skeleton — action, entityType, entityId, source, occurredAt — is kept, so the audit trail still records that something happened, of what kind and when.",
+  },
+  AuditWorkingPaperRow: {
+    strategy: STRATEGY.RETAIN,
+    reason:
+      "rejectMutation, immutable working-paper evidence and statutory professional record. Carries no identity field of its own — the actor lives in ActivityEvent, which is pseudonymised.",
+  },
+  CaseAnalysis: {
+    strategy: STRATEGY.RETAIN,
+    reason: "rejectMutation, immutable analysis output kept as professional record. No identity field of its own.",
+  },
+  CaseSubmission: {
+    strategy: STRATEGY.RETAIN,
+    reason: "rejectMutation, immutable record of what was submitted. No identity field of its own.",
+  },
+  CaseTimelineEvent: {
+    strategy: STRATEGY.RETAIN,
+    reason: "rejectMutation, immutable case chronology. No identity field of its own.",
+  },
+  ErasureReceipt: {
+    strategy: STRATEGY.RETAIN,
+    reason:
+      "The proof that an erasure happened. Purging it with the firm would destroy the only record that the request was honoured, which defeats the audit purpose the receipt exists for. It deliberately holds no erased content, no names and no email addresses — only collection names, counts and status — so retaining it retains nothing about a person.",
+  },
+  EmailDelivery: {
+    strategy: STRATEGY.PSEUDONYMISE,
+    reason:
+      "Delivery records added 2026-09-28 (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1). The send facts (type, status, timestamps, error class) are kept, but each row carries recipientEmailHash — a link to a person that L9 point 6 makes erasable. The handler nulls the hash (and the display suffix); the row keeps answering 'was this email delivered' without saying to whom.",
+  },
+  EmailSuppression: {
+    strategy: STRATEGY.PSEUDONYMISE,
+    reason:
+      "Do-not-email rows added 2026-09-28. The suppression itself must outlive the erasure (removing it could re-email an address that complained), so the row is kept with its reason; it never held content — only a one-way hash, which the handler replaces with a neutral marker to break the link to the erased firm's contacts.",
+  },
+  WorkflowUsage: {
+    strategy: STRATEGY.PURGE,
+    reason:
+      "Per-user analytics counters (IMPROVEMENT-PLAN-V2 Part 3: usage split by desktop/extension). Not work product — a (user, client type, workflow, day) tally with ok/error counts and nothing else. Added 2026-09-28; classified explicitly rather than left to the derived PURGE default so the record shows the decision was made, per the pinned-surface rule that a new firmId-carrying collection must be classified by a person.",
+  },
+  TaskBulkOperation: {
+    strategy: STRATEGY.PURGE,
+    reason:
+      "Carries a TTL, but a TTL is a retention rule and not an answer to an erasure request. Waiting it out would leave the firm's data live for the remainder of the window, so it is purged explicitly.",
+  },
+});
+
+// The firm-scoped surface as it stood when this was written, generated by the enumerator and
+// committed. This is a DRIFT DETECTOR, not an erasure list: a new model carrying firmId will not
+// appear here, the enumerator fails naming it, and a human has to classify it. Without this, a new
+// collection would silently inherit the derived PURGE default below — and the next append-only
+// evidence table would be deleted by a default nobody chose.
+export const PINNED_FIRM_SCOPED = Object.freeze([
+  "ActivityEvent", "AuditWorkingPaper", "AuditWorkingPaperAnalysis", "AuditWorkingPaperRow",
+  "AutomationJob", "CaseAnalysis", "CaseDraft", "CaseMatter", "CaseProviderOperation",
+  "CaseSubmission", "CaseTimelineEvent", "Client", "ComplianceOverride", "ComplianceRule",
+  "DigestDelivery", "DigestRecoveryCursor", "Engagement", "EngagementFinding", "ErasureReceipt",
+  // FirmInvite added 2026-09-07 with the invitation feature. The enumerator failed naming it,
+  // which is this list working: a new firmId-carrying collection must be classified by a person.
+  "FirmInvite", "FirmMembership",
+  "ImportBatch", "ImportRow", "ReconciliationItem", "ReconciliationRun", "Reminder", "Task",
+  "TaskBulkOperation", "TaxWorkSession", "TdsHealthCheck", "TdsHealthEvidenceLink", "TdsHealthRun",
+  "TdsImportRow", "User",
+  // WorkflowUsage added 2026-09-28 with the usage-split analytics (IMPROVEMENT-PLAN-V2
+  // Part 3). Classified PURGE in REASONS above — analytics counters, not work product.
+  "WorkflowUsage",
+  // EmailDelivery / EmailSuppression added 2026-09-28 with email observability
+  // (IMPROVEMENT-PLAN-V2 Part 1). Both PSEUDONYMISE in REASONS above: send facts and the
+  // do-not-email protection survive; the recipient hash link does not.
+  "EmailDelivery", "EmailSuppression",
+  // GstDownloadRecord / GstFrequencyObservation added 2026-10-04 with the GST downloader's run
+  // records (GD30; owner decision OD4). Both carry firmId and no identity field, so the derived
+  // PURGE applies: run metadata about the firm's clients, deleted with the firm.
+  "GstDownloadRecord", "GstFrequencyObservation",
+  // FilingStatusObservation added 2026-10-04 with the filing board (decision D4, GD33): firmId and
+  // no identity field, so the same derived PURGE - deleted with the firm.
+  "FilingStatusObservation",
+]);
+
+/**
+ * Classify one model. `shape` is what the enumerator read out of the schema file.
+ * Anything not in REASONS and carrying firmId is derived as PURGE — firm work product with no
+ * append-only guard and no identity of its own.
+ */
+export function classify(name, shape) {
+  const listed = REASONS[name];
+  if (listed && typeof listed.reason === "string" && listed.reason.trim().length > 0) {
+    return { strategy: listed.strategy, reason: listed.reason, derived: false };
+  }
+  if (shape?.hasFirmId) {
+    return {
+      strategy: STRATEGY.PURGE,
+      reason: "Firm-scoped work product with no append-only guard and no identity fields of its own.",
+      derived: true,
+    };
+  }
+  return {
+    strategy: null,
+    reason: "Carries no firmId; not part of the firm erasure surface.",
+    derived: true,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// How each PSEUDONYMISE collection is actually rewritten.
+//
+// Kept here rather than inside the cascade so the "what" and the "why" stay next to each other,
+// and so a reviewer can see the full extent of identity handling in one place.
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The tombstone applied to a User. `User.email` is `unique: true`, so a blank or shared value would
+ * collide the moment a second account is erased — the tombstone has to stay unique per account.
+ * The row survives because foreign keys across retained work product point at it; what is erased is
+ * everything that identifies a person.
+ */
+export function userTombstone(userId) {
+  return {
+    $set: {
+      email: `erased-${String(userId)}@erased.invalid`,
+      name: "Erased account",
+      googleId: null,
+      avatarUrl: "",
+      phone: "",
+      isActive: false,
+      firmId: null,
+    },
+    // Invalidate every issued session. An erased account must not stay signed in anywhere, and
+    // authRequired compares tv on the token against this value on every request.
+    $inc: { tokenVersion: 1 },
+  };
+}
+
+/**
+ * Matches accounts that still need the tombstone. Used as the update filter so a repeated run is a
+ * no-op rather than re-incrementing tokenVersion — which is what makes PSEUDONYMISE idempotent
+ * instead of merely repeatable.
+ */
+export function userNeedsTombstone() {
+  return { email: { $not: /^erased-[0-9a-f]{24}@erased\.invalid$/i } };
+}
+
+/** Field on ActivityEvent that links an event to a person. Nulled, leaving the event intact. */
+export const ACTIVITY_EVENT_IDENTITY_FIELD = "actorUserId";

@@ -306,8 +306,13 @@
   }
 
   // ── CSV writing ───────────────────────────────────────────────────────────
+  // Formula-injection guard: a STRING cell a spreadsheet would evaluate as a
+  // formula (=, +, -, @ after optional whitespace) gets a leading apostrophe,
+  // matching the server-side csvCell in src/utils/csv.js. Numbers are left
+  // alone — a pure numeric cell cannot be a formula.
   function csvCell(value) {
-    const text = String(value == null ? "" : value);
+    let text = String(value == null ? "" : value);
+    if (typeof value === "string" && /^\s*[=+@-]/.test(text)) text = `'${text}`;
     return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   }
   function toCsv(headers, rows) {

@@ -16,6 +16,7 @@ import {
 import {
   authRequiredWithoutUsageTracking,
 } from "../middleware/auth.middleware.js";
+import { trackWorkflow } from "../middleware/workflow-usage.middleware.js";
 import {
   requireFirmMember,
   requireFirmWriteAccess,
@@ -28,6 +29,7 @@ router.use(
   authRequiredWithoutUsageTracking,
   requireFirmMember,
   requireFirmWriteAccess,
+  trackWorkflow("gst_recon"),
   requireFeatureFlag("gstReconciliation")
 );
 

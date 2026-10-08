@@ -26,6 +26,22 @@ export async function connectDB() {
         // Connection pool sized for production traffic
         maxPoolSize: Number(process.env.MONGO_POOL_MAX) || 50,
         minPoolSize: Number(process.env.MONGO_POOL_MIN) || 5,
+        // How long an operation may wait for a FREE POOL CONNECTION before giving up.
+        //
+        // The driver's default is 0, meaning "wait forever". None of the timeouts above bound this:
+        // serverSelectionTimeoutMS bounds choosing a server, socketTimeoutMS bounds an operation
+        // that is already running. Neither applies while an operation is still QUEUED, waiting for
+        // one of the maxPoolSize slots.
+        //
+        // So a saturated pool did not surface as errors. It surfaced as silence: every new
+        // operation queued indefinitely - including the one /health awaits - so the process stayed
+        // alive and listening while answering nothing. That is why an outage reads as
+        // 504 Gateway Timeout rather than 502. Nothing was wrong with the process, and nothing was
+        // visible in it either.
+        //
+        // 10s is longer than any healthy request waits, and short enough that saturation announces
+        // itself as a handled error naming the pool instead of as a hang.
+        waitQueueTimeoutMS: 10_000,
         // Query timeout — fail fast on slow queries
         maxIdleTimeMS: 60_000,
         retryWrites: true,

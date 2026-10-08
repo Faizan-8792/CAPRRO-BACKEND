@@ -2,9 +2,114 @@
 
 import Task from "../models/Task.js";
 import User from "../models/User.js";
+import FirmMembership from "../models/FirmMembership.js";
 import AppConfig from "../models/AppConfig.js";
+import { describeFirmWriteAccess } from "../middleware/authorization.middleware.js";
+import { parseStatutoryDayIso } from "../services/robust-normalize.service.js";
+import { safeRecordActivity } from "../services/activity.service.js";
+import ActivityEvent from "../models/ActivityEvent.js";
 
 const PRODUCT_ACCESS_MODEL = "FREE";
+
+/**
+ * Resolve who a task may be assigned to, for one firm.
+ *
+ * THE DEFECT THIS EXISTS TO FIX, because it was silent and it lost work.
+ * Both assignment sites used to ask `User.findOne({ _id, firmId })`. FirmMembership.js says in as
+ * many words that `User.firmId` points at the *active* workspace - it is which firm that person is
+ * looking at right now, not which firms they belong to. Membership lives in FirmMembership.
+ *
+ * So the question being asked was "is this colleague's screen currently showing my firm?", and the
+ * answer for anybody working in a second workspace is no. Meanwhile the assign dropdown is built
+ * from `GET /api/firms/:firmId/members`, which reads FirmMembership with status ACTIVE - so it
+ * offers exactly the people this check could reject.
+ *
+ * An administrator could therefore pick a real colleague from the list, press assign, receive
+ * HTTP 201, and get a task with NOBODY ASSIGNED. Nothing was said. The colleague never received
+ * the work, and the administrator had every reason to believe they had. In a product where one
+ * person is routinely in two firms, that is not an edge case.
+ *
+ * Two things are fixed here, not one:
+ *   1. The question. Active membership in THIS firm, which is what "in the firm" has always meant.
+ *   2. The silence. createTask used to fall through to null; updateTask already refused with 400.
+ *      Now both refuse, because quietly assigning work to nobody is never what the caller asked
+ *      for. The refusal distinguishes "not a member" from "no longer active" from "no such
+ *      account", since those have three different remedies.
+ *
+ * The user document is still loaded, so a membership row left behind by a deleted account cannot
+ * become an assignment to an id nothing answers to.
+ *
+ * @returns {Promise<{ ok: true, userId: unknown } | { ok: false, error: string }>}
+ */
+async function resolveFirmAssignee(firmId, assignedTo) {
+  const membership = await FirmMembership.findOne({
+    firmId,
+    userId: assignedTo,
+  })
+    .select("status")
+    .lean();
+
+  if (!membership) {
+    return { ok: false, error: "That person is not a member of this firm" };
+  }
+  if (membership.status !== "ACTIVE") {
+    return {
+      ok: false,
+      error: "That person is no longer an active member of this firm",
+    };
+  }
+
+  const assignedUser = await User.findOne({ _id: assignedTo })
+    .select("_id")
+    .lean();
+  if (!assignedUser) {
+    return { ok: false, error: "That account no longer exists" };
+  }
+
+  return { ok: true, userId: assignedUser._id };
+}
+
+/**
+ * The fields a firm actually needs to see the history of, and nothing else.
+ *
+ * Deliberately NOT the whole document. An activity trail that stores every field on every edit
+ * grows without bound, and the fields left out here are either derived (completedAt moves with
+ * status) or noise (mutationVersion). What IS captured is what somebody asks the trail about:
+ * who it was assigned to, where it was in the ladder, when it was due, and what they were told.
+ *
+ * assignedTo is stringified because it is an ObjectId on a loaded document and a string when it
+ * arrives from JSON; a trail that recorded one as an object and the other as a string would show
+ * a change on every edit that touched neither.
+ */
+function taskTrailSnapshot(task) {
+  if (!task) return null;
+  return {
+    assignedTo: task.assignedTo ? String(task.assignedTo) : null,
+    status: task.status ?? null,
+    title: task.title ?? null,
+    dueDateISO: task.dueDateISO ?? null,
+    remarks: task.remarks ?? "",
+    reviewStatus: task.reviewStatus ?? null,
+    assigneeReadAt: task.assigneeReadAt ? new Date(task.assigneeReadAt).toISOString() : null,
+  };
+}
+
+/**
+ * Which of the tracked fields actually moved. Returns null when nothing did.
+ *
+ * The trail records an event only when something changed, so "who touched this" stays readable
+ * instead of filling with no-op saves from forms that post every field they know about.
+ */
+function taskTrailChanges(before, after) {
+  if (!before || !after) return null;
+  const changed = {};
+  for (const key of Object.keys(after)) {
+    if (before[key] !== after[key]) {
+      changed[key] = { from: before[key], to: after[key] };
+    }
+  }
+  return Object.keys(changed).length > 0 ? changed : null;
+}
 const DEFAULT_TASK_PAGE_SIZE = 50;
 const MAX_TASK_PAGE_SIZE = 100;
 
@@ -18,7 +123,7 @@ function taskPagination(query = {}) {
   }
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_TASK_PAGE_SIZE) {
     const error = new Error(
-      `limit must be an integer between 1 and ${MAX_TASK_PAGE_SIZE}`
+      `limit must be an integer between 1 and ${MAX_TASK_PAGE_SIZE}`,
     );
     error.statusCode = 400;
     throw error;
@@ -85,6 +190,7 @@ export const createTask = async (req, res) => {
       assignedTo,
       status,
       reminderId,
+      remarks,
       meta = {},
     } = req.body || {};
 
@@ -95,19 +201,28 @@ export const createTask = async (req, res) => {
       });
     }
 
+    // Strict on purpose -- new Date(string) silently mis-reads an ambiguous DD-MM/MM-DD
+    // task due date. See parseStatutoryDayIso's remarks in robust-normalize.service.js.
+    let dueDate;
+    try {
+      dueDate = parseStatutoryDayIso(dueDateISO, "dueDateISO");
+    } catch {
+      return res.status(400).json({ ok: false, error: "Invalid dueDateISO" });
+    }
+
     // Product access is free for every authenticated firm. Operational limits
     // such as request-size caps and rate limiting remain enforced elsewhere.
 
-    // Validate assignedTo user inside same firm
+    // Who this is being handed to. A bad assignee is REFUSED rather than dropped: this used to
+    // fall through to null, so a task the administrator believed they had assigned was created
+    // with nobody on it and nobody was told. See resolveFirmAssignee.
     let assignedToUserId = null;
     if (assignedTo) {
-      const assignedUser = await User.findOne({
-        _id: assignedTo,
-        firmId,
-      }).lean();
-      if (assignedUser) {
-        assignedToUserId = assignedUser._id;
+      const assignee = await resolveFirmAssignee(firmId, assignedTo);
+      if (!assignee.ok) {
+        return res.status(400).json({ ok: false, error: assignee.error });
       }
+      assignedToUserId = assignee.userId;
     }
 
     const initialStatus = status || "NOT_STARTED";
@@ -118,8 +233,18 @@ export const createTask = async (req, res) => {
       clientName,
       serviceType: serviceType || "OTHER",
       title,
-      dueDateISO: new Date(dueDateISO).toISOString(),
+      dueDateISO: dueDate.toISOString(),
       assignedTo: assignedToUserId,
+
+      // Trimmed and coerced here rather than trusted: the schema caps the length, but a null or
+      // a number arriving from a client would otherwise be stored as-is and then rendered.
+      remarks: typeof remarks === "string" ? remarks.trim() : "",
+
+      // A brand-new assignment has not been read by anybody, INCLUDING when the administrator
+      // assigns it to themselves. Stated explicitly rather than left to the schema default, so
+      // the create path says out loud what the read receipt starts as.
+      assigneeReadAt: null,
+      assigneeReadBy: null,
       status: initialStatus,
       completedAt: initiallyComplete ? new Date() : null,
       completedBy: initiallyComplete ? user.id : null,
@@ -131,6 +256,18 @@ export const createTask = async (req, res) => {
     });
 
     await task.save();
+
+    // safeRecordActivity, not recordActivity: the trail must never be the reason a task fails to
+    // be created. A missing audit line is a gap; a refused assignment is lost work.
+    await safeRecordActivity({
+      firmId,
+      actorUserId: user.id,
+      action: "task.created",
+      entityType: "Task",
+      entityId: task._id,
+      beforeSummary: null,
+      afterSummary: taskTrailSnapshot(task),
+    });
 
     res.json({ ok: true, task });
   } catch (err) {
@@ -193,6 +330,23 @@ export const getTaskBoard = async (req, res) => {
         .skip(skip)
         .limit(limit)
         .populate("assignedTo", "name email")
+        // createdBy has always been STORED (createTask sets it) and was never serialised, so a
+        // "who raised this" column had no data to read. Populated with the same two fields as
+        // assignedTo and nothing more: a name and an email are what a person needs to be
+        // identified by a colleague, and widening the projection would ship account fields to a
+        // list view that has no use for them.
+        .populate("createdBy", "name email")
+
+        // Which employee the CLIENT sits with, which is a different question from who this
+        // one task is assigned to - the owner asked for both. Client.ownerUserId already
+        // modelled it and nothing had ever surfaced it, so an administrator could not see
+        // that a task about a client had gone to somebody other than the person who holds
+        // that client. Nested populate, because the answer is a name and not an id.
+        .populate({
+          path: "clientId",
+          select: "name ownerUserId",
+          populate: { path: "ownerUserId", select: "name email" },
+        })
         .lean(),
     ]);
 
@@ -210,7 +364,10 @@ export const getTaskBoard = async (req, res) => {
       columns[key].push({
         id: task._id,
         clientName: task.clientName,
-        clientId: task.clientId || null,
+        // Still an id, even though clientId is now populated: the client is a document here,
+        // and shipping the whole thing would change this field's shape for every existing
+        // caller. _id is read when present so both the populated and unpopulated cases work.
+        clientId: task.clientId ? task.clientId._id || task.clientId : null,
         serviceType: task.serviceType,
         complianceCode: task.complianceCode || null,
         period: task.period || null,
@@ -225,11 +382,51 @@ export const getTaskBoard = async (req, res) => {
             }
           : null,
         status: task.status,
+        // Who raised the task. Null rather than omitted when the populate found no user, so a
+        // client can tell "the server does not report this" from "nobody is recorded" -- the
+        // desktop renders those two differently, and it must not fall back to the assignee, who is
+        // usually a different person.
+        createdBy: task.createdBy
+          ? {
+              id: task.createdBy._id || task.createdBy,
+              name: task.createdBy.name || null,
+              email: task.createdBy.email || null,
+            }
+          : null,
         documentReadiness: task.documentReadiness || "UNKNOWN",
         reconciliationExceptionCount: Number(
-          task.reconciliationExceptionCount || 0
+          task.reconciliationExceptionCount || 0,
         ),
         reviewStatus: task.reviewStatus || "NOT_REQUIRED",
+
+        // Named explicitly, like every other field on this hand-built row. An administrator
+        // reading the board is asking "have they seen it", and a null here is the honest
+        // answer "not yet" rather than a missing key the client has to guess about.
+        remarks: task.remarks || "",
+        assigneeReadAt: task.assigneeReadAt || null,
+
+        // WHO read it, not just when. Found by the live end-to-end run against the deployed API:
+        // assigneeReadAt arrived and this came back undefined, because this row is composed key by
+        // key and this key was never added. Unit tests asserted the PROJECTION named it, which is a
+        // different claim - a field can be fetched from the database and still be dropped on the
+        // way into the response, and that is exactly what happened.
+        //
+        // It matters on a reassignment: with only a timestamp, a receipt left by the PREVIOUS
+        // assignee is indistinguishable from one left by the current one, which is the confusion
+        // the receipt exists to prevent.
+        assigneeReadBy: task.assigneeReadBy || null,
+
+        // The employee the client sits with. Null when the client is not linked or has no
+        // owner recorded, which are both real states and neither is an error.
+        clientOwner:
+          task.clientId && task.clientId.ownerUserId
+            ? {
+                id: task.clientId.ownerUserId._id,
+                name: task.clientId.ownerUserId.name,
+                email: task.clientId.ownerUserId.email,
+              }
+            : null,
+
         filedAt: task.filedAt || null,
         filedBy: task.filedBy || null,
         mutationVersion: Number(task.mutationVersion || 0),
@@ -262,7 +459,16 @@ export const updateTask = async (req, res) => {
     const user = req.user;
     const firmId = user.firmId;
     const { id } = req.params;
-    const { status, assignedTo, title, dueDateISO, meta } = req.body || {};
+    const {
+      status,
+      assignedTo,
+      title,
+      dueDateISO,
+      meta,
+      remarks,
+      expectedVersion,
+    } =
+      req.body || {};
 
     if (!firmId) {
       return res
@@ -275,6 +481,35 @@ export const updateTask = async (req, res) => {
       return res.status(404).json({ ok: false, error: "Task not found" });
     }
     if (await rejectCaseProjectionMutation(task, res)) return;
+
+    // Captured BEFORE anything below can move a field. Taken after the refusals above rather than
+    // before them, so a request that is about to be rejected never produces a trail entry for a
+    // change that did not happen.
+    const beforeTrail = taskTrailSnapshot(task);
+
+    // Optional so an existing caller that never read mutationVersion keeps
+    // working unchanged; a caller that did read it (the board response has
+    // always returned it) can now use it to catch the case two people edit the
+    // same task at once, where the second save previously overwrote the first
+    // with no signal to either party. Checked before any field is touched so a
+    // stale write changes nothing, not even a partial field.
+    if (expectedVersion !== undefined) {
+      const expected = Number(expectedVersion);
+      if (!Number.isSafeInteger(expected) || expected < 0) {
+        return res.status(400).json({
+          ok: false,
+          error: "expectedVersion must be a nonnegative integer",
+        });
+      }
+      if (expected !== Number(task.mutationVersion || 0)) {
+        return res.status(409).json({
+          ok: false,
+          error: "This task changed since it was read. Reload and try again.",
+          code: "TASK_VERSION_CONFLICT",
+          currentVersion: Number(task.mutationVersion || 0),
+        });
+      }
+    }
 
     if (status) {
       const wasComplete = ["FILED", "CLOSED"].includes(task.status);
@@ -301,24 +536,55 @@ export const updateTask = async (req, res) => {
     }
 
     if (dueDateISO) {
-      task.dueDateISO = new Date(dueDateISO).toISOString();
+      let updatedDueDate;
+      try {
+        updatedDueDate = parseStatutoryDayIso(dueDateISO, "dueDateISO");
+      } catch {
+        return res.status(400).json({ ok: false, error: "Invalid dueDateISO" });
+      }
+      task.dueDateISO = updatedDueDate.toISOString();
     }
 
     if (assignedTo !== undefined) {
+      // Read BEFORE the field moves, so "did the assignee actually change" is a comparison and
+      // not a guess. Compared as strings because one side is an ObjectId and the other arrives
+      // from JSON; == would be true for the same id and === never would.
+      const previousAssignee = task.assignedTo ? String(task.assignedTo) : null;
+
       if (!assignedTo) {
         task.assignedTo = null;
       } else {
-        const assignedUser = await User.findOne({
-          _id: assignedTo,
-          firmId,
-        }).lean();
-        if (!assignedUser) {
-          return res
-            .status(400)
-            .json({ ok: false, error: "Assigned user not in firm" });
+        // Same resolver as createTask. This site already refused rather than dropping, but it was
+        // refusing on the wrong question - the assignee's ACTIVE WORKSPACE instead of their
+        // membership - so a reassignment to a colleague working in another firm was rejected as
+        // "not in firm" about somebody who plainly is.
+        const assignee = await resolveFirmAssignee(firmId, assignedTo);
+        if (!assignee.ok) {
+          return res.status(400).json({ ok: false, error: assignee.error });
         }
-        task.assignedTo = assignedUser._id;
+        task.assignedTo = assignee.userId;
       }
+
+      const nextAssignee = task.assignedTo ? String(task.assignedTo) : null;
+
+      // THE RULE THIS FEATURE TURNS ON. A task handed to somebody else has not been read by
+      // them, so the receipt is cleared. An administrator looking at a tick left behind by the
+      // PREVIOUS assignee would conclude the new one has seen the work, which is the opposite of
+      // the truth and exactly the mistake a read receipt exists to prevent.
+      //
+      // Guarded on a real change, not on the field being present in the request: re-sending the
+      // same assignee (which a bulk edit or a form that posts every field does routinely) must
+      // NOT throw away an acknowledgement that genuinely happened.
+      if (previousAssignee !== nextAssignee) {
+        task.assigneeReadAt = null;
+        task.assigneeReadBy = null;
+      }
+    }
+
+    // Present-and-a-string, so an explicit empty string CLEARS the remarks while an absent field
+    // leaves them alone. `if (remarks)` would have made clearing them impossible.
+    if (typeof remarks === "string") {
+      task.remarks = remarks.trim();
     }
 
     if (meta && typeof meta === "object") {
@@ -326,6 +592,24 @@ export const updateTask = async (req, res) => {
     }
 
     await task.save();
+
+    // The point of the whole trail: an assignment change records who held it BEFORE, which is
+    // what answers "whom was this assigned to previously". Nothing is recorded when nothing
+    // moved, so the history stays worth reading.
+    const trailChanges = taskTrailChanges(beforeTrail, taskTrailSnapshot(task));
+    if (trailChanges) {
+      await safeRecordActivity({
+        firmId,
+        actorUserId: user.id,
+        action: trailChanges.assignedTo ? "task.reassigned" : "task.updated",
+        entityType: "Task",
+        entityId: task._id,
+        beforeSummary: beforeTrail,
+        afterSummary: taskTrailSnapshot(task),
+        metadata: { changed: Object.keys(trailChanges) },
+      });
+    }
+
     res.json({ ok: true, task });
   } catch (err) {
     console.error("updateTask error:", err);
@@ -363,6 +647,19 @@ export const archiveTask = async (req, res) => {
   }
 };
 
+// -------- Whether this caller may complete tasks at all --------
+
+/**
+ * The write half of "may this person complete this task".
+ *
+ * completeTaskFromUser sits behind requireFirmWriteAccess, so a read-only member - a VIEWER, or a
+ * MEMBER of a firm whose memberAccess is READ_ONLY - can only ever be refused it. Both clients draw
+ * "Mark complete" from canComplete, so a canComplete that ignored write access offered those
+ * members a control that could do nothing but fail. describeFirmWriteAccess is the write guard's
+ * own decision, asked without enforcing it, so the hint and the gate cannot disagree.
+ */
+const callerMayCompleteTasks = (req) => describeFirmWriteAccess(req);
+
 // -------- Exact task source lookup for workspace links --------
 
 export const getTaskSource = async (req, res) => {
@@ -396,7 +693,7 @@ export const getTaskSource = async (req, res) => {
 
     const task = await Task.findOne(filter)
       .select(
-        "clientName serviceType title dueDateISO status assignedTo completedAt createdAt updatedAt"
+        "clientName serviceType title dueDateISO status assignedTo remarks assigneeReadAt assigneeReadBy completedAt createdAt updatedAt",
       )
       .lean();
     if (!task) {
@@ -413,7 +710,8 @@ export const getTaskSource = async (req, res) => {
     ]);
     const canComplete =
       String(task.assignedTo || "") === String(userId) &&
-      openStatuses.has(task.status);
+      openStatuses.has(task.status) &&
+      (await callerMayCompleteTasks(req));
 
     return res.json({ ok: true, task, canComplete });
   } catch (err) {
@@ -447,21 +745,30 @@ export const getMyOpenTasks = async (req, res) => {
     };
     scopeCaseArtifacts(filter, capturedNoticeCasesEnabled(req));
 
-    const [total, tasks] = await Promise.all([
+    const [total, tasks, canComplete] = await Promise.all([
       Task.countDocuments(filter),
       Task.find(filter)
         .sort({ dueDateISO: 1, _id: 1 })
         .skip(skip)
         .limit(limit)
+        // remarks, assignedTo and the read receipt are listed because this is the screen the
+        // ASSIGNEE reads. Without remarks they cannot see what they were told; without the
+        // receipt the app cannot tell whether to offer "mark as read"; and without assignedTo
+        // it cannot tell that the work is theirs at all.
         .select(
-          "clientName serviceType title dueDateISO status documentReadiness reconciliationExceptionCount reviewStatus mutationVersion createdAt updatedAt"
+          "clientName serviceType title dueDateISO status assignedTo remarks assigneeReadAt assigneeReadBy documentReadiness reconciliationExceptionCount reviewStatus mutationVersion createdAt updatedAt",
         )
         .lean(),
+      callerMayCompleteTasks(req),
     ]);
 
+    // Every row here is the caller's own open work, so the only thing left to decide whether
+    // "Mark complete" can succeed is write access - stated once and on every row, because the
+    // extension reads it per task.
     return res.json({
       ok: true,
-      tasks,
+      tasks: tasks.map((task) => ({ ...task, canComplete })),
+      canComplete,
       pagination: paginationResult(page, limit, total),
     });
   } catch (err) {
@@ -474,6 +781,141 @@ export const getMyOpenTasks = async (req, res) => {
 };
 
 // -------- NEW: Mark done from extension (user) --------
+
+/**
+ * The assignee acknowledges work that was given to them.
+ *
+ * Assignee-only, by the same means completeTaskFromUser uses: assignedTo is part of the QUERY,
+ * so a task belonging to somebody else is simply not found. That keeps "not yours" and "does not
+ * exist" indistinguishable from outside, which is what stops this route from confirming the
+ * existence of another person's work.
+ *
+ * IDEMPOTENT on purpose. Opening the same task twice, or two devices doing it at once, must not
+ * move the recorded time - the administrator is reading "when did they first see this", and a
+ * timestamp that creeps forward on every glance answers a different question.
+ */
+/**
+ * One task's history: who changed what, and when.
+ *
+ * This is what answers the owner's "whom was this task assigned to before". It is a QUERY over
+ * ActivityEvent rather than a field on the task, because the trail already exists, is already
+ * firm-scoped and is already the audit surface - a second private history on Task would be a
+ * second thing to keep true, and the two would eventually disagree.
+ *
+ * Firm-scoped twice over, deliberately. The task is looked up inside the caller's firm first, so
+ * a task belonging to another firm is simply not found; then the events are queried by that same
+ * firmId, so even an entityId guessed from another tenant returns nothing. Any member of the firm
+ * may read it, which matches the task board they can already see - this exposes no task that was
+ * hidden from them.
+ */
+export const getTaskHistory = async (req, res) => {
+  try {
+    const user = req.user;
+    const firmId = user.firmId;
+    const { id } = req.params;
+
+    if (!firmId) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Firm not linked to this user" });
+    }
+
+    const task = await Task.findOne({ _id: id, firmId }).lean();
+    if (!task) {
+      return res.status(404).json({ ok: false, error: "Task not found" });
+    }
+
+    // Newest first: "what happened to this most recently" is the question somebody opening a
+    // history actually has. Capped so one heavily-edited task cannot return an unbounded page.
+    const events = await ActivityEvent.find({
+      firmId,
+      entityType: "Task",
+      entityId: String(id),
+    })
+      .sort({ occurredAt: -1 })
+      .limit(200)
+      .populate("actorUserId", "name email")
+      .lean();
+
+    res.json({
+      ok: true,
+      taskId: String(id),
+      events: (events || []).map((event) => ({
+        id: String(event._id),
+        action: event.action,
+        occurredAt: event.occurredAt,
+        actor: event.actorUserId
+          ? {
+              id: String(event.actorUserId._id ?? event.actorUserId),
+              name: event.actorUserId.name ?? null,
+              email: event.actorUserId.email ?? null,
+            }
+          : null,
+        before: event.beforeSummary ?? null,
+        after: event.afterSummary ?? null,
+        changed: event.metadata?.changed ?? null,
+      })),
+    });
+  } catch (err) {
+    console.error("getTaskHistory error:", err);
+    res.status(500).json({ ok: false, error: "Failed to load the task history" });
+  }
+};
+
+export const markTaskRead = async (req, res) => {
+  try {
+    const user = req.user;
+    const firmId = user.firmId;
+    const { id } = req.params;
+
+    if (!firmId) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "Firm not linked to this user" });
+    }
+
+    const task = await Task.findOne({
+      _id: id,
+      firmId,
+      isActive: true,
+      assignedTo: user.id,
+    });
+
+    if (!task) {
+      return res.status(404).json({
+        ok: false,
+        error: "Task not found or not assigned to this user",
+      });
+    }
+
+    // Already acknowledged: report the state, change nothing, and say it was already read so a
+    // caller can tell "you have just marked this" from "this was marked days ago".
+    if (task.assigneeReadAt) {
+      return res.json({
+        ok: true,
+        alreadyRead: true,
+        assigneeReadAt: task.assigneeReadAt,
+        assigneeReadBy: task.assigneeReadBy,
+        task,
+      });
+    }
+
+    task.assigneeReadAt = new Date();
+    task.assigneeReadBy = user.id;
+    await task.save();
+
+    res.json({
+      ok: true,
+      alreadyRead: false,
+      assigneeReadAt: task.assigneeReadAt,
+      assigneeReadBy: task.assigneeReadBy,
+      task,
+    });
+  } catch (err) {
+    console.error("markTaskRead error:", err);
+    res.status(500).json({ ok: false, error: "Failed to mark the task as read" });
+  }
+};
 
 export const completeTaskFromUser = async (req, res) => {
   try {
@@ -491,7 +933,7 @@ export const completeTaskFromUser = async (req, res) => {
       _id: id,
       firmId,
       isActive: true,
-      assignedTo: user.id,  // ✅ FIXED: user._id → user.id
+      assignedTo: user.id, // ✅ FIXED: user._id → user.id
     });
 
     if (!task) {

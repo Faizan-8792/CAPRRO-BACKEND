@@ -1,5 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
+import rateLimit from "express-rate-limit";
 import {
   confirmFields,
   createCase,
@@ -11,6 +12,7 @@ import {
   finalizeResponseDraft,
   generateAnalysis,
   listCases,
+  listReferences,
   patchCase,
   previewCaseOcr,
   proposeCaseFields,
@@ -22,12 +24,16 @@ import {
   authRequired,
   authRequiredWithoutUsageTracking,
 } from "../middleware/auth.middleware.js";
+import { trackWorkflow } from "../middleware/workflow-usage.middleware.js";
 import {
   requireFirmMember,
   requireFirmWriteAccess,
 } from "../middleware/authorization.middleware.js";
 import { requireFeatureFlag } from "../middleware/rollout.middleware.js";
-import { OCR_MAX_BYTES, OCR_MIME_TYPES } from "../services/ocr-space.service.js";
+import {
+  OCR_MAX_BYTES,
+  OCR_MIME_TYPES,
+} from "../services/ocr-space.service.js";
 
 const router = Router();
 const upload = multer({
@@ -37,26 +43,49 @@ const upload = multer({
     if (!OCR_MIME_TYPES.has(file.mimetype)) {
       const error = new Error("OCR accepts PDF, PNG, or JPEG files only");
       error.statusCode = 415;
+      // multer passes a fileFilter error through unwrapped (make-middleware.js
+      // abortWithError -> next(err)), so this is a plain Error with no `code`.
+      // Without a code the global handler cannot treat the message as public and
+      // production answered the catch-all "The request could not be completed."
+      // -- which never tells the user that only PDF, PNG and JPEG are accepted.
+      // The same rejection inside ocr-space.service.js is unreachable over HTTP
+      // because this filter runs first, so the code has to be set here.
+      error.code = "OCR_TYPE_UNSUPPORTED";
       return callback(error);
     }
     return callback(null, true);
   },
 });
 
+// O10: cheap second line of defense on top of (not instead of) the per-user/
+// monthly/global quota enforced inside extractTextWithOcrSpace itself
+// (ocr-space.service.js) -- this bounds how fast a burst can run, the quota
+// bounds the total spend that burst can rack up in a day. Same
+// express-rate-limit pattern and per-IP keying as auth.routes.js.
+const ocrRouteLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: "Too many OCR requests. Wait a few minutes and try again." },
+});
+
 router.post(
   "/ocr",
   authRequiredWithoutUsageTracking,
+  trackWorkflow("ocr_consent"),
   requireFirmMember,
   requireFeatureFlag("noticeCases"),
+  ocrRouteLimiter,
   upload.single("file"),
-  previewCaseOcr
+  previewCaseOcr,
 );
 
 router.use(
   authRequired,
   requireFirmMember,
   requireFirmWriteAccess,
-  requireFeatureFlag("noticeCases")
+  requireFeatureFlag("noticeCases"),
 );
 router.post("/", createCase);
 router.get("/", listCases);
@@ -66,6 +95,7 @@ router.patch("/:id", patchCase);
 router.post("/:id/extraction", proposeCaseFields);
 router.patch("/:id/confirmations", confirmFields);
 router.post("/:id/timeline", createTimelineEntry);
+router.get("/:id/references", listReferences);
 router.post("/:id/references", verifyReference);
 router.post("/:id/analyses", generateAnalysis);
 router.post("/:id/drafts", createResponseDraft);

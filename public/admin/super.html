@@ -4,189 +4,546 @@
     <meta charset="UTF-8" />
     <title>CA PRO Toolkit – Super Admin</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Bootstrap for its grid and spacing utilities only; capro-tokens.css, IBM Plex, the shared
+         component library and admin.css give the panel its look (DS24). -->
     <link rel="stylesheet" href="bootstrap.min.css" />
-    <link rel="stylesheet" href="admin.css?v=11" />
+    <link rel="stylesheet" href="capro-tokens.css?v=2" />
+    <link rel="stylesheet" href="ui/capro-fonts.css?v=1" />
+    <link rel="stylesheet" href="ui/capro-ui.css?v=1" />
+    <link rel="stylesheet" href="admin.css?v=17" />
     <link rel="icon" type="image/png" href="logo.png" />
   </head>
   <body class="super-admin-body">
-    <!-- TOP NAVBAR -->
-    <nav class="navbar navbar-expand-lg shadow-sm">
-      <div class="container-fluid px-4">
-        <span class="navbar-brand fw-semibold d-flex align-items-center gap-2">
-          <img src="logo.png" alt="CA PRO" style="width:32px;height:32px;border-radius:6px;" />
-          <span class="badge bg-primary fw-bold">SUPER</span>
-          <span style="color: var(--text); font-weight: 700;">CA PRO Toolkit</span>
+    <div class="admin-brand-rule" aria-hidden="true"></div>
+    <!-- TOP BAR -->
+    <nav class="navbar admin-appbar" aria-label="Account">
+      <div class="container-fluid">
+        <span class="admin-brand">
+          <span class="admin-brand__mark"><img src="ui/capro-mark.png" alt="" width="24" height="24" /></span>
+          <span class="admin-brand__name">CA PRO Toolkit</span>
+          <span class="admin-brand__role">Super admin</span>
         </span>
 
-        <div class="d-flex align-items-center gap-3 ms-auto">
-          <div class="small text-end d-none d-md-block">
-            <div style="color: var(--muted); font-size: 11px;">Logged in as</div>
-            <div class="fw-semibold" id="superEmail" style="color: var(--text);">—</div>
+        <div class="admin-appbar__end">
+          <div class="admin-identity">
+            <span class="admin-identity__label">Signed in as</span>
+            <span class="admin-identity__value" id="superEmail">—</span>
           </div>
 
-          <button
-            id="backToAdminBtn"
-            class="btn btn-outline-secondary btn-sm"
-            type="button"
-            title="Go to Firm Admin panel"
-          >
-            Firm Admin Panel
-          </button>
-
-          <button
-            id="superLogoutBtn"
-            class="btn btn-primary btn-sm"
-            type="button"
-          >
-            Logout
-          </button>
+          <button id="backToAdminBtn" class="btn btn-sm btn-outline-secondary" type="button">Firm admin panel</button>
+          <button id="superLogoutBtn" class="btn btn-sm btn-outline-secondary" type="button">Sign out</button>
         </div>
       </div>
     </nav>
 
-    <main class="container-fluid px-4 my-4 super-admin-main">
+    <!-- Where every change on this panel lands (design rule 25: the scope is always visible). -->
+    <div class="admin-scope" id="superScope" role="note" aria-label="Scope of this panel">
+      <span class="admin-scope__env" id="superScopeName">Production</span>
+      <span class="admin-scope__host" id="superScopeHost"></span>
+      <span class="admin-scope__note">Changes on this panel apply to every firm and every user.</span>
+      <span class="admin-scope__maintenance" id="superScopeMaintenance" hidden>Maintenance mode is on</span>
+    </div>
 
-      <!-- SYSTEM SELF-TEST -->
-      <section class="mb-4">
-        <div class="mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
-          <div>
-            <h1 class="h5 mb-1">🧪 System Self-Test</h1>
-            <p class="text-muted mb-0 small">
-              One click checks everything — backend, database, every engine and API, and email configuration. Read-only; nothing is written and no email is sent.
+    <main class="container-fluid super-admin-main">
+      <!-- One section at a time. This panel used to paint all eight at once - about
+           6,500px of page - with no way to jump. The shell, the sidebar styling and
+           the mobile breakpoint already existed in admin.css for the firm panel and
+           were simply unused here. -->
+      <div class="layout">
+        <aside class="sidebar" aria-label="Super admin sections">
+          <div class="small-label">Pages</div>
+          <a href="#overview">Platform overview</a>
+          <a href="#controls">App controls</a>
+          <a href="#analytics">Usage analytics</a>
+          <a href="#emails">Emails</a>
+          <a href="#users">User directory</a>
+          <a href="#firms">Firms &amp; access</a>
+          <a href="#approvals">Pending approvals</a>
+          <a href="#terms">Terms acceptance</a>
+          <a href="#review">Deep system review</a>
+        </aside>
+        <div class="content">
+
+      <!-- DEEP SYSTEM REVIEW -->
+      <section id="page-review" class="super-page" aria-labelledby="deepSystemReviewTitle">
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text st-heading-copy">
+            <h1 class="admin-page-title" id="deepSystemReviewTitle">Deep system review</h1>
+            <p class="admin-page-lede">
+              Seeds an isolated synthetic workspace, verifies every product section against expected outputs, removes all seeded records, then asks DeepSeek to cross-check the evidence.
             </p>
           </div>
-          <div class="d-flex align-items-center gap-2 flex-wrap">
-            <button id="sendTestEmailBtn" class="btn btn-outline-primary" type="button">✉ Send test email</button>
-            <button id="runSelfTestBtn" class="btn btn-primary" type="button">▶ Run Full System Test</button>
+          <div class="admin-pagehead__actions">
+            <button id="sendTestEmailBtn" class="btn btn-outline-primary" type="button">Send test email</button>
+            <button id="runSelfTestBtn" class="btn btn-primary" type="button" disabled>Run deep review</button>
           </div>
         </div>
-        <div id="sendTestEmailStatus" class="small mb-2" aria-live="polite"></div>
+
+        <div class="st-safety-panel mb-3">
+          <div class="st-safety-grid" aria-label="Deep review safety controls">
+            <div><strong>Synthetic only</strong><span>No production firm or client receives seeded data.</span></div>
+            <div><strong>Verified cleanup</strong><span>Exact record IDs are deleted and checked for residue.</span></div>
+            <div><strong>Grounded AI review</strong><span>DeepSeek receives synthetic, redacted expected-versus-actual evidence only.</span></div>
+          </div>
+          <label class="st-confirm" for="selfTestConfirm">
+            <input class="form-check-input" id="selfTestConfirm" type="checkbox" />
+            <span>I understand this review writes temporary synthetic records and may take several minutes.</span>
+          </label>
+        </div>
+
+        <div id="sendTestEmailStatus" class="admin-status mb-2" role="status" aria-live="polite"></div>
         <div class="card p-3 super-admin-card">
           <div id="selfTestIdle" class="text-muted small">
-            Click “Run Full System Test” to verify the whole system is working. Each check appears live with a spinner, then a green tick (passed) or red mark (failed) with full detail.
+            Confirm the safety notice, then run the review. Results show real server progress, expected and actual values, DeepSeek findings, and cleanup proof.
           </div>
-          <div id="selfTestProgressWrap" class="d-none">
-            <div class="d-flex align-items-center justify-content-between mb-1">
-              <div class="fw-semibold" id="selfTestHeadline">Running system checks…</div>
-              <div class="small text-muted" id="selfTestCounts">0 / 0</div>
+          <div id="selfTestProgressWrap" class="d-none" aria-live="polite" aria-atomic="true">
+            <div class="d-flex align-items-center justify-content-between gap-3 mb-1">
+              <div class="fw-semibold" id="selfTestHeadline">Preparing deep review</div>
+              <div class="small text-muted text-nowrap" id="selfTestCounts">0 / 0</div>
             </div>
-            <div class="progress" style="height: 8px;">
-              <div id="selfTestBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+            <div class="progress">
+              <div
+                id="selfTestBar"
+                class="progress-bar"
+                role="progressbar"
+                aria-label="Deep system review progress"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow="0"
+                style="width: 0%"
+              ></div>
             </div>
+            <div class="st-run-meta" id="selfTestRunMeta"></div>
           </div>
           <div id="selfTestResults" class="mt-3"></div>
         </div>
       </section>
 
-      <!-- APP CONFIG (Maintenance + Welcome) -->
-      <section class="mb-4">
-        <div class="mb-3">
-          <h1 class="h5 mb-1">🔧 App Controls</h1>
-          <p class="text-muted mb-0 small">
-            Toggle maintenance mode and manage the welcome announcement.
+      <!-- APP CONTROLS: the platform switches, the announcements, the health cards -->
+      <section id="page-controls" class="super-page" aria-labelledby="controlsTitle">
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="controlsTitle">App controls</h1>
+            <p class="admin-page-lede">
+              The switches that reach every user, what users are told, and how the paid providers and reminder emails are holding up.
+            </p>
+          </div>
+        </div>
+
+        <!-- The danger zone (design rule 25): each change asks for a reason, which the server keeps,
+             and a confirmation; the platform-wide ones ask for the environment's name typed. -->
+        <section class="card p-3 super-admin-card admin-danger-zone" id="maintenanceCard" aria-labelledby="maintenanceTitle">
+          <div class="admin-danger-zone__head">
+            <h2 class="admin-section-title" id="maintenanceTitle">Maintenance mode</h2>
+            <span class="admin-danger-zone__tag">Every firm and every user</span>
+          </div>
+          <fieldset id="maintenanceSet" class="super-loading-set" disabled aria-busy="true">
+          <div class="admin-setting">
+            <div>
+              <div class="admin-setting__name" id="maintenanceLabel">Maintenance mode: loading&hellip;</div>
+              <div class="admin-setting__help">When it is on, every user sees the maintenance screen and the API refuses their work. Signing in, unsubscribe links and this panel keep working.</div>
+            </div>
+            <input class="cp-switch" type="checkbox" role="switch" id="maintenanceToggle" aria-labelledby="maintenanceLabel" />
+          </div>
+          <div class="admin-setting">
+            <div>
+              <label class="form-label" for="maintenanceMessageInput">Maintenance message</label>
+              <input type="text" class="form-control" id="maintenanceMessageInput" maxlength="200" placeholder="We are doing some quick maintenance and will be back shortly." />
+              <div class="admin-hint">Shown on the maintenance screen while maintenance mode is on.</div>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" id="saveMaintenanceBtn" type="button">Save message</button>
+          </div>
+          <div id="maintenanceStatus" class="admin-status" role="status" aria-live="polite"></div>
+          </fieldset>
+        </section>
+
+        <section class="card p-3 super-admin-card admin-danger-zone" aria-labelledby="featureFlagsTitle">
+          <fieldset id="featureFlagsSet" class="super-loading-set" disabled aria-busy="true">
+          <div class="admin-danger-zone__head">
+            <h2 class="admin-section-title" id="featureFlagsTitle">Feature flags</h2>
+            <span class="admin-danger-zone__tag">Every firm and every user</span>
+          </div>
+          <p class="admin-section-lede">
+            Every flag below defaults to off on a fresh deployment. Tick the ones you want live, then save: only the flags you change are sent, with the reason you give.
           </p>
-        </div>
-
-        <div class="card p-3 super-admin-card">
-          <div class="row g-3 align-items-center">
-            <div class="col-md-7">
-              <div class="d-flex align-items-center gap-3">
-                <div class="form-check form-switch m-0" style="font-size: 18px;">
-                  <input class="form-check-input" type="checkbox" role="switch" id="maintenanceToggle" style="width: 44px; height: 24px;">
-                </div>
-                <div>
-                  <div style="font-weight:700; color: var(--text);" id="maintenanceLabel">Maintenance mode: OFF</div>
-                  <div class="text-muted" style="font-size:12px;">When ON, all users see an "Under Maintenance" screen.</div>
-                </div>
-              </div>
+          <div class="flag-grid">
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-zeroApprovalFirmCreation" /><code>zeroApprovalFirmCreation</code></label>
             </div>
-            <div class="col-md-5">
-              <label class="form-label small-label">Maintenance message</label>
-              <input type="text" class="form-control" id="maintenanceMessageInput" maxlength="200" placeholder="We are doing some quick maintenance...">
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-unrestrictedTasks" /><code>unrestrictedTasks</code></label>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-fullReminderOffsets" /><code>fullReminderOffsets</code></label>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-reliableReminderDelivery" /><code>reliableReminderDelivery</code></label>
+              <div class="admin-hint">Retries failed reminder emails on a schedule. Off leaves failed sends unretried.</div>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-fullTabWorkspace" /><code>fullTabWorkspace</code></label>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-sampleWorkspace" /><code>sampleWorkspace</code></label>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-homeWorkspace" /><code>homeWorkspace</code></label>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-clientComplianceProfile" /><code>clientComplianceProfile</code></label>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-complianceGenerationShadow" /><code>complianceGenerationShadow</code></label>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-complianceGenerationLive" /><code>complianceGenerationLive</code></label>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-gstReconciliation" /><code>gstReconciliation</code></label>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-tdsHealth" /><code>tdsHealth</code></label>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-noticeCases" /><code>noticeCases</code></label>
+              <div class="admin-hint">Turning this on runs a server-side index-readiness check that may reject the save.</div>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-assuranceEngagements" /><code>assuranceEngagements</code></label>
+              <div class="admin-hint">Turning this on runs a server-side index-readiness check that may reject the save.</div>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-filingDashboard" /><code>filingDashboard</code></label>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-teamWorkload" /><code>teamWorkload</code></label>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-auditWorkingPapers" /><code>auditWorkingPapers</code></label>
+              <div class="admin-hint">Turning this on runs a server-side index-readiness check that may reject the save.</div>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-dailyDigest" /><code>dailyDigest</code></label>
+              <div class="admin-hint">Enables outbound email.</div>
+            </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-weeklySummary" /><code>weeklySummary</code></label>
+              <div class="admin-hint">Enables outbound email.</div>
             </div>
           </div>
-          <div class="mt-2 text-end">
-            <button class="btn btn-sm btn-primary" id="saveMaintenanceBtn">Save Message</button>
+          <div class="admin-card-actions">
+            <span></span>
+            <button class="btn btn-sm btn-primary" id="saveFeatureFlagsBtn" type="button">Save feature flags</button>
           </div>
-          <div id="maintenanceStatus" class="small-label mt-2"></div>
-        </div>
+          <div id="featureFlagsStatus" class="admin-status" role="status" aria-live="polite"></div>
+          </fieldset>
+        </section>
 
-        <div class="card p-3 super-admin-card mt-3">
-          <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Welcome Announcement</h6>
-          <div class="row g-2">
+        <section class="card p-3 super-admin-card" aria-labelledby="controlChangesTitle">
+          <h2 class="admin-section-title" id="controlChangesTitle">Recent changes to these switches</h2>
+          <p class="admin-section-lede">Who changed maintenance mode or a feature flag, what was set, and the reason they gave. The server keeps the last 50.</p>
+          <div id="controlChangesStatus" class="admin-status" role="status" aria-live="polite">Reading the history&hellip;</div>
+          <ul class="control-changes" id="controlChangesList"></ul>
+        </section>
+
+        <section class="card p-3 super-admin-card" aria-labelledby="welcomeTitle">
+          <fieldset id="welcomeSet" class="super-loading-set" disabled aria-busy="true">
+          <h2 class="admin-section-title" id="welcomeTitle">Welcome announcement</h2>
+          <p class="admin-section-lede">Shown once in the extension popup to everyone who has not seen this version.</p>
+          <div class="row g-3">
             <div class="col-md-3">
-              <label class="form-label small-label">Version</label>
-              <input type="text" class="form-control" id="welcomeVersion" placeholder="v1-ai-launch">
-              <div class="text-muted" style="font-size:11px;margin-top:4px;">Bump this to re-show to everyone.</div>
+              <label class="form-label" for="welcomeVersion">Version</label>
+              <input type="text" class="form-control" id="welcomeVersion" placeholder="v1-ai-launch" />
+              <div class="admin-hint">Change this to show the announcement to everyone again.</div>
             </div>
             <div class="col-md-9">
-              <label class="form-label small-label">Title</label>
-              <input type="text" class="form-control" id="welcomeTitleInput" maxlength="200">
+              <label class="form-label" for="welcomeTitleInput">Title</label>
+              <input type="text" class="form-control" id="welcomeTitleInput" maxlength="200" />
             </div>
           </div>
-          <div class="mt-2">
-            <label class="form-label small-label">Body</label>
+          <div class="mt-3">
+            <label class="form-label" for="welcomeBodyInput">Body</label>
             <textarea class="form-control" id="welcomeBodyInput" rows="3" maxlength="1500"></textarea>
           </div>
-          <div class="mt-2 d-flex align-items-center gap-2 flex-wrap">
-            <label class="d-flex align-items-center gap-1" style="font-size:12px;">
-              <input type="checkbox" id="welcomeEnabled">
-              <span>Enabled</span>
-            </label>
-            <button class="btn btn-sm btn-primary ms-auto" id="saveWelcomeBtn">Save Announcement</button>
+          <div class="admin-card-actions">
+            <label class="admin-check"><input type="checkbox" id="welcomeEnabled" /><span>Show the announcement</span></label>
+            <button class="btn btn-sm btn-primary" id="saveWelcomeBtn" type="button">Save announcement</button>
           </div>
-          <div id="welcomeStatus" class="small-label mt-2"></div>
-        </div>
+          <div id="welcomeStatus" class="admin-status" role="status" aria-live="polite"></div>
+          </fieldset>
+        </section>
+
+        <section class="card p-3 super-admin-card" aria-labelledby="desktopReleaseTitle">
+          <fieldset id="desktopReleaseSet" class="super-loading-set" disabled aria-busy="true">
+          <h2 class="admin-section-title" id="desktopReleaseTitle">Desktop release</h2>
+          <div id="desktopReleaseLive" class="admin-section-lede">Reading the saved release&hellip;</div>
+          <div class="row g-3">
+            <div class="col-md-3">
+              <label class="form-label" for="desktopLatestVersion">Latest version</label>
+              <input type="text" class="form-control" id="desktopLatestVersion" placeholder="0.1.2" />
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="desktopMinSupportedVersion">Minimum supported version <span class="cp-label__optional">(optional)</span></label>
+              <input type="text" class="form-control" id="desktopMinSupportedVersion" placeholder="Blank for no minimum" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="desktopDownloadUrl">Download URL</label>
+              <input type="text" class="form-control" id="desktopDownloadUrl" placeholder="https://caprotoolkit.in/download/CA-PRO-Toolkit-Setup-0.1.2-x64.exe" />
+              <div class="admin-hint">Upload the installer to the website first, then paste its URL here. Only https URLs on caprotoolkit.in are accepted. The SHA-256 and the size come from the release script's output.</div>
+            </div>
+          </div>
+          <div class="row g-3 mt-0">
+            <div class="col-md-8">
+              <label class="form-label" for="desktopSha256">SHA-256</label>
+              <input type="text" class="form-control" id="desktopSha256" maxlength="64" placeholder="64 hex characters" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="desktopSizeBytes">Size (bytes)</label>
+              <input type="number" class="form-control" id="desktopSizeBytes" placeholder="0" />
+            </div>
+          </div>
+          <div class="mt-3">
+            <label class="form-label" for="desktopReleaseNotes">Release notes</label>
+            <textarea class="form-control" id="desktopReleaseNotes" rows="4" maxlength="4000"></textarea>
+          </div>
+          <div class="admin-card-actions">
+            <span class="d-flex flex-wrap gap-3">
+              <label class="admin-check"><input type="checkbox" id="desktopMandatory" /><span>Required update: users cannot dismiss it</span></label>
+              <label class="admin-check"><input type="checkbox" id="desktopEnabled" /><span>Enabled</span></label>
+            </span>
+            <button class="btn btn-sm btn-outline-secondary" id="saveDesktopReleaseBtn" type="button">Save release</button>
+            <button class="btn btn-sm btn-warning" id="notifyDesktopReleaseBtn" type="button">Notify all users</button>
+          </div>
+          <div id="desktopReleaseStatus" class="admin-status" role="status" aria-live="polite"></div>
+          </fieldset>
+        </section>
+
+        <section class="card p-3 super-admin-card" aria-labelledby="providerUsageTitle">
+          <h2 class="admin-section-title" id="providerUsageTitle">Provider usage</h2>
+          <p class="admin-section-lede">
+            DeepSeek and OCR.space are billed per call. Each is metered per user (daily and monthly caps) and against a provider-wide daily ceiling, enforced before any paid call is made. The figures are live counts against those caps.
+          </p>
+          <div id="providerUsageStatus" class="admin-status" role="status" aria-live="polite">Loading...</div>
+          <div class="row g-3" id="providerUsageGrid"></div>
+        </section>
+
+        <section class="card p-3 super-admin-card" aria-labelledby="deliveryHealthTitle">
+          <h2 class="admin-section-title" id="deliveryHealthTitle">Reminder delivery health</h2>
+          <p class="admin-section-lede">
+            Reminders whose email delivery could not be confirmed healthy: a retry pending, an unconfirmed delivery state, a claim gone stale, or a past failed attempt. Scans up to 5,000 reminders that have ever attempted delivery.
+          </p>
+          <div id="reminderDeliveryHealthStatus" class="admin-status" role="status" aria-live="polite">Loading...</div>
+          <div id="reminderDeliveryHealthBody"></div>
+        </section>
       </section>
 
       <!-- USAGE ANALYTICS -->
-      <section class="mb-4">
-        <div class="mb-3">
-          <h1 class="h5 mb-1">📈 Extension Usage Analytics</h1>
-          <p class="text-muted mb-0 small">
-            How many CAs are using the extension regularly.
-          </p>
+      <section id="page-analytics" class="super-page" aria-labelledby="analyticsTitle">
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="analyticsTitle">Usage and analytics</h1>
+            <p class="admin-page-lede">
+              Who is using CA PRO, on which app (desktop or Chrome extension), and which workflows they run. The top figures are approximate last-seen counts; the client split and the per-user table are server-verified workflow counters.
+            </p>
+          </div>
         </div>
-        <div id="usageLoadingStatus" class="text-muted small mb-3">Loading usage stats...</div>
+        <div id="usageLoadingStatus" class="admin-status mb-3" role="status" aria-live="polite">Loading usage stats...</div>
 
         <div class="stats-grid" id="usageGrid"></div>
 
-        <div class="row g-3 mb-4 mt-1">
-          <div class="col-md-7">
+        <div class="row g-3 mb-3">
+          <div class="col-lg-7">
             <div class="card p-3">
-              <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Daily Activity (last 14 days)</h6>
-              <div id="dailyActivityChart" style="display:flex; align-items:flex-end; gap:6px; min-height:90px; padding-top:10px;"></div>
+              <h2 class="admin-section-title">Daily activity &mdash; users, last 14 days (UTC)</h2>
+              <p class="admin-section-lede">Approximate. Each user is counted once, on the day they were last active, so a day's figure is the number of users whose latest activity fell on it. The window is the 14 &times; 24 hours up to now, in UTC days, so the first day may be partial. Use the client-split chart below for real per-day workflow activity.</p>
+              <div id="dailyActivityChart" class="day-chart"></div>
             </div>
           </div>
-          <div class="col-md-5">
+          <div class="col-lg-5">
             <div class="card p-3">
-              <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Top Active Users</h6>
-              <div id="topUsersList" style="font-size: 12.5px;">Loading...</div>
+              <h2 class="admin-section-title">Top active users</h2>
+              <div id="topUsersList" class="small">Loading...</div>
             </div>
+          </div>
+        </div>
+
+        <div class="row g-3 mb-3">
+          <div class="col-lg-6">
+            <div class="card p-3">
+              <h2 class="admin-section-title">Client split &mdash; distinct users per day by app, last 14 days (UTC)</h2>
+              <p class="admin-section-lede">Counted from recorded workflow runs, over 14 UTC days including today. A user who used both apps on a day counts once under each, so the two figures can add up to more than the users active that day.</p>
+              <div id="clientSplitGrid" class="d-flex flex-wrap gap-2"></div>
+              <div id="clientSplitChart" class="day-chart"></div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="card p-3">
+              <h2 class="admin-section-title">Workflow usage (last 30 days)</h2>
+              <div id="workflowBreakdownList" class="small">Loading...</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card p-3">
+          <h2 class="admin-section-title">Per-user usage (last 30 days, biggest first)</h2>
+          <p class="admin-section-lede">Super-admin only: firm admins never see this table. Counts are recorded workflow runs per app &mdash; content-free, no client data is involved.</p>
+          <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+              <thead>
+                <tr>
+                  <th scope="col">User</th>
+                  <th scope="col">Desktop</th>
+                  <th scope="col">Extension</th>
+                  <th scope="col">Total</th>
+                  <th scope="col">Workflows</th>
+                  <th scope="col">Last seen</th>
+                </tr>
+              </thead>
+              <tbody id="perUserUsageBody"></tbody>
+            </table>
           </div>
         </div>
       </section>
 
-      <!-- DASHBOARD STATS -->
-      <section class="mb-4">
-        <div class="mb-3">
-          <h1 class="h5 mb-1">📊 Platform Overview</h1>
-          <p class="text-muted mb-0 small">
-            Real-time statistics for the entire CA PRO platform.
-          </p>
+      <!-- EMAILS (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1) -->
+      <section id="page-emails" class="super-page" aria-labelledby="emailsTitle" hidden>
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="emailsTitle">Emails</h1>
+            <p class="admin-page-lede">
+              Every outbound email the system produced, with what the provider did with it. Recipient addresses are stored only as a one-way hash and a 4-character suffix &mdash; search by typing the exact address.
+            </p>
+          </div>
+        </div>
+        <div id="emailsStatus" class="admin-status mb-2" role="status" aria-live="polite"></div>
+
+        <div class="card p-3">
+          <div class="row g-2 align-items-end">
+            <div class="col-auto">
+              <label class="form-label" for="emailsFrom">From</label>
+              <input type="date" id="emailsFrom" class="form-control form-control-sm" />
+            </div>
+            <div class="col-auto">
+              <label class="form-label" for="emailsTo">To</label>
+              <input type="date" id="emailsTo" class="form-control form-control-sm" />
+            </div>
+            <div class="col-auto">
+              <label class="form-label" for="emailsType">Type</label>
+              <select id="emailsType" class="form-select form-select-sm">
+                <option value="">All types</option>
+                <option value="otp">OTP</option>
+                <option value="reminder">Reminder</option>
+                <option value="daily_digest">Daily digest</option>
+                <option value="weekly_digest">Weekly digest</option>
+                <option value="test_digest">Test digest</option>
+                <option value="digest_activation">Digest activation</option>
+                <option value="test_email">Test email</option>
+                <option value="reminder_alert">Delivery alert</option>
+                <option value="rollout_notice">Rollout notice</option>
+                <option value="campaign">Campaign</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="col-auto">
+              <label class="form-label" for="emailsStatusFilter">Status</label>
+              <select id="emailsStatusFilter" class="form-select form-select-sm">
+                <option value="">All statuses</option>
+                <option value="queued">Queued</option>
+                <option value="sent">Sent</option>
+                <option value="delivered">Delivered</option>
+                <option value="bounced">Bounced</option>
+                <option value="complained">Complained</option>
+                <option value="failed">Failed</option>
+              </select>
+            </div>
+            <div class="col-auto">
+              <label class="form-label" for="emailsRecipient">Exact recipient address</label>
+              <input type="email" id="emailsRecipient" class="form-control form-control-sm" placeholder="name@example.com" autocomplete="off" />
+            </div>
+            <div class="col-auto d-flex gap-2">
+              <button id="emailsApplyBtn" class="btn btn-sm btn-primary" type="button">Apply</button>
+              <button id="emailsResetBtn" class="btn btn-sm btn-outline-secondary" type="button">Reset</button>
+              <button id="emailsCsvBtn" class="btn btn-sm btn-outline-secondary" type="button">Export CSV</button>
+            </div>
+          </div>
         </div>
 
-        <div id="statsLoadingStatus" class="text-muted small mb-3">Loading dashboard statistics...</div>
+        <div id="emailsSummaryStrip" class="stats-grid"></div>
+        <div id="emailsBounceBanner" class="alert alert-warning mb-3" role="status" hidden></div>
+
+        <div class="card p-3">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+              <thead>
+                <tr>
+                  <th scope="col">Date / time (UTC)</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">To</th>
+                  <th scope="col">Firm</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Error</th>
+                  <th scope="col">Provider id</th>
+                  <th scope="col"><span class="visually-hidden">Details</span></th>
+                </tr>
+              </thead>
+              <tbody id="emailsBody"></tbody>
+            </table>
+          </div>
+          <div class="d-flex justify-content-between align-items-center mt-2">
+            <span id="emailsPageInfo" class="text-muted small"></span>
+            <span class="d-flex gap-2">
+              <button id="emailsPrevBtn" class="btn btn-sm btn-outline-secondary" type="button" disabled>Previous</button>
+              <button id="emailsNextBtn" class="btn btn-sm btn-outline-secondary" type="button" disabled>Next</button>
+            </span>
+          </div>
+        </div>
+
+        <div class="card p-3">
+          <h2 class="admin-section-title">Suppression list (do-not-email)</h2>
+          <p class="admin-section-lede">Addresses that hard-bounced or complained. A suppressed address is refused before every future send. Removing a row is recorded.</p>
+          <div class="table-responsive">
+            <table class="table table-sm mb-0">
+              <thead>
+                <tr><th scope="col">Reason</th><th scope="col">Added</th><th scope="col">Scope</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr>
+              </thead>
+              <tbody id="suppressionsBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Detail drawer -->
+        <div id="emailDetailOverlay" class="position-fixed top-0 start-0 w-100 h-100" hidden style="z-index:1050;">
+          <div class="position-absolute top-0 end-0 h-100 bg-white p-4" style="width:min(480px,92vw);overflow-y:auto;" role="dialog" aria-modal="true" aria-labelledby="emailDetailTitle">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+              <h2 class="admin-section-title" id="emailDetailTitle">Email detail</h2>
+              <button id="emailDetailCloseBtn" class="btn btn-sm btn-outline-secondary" type="button">Close</button>
+            </div>
+            <div id="emailDetailBody" class="small"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PLATFORM OVERVIEW -->
+      <section id="page-overview" class="super-page" aria-labelledby="overviewTitle">
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="overviewTitle">Platform overview</h1>
+            <p class="admin-page-lede">
+              Live figures for the whole CA PRO platform.
+            </p>
+          </div>
+        </div>
+
+        <div id="statsLoadingStatus" class="admin-status mb-3" role="status" aria-live="polite">Loading dashboard statistics...</div>
 
         <div class="stats-grid" id="statsGrid">
           <!-- Stats cards rendered by JS -->
         </div>
 
-        <!-- Secondary stats row -->
-        <div class="row g-3 mb-4">
+        <div class="row g-3">
           <div class="col-md-6">
             <div class="card p-3">
-              <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Task Status Breakdown</h6>
+              <h2 class="admin-section-title">Tasks by status</h2>
               <div id="taskStatusBreakdown" class="d-flex flex-wrap gap-2">
                 <span class="text-muted small">Loading...</span>
               </div>
@@ -194,7 +551,7 @@
           </div>
           <div class="col-md-6">
             <div class="card p-3">
-              <h6 class="mb-2" style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted);">Service Type Distribution</h6>
+              <h2 class="admin-section-title">Tasks by service</h2>
               <div id="serviceBreakdown" class="d-flex flex-wrap gap-2">
                 <span class="text-muted small">Loading...</span>
               </div>
@@ -204,13 +561,17 @@
       </section>
 
       <!-- USER DIRECTORY -->
-      <section class="mb-4">
-        <div class="row g-3 mb-3 align-items-center">
-          <div class="col">
-            <h2 class="h5 mb-1">👥 User directory</h2>
-            <p class="text-muted mb-0 small">
+      <section id="page-users" class="super-page" aria-labelledby="usersTitle">
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="usersTitle">User directory</h1>
+            <p class="admin-page-lede">
               Every account: who signed up, when they joined, when they were last active, and who has gone quiet.
             </p>
+          </div>
+          <div class="admin-pagehead__actions">
+            <button id="userExportCsvBtn" class="btn btn-sm btn-outline-secondary" type="button">Export this view (CSV)</button>
+            <button id="userExportXlsxBtn" class="btn btn-sm btn-outline-secondary" type="button">Export this view (Excel)</button>
           </div>
         </div>
 
@@ -218,11 +579,11 @@
           <div class="card-body">
             <div class="row g-2 mb-3">
               <div class="col-md-4">
-                <label class="form-label small-label" for="userSearchInput">Search</label>
+                <label class="form-label" for="userSearchInput">Search</label>
                 <input id="userSearchInput" class="form-control form-control-sm" type="search" placeholder="Email or name" />
               </div>
               <div class="col-md-3">
-                <label class="form-label small-label" for="userActivityFilter">Activity</label>
+                <label class="form-label" for="userActivityFilter">Activity</label>
                 <select id="userActivityFilter" class="form-select form-select-sm">
                   <option value="">All activity</option>
                   <option value="active">Active (last 30 days)</option>
@@ -231,7 +592,7 @@
                 </select>
               </div>
               <div class="col-md-3">
-                <label class="form-label small-label" for="userRoleFilter">Role</label>
+                <label class="form-label" for="userRoleFilter">Role</label>
                 <select id="userRoleFilter" class="form-select form-select-sm">
                   <option value="">All roles</option>
                   <option value="USER">User</option>
@@ -240,7 +601,7 @@
                 </select>
               </div>
               <div class="col-md-2">
-                <label class="form-label small-label" for="userSortSelect">Sort by</label>
+                <label class="form-label" for="userSortSelect">Sort by</label>
                 <select id="userSortSelect" class="form-select form-select-sm">
                   <option value="recent">Recently active</option>
                   <option value="signup">Newest signup</option>
@@ -249,13 +610,7 @@
               </div>
             </div>
 
-            <div class="d-flex align-items-center gap-2 mb-3">
-              <span class="text-muted small">Export current view:</span>
-              <button id="userExportCsvBtn" class="btn btn-sm btn-outline-secondary" type="button">CSV</button>
-              <button id="userExportXlsxBtn" class="btn btn-sm btn-outline-secondary" type="button">Excel</button>
-            </div>
-
-            <p id="userDirectoryStatus" class="text-muted mb-3 small">Loading users…</p>
+            <p id="userDirectoryStatus" class="admin-status mb-3" role="status" aria-live="polite">Loading users…</p>
 
             <div class="table-responsive">
               <table class="table table-hover align-middle mb-0">
@@ -284,20 +639,110 @@
         </div>
       </section>
 
-      <!-- PENDING ADMINS -->
-      <section class="mb-4">
-        <div class="row g-3 mb-3 align-items-center">
-          <div class="col">
-            <h2 class="h5 mb-1">⏳ Pending Firm Admin Approvals</h2>
-            <p class="text-muted mb-0 small">
-              Approve or revoke access for pending firm admin accounts.
+      <!-- TERMS ACCEPTANCE HISTORY -->
+      <section id="page-terms" class="super-page" aria-labelledby="termsAcceptanceTitle">
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="termsAcceptanceTitle">Terms acceptance history</h1>
+            <p class="admin-page-lede">
+              Immutable server records for desktop acceptance. Times show the viewer's local zone and the exact UTC value stored by the server.
             </p>
           </div>
         </div>
 
         <div class="card shadow-sm border-0 super-admin-card">
           <div class="card-body">
-            <p id="pendingStatus" class="text-muted mb-3 small">
+            <div class="rounded border p-3 mb-3" aria-label="Current terms receipt">
+              <div class="small-label mb-1">Current required document</div>
+              <div class="d-flex flex-column gap-1">
+                <strong id="termsCurrentVersion">Version —</strong>
+                <code id="termsCurrentHash" class="small text-break">SHA-256 —</code>
+              </div>
+            </div>
+
+            <form id="termsAcceptanceFilters" class="row g-2 mb-3">
+              <div class="col-lg-4 col-md-6">
+                <label class="form-label" for="termsAcceptanceSearch">Email</label>
+                <input
+                  id="termsAcceptanceSearch"
+                  class="form-control form-control-sm"
+                  type="search"
+                  maxlength="320"
+                  autocomplete="off"
+                  placeholder="Search accepted email"
+                />
+              </div>
+              <div class="col-lg-2 col-md-6">
+                <label class="form-label" for="termsAcceptanceVersion">Version</label>
+                <input
+                  id="termsAcceptanceVersion"
+                  class="form-control form-control-sm"
+                  type="text"
+                  maxlength="64"
+                  autocomplete="off"
+                  placeholder="2026-08-01"
+                />
+              </div>
+              <div class="col-lg-2 col-md-4">
+                <label class="form-label" for="termsAcceptanceFrom">Accepted from</label>
+                <input id="termsAcceptanceFrom" class="form-control form-control-sm" type="date" />
+              </div>
+              <div class="col-lg-2 col-md-4">
+                <label class="form-label" for="termsAcceptanceTo">Accepted to</label>
+                <input id="termsAcceptanceTo" class="form-control form-control-sm" type="date" />
+              </div>
+              <div class="col-lg-2 col-md-4 d-flex align-items-end gap-2">
+                <button id="termsAcceptanceApply" class="btn btn-sm btn-primary flex-grow-1" type="submit">Apply</button>
+                <button id="termsAcceptanceClear" class="btn btn-sm btn-outline-secondary" type="button">Clear</button>
+              </div>
+            </form>
+
+            <div class="d-flex align-items-center gap-2 mb-3">
+              <p id="termsAcceptanceStatus" class="admin-status mb-0" role="status" aria-live="polite">
+                Loading acceptance history...
+              </p>
+              <button id="termsAcceptanceRetry" class="btn btn-sm btn-outline-secondary d-none" type="button">Try again</button>
+            </div>
+
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                  <tr>
+                    <th scope="col">Email</th>
+                    <th scope="col" style="min-width: 250px;">Accepted at</th>
+                    <th scope="col">Version</th>
+                    <th scope="col">Source</th>
+                    <th scope="col" style="min-width: 300px;">Document SHA-256</th>
+                    <th scope="col">Record ID</th>
+                  </tr>
+                </thead>
+                <tbody id="termsAcceptanceBody"></tbody>
+              </table>
+            </div>
+
+            <div class="d-flex align-items-center justify-content-between mt-3">
+              <button id="termsAcceptancePrev" class="btn btn-sm btn-outline-secondary" type="button" disabled>Previous</button>
+              <span id="termsAcceptanceMeta" class="text-muted small">—</span>
+              <button id="termsAcceptanceNext" class="btn btn-sm btn-outline-secondary" type="button" disabled>Next</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PENDING FIRM ADMIN REQUESTS -->
+      <section id="page-approvals" class="super-page" aria-labelledby="approvalsTitle">
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="approvalsTitle">Pending firm admin requests</h1>
+            <p class="admin-page-lede">
+              Approve a request to make the account a firm admin, or decline it.
+            </p>
+          </div>
+        </div>
+
+        <div class="card shadow-sm border-0 super-admin-card">
+          <div class="card-body">
+            <p id="pendingStatus" class="admin-status mb-3" role="status" aria-live="polite">
               Loading pending firm admin requests…
             </p>
 
@@ -309,7 +754,7 @@
                     <th scope="col">Name</th>
                     <th scope="col">Firm</th>
                     <th scope="col">Requested at</th>
-                    <th scope="col" style="width: 190px;">Actions</th>
+                    <th scope="col" style="width: 190px;"><span class="visually-hidden">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody id="pendingAdminsBody">
@@ -321,19 +766,19 @@
       </section>
 
       <!-- FIRMS / ACCESS -->
-      <section>
-        <div class="row g-3 mb-3 align-items-center">
-          <div class="col">
-            <h2 class="h5 mb-1">Firms, administrators, and access</h2>
-            <p class="text-muted mb-0 small">
-              Every product feature is free. Manage firm status, members, or deletion here.
+      <section id="page-firms" class="super-page" aria-labelledby="firmsTitle">
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="firmsTitle">Firms, administrators and access</h1>
+            <p class="admin-page-lede">
+              Every product feature is free. See a firm's users, deactivate or activate a firm, or erase it and its data.
             </p>
           </div>
         </div>
 
         <div class="card shadow-sm border-0 super-admin-card">
           <div class="card-body">
-            <p id="firmsStatus" class="text-muted mb-3 small">
+            <p id="firmsStatus" class="admin-status mb-3" role="status" aria-live="polite">
               Loading firms…
             </p>
 
@@ -343,10 +788,10 @@
                   <tr>
                     <th scope="col">Firm</th>
                     <th scope="col">Handle</th>
-                    <th scope="col">Owner Admin</th>
+                    <th scope="col">Owner admin</th>
                     <th scope="col">Product access</th>
                     <th scope="col">Account status</th>
-                    <th scope="col" style="width: 280px;">Actions</th>
+                    <th scope="col" style="width: 280px;"><span class="visually-hidden">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody id="firmsBody">
@@ -354,26 +799,27 @@
               </table>
             </div>
 
-            <!-- FIRM USERS MODAL (custom, no Bootstrap JS dep) -->
+            <!-- FIRM USERS DIALOG (custom, no Bootstrap JS dependency). It scrolls inside the
+                 window: the table is wide, so it scrolls sideways inside its own box. -->
             <div class="ca-modal-backdrop" id="firmUsersModal" aria-hidden="true">
               <div class="ca-modal" role="dialog" aria-labelledby="firmUsersTitle" aria-modal="true">
                 <div class="ca-modal-header">
-                  <h5 class="ca-modal-title" id="firmUsersTitle">Firm Users</h5>
+                  <h2 class="ca-modal-title" id="firmUsersTitle">Firm users</h2>
                   <button type="button" class="ca-modal-close" id="firmUsersCloseBtn" aria-label="Close">×</button>
                 </div>
                 <div class="ca-modal-body">
-                  <p id="firmUsersStatus" class="text-muted small mb-3">Loading users…</p>
+                  <p id="firmUsersStatus" class="admin-status mb-3" role="status" aria-live="polite">Loading users…</p>
                   <div class="table-responsive">
                     <table class="table table-sm align-middle mb-0">
                       <thead class="table-light">
                         <tr>
-                          <th>Email</th>
-                          <th>Name</th>
-                          <th>Role</th>
-                          <th>Type</th>
-                          <th>Active</th>
-                          <th>Joined</th>
-                          <th style="min-width:280px;">Actions</th>
+                          <th scope="col">Email</th>
+                          <th scope="col">Name</th>
+                          <th scope="col">Role</th>
+                          <th scope="col">Type</th>
+                          <th scope="col">Account</th>
+                          <th scope="col">Joined</th>
+                          <th scope="col" style="min-width:280px;"><span class="visually-hidden">Actions</span></th>
                         </tr>
                       </thead>
                       <tbody id="firmUsersBody"></tbody>
@@ -381,17 +827,20 @@
                   </div>
                 </div>
                 <div class="ca-modal-footer">
-                  <button type="button" class="btn btn-secondary btn-sm" id="firmUsersCloseBtn2">Close</button>
+                  <button type="button" class="btn btn-outline-secondary btn-sm" id="firmUsersCloseBtn2">Close</button>
                 </div>
               </div>
             </div>
           </div>
         </div>
       </section>
+        </div>
+      </div>
     </main>
 
     <!-- Bootstrap JS no longer needed (custom modal). Kept removed. -->
+    <script src="ui/capro-ui.js?v=2"></script>
     <script src="file-tools.js"></script>
-    <script src="super.js?v=14"></script>
+    <script src="super.js?v=28"></script>
   </body>
 </html>

@@ -1,5 +1,10 @@
-import ImportBatch from "../models/ImportBatch.js";
+import ImportBatch, {
+  GST_GENERATION_SAFE_NORMALIZATION_VERSIONS,
+} from "../models/ImportBatch.js";
 import ImportRow from "../models/ImportRow.js";
+// Imported rather than re-listed: a kind added to the model but forgotten here would be a GST
+// import that silently escapes the identity readiness scan.
+import { GST_IMPORT_KINDS } from "../models/ImportRow.js";
 import ReconciliationItem from "../models/ReconciliationItem.js";
 import ReconciliationRun from "../models/ReconciliationRun.js";
 
@@ -81,8 +86,6 @@ const FORBIDDEN_INDEX_SPECS = Object.freeze([
   },
 ]);
 
-const GST_IMPORT_KINDS = ["GST_PURCHASE", "GSTR2B", "GSTR3B_SUMMARY"];
-const GST_IMPORT_NORMALIZATION_VERSION = "gst-import-v2";
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/i;
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const OPERATION_ID_PATTERN = /^[a-f0-9]{64}$/;
@@ -506,7 +509,7 @@ async function findUnsafeLegacyDocuments({ reconciliation }) {
           invalidStringPattern("importFingerprint", SHA256_HEX_PATTERN),
           invalidStringPattern("sourceHash", SHA256_HEX_PATTERN),
           invalidStringPattern("activeImportGeneration", UUID_PATTERN),
-          { normalizationVersion: { $ne: GST_IMPORT_NORMALIZATION_VERSION } },
+          { normalizationVersion: { $nin: GST_GENERATION_SAFE_NORMALIZATION_VERSIONS } },
           invalidObjectId("firmId"),
           invalidObjectId("clientId"),
           invalidStringPattern("gstin", GSTIN_PATTERN),
@@ -1081,5 +1084,37 @@ export async function assertGstStorageIndexes({ reconciliation = false } = {}) {
   }
   return true;
 }
+
+/**
+ * The models whose indexes `assertGstStorageIndexes` requires, in the shape
+ * `index-provisioning.service.js` consumes.
+ *
+ * WHY THIS EXPORT EXISTS
+ * ----------------------
+ * `db.js` sets `autoIndex: process.env.NODE_ENV !== "production"` -- "index in dev, manage in
+ * prod" -- and `index-provisioning.service.js` is what "manage in prod" means. Until this was
+ * added, NO group covered ImportBatch, ImportRow or the reconciliation collections, so on a
+ * production database that had never had autoIndex build them, every GST import commit answered
+ * **503 "GST storage is not rollout-ready: ImportBatch (import identity), ImportRow (import row
+ * generation)"** and no reconciliation could ever be created.
+ *
+ * Reproduced directly rather than reasoned about: the desktop fixture capture runs with
+ * NODE_ENV=production against a database it drops on every run, drove the real
+ * preview -> commit chain, and got exactly that 503 from
+ * `gst-storage-readiness.service.js:1075`.
+ *
+ * That makes it a latent production defect rather than a visible one: an environment whose
+ * collections were first created while autoIndex was on already has these indexes, so the running
+ * service is fine. A FRESH deployment -- or a restore into a new cluster, which is exactly what
+ * O3/O4's disaster-recovery path does -- would come up with GST import permanently refused.
+ *
+ * Derived from the same spec arrays the assertion uses, so the two cannot drift apart.
+ */
+export const REQUIRED_GST_STORAGE_INDEXES = Object.freeze(
+  [...IMPORT_INDEX_SPECS, ...RECONCILIATION_INDEX_SPECS].map((spec) => ({
+    model: spec.Model,
+    label: `GST storage: ${spec.label}`,
+  })),
+);
 
 export { indexKeyMatches, indexSpecMatches };

@@ -7,62 +7,228 @@ import AppConfig from "./models/AppConfig.js";
 import Reminder from "./models/Reminder.js";
 import { processReminderForNow } from "./controllers/reminder.controller.js";
 import { assertCaseIndexesReady } from "./services/case-index-readiness.service.js";
+import { assertDigestIndexesReady } from "./services/digest-index-readiness.service.js";
 import { assertEngagementIndexesReady } from "./services/engagement-index-readiness.service.js";
 import { assertAuditWorkingPaperIndexesReady } from "./services/audit-working-paper-index-readiness.service.js";
 import { runAutomationWorkerBatch } from "./services/automation-worker.service.js";
-import { enqueueDueDigests } from "./services/digest.service.js";
-import app from "./app.js";
+import { ensureRequiredIndexes } from "./services/index-provisioning.service.js";
+import CaseMatter from "./models/CaseMatter.js";
+import AuditWorkingPaperAnalysis from "./models/AuditWorkingPaperAnalysis.js";
+import EngagementFinding from "./models/EngagementFinding.js";
+import { runRetentionPurge } from "./services/data-retention.service.js";
+import {
+  drainDigestRecovery,
+  enqueueDueDigests,
+} from "./services/digest.service.js";
+import { checkReminderDeliveryHealthAndAlert } from "./services/reminder-delivery-alert.service.js";
+import { sendReminderDeliveryAlertEmail } from "./services/email.service.js";
+import { SUPER_ADMIN_EMAIL } from "./middleware/authorization.middleware.js";
+import app, {
+  setBackgroundInitializationError,
+  setBackgroundReadiness,
+} from "./app.js";
 
 const PORT = Number(process.env.PORT || 4001);
 const REMINDER_SCHEDULER_INTERVAL_MS = 15 * 60 * 1000;
 const DIGEST_SCHEDULER_INTERVAL_MS = 15 * 60 * 1000;
 const AUTOMATION_WORKER_INTERVAL_MS = 30 * 1000;
+// The retention window is 30 days, so this does not need fine granularity. Six
+// hours keeps the purge well inside its own day without adding steady load, and
+// still gives four chances a day for a tick to land if the process restarts.
+const RETENTION_SCHEDULER_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// T3 (.kiro/PLAN.md): fleet-wide reminder delivery-health alerting. Same
+// cadence as REMINDER_SCHEDULER_INTERVAL_MS -- checking more often than
+// reminders are actually processed would find nothing new. The re-alert
+// throttle itself lives in reminder-delivery-alert.service.js.
+const REMINDER_DELIVERY_ALERT_INTERVAL_MS = 15 * 60 * 1000;
+const BOOTSTRAP_RETRY_DELAY_MS = 30 * 1000;
+// How many reminders one keyset batch reads. Small enough that a batch is cheap and its
+// connection is released quickly; large enough that a normal firm is one or two round trips.
+const REMINDER_SCAN_BATCH_SIZE = 200;
+// A terminating loop does not need this. Sustained inserts arriving faster than the pass drains
+// them do. 500 batches is 100,000 reminders in one tick, far past any real volume, and stopping
+// there is announced rather than silent.
+const REMINDER_SCAN_MAX_BATCHES = 500;
 const AUTOMATION_WORKER_BATCH_SIZE = 5;
 const automationWorkerId = `${hostname()}:${process.pid}`;
 
 let shuttingDown = false;
+let schedulersStarted = false;
+let bootstrapPromise = null;
+let bootstrapRetryTimer = null;
+// Names the phase boot is currently in, so a failure reports where it happened
+// and not only what the error code was. Several phases can raise the same driver
+// error code, and without the phase the code does not identify the cause.
+let bootstrapStage = null;
+let databaseConnectionInitialized = false;
+let reminderSchedulerPromise = null;
 let automationWorkerPromise = null;
 let digestSchedulerPromise = null;
 let reminderSchedulerTimer = null;
 let digestSchedulerTimer = null;
 let automationWorkerTimer = null;
+let retentionSchedulerPromise = null;
+let retentionSchedulerTimer = null;
+let reminderDeliveryAlertPromise = null;
+let reminderDeliveryAlertTimer = null;
+
+export async function completeDigestStartup({
+  assertIndexes,
+  drainRecovery,
+  startSchedulers,
+  setReady,
+  isShuttingDown,
+}) {
+  // This body deliberately touches nothing but its injected parameters. A test
+  // extracts this function's source and evaluates it in isolation, so a reference
+  // to any module-level binding here is a crash rather than a test failure. That
+  // is also why bootstrap() names the stage before calling this rather than the
+  // phases naming themselves: within digest startup the error code distinguishes
+  // them -- DIGEST_INDEXES_NOT_READY for the index phase, DIGEST_RECOVERY_* for
+  // the drain.
+  await assertIndexes();
+  if (isShuttingDown()) return false;
+  await drainRecovery();
+  if (isShuttingDown()) return false;
+  await startSchedulers();
+  setReady(true);
+  return true;
+}
 
 // Start listening synchronously (no top-level await) so process managers such
 // as Phusion Passenger — which do not reliably support top-level await in the
 // entry module — detect the server immediately. Database connection, rollout
 // readiness checks, and background schedulers are initialized asynchronously in
-// bootstrap() after the server is already accepting connections.
+// bootstrap() after the server is already accepting connections. Health stays
+// degraded until database and background readiness checks both complete.
+setBackgroundReadiness(false);
 const server = app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
+  // Where the process really listens, what started it, and which port- or socket-like variables the
+  // platform set: on 2026-10-04 the server ran normally while the host's routing never reached it,
+  // and nothing in the log could say why. Ports and absolute paths are printed; any other value is
+  // named only, never shown.
+  try {
+    const bound = server.address();
+    const names = Object.keys(process.env)
+      .filter((key) => /port|sock|lsnode|lsws|passenger|listen/i.test(key))
+      .sort();
+    const shown = names.map((key) =>
+      /^\d{1,5}$/.test(process.env[key]) || /^\/[\w./-]+$/.test(process.env[key]) ? `${key}=${process.env[key]}` : key,
+    );
+    console.log(
+      `[STARTUP] bound ${typeof bound === "string" ? bound : JSON.stringify(bound)}; ` +
+        `argv ${process.argv.slice(0, 2).join(" ")}; env ${shown.join(" ")}`,
+    );
+  } catch {
+    // A diagnostic never stops the server.
+  }
 });
 
-async function runReminderScheduler() {
-  const nowUtc = new Date();
-  console.log("REMINDER Scheduler tick at", nowUtc.toISOString());
+/**
+ * The reminder tick.
+ *
+ * Guarded like its four siblings, which it was not. Every other scheduler here returns its
+ * in-flight promise rather than starting a second run; this one started a new pass every 15
+ * minutes whatever the previous pass was doing.
+ *
+ * That matters because the tick's cost grows with the data. It walks every active reminder
+ * serially, and a CASE-sourced reminder re-reads the noticeCases flag with `fresh: true`, which
+ * deliberately bypasses AppConfig's 30-second cache and makes a real round trip per reminder. Once
+ * one pass takes longer than the interval, passes overlap; overlapping passes hold more pool
+ * connections; and a saturated pool is the condition under which requests stop being answered at
+ * all. Nothing here failed loudly - it simply took longer each time until it did not finish.
+ *
+ * The guard also makes the pass awaitable, so gracefulShutdown can wait for it as it already waits
+ * for the other four.
+ */
+function runReminderScheduler() {
+  if (shuttingDown || reminderSchedulerPromise) return reminderSchedulerPromise;
+  reminderSchedulerPromise = (async () => {
+    const nowUtc = new Date();
+    console.log("REMINDER Scheduler tick at", nowUtc.toISOString());
 
-  try {
-    const noticeCasesEnabled = await AppConfig.isFeatureEnabled("noticeCases", {
-      fresh: true,
-    });
-    const activeReminders = await Reminder.find({
-      isActive: true,
-      ...(noticeCasesEnabled ? {} : { source: { $ne: "CASE" } }),
-    });
+    try {
+      const noticeCasesEnabled = await AppConfig.isFeatureEnabled(
+        "noticeCases",
+        { fresh: true },
+      );
+      const filter = {
+        isActive: true,
+        ...(noticeCasesEnabled ? {} : { source: { $ne: "CASE" } }),
+      };
 
-    for (const reminder of activeReminders) {
-      try {
-        await processReminderForNow(reminder, nowUtc);
-      } catch (error) {
-        console.error(
-          "REMINDER Error processing reminder",
-          reminder?.id,
-          error
-        );
+      // Read in keyset batches rather than all at once.
+      //
+      // This used to be one unbounded find(): every active reminder in the product, hydrated as
+      // full documents, held in memory for the whole pass. It grew with total usage rather than
+      // with any one firm, and it was the last unbounded read left in the incident's own path.
+      //
+      // A .limit() alone would have been the wrong fix - it would silently stop processing
+      // reminders past the cap, which is worse than a slow pass, not better. A .cursor() would
+      // bound the memory but hold a server-side cursor open across every delivery in the pass,
+      // trading a memory problem for a longer-held connection - the exact resource this change is
+      // about. Keyset paging by _id gives both: each query is small and short-lived, the connection
+      // is released between batches, and the pass still reaches every reminder because it stops
+      // only when a batch comes back short.
+      let lastId = null;
+      let scanned = 0;
+      let batches = 0;
+
+      for (;;) {
+        if (shuttingDown) break;
+
+        const batch = await Reminder.find(
+          lastId ? { ...filter, _id: { $gt: lastId } } : filter,
+        )
+          .sort({ _id: 1 })
+          .limit(REMINDER_SCAN_BATCH_SIZE);
+
+        if (!batch.length) break;
+        batches += 1;
+
+        for (const reminder of batch) {
+          // A shutdown that has begun must not be held open by the rest of the list.
+          if (shuttingDown) break;
+          scanned += 1;
+          try {
+            await processReminderForNow(reminder, nowUtc);
+          } catch (error) {
+            console.error(
+              "REMINDER Error processing reminder",
+              reminder?.id,
+              error,
+            );
+          }
+        }
+
+        lastId = batch[batch.length - 1]?._id;
+        if (!lastId) break;
+        if (batch.length < REMINDER_SCAN_BATCH_SIZE) break;
+
+        // _id is unique and strictly ascending here, so this loop terminates on its own. The cap
+        // exists for the case it cannot: sustained inserts arriving faster than the pass drains
+        // them. It says exactly how many were processed and that more remain, because a pass that
+        // quietly stopped early would look identical to a pass that finished.
+        if (batches >= REMINDER_SCAN_MAX_BATCHES) {
+          console.error(
+            `REMINDER Scheduler stopped after ${batches} batches (${scanned} reminders). More remain ` +
+              `and will be picked up by the next tick; raise REMINDER_SCAN_MAX_BATCHES if this recurs.`,
+          );
+          break;
+        }
       }
+    } catch (error) {
+      console.error("REMINDER Scheduler top-level error", error);
     }
-  } catch (error) {
-    console.error("REMINDER Scheduler top-level error", error);
-  }
+  })()
+    .catch((error) => {
+      console.error("REMINDER Scheduler unexpected error", error);
+    })
+    .finally(() => {
+      reminderSchedulerPromise = null;
+    });
+  return reminderSchedulerPromise;
 }
 
 function runDigestScheduler() {
@@ -111,31 +277,159 @@ function runAutomationWorker() {
   return automationWorkerPromise;
 }
 
+// Enforces the 30-day retention decided in PLAN.md section 33. Logs every tick
+// that changed anything, and logs failures per step: the purge reports partial
+// failure rather than aborting, so a step that could not run must be visible.
+function runRetentionScheduler() {
+  if (shuttingDown || retentionSchedulerPromise)
+    return retentionSchedulerPromise;
+  retentionSchedulerPromise = runRetentionPurge({
+    models: { CaseMatter, AuditWorkingPaperAnalysis, EngagementFinding },
+  })
+    .then((summary) => {
+      if (summary.changed > 0) {
+        console.log("[RETENTION] Purge tick complete", {
+          cutoff: summary.cutoff.toISOString(),
+          changed: summary.changed,
+          steps: summary.steps,
+        });
+      }
+      for (const failure of summary.failures) {
+        console.error("[RETENTION] Purge step failed", failure);
+      }
+      return summary;
+    })
+    .catch((error) => {
+      console.error("[RETENTION] Purge tick failed", error);
+      return null;
+    })
+    .finally(() => {
+      retentionSchedulerPromise = null;
+    });
+  return retentionSchedulerPromise;
+}
+
+// T3 (.kiro/PLAN.md): checks the same fleet-wide delivery-problem count as
+// T2's admin panel (GET /api/super/reminder-delivery-health) and, past a
+// small threshold, emails the owner a secondary signal -- a best-effort
+// alert on top of the panel, never a replacement for it. Threshold and
+// re-alert throttle live in reminder-delivery-alert.service.js.
+function runReminderDeliveryAlertScheduler() {
+  if (shuttingDown || reminderDeliveryAlertPromise) {
+    return reminderDeliveryAlertPromise;
+  }
+  reminderDeliveryAlertPromise = checkReminderDeliveryHealthAndAlert({
+    Reminder,
+    AppConfig,
+    toEmail: SUPER_ADMIN_EMAIL,
+    sendAlertEmail: ({
+      toEmail,
+      issueCount,
+      candidatesScanned,
+      candidatesScanTruncated,
+      now,
+    }) =>
+      sendReminderDeliveryAlertEmail({
+        toEmail,
+        issueCount,
+        candidatesScanned,
+        candidatesScanTruncated,
+        generatedAt: now,
+      }),
+  })
+    .then((summary) => {
+      if (summary.alerted) {
+        console.log("[REMINDER-ALERT] Delivery-health alert sent", summary);
+      } else if (summary.reason === "SEND_FAILED") {
+        console.error("[REMINDER-ALERT] Alert email failed to send", summary);
+      }
+      return summary;
+    })
+    .catch((error) => {
+      console.error("[REMINDER-ALERT] Scheduler tick failed", error);
+      return null;
+    })
+    .finally(() => {
+      reminderDeliveryAlertPromise = null;
+    });
+  return reminderDeliveryAlertPromise;
+}
+
 function startSchedulers() {
+  if (shuttingDown || schedulersStarted) return false;
+  schedulersStarted = true;
   reminderSchedulerTimer = setInterval(
     runReminderScheduler,
-    REMINDER_SCHEDULER_INTERVAL_MS
+    REMINDER_SCHEDULER_INTERVAL_MS,
   );
   digestSchedulerTimer = setInterval(
     runDigestScheduler,
-    DIGEST_SCHEDULER_INTERVAL_MS
+    DIGEST_SCHEDULER_INTERVAL_MS,
   );
   automationWorkerTimer = setInterval(
     runAutomationWorker,
-    AUTOMATION_WORKER_INTERVAL_MS
+    AUTOMATION_WORKER_INTERVAL_MS,
+  );
+  retentionSchedulerTimer = setInterval(
+    runRetentionScheduler,
+    RETENTION_SCHEDULER_INTERVAL_MS,
+  );
+  reminderDeliveryAlertTimer = setInterval(
+    runReminderDeliveryAlertScheduler,
+    REMINDER_DELIVERY_ALERT_INTERVAL_MS,
   );
   reminderSchedulerTimer.unref();
   digestSchedulerTimer.unref();
   automationWorkerTimer.unref();
+  retentionSchedulerTimer.unref();
+  reminderDeliveryAlertTimer.unref();
   runReminderScheduler();
   runDigestScheduler();
   runAutomationWorker();
+  runRetentionScheduler();
+  runReminderDeliveryAlertScheduler();
+  return true;
+}
+
+function currentBootstrapStage() {
+  return bootstrapStage;
 }
 
 async function bootstrap() {
-  await connectDB();
+  bootstrapStage = "connect";
+  if (!databaseConnectionInitialized) {
+    await connectDB();
+    databaseConnectionInitialized = true;
+  }
+
+  // Create the indexes the assertions below require. connectDB() disables
+  // autoIndex in production, and nothing else created them, so a release that
+  // declared a new index could never reach readiness: the assertion threw, boot
+  // retried every 30 seconds indefinitely, and the schedulers below never
+  // started. This never fails the boot -- the assertions remain the authority on
+  // readiness and report precisely what is missing.
+  bootstrapStage = "provision-indexes";
+  try {
+    const provisioning = await ensureRequiredIndexes();
+    if (provisioning.created.length > 0) {
+      console.log(
+        "[BOOT] Created indexes:",
+        provisioning.created
+          .map((entry) => `${entry.collection}.${entry.name}`)
+          .join(", "),
+      );
+    }
+    for (const failure of provisioning.failures) {
+      console.error(
+        `[BOOT] Index provisioning failed for ${failure.collection}: ${failure.reason}`,
+      );
+    }
+  } catch (error) {
+    console.error("[BOOT] Index provisioning error:", error?.message || error);
+  }
 
   if (process.env.NODE_ENV === "production") {
+    bootstrapStage = "rollout-flags";
     const [noticeRollout, engagementRollout, workingPaperRollout] =
       await Promise.all([
         AppConfig.getFeatureFlagState("noticeCases", { fresh: true }),
@@ -144,11 +438,12 @@ async function bootstrap() {
       ]);
     if (workingPaperRollout.enabled && !engagementRollout.enabled) {
       const error = new Error(
-        "auditWorkingPapers cannot start enabled while assuranceEngagements is disabled"
+        "auditWorkingPapers cannot start enabled while assuranceEngagements is disabled",
       );
       error.code = "INVALID_AUDIT_WORKING_PAPER_ROLLOUT";
       throw error;
     }
+    bootstrapStage = "feature-index-readiness";
     const readinessChecks = [];
     if (noticeRollout.enabled) readinessChecks.push(assertCaseIndexesReady());
     if (engagementRollout.enabled)
@@ -159,24 +454,66 @@ async function bootstrap() {
     await Promise.all(readinessChecks);
   }
 
-  startSchedulers();
+  bootstrapStage = "digest-startup";
+  return completeDigestStartup({
+    assertIndexes: assertDigestIndexesReady,
+    drainRecovery: drainDigestRecovery,
+    startSchedulers,
+    setReady: setBackgroundReadiness,
+    isShuttingDown: () => shuttingDown,
+  });
 }
 
-bootstrap().catch((error) => {
-  // Keep the HTTP server accepting connections so the platform does not
-  // crash-loop and /health can report a degraded state. Mongoose retries the
-  // connection in the background.
-  console.error("[BOOT] Startup initialization error:", error?.message || error);
-});
+function clearBootstrapRetryTimer() {
+  if (!bootstrapRetryTimer) return;
+  clearTimeout(bootstrapRetryTimer);
+  bootstrapRetryTimer = null;
+}
+
+function scheduleBootstrapRetry() {
+  if (shuttingDown || bootstrapRetryTimer) return;
+  bootstrapRetryTimer = setTimeout(() => {
+    bootstrapRetryTimer = null;
+    void runBootstrap();
+  }, BOOTSTRAP_RETRY_DELAY_MS);
+  bootstrapRetryTimer.unref();
+}
+
+function runBootstrap() {
+  if (shuttingDown || bootstrapPromise) return bootstrapPromise;
+  setBackgroundReadiness(false);
+  bootstrapPromise = bootstrap()
+    .catch((error) => {
+      // Keep HTTP accepting connections so /health can report degraded while
+      // fixed-delay retries wait for database/index readiness to recover.
+      console.error(
+        "[BOOT] Startup initialization error:",
+        error?.message || error,
+      );
+      setBackgroundInitializationError(error, currentBootstrapStage());
+      scheduleBootstrapRetry();
+      return false;
+    })
+    .finally(() => {
+      bootstrapPromise = null;
+    });
+  return bootstrapPromise;
+}
+
+void runBootstrap();
 
 async function gracefulShutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
+  setBackgroundReadiness(false);
+  clearBootstrapRetryTimer();
   console.log(`\n[${signal}] Graceful shutdown starting...`);
 
   if (reminderSchedulerTimer) clearInterval(reminderSchedulerTimer);
   if (digestSchedulerTimer) clearInterval(digestSchedulerTimer);
   if (automationWorkerTimer) clearInterval(automationWorkerTimer);
+  if (retentionSchedulerTimer) clearInterval(retentionSchedulerTimer);
+  if (reminderDeliveryAlertTimer) clearInterval(reminderDeliveryAlertTimer);
 
   server.close((error) => {
     if (error) console.error("HTTP server close error:", error);
@@ -190,6 +527,16 @@ async function gracefulShutdown(signal) {
   forceTimer.unref();
 
   try {
+    // Now awaitable, because the tick is guarded. Before, a pass in flight was simply abandoned
+    // mid-list: a reminder could be delivered and the process exit before the delivery was
+    // recorded, which reads afterwards as a reminder that never went out.
+    const activeReminderScheduler = reminderSchedulerPromise;
+    if (activeReminderScheduler) await activeReminderScheduler;
+  } catch (error) {
+    console.error("Reminder scheduler shutdown error:", error.message);
+  }
+
+  try {
     const activeWorker = automationWorkerPromise;
     if (activeWorker) await activeWorker;
   } catch (error) {
@@ -201,6 +548,19 @@ async function gracefulShutdown(signal) {
     if (activeDigestScheduler) await activeDigestScheduler;
   } catch (error) {
     console.error("Digest scheduler shutdown error:", error.message);
+  }
+  try {
+    const activeRetentionScheduler = retentionSchedulerPromise;
+    if (activeRetentionScheduler) await activeRetentionScheduler;
+  } catch (error) {
+    console.error("Retention scheduler shutdown error:", error.message);
+  }
+
+  try {
+    const activeReminderDeliveryAlert = reminderDeliveryAlertPromise;
+    if (activeReminderDeliveryAlert) await activeReminderDeliveryAlert;
+  } catch (error) {
+    console.error("Reminder delivery alert scheduler shutdown error:", error.message);
   }
 
   try {

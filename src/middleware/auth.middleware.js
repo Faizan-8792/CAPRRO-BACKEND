@@ -62,6 +62,32 @@ async function authenticate(req, res, next, { recordUsage }) {
       role: user.role,
       accountType: user.accountType,
       firmId: user.firmId || null,
+      // The version this request was authorized under. Later writes condition on
+      // it so a force-logout that lands mid-request cannot be committed through.
+      tokenVersion: user.tokenVersion || 0,
+      // Client-type claim (IMPROVEMENT-PLAN-V2-2026-09-28 Part 3). 'desktop'
+      // enters a token only via the verified Google installed-app audience;
+      // absence (older unexpired tokens) means 'extension'. This claim — not
+      // any request body field — is what usage analytics records.
+      client: payload.client === "desktop" ? "desktop" : "extension",
+    };
+
+    // Corroboration, not identity: the desktop has always sent X-CaPro-Client,
+    // the extension now sends it too. The claim wins; a disagreement is logged
+    // as a coarse anomaly with no identifier attached (PLAN.md: clientType
+    // metadata is untrusted, so it is recorded as metadata or ignored, never
+    // used to decide anything).
+    const headerClient = String(
+      req.headers["x-capro-client"] || "",
+    ).toLowerCase();
+    if (headerClient && headerClient !== req.user.client) {
+      console.warn(
+        `[client-context] claim/header client mismatch (${req.user.client} vs ${headerClient})`,
+      );
+    }
+    req.clientMeta = {
+      version: String(req.headers["x-capro-client-version"] || "").slice(0, 40),
+      header: headerClient || null,
     };
 
     if (recordUsage) {

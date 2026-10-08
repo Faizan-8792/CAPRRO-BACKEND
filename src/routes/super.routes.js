@@ -4,6 +4,7 @@ import express from "express";
 import { authRequired } from "../middleware/auth.middleware.js";
 import {
   getUsageStats,
+  getProviderUsageStats,
   getSuperDashboardStats,
   listAllUsers,
   listPendingAdmins,
@@ -15,11 +16,25 @@ import {
   updateFirmUserForSuper,
   deleteFirmUserForSuper,
   deleteFirmForSuper,
+  listErasureRequestsForSuper,
+  getErasureReceiptForSuper,
+  getReminderDeliveryHealthStats,
   runSystemSelfTest,
+  getSystemSelfTestRun,
+  getLatestSystemSelfTestRun,
   sendSuperTestEmail,
   sendTestDigest,
   forceLogoutUser,
+  listEmailDeliveriesForSuper,
+  getEmailDeliveryForSuper,
+  listEmailSuppressionsForSuper,
+  deleteEmailSuppressionForSuper,
+  configureResendWebhookSecret,
+  clearResendWebhookSecret,
+  getResendWebhookSecretState,
+  publishPortalMapVersion,
 } from "../controllers/super.controller.js";
+import { listTermsAcceptances } from "../controllers/terms.controller.js";
 import { requireSuperAdmin } from "../middleware/authorization.middleware.js";
 import rateLimit from "express-rate-limit";
 
@@ -36,8 +51,18 @@ const diagnosticsLimiter = rateLimit({
 
 router.use(authRequired);
 
-// One-button full system self-test (super admin only)
+// Immutable, server-timestamped Terms & Conditions acceptance audit.
+router.get(
+  "/terms-acceptances",
+  requireSuperAdmin,
+  listTermsAcceptances
+);
+
+// Isolated deep system review (super admin only). POST starts an asynchronous
+// run; GET endpoints provide real progress and the latest retained report.
 router.post("/self-test", diagnosticsLimiter, requireSuperAdmin, runSystemSelfTest);
+router.get("/self-test/latest", requireSuperAdmin, getLatestSystemSelfTestRun);
+router.get("/self-test/:runId", requireSuperAdmin, getSystemSelfTestRun);
 // Send a real test email to the admin's own address (super admin only)
 router.post("/send-test-email", diagnosticsLimiter, requireSuperAdmin, sendSuperTestEmail);
 // Send a real digest email (weekly/daily) to the admin to verify digest delivery (super admin only)
@@ -48,6 +73,37 @@ router.get("/dashboard-stats", getSuperDashboardStats);
 
 // Extension usage analytics (DAU/WAU/MAU)
 router.get("/usage-stats", getUsageStats);
+
+// Email observability (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1). The list
+// endpoint carries its own summary so a page load costs ONE request; the
+// detail endpoint exists for the drawer, not the table.
+router.get("/emails", requireSuperAdmin, listEmailDeliveriesForSuper);
+router.get("/emails/suppressions", requireSuperAdmin, listEmailSuppressionsForSuper);
+router.delete("/emails/suppressions/:id", requireSuperAdmin, deleteEmailSuppressionForSuper);
+
+// The Resend webhook signing secret. Write-only: the PUT stores it, the DELETE
+// unconfigures it, and the GET answers only whether one is present -- the value
+// itself never travels back out of the server, in any response, ever.
+router.put("/config/resend-webhook-secret", requireSuperAdmin, configureResendWebhookSecret);
+router.delete("/config/resend-webhook-secret", requireSuperAdmin, clearResendWebhookSecret);
+router.get("/config/resend-webhook-secret", requireSuperAdmin, getResendWebhookSecretState);
+router.get("/emails/:id", requireSuperAdmin, getEmailDeliveryForSuper);
+
+// O10: paid-provider (DeepSeek / OCR.space) call-volume meter -- backs the
+// "Provider usage" admin panel card.
+router.get("/provider-usage", requireSuperAdmin, getProviderUsageStats);
+
+// GD28: a new signed version of the GST downloader's portal map. authRequired
+// (router.use above), requireSuperAdmin here, assertSuper in the controller.
+router.post("/gst-portal-map", requireSuperAdmin, publishPortalMapVersion);
+
+// T1 (.kiro/PLAN.md): fleet-wide reminder delivery-failure visibility --
+// prerequisite for turning on reliableReminderDelivery/complianceGenerationShadow.
+router.get(
+  "/reminder-delivery-health",
+  requireSuperAdmin,
+  getReminderDeliveryHealthStats
+);
 
 // Full user directory (search, activity/role filters, pagination)
 router.get("/users", listAllUsers);
@@ -71,7 +127,12 @@ router.patch("/firms/:firmId/users/:userId", updateFirmUserForSuper);
 // Delete user from firm
 router.delete("/firms/:firmId/users/:userId", deleteFirmUserForSuper);
 
-// Delete firm completely
+// Erase a firm and everything scoped to it. Requires an explicit confirmation in the body;
+// see deleteFirmForSuper for why.
 router.delete("/firms/:firmId", deleteFirmForSuper);
+
+// Outstanding erasure requests, and the receipts produced by honouring them.
+router.get("/erasure-requests", listErasureRequestsForSuper);
+router.get("/erasure-receipts/:operationId", getErasureReceiptForSuper);
 
 export default router;

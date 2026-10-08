@@ -1,0 +1,108 @@
+/* =========================================================================
+   CA PRO public pages - the admin sign-in, the digest unsubscribe page and the daily digest
+   activation page (DS25). One sheet for the three, on the design system the panels wear:
+   /admin/capro-tokens.css (the light palette), /admin/ui/capro-fonts.css (IBM Plex, from this
+   site) and /admin/ui/capro-ui.css (buttons, fields, alerts). No CDN stylesheet and no web font
+   from another host: the sign-in page loaded Bootstrap from jsDelivr and a Google font, and the
+   other two pages carried their own palettes (one in an off-brand blue).
+   ========================================================================= */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body.public-page {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: var(--capro-canvas);
+  color: var(--capro-ink);
+  font-family: var(--capro-font-ui);
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.public-card {
+  width: min(440px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--capro-border-subtle);
+  border-radius: var(--capro-radius-xl);
+  background: var(--capro-surface);
+  box-shadow: var(--capro-shadow-2);
+}
+
+.public-card__rule { height: 3px; background: var(--capro-gradient-brand); }
+.public-card__body { padding: 24px 24px 20px; }
+
+.public-brand { display: flex; align-items: center; gap: 10px; margin: 0 0 20px; }
+
+.public-brand__mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--capro-radius-md);
+  background: var(--capro-brand-cream);
+  box-shadow: inset 0 0 0 1px var(--capro-border-subtle);
+}
+
+.public-brand__mark img { display: block; width: 26px; height: 26px; }
+.public-brand__name { font-size: 15px; line-height: 20px; font-weight: 600; }
+
+.public-title { margin: 0 0 4px; font-size: 20px; line-height: 28px; font-weight: 600; }
+.public-lede { margin: 0 0 20px; color: var(--capro-muted); }
+
+.public-field { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; }
+
+.public-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.public-actions > .cp-btn { flex: 1 1 160px; }
+
+/* One status line per page: what just happened and what to do next, in its tone. */
+.public-status {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--capro-border-subtle);
+  border-radius: var(--capro-radius-md);
+  background: var(--capro-subtle);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+/* Empty, it takes no room but stays in the page: a live region has to exist before it speaks. */
+.public-status:empty { margin: 0; padding: 0; border: 0; }
+.public-status[data-tone="success"] { border-color: color-mix(in srgb, var(--capro-success) 30%, var(--capro-border-subtle)); background: var(--capro-success-soft); color: var(--capro-ink); }
+.public-status[data-tone="critical"] { border-color: color-mix(in srgb, var(--capro-critical) 30%, var(--capro-border-subtle)); background: var(--capro-critical-soft); color: var(--capro-ink); }
+
+.public-foot { margin: 16px 0 0; font-size: 12px; line-height: 16px; color: var(--capro-muted); text-align: center; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+.hidden { display: none !important; }
+
+/* The unsubscribe page: what the link is for, then the choice. */
+.public-facts { margin: 0 0 16px; padding: 0; }
+.public-facts > div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--capro-border-subtle); }
+.public-facts dt { color: var(--capro-muted); font-weight: 400; }
+.public-facts dd { margin: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+
+.public-choices { margin: 0 0 12px; padding: 0; border: 0; }
+
+.public-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--capro-border-subtle);
+  border-radius: var(--capro-radius-md);
+  cursor: pointer;
+}
+
+.public-choice:hover { border-color: var(--capro-border-hover); }
+.public-choice:has(input:checked) { border-color: var(--capro-accent); background: var(--capro-accent-soft); }
+.public-choice input { flex: none; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--capro-accent); }
+.public-choice__desc { display: block; margin-top: 2px; font-size: 12px; line-height: 16px; color: var(--capro-muted); }

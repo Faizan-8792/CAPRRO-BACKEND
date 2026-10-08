@@ -1,0 +1,9 @@
+Materiality (Overall): Rs. 15,00,000 (1% of Revenue)
+
+Related Party Rental Arrangement [WP Ref: R-01]
+Background: The company leases its main warehouse from Meridian Estates LLP, a partnership in which the Managing Director's spouse holds a 60% partnership interest. The lease is for Rs. 4,80,000 per month (Rs. 57,60,000 annually). No comparable third-party rental agreement or market rent survey is on file. The lease was signed by the Managing Director on behalf of the company with no board resolution or audit committee approval recorded in the minute book reviewed.
+Findings: The related-party register maintained by the company secretary lists Meridian Estates LLP and correctly identifies the relationship. However, the annual related-party transactions disclosure note prepared for the financial statements does not mention this lease at all.
+
+Bank Loan Covenant Position [WP Ref: S-02]
+Background: The credit risk team's internal memo, dated 15 March 2025 and placed in the file, states: "The current ratio covenant under the Zenith Bank facility agreement was comfortably met at 31 March 2025, at 1.45:1 against a required minimum of 1.20:1, and no waiver or lender communication was necessary this year." A separate document in the same file, the signed lender correspondence dated 2 April 2025 from Zenith Bank, states: "We refer to your request dated 20 March 2025 for a waiver of the current ratio covenant, which your management reported would otherwise have been breached at year end, and confirm the waiver is granted for the year ended 31 March 2025."
+Findings: No reconciliation between the internal memo and the lender correspondence is on file, and no explanation for the discrepancy was requested from the credit risk team during the engagement.
