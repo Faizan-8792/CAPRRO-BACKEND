@@ -903,7 +903,12 @@ try {
         # The reporting tree and the adoption figures. The cycle check is the one that matters: a
         # reporting graph can contain a loop, no mongoose schema can prevent it because a ref
         # cannot say "not one of my own descendants", and a tree walk over one runs forever.
-        "firm-org-contract"
+        "firm-org-contract",
+        # canComplete against the completion route, for every firm role: the hint both clients draw
+        # "Mark complete" from must equal whether the write guard then lets the PATCH through.
+        "task-completion-offer-e2e",
+        # canWrite on the tax work reads against a tax work write, for every firm role.
+        "taxwork-write-offer-e2e"
     )
 
     # The other four unwired suites need a REPLICA SET, not just a mongod: they run multi-document
@@ -936,6 +941,8 @@ try {
         "terms-acceptance-contract" = "scratch-gates-terms"
         "gst-reconciliation-e2e" = "scratch-gates-gst-e2e"
         "bulk-actions-e2e" = "scratch-gates-bulk"
+        "task-completion-offer-e2e" = "scratch-gates-task-completion"
+        "taxwork-write-offer-e2e" = "scratch-gates-taxwork-offer"
         # IMPROVEMENT-PLAN-V2-2026-09-28 Part 1: the webhook suite boots the real app
         # and drives delivery/suppression rows; it refuses to run unless the URI is
         # loopback AND scratch-marked, so it needs its own entry here to run at all.

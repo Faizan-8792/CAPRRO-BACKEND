@@ -6,6 +6,7 @@ import TaxWorkSession, {
   STATUSES,
 } from "../models/TaxWorkSession.js";
 import { safeRecordActivity } from "../services/activity.service.js";
+import { describeFirmWriteAccess } from "../middleware/authorization.middleware.js";
 import {
   TAX_TEMPLATES,
   listTaxTypes,
@@ -302,12 +303,15 @@ export const listSessions = async (req, res, next) => {
       filter.assignedTo = assignedTo;
     if (mine === "1" || mine === "true") filter.assignedTo = req.user.id;
 
-    const sessions = await TaxWorkSession.find(filter)
-      .sort({ updatedAt: -1 })
-      .populate("clientId", "name gstin pan")
-      .populate("assignedTo", "name email")
-      .limit(500)
-      .lean();
+    const [sessions, canWrite] = await Promise.all([
+      TaxWorkSession.find(filter)
+        .sort({ updatedAt: -1 })
+        .populate("clientId", "name gstin pan")
+        .populate("assignedTo", "name email")
+        .limit(500)
+        .lean(),
+      describeFirmWriteAccess(req),
+    ]);
 
     const enriched = sessions.map((s) => {
       const total = (s.documents || []).length;
@@ -323,7 +327,10 @@ export const listSessions = async (req, res, next) => {
       };
     });
 
-    return res.json({ ok: true, sessions: enriched });
+    // Every route on this router passes the write guard, so canWrite is that guard's own answer,
+    // asked without enforcing it: the extension's tax work page leaves out the changes a read-only
+    // member could only be refused. Reading stays open to every member.
+    return res.json({ ok: true, sessions: enriched, canWrite });
   } catch (err) {
     next(err);
   }
@@ -336,14 +343,17 @@ export const getSession = async (req, res, next) => {
     if (!isValidObjectId(id)) {
       return res.status(400).json({ ok: false, error: "Invalid session id" });
     }
-    const session = await TaxWorkSession.findOne({ _id: id, ...scope })
-      .populate("clientId", "name gstin pan email phone contactPerson")
-      .populate("assignedTo", "name email")
-      .populate("createdBy", "name email")
-      .lean();
+    const [session, canWrite] = await Promise.all([
+      TaxWorkSession.findOne({ _id: id, ...scope })
+        .populate("clientId", "name gstin pan email phone contactPerson")
+        .populate("assignedTo", "name email")
+        .populate("createdBy", "name email")
+        .lean(),
+      describeFirmWriteAccess(req),
+    ]);
     if (!session)
       return res.status(404).json({ ok: false, error: "Session not found" });
-    return res.json({ ok: true, session });
+    return res.json({ ok: true, session, canWrite });
   } catch (err) {
     next(err);
   }

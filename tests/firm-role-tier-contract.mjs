@@ -195,6 +195,47 @@ await test("write access: middleware and accessor agree on all 216 combinations"
   assert.deepEqual(disagreed, []);
 });
 
+// The answer a READ gives its client about writing (canComplete on the task reads, canWrite on the
+// tax work list) must be the gate's own answer, or a client offers a control the gate refuses - or
+// hides one it would allow.
+await test("the write answer reads give: describeWriteAccess agrees with the gate on all 216 combinations", async () => {
+  const disagreed = [];
+  for (const item of cases) {
+    const guards = createFirmAuthorization(stubModels(item.firm, item.membership));
+    const gate = await middlewareAllows(guards.requireFirmWriteAccess, item.user, "PATCH");
+    const told = await guards.describeWriteAccess({ user: item.user, method: "GET" });
+    if (gate !== told) {
+      disagreed.push(`${item.label}: gate=${gate} describeWriteAccess=${told}`);
+    }
+  }
+  assert.deepEqual(disagreed, []);
+});
+
+await test("describeWriteAccess says no, without throwing, for a caller with no firm or no session", async () => {
+  const guards = createFirmAuthorization(stubModels(null, null));
+  assert.equal(await guards.describeWriteAccess({ user: { id: "u", role: "USER", firmId: null } }), false);
+  assert.equal(await guards.describeWriteAccess({}), false);
+});
+
+// The matrix above only ever has an active firm. A deactivated one is refused by the gate before
+// any rung is read - and an ACTIVE membership row on its own would otherwise read as a writer.
+await test("describeWriteAccess says no for a deactivated firm, as the gate does, whatever the membership", async () => {
+  const firm = { _id: FIRM_ID, ownerUserId: OWNER_ID, isActive: false, kind: "SHARED", memberAccess: "EDIT" };
+  const disagreed = [];
+  for (const membership of MEMBERSHIPS) {
+    const guards = createFirmAuthorization(stubModels(firm, membership.value));
+    for (const accountRole of ACCOUNT_ROLES) {
+      const user = { id: OWNER_ID, role: accountRole, firmId: FIRM_ID };
+      const gate = await middlewareAllows(guards.requireFirmWriteAccess, user, "PATCH");
+      const told = await guards.describeWriteAccess({ user });
+      if (gate !== false || told !== false) {
+        disagreed.push(`${accountRole} / ${membership.label}: gate=${gate} describeWriteAccess=${told}`);
+      }
+    }
+  }
+  assert.deepEqual(disagreed, []);
+});
+
 await test("read access: middleware and accessor agree on all 216 combinations", async () => {
   const disagreed = [];
   for (const item of cases) {

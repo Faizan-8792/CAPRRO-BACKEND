@@ -172,11 +172,30 @@ export function createFirmAuthorization({
     }
   }
 
+  /**
+   * Whether requireFirmWriteAccess would let this caller write, without enforcing anything.
+   *
+   * For a read that tells its client whether a write would be accepted - canComplete on the task
+   * reads, canWrite on the tax work list - so neither client offers a control the guard can only
+   * refuse. It is the guard's own loader and the guard's own refusals in the guard's order, so the
+   * answer cannot drift from the gate; tests/firm-role-tier-contract.mjs compares the two on every
+   * combination of account role, membership, firm policy, firm kind and ownership.
+   */
+  async function describeWriteAccess(req) {
+    if (!req.user?.firmId) return false;
+    const { firm, authority } = await loadAuthority(
+      req,
+      "_id ownerUserId kind memberAccess",
+    );
+    return Boolean(firm) && !authority.isForeignPersonalWorkspace && authority.canWrite;
+  }
+
   return {
     requireFirmMember: (req, res, next) => requireActiveFirm(req, res, next),
     requireFirmAdmin: (req, res, next) =>
       requireActiveFirm(req, res, next, { adminOnly: true }),
     requireFirmWriteAccess,
+    describeWriteAccess,
   };
 }
 
@@ -185,6 +204,7 @@ const firmAuthorization = createFirmAuthorization();
 export const requireFirmMember = firmAuthorization.requireFirmMember;
 export const requireFirmAdmin = firmAuthorization.requireFirmAdmin;
 export const requireFirmWriteAccess = firmAuthorization.requireFirmWriteAccess;
+export const describeFirmWriteAccess = firmAuthorization.describeWriteAccess;
 
 export function requireSuperAdmin(req, res, next) {
   if (!req.user) return reject(req, res, 401, "Unauthorized");

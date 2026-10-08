@@ -4,6 +4,7 @@ import Task from "../models/Task.js";
 import User from "../models/User.js";
 import FirmMembership from "../models/FirmMembership.js";
 import AppConfig from "../models/AppConfig.js";
+import { describeFirmWriteAccess } from "../middleware/authorization.middleware.js";
 import { parseStatutoryDayIso } from "../services/robust-normalize.service.js";
 import { safeRecordActivity } from "../services/activity.service.js";
 import ActivityEvent from "../models/ActivityEvent.js";
@@ -646,6 +647,19 @@ export const archiveTask = async (req, res) => {
   }
 };
 
+// -------- Whether this caller may complete tasks at all --------
+
+/**
+ * The write half of "may this person complete this task".
+ *
+ * completeTaskFromUser sits behind requireFirmWriteAccess, so a read-only member - a VIEWER, or a
+ * MEMBER of a firm whose memberAccess is READ_ONLY - can only ever be refused it. Both clients draw
+ * "Mark complete" from canComplete, so a canComplete that ignored write access offered those
+ * members a control that could do nothing but fail. describeFirmWriteAccess is the write guard's
+ * own decision, asked without enforcing it, so the hint and the gate cannot disagree.
+ */
+const callerMayCompleteTasks = (req) => describeFirmWriteAccess(req);
+
 // -------- Exact task source lookup for workspace links --------
 
 export const getTaskSource = async (req, res) => {
@@ -696,7 +710,8 @@ export const getTaskSource = async (req, res) => {
     ]);
     const canComplete =
       String(task.assignedTo || "") === String(userId) &&
-      openStatuses.has(task.status);
+      openStatuses.has(task.status) &&
+      (await callerMayCompleteTasks(req));
 
     return res.json({ ok: true, task, canComplete });
   } catch (err) {
@@ -730,7 +745,7 @@ export const getMyOpenTasks = async (req, res) => {
     };
     scopeCaseArtifacts(filter, capturedNoticeCasesEnabled(req));
 
-    const [total, tasks] = await Promise.all([
+    const [total, tasks, canComplete] = await Promise.all([
       Task.countDocuments(filter),
       Task.find(filter)
         .sort({ dueDateISO: 1, _id: 1 })
@@ -744,11 +759,16 @@ export const getMyOpenTasks = async (req, res) => {
           "clientName serviceType title dueDateISO status assignedTo remarks assigneeReadAt assigneeReadBy documentReadiness reconciliationExceptionCount reviewStatus mutationVersion createdAt updatedAt",
         )
         .lean(),
+      callerMayCompleteTasks(req),
     ]);
 
+    // Every row here is the caller's own open work, so the only thing left to decide whether
+    // "Mark complete" can succeed is write access - stated once and on every row, because the
+    // extension reads it per task.
     return res.json({
       ok: true,
-      tasks,
+      tasks: tasks.map((task) => ({ ...task, canComplete })),
+      canComplete,
       pagination: paginationResult(page, limit, total),
     });
   } catch (err) {
