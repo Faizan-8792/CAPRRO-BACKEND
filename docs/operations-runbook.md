@@ -307,6 +307,13 @@ section is relative to that directory.
    Atlas **M0 free tier** is slow. Poll until `"status":"ok"` before declaring the deploy good, and
    only treat it as a failure if it has not settled after roughly 5 minutes.
 
+   **A code-only deploy can take about 6 minutes when digest recovery is mid-run.** Measured
+   2026-10-08 (commit 3b8dc46): `/health` stayed `degraded` with `"backgroundStage":"digest-startup"`,
+   `"backgroundError":"DIGEST_RECOVERY_BUSY"` and `"backgroundDetail":"Digest recovery is already
+   running"` - the previous process's recovery pass still held its lease - and flipped to `ok` at
+   uptime 355 s with no action, because `server.js` retries the bootstrap on its own. Read that
+   error as "wait", not as a failed deploy; only past roughly 8 minutes is it worth investigating.
+
    **One thing to check on the first deploy after 2026-08-24.** Index provisioning now covers the
    GST storage collections (ImportBatch, ImportRow, ReconciliationRun and friends), which it did not
    before -- a fresh database could not commit a GST import at all. Provisioning builds a UNIQUE
