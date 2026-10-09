@@ -24,9 +24,9 @@ const uri = (() => {
 })();
 
 const SCRATCH_MARK = "scratch";
-if (!uri || !uri.includes(SCRATCH_MARK)) {
+const uriOk = Boolean(uri && uri.includes(SCRATCH_MARK));
+if (!uriOk) {
   console.error("Refusing to run: MONGODB_URI must be a loopback scratch database.");
-  process.exit(1);
 }
 
 let passed = 0;
@@ -136,4 +136,4 @@ async function runSuite() {
   return failed === 0 ? 0 : 1;
 }
 
-process.exitCode = await runSuite();
+process.exitCode = uriOk ? await runSuite() : 1;
