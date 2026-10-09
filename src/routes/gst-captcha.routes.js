@@ -9,6 +9,16 @@
 // The firm's key lives in the server env (CAPTCHA_API). Each solve is billed
 // to that key, so the route is signed-in-users-only, rate-limited hard, and
 // refuses anything that is not a small inline JPEG/PNG.
+//
+// Hardening (2026-10-09, owner decision to keep the relay):
+//   - The express-rate-limit window is per account (the authenticated user
+//     id), not per internet address — a shared office connection cannot turn
+//     one firm's budget into everyone's ceiling, and one account cannot
+//     multiply theirs across addresses.
+//   - A daily per-account cap on top of the burst window, so a leaked
+//     credential cannot drain the key around the clock.
+//   - The reply never carries the service balance. What the key is worth is
+//     the operator's business, not the caller's.
 
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
@@ -28,13 +38,44 @@ const solveLimiter = rateLimit({
   limit: 60,
   standardHeaders: "draft-7",
   legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || req.ip,
   message: { ok: false, error: "Too many captcha solves from this account. Wait a few minutes." },
 });
+
+// The daily ceiling. One hundred solves is a full month of sign-ins for a
+// large firm, and far short of anything worth scripting against.
+const DAILY_SOLVE_CAP = 100;
+
+// Today's solves per account, in this process. Resets at midnight UTC. A
+// restart clears the counter — acceptable for a cost guard whose real bound
+// is the express limiter above plus the key's own dashboard.
+const solvesToday = new Map();
+let solvesTodayDate = new Date().toISOString().slice(0, 10);
+
+function dailyCountAndBump(userId) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (today !== solvesTodayDate) {
+    solvesToday.clear();
+    solvesTodayDate = today;
+  }
+  const next = (solvesToday.get(userId) || 0) + 1;
+  solvesToday.set(userId, next);
+  return next;
+}
 
 router.post("/captcha-solve", authRequired, solveLimiter, async (req, res) => {
   const apiKey = process.env.CAPTCHA_API;
   if (!apiKey) {
     return res.status(503).json({ ok: false, error: "Captcha solving is not configured on this server." });
+  }
+
+  const userId = req.user?.id || req.ip || "unknown";
+  const usedToday = dailyCountAndBump(userId);
+  if (usedToday > DAILY_SOLVE_CAP) {
+    return res.status(429).json({
+      ok: false,
+      error: `This account has reached its captcha limit for today (${DAILY_SOLVE_CAP}). It resets at midnight UTC.`,
+    });
   }
 
   const dataUrl = String(req.body?.dataUrl || "");
@@ -86,7 +127,6 @@ router.post("/captcha-solve", authRequired, solveLimiter, async (req, res) => {
     ok: true,
     prediction: String(answer.data.prediction),
     confidence: String(answer.data.confidence || ""),
-    balance: answer.billing?.balance_remaining != null ? String(answer.billing.balance_remaining) : "",
   });
 });
 

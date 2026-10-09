@@ -768,6 +768,9 @@ try {
         # O22: a signed-in request to an /api path no route matches answers the JSON envelope
         # (404, code NOT_FOUND), not Express's HTML page; signed out it is still the catch-all's 401.
         "api-not-found-contract",
+        # The auto sign-in's captcha relay (2026-10-09): auth, shape guards,
+        # the daily per-account cap and the no-balance rule, against the real app.
+        "gst-captcha-route-contract",
         # GD30 (owner decision OD4): the GST downloader's run records - server-side validation,
         # firm A cannot read B, idempotent upsert, newer-wins, the recording switch off writes
         # nothing, the bounds, the unique key (Mongo subset, scratch-marked).
@@ -958,6 +961,7 @@ try {
         "email-delivery-contract" = "scratch-gates-email-delivery"
         "super-emails-controller-contract" = "scratch-gates-super-emails"
         "api-not-found-contract" = "scratch-gates-api-not-found"
+        "gst-captcha-route-contract" = "scratch-gates-captcha-route"
         "gst-downloads-contract" = "scratch-gates-gst-downloads"
         "control-change-reason" = "scratch-gates-control-change"
     }

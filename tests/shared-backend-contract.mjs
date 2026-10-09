@@ -102,7 +102,11 @@ check(
 // length check, because the value of this contract is that a third origin
 // cannot appear without someone deliberately editing this line. The point was
 // never "exactly one host"; it was "no host we did not agree to".
-const ALLOWED_HOST_PERMISSIONS = [`${SHARED_ORIGIN}/*`, "https://*.gst.gov.in/*"];
+// captchakings.com joined the agreed set on 2026-10-09 by owner decision
+// (option C retained): the auto sign-in's signed-out fallback solves directly
+// with the machine's own key. Signed-in solves go through the shared origin's
+// captcha relay, which holds the key server-side.
+const ALLOWED_HOST_PERMISSIONS = [`${SHARED_ORIGIN}/*`, "https://*.gst.gov.in/*", "https://captchakings.com/*"];
 
 check(
   "extension host_permissions allow only the shared backend and the GST portal",
