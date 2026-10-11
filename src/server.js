@@ -23,6 +23,7 @@ import {
 import { checkReminderDeliveryHealthAndAlert } from "./services/reminder-delivery-alert.service.js";
 import { sendReminderDeliveryAlertEmail } from "./services/email.service.js";
 import { SUPER_ADMIN_EMAIL } from "./middleware/authorization.middleware.js";
+import { flushAuthHealth } from "./services/auth-health.service.js";
 import app, {
   setBackgroundInitializationError,
   setBackgroundReadiness,
@@ -562,6 +563,10 @@ async function gracefulShutdown(signal) {
   } catch (error) {
     console.error("Reminder delivery alert scheduler shutdown error:", error.message);
   }
+
+  // Auth-health events are buffered for up to 30 s; write them before the
+  // connection closes. Never throws.
+  await flushAuthHealth();
 
   try {
     await mongoose.connection.close(false);

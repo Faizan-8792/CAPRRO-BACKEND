@@ -9,7 +9,9 @@ import {
   updateMe,
 } from "../controllers/auth.controller.js";
 import { getCurrentTerms } from "../controllers/terms.controller.js";
-import { authRequired } from "../middleware/auth.middleware.js";
+import { refreshToken, refreshLimiter } from "../controllers/auth-refresh.controller.js";
+import { postSessionEvent } from "../controllers/auth-session-events.controller.js";
+import { authRequired, authRequiredForRefresh } from "../middleware/auth.middleware.js";
 
 const router = Router();
 
@@ -46,6 +48,13 @@ router.post("/send-otp", sendOtpLimiter, sendOtp);
 router.post("/verify-otp", verifyOtpLimiter, verifyOtpAndLogin);
 router.post("/google", googleLoginLimiter, googleLogin);
 router.post("/google/desktop-token", googleLoginLimiter, googleDesktopToken);
+// Sliding-session renewal (PHASE 8): a still-valid token trades for a fresh
+// one, with the user re-hydrated and the revocation version re-checked on
+// every call. Refuses expired tokens outright - no replay grace.
+router.post("/refresh", authRequiredForRefresh, refreshLimiter, refreshToken);
+// Client-known authentication facts (explicit sign-out, restart recovery,
+// refresh retry). Authenticated: a signed-out client has nothing to report.
+router.post("/session-event", authRequired, postSessionEvent);
 router.get("/me", authRequired, getMe);
 router.patch("/me", authRequired, updateMe);
 

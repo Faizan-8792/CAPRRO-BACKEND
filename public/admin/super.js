@@ -2427,6 +2427,258 @@ async function loadFirmsSection() {
   }
 }
 
+// ─── Sign-in health (PHASE 8) ───────────────────────────────────────
+// GET /api/super/auth-health: aggregate counters only - the collection behind it holds no
+// tokens, passwords, cookies or addresses. A refused request is NOT a sign-out (the app may
+// renew or retry), so the two are never added together here. An unknown kind, reason or app
+// from a newer server is shown verbatim rather than folded into a known one.
+const sessionHealthState = { days: 30, loading: false };
+
+const SESSION_KIND_LABELS = {
+  login_success: "Signed in",
+  login_fail: "Sign-in failed",
+  refresh_success: "Renewed",
+  refresh_fail: "Renewal refused",
+  auth_rejection: "Request refused",
+  signed_out: "Signed out",
+  session_restored: "Restored after restart",
+  refresh_retry: "Renewal retried",
+};
+const SESSION_REASON_LABELS = {
+  expired: "Sign-in expired",
+  revoked: "Session revoked (signed out everywhere)",
+  invalid: "Token not recognised",
+  inactive: "Account inactive",
+  missing_user: "Account no longer exists",
+  no_credentials: "No sign-in sent",
+  network: "Network unavailable",
+  server_error: "Server error",
+  rate_limited: "Too many requests",
+  conflict: "Conflict",
+  max_age: "Maximum session age reached",
+  signed_out: "User pressed Sign out",
+  restart: "Browser or app restart",
+  race: "Lost a race with another renewal",
+  unknown: "Not recorded",
+};
+const SESSION_PLATFORM_LABELS = { extension: "Extension", desktop: "Desktop", website: "Website", unknown: "Unknown" };
+const SESSION_PLATFORMS = ["extension", "desktop", "website", "unknown"];
+const SESSION_DURATION_LABELS = {
+  0: "Under 1 hour",
+  1: "1 to 6 hours",
+  6: "6 to 24 hours",
+  24: "1 to 3 days",
+  72: "3 to 7 days",
+  168: "7 to 30 days",
+  "720+": "30 days or more",
+};
+
+function sessionLabel(map, value) {
+  const key = String(value ?? "");
+  return Object.hasOwn(map, key) ? map[key] : key || "Not recorded";
+}
+
+function sessionSum(rows, predicate) {
+  return rows.reduce((total, row) => (predicate(row) ? total + (Number(row.count) || 0) : total), 0);
+}
+
+function sessionEmptyRow(columns, text) {
+  return `<tr><td colspan="${columns}" class="text-muted">${escapeHtml(text)}</td></tr>`;
+}
+
+function sessionWindowText(days) {
+  return days === 1 ? "the last 24 hours" : `the last ${days} days`;
+}
+
+function setSessionWindowButtons(days) {
+  document.querySelectorAll("#sessionsWindowButtons [data-days]").forEach((button) => {
+    const pressed = Number(button.getAttribute("data-days")) === days;
+    button.classList.toggle("active", pressed);
+    button.setAttribute("aria-pressed", pressed ? "true" : "false");
+  });
+}
+
+async function loadSessionHealth(days = sessionHealthState.days) {
+  const statusEl = qs("sessionsStatus");
+  const wanted = Math.max(1, Math.min(365, Math.floor(Number(days)) || 30));
+  sessionHealthState.days = wanted;
+  setSessionWindowButtons(wanted);
+  if (statusEl) {
+    statusEl.removeAttribute("data-tone");
+    statusEl.textContent = `Loading sign-in health for ${sessionWindowText(wanted)}...`;
+  }
+  sessionHealthState.loading = true;
+  try {
+    const data = await api(`/super/auth-health?days=${wanted}`);
+    if (!data?.ok) throw new Error("Sign-in health could not be loaded.");
+    renderSessionHealth(data);
+    const anything = Object.values(data.totals || {}).some((count) => Number(count) > 0);
+    if (statusEl) {
+      statusEl.textContent = anything
+        ? `Showing ${sessionWindowText(data.windowDays || wanted)} (UTC).`
+        : `No sign-in events in ${sessionWindowText(data.windowDays || wanted)}. Recording began with this release, so earlier days have none.`;
+    }
+  } catch (err) {
+    if (statusEl) {
+      statusEl.dataset.tone = "critical";
+      const reason = String(err.message || "the server did not answer").replace(/[.\s]+$/, "");
+      statusEl.textContent = `Sign-in health could not be loaded: ${reason}. Choose Show to try again.`;
+    }
+  } finally {
+    sessionHealthState.loading = false;
+  }
+}
+
+function renderSessionHealth(data) {
+  const rows = Array.isArray(data.byKindReason) ? data.byKindReason : [];
+  const totals = data.totals || {};
+  const count = (kind) => Number(totals[kind]) || 0;
+  const explicitSignOuts = sessionSum(rows, (r) => r.kind === "signed_out" && r.reason === "signed_out");
+  const otherSignOuts = count("signed_out") - explicitSignOuts;
+
+  const grid = qs("sessionsGrid");
+  if (grid) {
+    const card = (tone, label, value, sub) => `
+      <div class="stat-card stat-${tone}">
+        <div class="stat-label">${escapeHtml(label)}</div>
+        <div class="stat-value">${superCount(value)}</div>
+        <div class="stat-sub">${escapeHtml(sub)}</div>
+      </div>`;
+    grid.innerHTML = [
+      card("primary", "Sign-ins", count("login_success"), `${superCount(count("login_fail"))} failed`),
+      card("success", "Renewed", count("refresh_success"), `${superCount(count("refresh_fail"))} refused by the server`),
+      card("gold", "Restored after restart", count("session_restored"), "Still signed in after the browser or app restarted"),
+      card("gold", "Renewals retried", count("refresh_retry"), "Network or server trouble; the session was kept"),
+      card("primary", "Signed out by the user", explicitSignOuts, "Pressed Sign out"),
+      card("gold", "Other sign-outs", otherSignOuts, "Cleared by the app; cause not recorded"),
+      card("primary", "Refused requests", count("auth_rejection"), "Not sign-outs; reasons below"),
+    ].join("");
+  }
+
+  const byDay = new Map();
+  for (const row of Array.isArray(data.byDay) ? data.byDay : []) {
+    const day = String(row.day || "");
+    if (!day) continue;
+    const entry = byDay.get(day) || { _id: day };
+    entry[row.kind] = (entry[row.kind] || 0) + (Number(row.count) || 0);
+    byDay.set(day, entry);
+  }
+  const dayRows = [...byDay.values()];
+  renderDayChart(qs("sessionsStartChart"), {
+    rows: dayRows.filter((row) => row.login_success || row.refresh_success),
+    windowDays: data.windowDays || sessionHealthState.days,
+    series: [{ key: "login_success", label: "Sign-ins" }, { key: "refresh_success", label: "Renewals" }],
+    caption: "Sign-ins and renewals per UTC day",
+    empty: "No sign-ins or renewals in this window",
+  });
+  renderDayChart(qs("sessionsEndChart"), {
+    rows: dayRows.filter((row) => row.auth_rejection || row.signed_out),
+    windowDays: data.windowDays || sessionHealthState.days,
+    series: [{ key: "auth_rejection", label: "Refused" }, { key: "signed_out", label: "Sign-outs" }],
+    caption: "Refused requests and sign-outs per UTC day",
+    empty: "No refused requests or sign-outs in this window",
+  });
+
+  const rejectionsBody = qs("sessionsRejectionsBody");
+  if (rejectionsBody) {
+    const rejections = rows.filter((r) => r.kind === "auth_rejection");
+    const reasons = [...new Set(rejections.map((r) => r.reason))];
+    reasons.sort((a, b) => sessionSum(rejections, (r) => r.reason === b) - sessionSum(rejections, (r) => r.reason === a));
+    const extraPlatforms = [...new Set(rejections.map((r) => r.platform))].filter((p) => !SESSION_PLATFORMS.includes(p));
+    rejectionsBody.innerHTML = reasons.length
+      ? reasons.map((reason) => {
+          const cells = SESSION_PLATFORMS.map((platform) =>
+            `<td>${superCount(sessionSum(rejections, (r) => r.reason === reason && r.platform === platform))}</td>`).join("");
+          const extras = extraPlatforms
+            .map((p) => [p, sessionSum(rejections, (r) => r.reason === reason && r.platform === p)])
+            .filter(([, n]) => n > 0);
+          const other = extras.length
+            ? ` <span class="text-muted">(${extras.map(([p, n]) => `${escapeHtml(p)}: ${superCount(n)}`).join(", ")})</span>`
+            : "";
+          return `<tr><th scope="row">${escapeHtml(sessionLabel(SESSION_REASON_LABELS, reason))}${other}</th>${cells}<td>${superCount(sessionSum(rejections, (r) => r.reason === reason))}</td></tr>`;
+        }).join("")
+      : sessionEmptyRow(6, "No refused requests in this window.");
+  }
+
+  const failuresBody = qs("sessionsFailuresBody");
+  if (failuresBody) {
+    const failureKinds = ["login_fail", "refresh_fail", "refresh_retry", "signed_out"];
+    const failures = rows
+      .filter((r) => failureKinds.includes(r.kind))
+      .sort((a, b) => failureKinds.indexOf(a.kind) - failureKinds.indexOf(b.kind) || (Number(b.count) || 0) - (Number(a.count) || 0));
+    failuresBody.innerHTML = failures.length
+      ? failures.map((r) => `<tr>
+          <td>${escapeHtml(sessionLabel(SESSION_KIND_LABELS, r.kind))}</td>
+          <td>${escapeHtml(sessionLabel(SESSION_REASON_LABELS, r.reason))}</td>
+          <td>${escapeHtml(sessionLabel(SESSION_PLATFORM_LABELS, r.platform))}</td>
+          <td>${superCount(r.count)}</td>
+        </tr>`).join("")
+      : sessionEmptyRow(4, "No failed sign-ins, renewals or sign-outs in this window.");
+  }
+
+  const durationsBody = qs("sessionsDurationsBody");
+  if (durationsBody) {
+    const buckets = Array.isArray(data.sessionDurationHours) ? data.sessionDurationHours : [];
+    durationsBody.innerHTML = buckets.length
+      ? buckets.map((b) => `<tr><td>${escapeHtml(sessionLabel(SESSION_DURATION_LABELS, b.bucket))}</td><td>${superCount(b.count)}</td></tr>`).join("")
+      : sessionEmptyRow(2, "No session both started and ended inside this window.");
+  }
+
+  const versionsBody = qs("sessionsVersionsBody");
+  if (versionsBody) {
+    const versionRows = Array.isArray(data.byVersion) ? data.byVersion : [];
+    const groups = new Map();
+    for (const row of versionRows) {
+      const key = `${row.platform}\u0000${row.appVersion || ""}`;
+      const group = groups.get(key) || { platform: row.platform, appVersion: row.appVersion || "", counts: {} };
+      group.counts[row.kind] = (group.counts[row.kind] || 0) + (Number(row.count) || 0);
+      groups.set(key, group);
+    }
+    const ordered = [...groups.values()].sort((a, b) =>
+      String(a.platform).localeCompare(String(b.platform)) || String(b.appVersion).localeCompare(String(a.appVersion), undefined, { numeric: true }));
+    const columns = ["login_success", "refresh_success", "refresh_fail", "auth_rejection", "signed_out", "session_restored"];
+    versionsBody.innerHTML = ordered.length
+      ? ordered.map((g) => `<tr>
+          <td>${escapeHtml(sessionLabel(SESSION_PLATFORM_LABELS, g.platform))}</td>
+          <td>${g.appVersion ? escapeHtml(g.appVersion) : '<span class="text-muted">Not reported</span>'}</td>
+          ${columns.map((kind) => `<td>${superCount(g.counts[kind] || 0)}</td>`).join("")}
+        </tr>`).join("")
+      : sessionEmptyRow(8, "No events in this window.");
+  }
+}
+
+function bindSessionHealthControls() {
+  document.querySelectorAll("#sessionsWindowButtons [data-days]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const custom = qs("sessionsCustomDays");
+      if (custom) custom.value = "";
+      loadSessionHealth(Number(button.getAttribute("data-days")));
+    });
+  });
+  const apply = qs("sessionsApplyBtn");
+  if (apply) {
+    apply.addEventListener("click", () => {
+      const custom = qs("sessionsCustomDays");
+      const raw = custom?.value?.trim() || "";
+      if (!raw) {
+        loadSessionHealth(sessionHealthState.days);
+        return;
+      }
+      const days = Number(raw);
+      if (!Number.isInteger(days) || days < 1 || days > 365) {
+        const statusEl = qs("sessionsStatus");
+        if (statusEl) {
+          statusEl.dataset.tone = "warning";
+          statusEl.textContent = "Enter a whole number of days from 1 to 365.";
+        }
+        return;
+      }
+      loadSessionHealth(days);
+    });
+  }
+}
+document.addEventListener("DOMContentLoaded", bindSessionHealthControls);
+
 // ─── Each page loads its own data (DS10) ────────────────────────────
 // The panel used to fetch every page's data at startup - about ten requests against the API's
 // limiter of 50 per 15 minutes, so a few reloads could lock the super admin out of their own
@@ -2436,6 +2688,7 @@ const SUPER_PAGE_LOADERS = {
   overview: () => loadDashboardStats(),
   controls: () => Promise.all([loadAppConfigSection(), loadProviderUsageStats(), loadReminderDeliveryHealthStats(), loadControlChanges()]),
   analytics: () => loadUsageStats(),
+  sessions: () => loadSessionHealth(),
   emails: () => Promise.all([loadEmailsPage(), loadEmailSuppressions()]),
   users: () => loadUserDirectory(),
   firms: () => loadFirmsSection(),
@@ -3113,6 +3366,7 @@ const SUPER_PAGES = [
   "controls",
   "overview",
   "analytics",
+  "sessions",
   "emails",
   "users",
   "firms",

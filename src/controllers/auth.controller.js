@@ -2,6 +2,7 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { OAuth2Client } from "google-auth-library";
 import User from "../models/User.js";
+import { recordAuthHealth } from "../services/auth-health.service.js";
 import { sendOtpEmail } from "../services/email.service.js";
 import { ensurePersonalFirm } from "../services/firm-provisioning.service.js";
 import { safeRecordActivity } from "../services/activity.service.js";
@@ -170,11 +171,13 @@ export const verifyOtpAndLogin = async (req, res, next) => {
     const user = await User.findOne({ email: normalizedEmail });
 
     if (!user) {
+      recordAuthHealth({ kind: "login_fail", reason: "invalid", platform: "website" });
       return res.status(404).json({ ok: false, error: "User not found" });
     }
 
     // Brute-force lockout: too many wrong OTPs → temporary hard stop.
     if (user.otpLockedUntil && user.otpLockedUntil.getTime() > Date.now()) {
+      recordAuthHealth({ kind: "login_fail", reason: "rate_limited", platform: "website", userId: user._id });
       return res.status(429).json({
         ok: false,
         error: "Too many incorrect attempts. Please request a new OTP shortly.",
@@ -192,12 +195,14 @@ export const verifyOtpAndLogin = async (req, res, next) => {
     }
 
     if (!user.otpCodeHash || !user.otpExpiresAt) {
+      recordAuthHealth({ kind: "login_fail", reason: "invalid", platform: "website", userId: user._id });
       return res
         .status(400)
         .json({ ok: false, error: "No active OTP for this user" });
     }
 
     if (user.otpExpiresAt.getTime() < Date.now()) {
+      recordAuthHealth({ kind: "login_fail", reason: "expired", platform: "website", userId: user._id });
       return res.status(400).json({ ok: false, error: "OTP expired" });
     }
 
@@ -212,6 +217,12 @@ export const verifyOtpAndLogin = async (req, res, next) => {
         user.otpExpiresAt = undefined;
       }
       await user.save();
+      recordAuthHealth({
+        kind: "login_fail",
+        reason: locked ? "rate_limited" : "invalid",
+        platform: "website",
+        userId: user._id,
+      });
       return res.status(locked ? 429 : 400).json({
         ok: false,
         error: locked
@@ -233,11 +244,15 @@ export const verifyOtpAndLogin = async (req, res, next) => {
 
     const payload = buildTokenPayload(user);
     const token = jwt.sign(
-      { ...payload, tv: user.tokenVersion || 0 },
+      // at: when this sign-in happened. Renewal preserves it, and refuses to
+      // extend a session past at + SESSION_MAX_AGE_DAYS (auth-refresh.controller.js).
+      { ...payload, tv: user.tokenVersion || 0, at: Math.floor(Date.now() / 1000) },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     );
 
+    // The OTP route serves the hosted admin sign-in only (public/admin/login.js).
+    recordAuthHealth({ kind: "login_success", platform: "website", userId: user._id });
     return res.json({ ok: true, token, user: payload });
   } catch (err) {
     next(err);
@@ -294,6 +309,7 @@ export const googleLogin = async (req, res, next) => {
         // access token, ensure it was minted for OUR client, then read profile.
         const info = await googleClient.getTokenInfo(accessToken);
         if (!GOOGLE_CLIENT_IDS.includes(info.aud)) {
+          recordAuthHealth({ kind: "login_fail", reason: "invalid", platform: "unknown" });
           return res
             .status(401)
             .json({ ok: false, error: "Google token audience mismatch" });
@@ -319,10 +335,12 @@ export const googleLogin = async (req, res, next) => {
         }
       }
     } catch {
+      recordAuthHealth({ kind: "login_fail", reason: "invalid", platform: "unknown" });
       return res.status(401).json({ ok: false, error: "Invalid Google token" });
     }
 
     if (!email || emailVerified === false) {
+      recordAuthHealth({ kind: "login_fail", reason: "invalid", platform: "unknown" });
       return res
         .status(401)
         .json({ ok: false, error: "Google account email is not verified" });
@@ -337,6 +355,7 @@ export const googleLogin = async (req, res, next) => {
       declaredClientType === "DESKTOP" &&
       googleAudience !== DESKTOP_GOOGLE_CLIENT_ID
     ) {
+      recordAuthHealth({ kind: "login_fail", reason: "invalid", platform: "unknown" });
       return res.status(401).json({
         ok: false,
         code: "GOOGLE_DESKTOP_AUDIENCE_REQUIRED",
@@ -403,11 +422,16 @@ export const googleLogin = async (req, res, next) => {
       client: isDesktopSignIn ? "desktop" : "extension",
     });
     const jwtToken = jwt.sign(
-      { ...tokenPayload, tv: user.tokenVersion || 0 },
+      { ...tokenPayload, tv: user.tokenVersion || 0, at: Math.floor(Date.now() / 1000) },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     );
 
+    recordAuthHealth({
+      kind: "login_success",
+      platform: tokenPayload.client === "desktop" ? "desktop" : "extension",
+      userId: user._id,
+    });
     return res.json({
       ok: true,
       token: jwtToken,

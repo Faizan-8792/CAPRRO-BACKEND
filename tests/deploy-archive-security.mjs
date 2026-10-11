@@ -2404,9 +2404,17 @@ if (listed.status !== 0 || listed.error) {
   // signed-in-only POST that forwards a small inline image to captchakings.com under the server's
   // own CAPTCHA_API read at call time - the key is never logged, never returned, and the rate
   // limit and payload bounds are in the same file.
+  // 211 -> 216 on 2026-10-11 for PHASE 8, session renewal and auth-health analytics, all five
+  // confirmed clean by this scan before the pin moved: src/models/AuthHealthEvent.js (a schema
+  // with fixed vocabularies and a TTL, no token, email or IP field); src/services/auth-health.service.js
+  // (validated, coalesced, fire-and-forget writes and pure aggregation, no network call);
+  // src/controllers/auth-refresh.controller.js (signs with the same JWT_SECRET the sign-in routes
+  // use, never logs or returns it, and reads SESSION_MAX_AGE_DAYS bounded to 1..365);
+  // src/controllers/auth-session-events.controller.js and src/controllers/auth-health.controller.js
+  // (a fixed client vocabulary, and aggregate counts for the super admin only).
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 211 && result.status === 0,
+    files.length === 216 && result.status === 0,
     result,
   );
 }

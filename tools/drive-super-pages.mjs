@@ -16,7 +16,11 @@
 //   3. both analytics charts have a scale, every UTC day of the window as a column, a table whose
 //      figures equal the payload the page received (zero for a day with no row), and the client
 //      split has a legend;
-//   4. nothing in the page threw.
+//   4. nothing in the page threw;
+//   5. the Sign-in health page (PHASE 8) shows the auth-health payload it received: the cards, the
+//      refusal reasons by app, the failures, the session lengths and the version split equal the
+//      payload; the window buttons and the custom window ask for exactly that window; an invalid
+//      window asks for nothing; a failed load says so (stub); no transport words reach the page.
 //
 // TWO BACKENDS
 //   default   the real express app on a loopback port against a scratch database - the ledger
@@ -70,7 +74,7 @@ let base = "";
 let token = "";
 let cleanup = async () => {};
 // What the stub's /api/app-config does (stub mode only).
-const stubState = { appConfigDelayMs: 0, appConfigFails: false };
+const stubState = { appConfigDelayMs: 0, appConfigFails: false, authHealthFails: false };
 // What the Controls cards should show once read: the stub's maintenance mode, or the seeded one.
 const storedMaintenance = STUB ? true : false;
 
@@ -126,6 +130,46 @@ if (STUB) {
   stub.get("/api/super/pending-admins", answer({ ok: true, users: [] }));
   stub.get("/api/super/terms-acceptances", answer({ ok: true, acceptances: [], pagination: { page: 1, totalPages: 1, total: 0 } }));
   stub.get("/api/super/self-test/latest", answer({ ok: true, run: null }));
+  // authHealthSummary's shape (auth-health.service.js), including a kind and an app the panel
+  // does not know, which must be shown verbatim rather than folded into a known one.
+  stub.get("/api/super/auth-health", (req, res) => {
+    if (stubState.authHealthFails) return res.status(500).json({ ok: false, error: "Server error" });
+    const windowDays = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+    return res.json({
+      ok: true,
+      windowDays,
+      since: new Date(Date.now() - windowDays * DAY_MS).toISOString(),
+      byDay: [
+        { day: day(2), kind: "login_success", count: 3 },
+        { day: day(2), kind: "refresh_success", count: 5 },
+        { day: day(1), kind: "auth_rejection", count: 24 },
+        { day: day(0), kind: "signed_out", count: 2 },
+        { day: day(0), kind: "session_restored", count: 6 },
+      ],
+      byKindReason: [
+        { kind: "auth_rejection", reason: "no_credentials", platform: "unknown", count: 20 },
+        { kind: "auth_rejection", reason: "expired", platform: "extension", count: 3 },
+        { kind: "auth_rejection", reason: "revoked", platform: "desktop", count: 1 },
+        { kind: "auth_rejection", reason: "expired", platform: "kiosk", count: 1 },
+        { kind: "refresh_success", reason: "unknown", platform: "extension", count: 5 },
+        { kind: "refresh_fail", reason: "max_age", platform: "desktop", count: 1 },
+        { kind: "refresh_retry", reason: "network", platform: "extension", count: 2 },
+        { kind: "login_success", reason: "unknown", platform: "desktop", count: 3 },
+        { kind: "login_fail", reason: "invalid", platform: "website", count: 1 },
+        { kind: "signed_out", reason: "signed_out", platform: "extension", count: 1 },
+        { kind: "signed_out", reason: "unknown", platform: "extension", count: 1 },
+        { kind: "session_restored", reason: "restart", platform: "extension", count: 6 },
+      ],
+      byVersion: [
+        { platform: "extension", appVersion: "1.4.14", kind: "refresh_success", count: 5 },
+        { platform: "extension", appVersion: "1.4.14", kind: "session_restored", count: 6 },
+        { platform: "desktop", appVersion: "", kind: "login_success", count: 3 },
+        { platform: "desktop", appVersion: "0.1.27", kind: "refresh_fail", count: 1 },
+      ],
+      totals: { auth_rejection: 25, refresh_success: 5, refresh_fail: 1, refresh_retry: 2, login_success: 3, login_fail: 1, signed_out: 2, session_restored: 6 },
+      sessionDurationHours: [{ bucket: "1", count: 1 }, { bucket: "24", count: 2 }],
+    });
+  });
   stub.use("/api", (req, res) => res.status(404).json({ ok: false, error: "Not found" }));
   const server = stub.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
@@ -154,6 +198,7 @@ if (STUB) {
   const { default: User } = await import("../src/models/User.js");
   const { default: AppConfig } = await import("../src/models/AppConfig.js");
   const { default: WorkflowUsage } = await import("../src/models/WorkflowUsage.js");
+  const { default: AuthHealthEvent } = await import("../src/models/AuthHealthEvent.js");
 
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
@@ -188,6 +233,26 @@ if (STUB) {
     for (const [who, client, back] of runs) {
       await WorkflowUsage.create({ userId: people[who]._id, client, workflow: "gst_recon", periodDay: day(back), count: 2, lastSeenAt: noon(back), outcomeCounts: { ok: 2, error: 0 } });
     }
+    // Authentication events (PHASE 8): a session that ended by an explicit sign-out two hours in,
+    // one ended by a revocation, renewals, restart recoveries, refusals of every common reason.
+    const hoursAfter = (back, hours) => new Date(noon(back).getTime() + hours * 60 * 60 * 1000);
+    await AuthHealthEvent.insertMany([
+      { kind: "login_success", platform: "extension", userId: people[0]._id, occurredAt: noon(5) },
+      { kind: "signed_out", reason: "signed_out", platform: "extension", appVersion: "1.4.14", userId: people[0]._id, occurredAt: hoursAfter(5, 2) },
+      { kind: "login_success", platform: "desktop", userId: people[1]._id, occurredAt: noon(4) },
+      { kind: "refresh_success", platform: "desktop", appVersion: "0.1.27", userId: people[1]._id, occurredAt: noon(2), count: 2 },
+      { kind: "auth_rejection", reason: "revoked", platform: "desktop", appVersion: "0.1.27", userId: people[1]._id, occurredAt: noon(1) },
+      { kind: "refresh_success", platform: "extension", appVersion: "1.4.14", userId: people[2]._id, occurredAt: noon(1), count: 3 },
+      { kind: "session_restored", reason: "restart", platform: "extension", appVersion: "1.4.14", userId: people[2]._id, occurredAt: noon(0), count: 4 },
+      { kind: "refresh_retry", reason: "network", platform: "extension", appVersion: "1.4.14", userId: people[2]._id, occurredAt: noon(1), count: 2 },
+      { kind: "refresh_fail", reason: "max_age", platform: "desktop", appVersion: "0.1.27", userId: people[3]._id, occurredAt: noon(1) },
+      { kind: "auth_rejection", reason: "expired", platform: "extension", userId: people[3]._id, occurredAt: noon(3), count: 4 },
+      { kind: "auth_rejection", reason: "no_credentials", platform: "unknown", occurredAt: noon(0), count: 20 },
+      { kind: "auth_rejection", reason: "invalid", platform: "unknown", occurredAt: noon(0), count: 2 },
+      { kind: "signed_out", reason: "unknown", platform: "extension", appVersion: "1.4.14", userId: people[4]._id, occurredAt: noon(1) },
+      { kind: "login_fail", reason: "invalid", platform: "website", occurredAt: noon(0) },
+      { kind: "login_success", platform: "website", userId: superUser._id, occurredAt: noon(0) },
+    ]);
     token = jwt.sign(
       { id: String(superUser._id), email: superUser.email, role: superUser.role, accountType: superUser.accountType, firmId: null, isActive: true, tv: 0 },
       process.env.JWT_SECRET,
@@ -216,6 +281,7 @@ const RECORDER = `(() => {
     const response = await original(...args);
     const url = String(args[0] && args[0].url || args[0]);
     if (/\\/api\\/super\\/usage-stats$/.test(url)) response.clone().json().then((body) => { window.__payloads.usage = body; }, () => {});
+    if (/\\/api\\/super\\/auth-health\\?/.test(url)) response.clone().json().then((body) => { window.__payloads.authHealth = body; }, () => {});
     return response;
   };
 })();`;
@@ -226,6 +292,7 @@ const PAGE_ENDPOINTS = {
   // DS24 added the history of changes to the platform switches.
   controls: ["/api/app-config", "/api/app-config/control-changes", "/api/app-config/desktop-release", "/api/super/provider-usage", "/api/super/reminder-delivery-health"],
   analytics: ["/api/super/usage-stats"],
+  sessions: ["/api/super/auth-health"],
   emails: ["/api/super/emails", "/api/super/emails/suppressions"],
   users: ["/api/super/users"],
   firms: ["/api/super/firms"],
@@ -272,7 +339,7 @@ try {
     check("opens-on-overview", shown === true, `Overview shown at startup: ${shown}`);
 
     // 2. Each page asks for its own data on first opening, and only then.
-    for (const name of ["controls", "analytics", "emails", "users", "firms", "approvals", "terms", "review"]) {
+    for (const name of ["controls", "analytics", "sessions", "emails", "users", "firms", "approvals", "terms", "review"]) {
       page.clearRequests();
       await page.evaluate(`location.hash = ${JSON.stringify(name)}; true`);
       await sleep(1500);
@@ -326,6 +393,101 @@ try {
       check(`${chart.id}-legend`, JSON.stringify(seen.legend) === JSON.stringify(chart.legend), `legend ${JSON.stringify(seen.legend)}`);
       check(`${chart.id}-states-window-and-denominator`, /14/.test(seen.heading) && /UTC/.test(seen.heading) && /counted|Counted/.test(seen.note), `${seen.heading} / ${seen.note.slice(0, 90)}...`);
       check(`${chart.id}-columns-stay-in-day-order`, seen.sortable === 0, `${seen.sortable} sortable header(s) on the chart's table`);
+    }
+
+    // 3b. Sign-in health (PHASE 8): what the page shows equals the payload it received.
+    await page.evaluate(`location.hash = "sessions"; true`);
+    await sleep(600);
+    const health = await page.evaluate(`window.__payloads.authHealth || null`);
+    check("sessions-payload-seen", Boolean(health && health.ok), health ? `window ${health.windowDays} days, ${(health.byKindReason || []).length} kind/reason rows` : "no auth-health payload recorded");
+    if (health) {
+      const shown = await page.evaluate(`(() => {
+        const text = (el) => (el ? el.textContent.replace(/\\s+/g, " ").trim() : "");
+        const rows = (id) => [...document.getElementById(id).rows].map((row) => [...row.cells].map((cell) => text(cell)));
+        return {
+          cards: [...document.querySelectorAll("#sessionsGrid .stat-card")].map((card) => ({ label: text(card.querySelector(".stat-label")), value: text(card.querySelector(".stat-value")) })),
+          rejections: rows("sessionsRejectionsBody"),
+          failures: rows("sessionsFailuresBody"),
+          durations: rows("sessionsDurationsBody"),
+          versions: rows("sessionsVersionsBody"),
+          charts: ["sessionsStartChart", "sessionsEndChart"].map((id) => Boolean(document.querySelector("#" + id + " table.day-chart__table")) || Boolean(document.querySelector("#" + id + " .day-chart__empty"))),
+          pressed: [...document.querySelectorAll("#sessionsWindowButtons [aria-pressed='true']")].map((b) => b.dataset.days),
+          // innerText, not textContent: adjacent table cells 4, 0, 1 must not read as "401".
+          pageText: document.getElementById("page-sessions").innerText,
+        };
+      })()`);
+      const n = (value) => Number(String(value).replace(/[^0-9-]/g, "")) || 0;
+      const sum = (pred) => (health.byKindReason || []).filter(pred).reduce((t, r) => t + (Number(r.count) || 0), 0);
+      const card = (label) => shown.cards.find((c) => c.label === label);
+      const totals = health.totals || {};
+      check("sessions-cards", shown.cards.length === 7
+        && n(card("Sign-ins")?.value) === (totals.login_success || 0)
+        && n(card("Renewed")?.value) === (totals.refresh_success || 0)
+        && n(card("Refused requests")?.value) === (totals.auth_rejection || 0)
+        && n(card("Restored after restart")?.value) === (totals.session_restored || 0)
+        && n(card("Signed out by the user")?.value) === sum((r) => r.kind === "signed_out" && r.reason === "signed_out")
+        && n(card("Other sign-outs")?.value) === (totals.signed_out || 0) - sum((r) => r.kind === "signed_out" && r.reason === "signed_out"),
+        shown.cards.map((c) => `${c.label}=${c.value}`).join("; "));
+      const reasons = [...new Set((health.byKindReason || []).filter((r) => r.kind === "auth_rejection").map((r) => r.reason))];
+      const rejectionTotals = shown.rejections.map((cells) => n(cells[cells.length - 1])).sort((a, b) => b - a);
+      const expectedTotals = reasons.map((reason) => sum((r) => r.kind === "auth_rejection" && r.reason === reason)).sort((a, b) => b - a);
+      check("sessions-refusal-reasons", reasons.length === 0
+        ? shown.rejections.length === 1
+        : JSON.stringify(rejectionTotals) === JSON.stringify(expectedTotals),
+        `${shown.rejections.length} reason row(s): ${shown.rejections.map((c) => c[0] + " " + c[c.length - 1]).join("; ")}`);
+      const unknownApps = [...new Set((health.byKindReason || []).map((r) => r.platform))].filter((p) => !["extension", "desktop", "website", "unknown"].includes(p));
+      check("sessions-unknown-app-shown-verbatim", unknownApps.every((p) => shown.pageText.includes(p)), unknownApps.length ? `unknown app(s) ${unknownApps.join(", ")} shown` : "no unknown app in this payload");
+      const failureRows = (health.byKindReason || []).filter((r) => ["login_fail", "refresh_fail", "refresh_retry", "signed_out"].includes(r.kind));
+      check("sessions-failures", failureRows.length === 0 ? shown.failures.length === 1 : shown.failures.length === failureRows.length
+        && shown.failures.every((cells, i) => cells.length === 4), `${shown.failures.length} row(s) for ${failureRows.length} payload row(s)`);
+      const buckets = health.sessionDurationHours || [];
+      check("sessions-durations", buckets.length === 0 ? shown.durations.length === 1 : JSON.stringify(shown.durations.map((c) => n(c[1]))) === JSON.stringify(buckets.map((b) => b.count)),
+        shown.durations.map((c) => c.join(" ")).join("; "));
+      const groups = new Set((health.byVersion || []).map((r) => r.platform + "|" + (r.appVersion || "")));
+      check("sessions-versions", groups.size === 0 ? shown.versions.length === 1 : shown.versions.length === groups.size,
+        shown.versions.map((c) => c.slice(0, 2).join(" ")).join("; "));
+      check("sessions-charts-have-tables", shown.charts.every(Boolean), JSON.stringify(shown.charts));
+      check("sessions-default-window", JSON.stringify(shown.pressed) === JSON.stringify(["30"]), `pressed ${shown.pressed.join(",")}`);
+      const banned = ["logout", "401", "403", "429", "HTTP", "null", "undefined", "NaN", "exception"].filter((word) => new RegExp(`\\b${word}\\b`, "i").test(shown.pageText));
+      check("sessions-no-transport-words", banned.length === 0, banned.length ? `found ${banned.join(", ")}` : "clean");
+
+      const healthRequests = () => page.requests().map((r) => r.url).filter((url) => url.includes("/api/super/auth-health"));
+      page.clearRequests();
+      await page.evaluate(`document.querySelector('#sessionsWindowButtons [data-days="7"]').click(); true`);
+      await sleep(800);
+      const seven = healthRequests();
+      const pressedSeven = await page.evaluate(`[...document.querySelectorAll("#sessionsWindowButtons [aria-pressed='true']")].map((b) => b.dataset.days).join(",")`);
+      check("sessions-window-7", seven.length === 1 && /[?&]days=7$/.test(seven[0]) && pressedSeven === "7", `${seven.join(", ") || "no request"}; pressed ${pressedSeven}`);
+      page.clearRequests();
+      await page.evaluate(`document.getElementById("sessionsCustomDays").value = "0"; document.getElementById("sessionsApplyBtn").click(); true`);
+      await sleep(500);
+      const invalid = healthRequests();
+      const invalidStatus = await page.evaluate(`document.getElementById("sessionsStatus").textContent`);
+      check("sessions-invalid-window-asks-nothing", invalid.length === 0 && /whole number of days/.test(invalidStatus), `${invalid.length} request(s); status ${JSON.stringify(invalidStatus)}`);
+      page.clearRequests();
+      await page.evaluate(`document.getElementById("sessionsCustomDays").value = "45"; document.getElementById("sessionsApplyBtn").click(); true`);
+      await sleep(800);
+      const custom = healthRequests();
+      check("sessions-custom-window", custom.length === 1 && /[?&]days=45$/.test(custom[0]), custom.join(", ") || "no request");
+      if (STUB) {
+        stubState.authHealthFails = true;
+        await page.evaluate(`document.getElementById("sessionsCustomDays").value = ""; document.getElementById("sessionsApplyBtn").click(); true`);
+        await sleep(800);
+        const failedState = await page.evaluate(`({ tone: document.getElementById("sessionsStatus").dataset.tone || "", text: document.getElementById("sessionsStatus").textContent })`);
+        check("sessions-failed-load-says-so", failedState.tone === "critical" && /could not be loaded/.test(failedState.text) && !/500|HTTP/.test(failedState.text), JSON.stringify(failedState));
+        stubState.authHealthFails = false;
+      }
+      if (process.env.SESSIONS_SHOT) {
+        await page.evaluate(`document.querySelector('#sessionsWindowButtons [data-days="30"]').click(); true`);
+        await page.send("Emulation.setDeviceMetricsOverride", { width: 1366, height: 1700, deviceScaleFactor: 1, mobile: false });
+        await sleep(900);
+        await page.evaluate(`window.scrollTo(0, 0); true`);
+        const sessionsShot = await page.send("Page.captureScreenshot", { format: "png" });
+        const { writeFileSync } = await import("node:fs");
+        writeFileSync(process.env.SESSIONS_SHOT, Buffer.from(sessionsShot.data, "base64"));
+        console.log(`  screenshot ${process.env.SESSIONS_SHOT}`);
+        await page.send("Emulation.clearDeviceMetricsOverride", {});
+      }
     }
 
     // 4. Nothing threw.

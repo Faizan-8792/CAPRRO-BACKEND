@@ -70,6 +70,10 @@ export const RETENTION_CLASSIFICATION = Object.freeze({
   AuditWorkingPaper: RETENTION_CLASSES.RETAIN,
   AuditWorkingPaperAnalysis: RETENTION_CLASSES.PURGE_CONDITIONAL,
   AuditWorkingPaperRow: RETENTION_CLASSES.RETAIN,
+  // Added 2026-10-11 with session renewal (PHASE 8). SELF_EXPIRING for real: the schema carries
+  // a TTL index on occurredAt (400 days), so MongoDB removes each row itself. Coarse counters
+  // only - a kind, a reason, an app, a version and at most a user id; no token, email or IP.
+  AuthHealthEvent: RETENTION_CLASSES.SELF_EXPIRING,
   AutomationJob: RETENTION_CLASSES.SELF_EXPIRING,
   CaseAnalysis: RETENTION_CLASSES.RETAIN,
   CaseDraft: RETENTION_CLASSES.RETAIN,

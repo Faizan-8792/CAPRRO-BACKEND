@@ -333,6 +333,20 @@ define("GET", "api/auth/terms/current", async () =>
   call("GET", "api/auth/terms/current", { auth: false }),
 );
 
+// PHASE 8 session renewal. The successor token is a real signed JWT (under this tool's local
+// secret); it is replaced before the fixture is written - the drift gate compares key paths, not
+// values, so the shape is still pinned and no token-shaped string is committed.
+define("POST", "api/auth/refresh", async () => {
+  const result = await call("POST", "api/auth/refresh");
+  if (typeof result.json?.token === "string") {
+    result.json = { ...result.json, token: "fixture-redacted-successor-token" };
+  }
+  return result;
+});
+define("POST", "api/auth/session-event", async () =>
+  call("POST", "api/auth/session-event", { body: { kind: "session_restored", reason: "restart" } }),
+);
+
 // Creates that need only fields this seed already has.
 define("POST", "api/reminders", async () => {
   const result = await call("POST", "api/reminders", {

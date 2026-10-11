@@ -55,6 +55,7 @@
           <a href="#overview">Platform overview</a>
           <a href="#controls">App controls</a>
           <a href="#analytics">Usage analytics</a>
+          <a href="#sessions">Sign-in health</a>
           <a href="#emails">Emails</a>
           <a href="#users">User directory</a>
           <a href="#firms">Firms &amp; access</a>
@@ -401,6 +402,147 @@
               </thead>
               <tbody id="perUserUsageBody"></tbody>
             </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- SIGN-IN HEALTH (PHASE 8): why sessions start, renew and end, from privacy-safe counters -->
+      <section id="page-sessions" class="super-page" aria-labelledby="sessionsTitle" hidden>
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="sessionsTitle">Authentication &amp; session health</h1>
+            <p class="admin-page-lede">
+              Why sessions start, renew and end on each app. Counts only: no tokens, passwords, cookies or addresses are recorded. A refused request is not a sign-out &mdash; the app may renew or retry &mdash; so refusals and sign-outs are counted separately. Days are UTC.
+            </p>
+          </div>
+        </div>
+
+        <div class="card p-3 mb-3">
+          <div class="row g-2 align-items-end">
+            <div class="col-auto">
+              <span class="form-label d-block" id="sessionsWindowLabel">Window</span>
+              <div class="btn-group btn-group-sm" role="group" aria-labelledby="sessionsWindowLabel" id="sessionsWindowButtons">
+                <button type="button" class="btn btn-outline-secondary" data-days="1" aria-pressed="false">24 hours</button>
+                <button type="button" class="btn btn-outline-secondary" data-days="7" aria-pressed="false">7 days</button>
+                <button type="button" class="btn btn-outline-secondary active" data-days="30" aria-pressed="true">30 days</button>
+                <button type="button" class="btn btn-outline-secondary" data-days="90" aria-pressed="false">90 days</button>
+              </div>
+            </div>
+            <div class="col-auto">
+              <label class="form-label" for="sessionsCustomDays">Custom, in days (1&ndash;365)</label>
+              <input type="number" id="sessionsCustomDays" class="form-control form-control-sm" min="1" max="365" step="1" inputmode="numeric" />
+            </div>
+            <div class="col-auto">
+              <button id="sessionsApplyBtn" class="btn btn-sm btn-primary" type="button">Show</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="sessionsStatus" class="admin-status mb-3" role="status" aria-live="polite"></div>
+
+        <div class="stats-grid" id="sessionsGrid"></div>
+
+        <div class="row g-3 mb-3">
+          <!-- Full width: a 30- or 90-day window needs every day column legible. -->
+          <div class="col-12">
+            <div class="card p-3">
+              <h2 class="admin-section-title">Sign-ins and renewals per day (UTC)</h2>
+              <p class="admin-section-lede">A renewal trades a still-valid sign-in for a fresh one a day before it lapses, so a user stays signed in without being asked again.</p>
+              <div id="sessionsStartChart" class="day-chart"></div>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="card p-3">
+              <h2 class="admin-section-title">Refused requests and sign-outs per day (UTC)</h2>
+              <p class="admin-section-lede">Refused requests are counted per request, not per person: one expired sign-in can be refused several times before the app asks for a new one.</p>
+              <div id="sessionsEndChart" class="day-chart"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row g-3 mb-3">
+          <div class="col-lg-6">
+            <div class="card p-3">
+              <h2 class="admin-section-title">Why requests were refused</h2>
+              <p class="admin-section-lede">The server's own reason for each refusal. An &ldquo;Unknown&rdquo; app means the request carried nothing the server could trust to say which app sent it.</p>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                  <thead>
+                    <tr>
+                      <th scope="col">Reason</th>
+                      <th scope="col">Extension</th>
+                      <th scope="col">Desktop</th>
+                      <th scope="col">Website</th>
+                      <th scope="col">Unknown</th>
+                      <th scope="col">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody id="sessionsRejectionsBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="card p-3">
+              <h2 class="admin-section-title">Failed sign-ins, renewals and sign-outs</h2>
+              <p class="admin-section-lede">A renewal stopped at the maximum session age does not end the sign-in: it stays valid until it expires, and the user then signs in again.</p>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                  <thead>
+                    <tr>
+                      <th scope="col">What happened</th>
+                      <th scope="col">Reason</th>
+                      <th scope="col">App</th>
+                      <th scope="col">Count</th>
+                    </tr>
+                  </thead>
+                  <tbody id="sessionsFailuresBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row g-3">
+          <div class="col-lg-5">
+            <div class="card p-3">
+              <h2 class="admin-section-title">How long sessions lasted</h2>
+              <p class="admin-section-lede">From a recorded sign-in to its end (a sign-out, an expiry, a revocation) inside the window. Sessions still running are not counted.</p>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                  <thead>
+                    <tr>
+                      <th scope="col">Length</th>
+                      <th scope="col">Sessions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="sessionsDurationsBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-7">
+            <div class="card p-3">
+              <h2 class="admin-section-title">By app and version</h2>
+              <p class="admin-section-lede">The version each app reported with the event. Sign-ins are recorded by the server before an app reports its version, so they show as not reported.</p>
+              <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                  <thead>
+                    <tr>
+                      <th scope="col">App</th>
+                      <th scope="col">Version</th>
+                      <th scope="col">Sign-ins</th>
+                      <th scope="col">Renewed</th>
+                      <th scope="col">Renewal refused</th>
+                      <th scope="col">Refused requests</th>
+                      <th scope="col">Sign-outs</th>
+                      <th scope="col">Restored after restart</th>
+                    </tr>
+                  </thead>
+                  <tbody id="sessionsVersionsBody"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -841,6 +983,6 @@
     <!-- Bootstrap JS no longer needed (custom modal). Kept removed. -->
     <script src="ui/capro-ui.js?v=2"></script>
     <script src="file-tools.js"></script>
-    <script src="super.js?v=28"></script>
+    <script src="super.js?v=29"></script>
   </body>
 </html>

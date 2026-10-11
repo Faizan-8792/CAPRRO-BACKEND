@@ -36,6 +36,7 @@ import {
 } from "../controllers/super.controller.js";
 import { listTermsAcceptances } from "../controllers/terms.controller.js";
 import { requireSuperAdmin } from "../middleware/authorization.middleware.js";
+import { getAuthHealth } from "../controllers/auth-health.controller.js";
 import rateLimit from "express-rate-limit";
 
 const router = express.Router();
@@ -73,6 +74,11 @@ router.get("/dashboard-stats", getSuperDashboardStats);
 
 // Extension usage analytics (DAU/WAU/MAU)
 router.get("/usage-stats", getUsageStats);
+
+// Authentication & Session Health (PHASE 8): aggregated, privacy-safe counts
+// of logins, refreshes, rejections by reason, client-reported sign-outs and
+// restart recoveries, plus a session-duration distribution.
+router.get("/auth-health", requireSuperAdmin, getAuthHealth);
 
 // Email observability (IMPROVEMENT-PLAN-V2-2026-09-28 Part 1). The list
 // endpoint carries its own summary so a page load costs ONE request; the

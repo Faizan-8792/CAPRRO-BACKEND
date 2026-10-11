@@ -771,6 +771,10 @@ try {
         # The auto sign-in's captcha relay (2026-10-09): auth, shape guards,
         # the daily per-account cap and the no-balance rule, against the real app.
         "gst-captcha-route-contract",
+        # PHASE 8 (2026-10-11): session renewal and auth-health analytics - a live token
+        # renews, expired/revoked/inactive/forged ones cannot, the 30-day session cap holds,
+        # anonymous refusals coalesce, the admin summary is super-admin only (scratch Mongo).
+        "auth-refresh-contract",
         # GD30 (owner decision OD4): the GST downloader's run records - server-side validation,
         # firm A cannot read B, idempotent upsert, newer-wins, the recording switch off writes
         # nothing, the bounds, the unique key (Mongo subset, scratch-marked).
@@ -962,6 +966,7 @@ try {
         "super-emails-controller-contract" = "scratch-gates-super-emails"
         "api-not-found-contract" = "scratch-gates-api-not-found"
         "gst-captcha-route-contract" = "scratch-gates-captcha-route"
+        "auth-refresh-contract" = "scratch-gates-auth-refresh"
         "gst-downloads-contract" = "scratch-gates-gst-downloads"
         "control-change-reason" = "scratch-gates-control-change"
     }

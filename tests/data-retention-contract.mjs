@@ -133,7 +133,9 @@ test("all 46 models are classified", () => {
   // beside them - bounded upserts of metadata, purged with the firm.
   // 46 -> 47: FilingStatusObservation.js, 2026-10-04, with the filing board (decision D4, GD33).
   // RETAIN for the same reason: one upserted row per firm, client, return and month.
-  assert.equal(Object.keys(RETENTION_CLASSIFICATION).length, 47);
+  // 47 -> 48: AuthHealthEvent.js, 2026-10-11, with session renewal (PHASE 8). SELF_EXPIRING: a
+  // TTL index on occurredAt removes each row after 400 days.
+  assert.equal(Object.keys(RETENTION_CLASSIFICATION).length, 48);
 });
 
 test("classification matches the real src/models directory exactly", () => {
@@ -141,9 +143,9 @@ test("classification matches the real src/models directory exactly", () => {
   const modelNames = readdirSync(join(here, "..", "src", "models"))
     .filter((name) => name.endsWith(".js"))
     .map((name) => name.replace(/\.js$/, ""));
-  assert.equal(modelNames.length, 47);
+  assert.equal(modelNames.length, 48);
   const result = assertClassificationCoversModels(modelNames);
-  assert.equal(result.classified, 47);
+  assert.equal(result.classified, 48);
 });
 
 test("a new unclassified model makes the guard throw, naming it", () => {
@@ -205,10 +207,11 @@ test("classification totals match PLAN.md 33.9 (see note above: PLAN.md's own pr
   assert.equal(counts[RETENTION_CLASSES.RETAIN], 39);
   assert.equal(counts[RETENTION_CLASSES.PURGE_FIELD], 1);
   assert.equal(counts[RETENTION_CLASSES.PURGE_CONDITIONAL], 1);
-  assert.equal(counts[RETENTION_CLASSES.SELF_EXPIRING], 6);
+  // 6 -> 7 with AuthHealthEvent (PHASE 8): a real TTL index, so the class is a fact, not a hope.
+  assert.equal(counts[RETENTION_CLASSES.SELF_EXPIRING], 7);
   assert.equal(
     Object.values(counts).reduce((total, value) => total + value, 0),
-    47,
+    48,
   );
 });
 
