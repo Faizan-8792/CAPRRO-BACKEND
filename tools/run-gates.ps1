@@ -810,6 +810,7 @@ try {
         "audit-topic-catalogue-parity",
         "task-version-guard-contract",
         "taxworker-duplicate-audit-contract",
+        "tax-period-quarters-contract",
         "case-verified-references-contract",
         "engagement-reviewer-authorization-contract",
         "deploy-archive-security",
