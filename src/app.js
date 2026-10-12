@@ -88,6 +88,11 @@ const PUBLIC_ERROR_CODES = new Set([
   // chartered accountant. They need new copy first, which is a product decision,
   // not a code change. See docs/notices-cases-contract.md.
   "CASE_AI_CONSENT_REQUIRED",
+  // A model reply with nothing quotable from the notice is not a form error, yet production said
+  // "Some submitted information could not be accepted. Review the form and try again." (seen while
+  // recording the Notices tutorial, 2026-10-12), and the desktop's own wording for this code never
+  // ran, because a non-public code is not sent. The message is that desktop wording.
+  "CASE_AI_NO_VERIFIABLE_FIELDS",
   "OCR_CONSENT_REQUIRED",
   "OCR_FILE_REQUIRED",
   "OCR_FILE_TOO_LARGE",

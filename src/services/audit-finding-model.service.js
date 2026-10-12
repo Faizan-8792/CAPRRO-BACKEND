@@ -272,8 +272,12 @@ const NUMBER_WORDS = Object.freeze({
 const POPULATION_NOUNS =
   "journal entr|entries|items|invoices|vouchers|transactions|balances|samples";
 
+// A count stands on its own. It is never a digit group inside a larger figure and never an amount
+// after Rs, INR or the rupee sign: "Rs 48,60,000 of invoices" once read as a population of 0 items
+// (the last group, "000"), and the finding then advised testing all of them. Grouped digits
+// ("4,200 invoices") read as the whole number.
 const POPULATION_SIZE = new RegExp(
-  `\\b(\\d{1,5}|${Object.keys(NUMBER_WORDS).join("|")})\\s+(?:(?!lakhs?|lacs?|crores?|thousand|million|billion)[A-Za-z-]+\\s+){0,3}(?:${POPULATION_NOUNS})`,
+  `(?<![\\d.,\u20b9]|(?:\\bRs|\\bINR)\\.?\\s*)\\b(\\d{1,3}(?:,\\d{2,3})+|\\d{1,6}|${Object.keys(NUMBER_WORDS).join("|")})(?![.,]?\\d)\\s+(?:(?!lakhs?|lacs?|crores?|thousand|million|billion)[A-Za-z-]+\\s+){0,3}(?:${POPULATION_NOUNS})`,
   "i",
 );
 // No closing \b: these are STEMS, and "journal entr" followed by \b cannot match "journal entries".
@@ -297,10 +301,13 @@ export function deriveSampling(text) {
   // The count may be digits or a word; a word is resolved through NUMBER_WORDS rather than being
   // coerced, because Number("five") is NaN and NaN would silently become "no population stated".
   const raw = match ? match[1] : null;
-  const population =
+  const digits = raw === null ? "" : raw.replace(/,/g, "");
+  const counted =
     raw === null
       ? null
-      : (NUMBER_WORDS[raw.toLowerCase()] ?? (Number.isFinite(Number(raw)) ? Number(raw) : null));
+      : (NUMBER_WORDS[raw.toLowerCase()] ?? (Number.isFinite(Number(digits)) ? Number(digits) : null));
+  // Nought items is no population to test.
+  const population = counted === 0 ? null : counted;
 
   if (population === null) {
     return {

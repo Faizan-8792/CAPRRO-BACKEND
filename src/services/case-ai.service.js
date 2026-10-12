@@ -174,7 +174,10 @@ SOURCE:\n${source.slice(0, 90000)}`,
     });
   }
   if (!proposals.length) {
-    throw httpError(422, "AI extraction produced no source-verifiable proposals", "CASE_AI_NO_VERIFIABLE_FIELDS");
+    // Public (app.js PUBLIC_ERROR_CODES), so this sentence is what the user reads; it is the desktop's
+    // own wording for this code (CaseExtractionService.NoVerifiableProposalsMessage), pinned equal by
+    // tests/notice-case-contract.mjs.
+    throw httpError(422, "The model returned nothing it could trace back to the notice text, so no fields were proposed. Nothing was changed on this case.", "CASE_AI_NO_VERIFIABLE_FIELDS");
   }
   return { proposals, provider: result.provider, model: result.model };
 }

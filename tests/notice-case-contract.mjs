@@ -211,6 +211,57 @@ check(
     : "their messages name cursors and snapshots, which mean nothing to a reviewer",
 );
 
+// ─── A model reply with nothing quotable is not a form error ───────
+// Seen while recording the Notices tutorial (2026-10-12): the model's proposals
+// could not be traced to the notice text, the server threw
+// CASE_AI_NO_VERIFIABLE_FIELDS, and because the code was not public the
+// extension said "Review the form and try again" - there was no form to review.
+// The desktop had the right sentence for this code all along, but a non-public
+// code is never sent, so it never ran. Public now, and worded as the desktop
+// words it.
+
+const caseAi = readFileSync(
+  join(BACKEND, "src", "services", "case-ai.service.js"),
+  "utf8",
+);
+const noVerifiable = caseAi.match(
+  /httpError\(\s*422\s*,\s*"([^"]+)"\s*,\s*"CASE_AI_NO_VERIFIABLE_FIELDS"\s*\)/,
+);
+check(
+  "CASE_AI_NO_VERIFIABLE_FIELDS is public with a sentence a reviewer can read",
+  publicErrorCodes.includes("CASE_AI_NO_VERIFIABLE_FIELDS") &&
+    Boolean(noVerifiable) &&
+    !/\b(401|403|429|HTTP|null|exception|source-verifiable)\b/i.test(noVerifiable[1]),
+  noVerifiable ? noVerifiable[1] : "the throw site no longer matches",
+);
+
+const desktopService = join(
+  BACKEND,
+  "..",
+  "apps",
+  "desktop-native",
+  "src",
+  "CaPro.Desktop.Core",
+  "Cases",
+  "CaseExtractionService.cs",
+);
+let desktopWording = null;
+try {
+  desktopWording =
+    readFileSync(desktopService, "utf8").match(
+      /NoVerifiableProposalsMessage\s*=\s*"([^"]+)"/,
+    )?.[1] ?? "";
+} catch {
+  desktopWording = null; // the backend cloned on its own: nothing to compare against
+}
+check(
+  "the server and the desktop word CASE_AI_NO_VERIFIABLE_FIELDS the same way",
+  desktopWording === null || (Boolean(noVerifiable) && desktopWording === noVerifiable[1]),
+  desktopWording === null
+    ? "desktop source not present beside this backend; wording not compared"
+    : `desktop: "${desktopWording}"`,
+);
+
 // ─── The multer fileFilter rejection must carry a code ─────────────
 // multer 2.2.0 passes a fileFilter error through unwrapped (make-middleware.js
 // abortWithError -> next(err)), so it arrives as a plain Error. Without a code

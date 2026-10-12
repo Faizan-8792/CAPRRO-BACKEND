@@ -334,6 +334,36 @@ check("a large named population may be sampled, with the basis recorded", () => 
   assert.match(sampling.basis, /record the method/i);
 });
 
+check("an amount is never read as a population", () => {
+  // Found 2026-10-12: "Rs 48,60,000 of invoices" read as "The population is 0 items. Testing all of
+  // them is normally the shorter route" - the last digit group of the amount taken as a count.
+  for (const text of [
+    "Vouch the Rs 48,60,000 of invoices raised on 30 and 31 March to the dispatch notes.",
+    "Vouch the Rs. 3,20,000 of invoices credited in April.",
+    "Trace the INR 250 invoices to the ledger.",
+    "Trace the \u20b948,60,000 of invoices to the ledger.",
+  ]) {
+    const sampling = deriveSampling(text);
+    assert.equal(sampling.populationSize, null, text);
+    assert.equal(sampling.applicable, null, text);
+    assert.equal(sampling.basis, null, text);
+  }
+});
+
+check("a grouped count reads as the whole number", () => {
+  const western = deriveSampling("Test the 4,200 invoices raised during the year.");
+  assert.equal(western.populationSize, 4200);
+  assert.equal(western.applicable, true);
+  const indian = deriveSampling("Test the 1,20,000 transactions posted during the year.");
+  assert.equal(indian.populationSize, 120000);
+});
+
+check("nought items is no population", () => {
+  const sampling = deriveSampling("There were 0 invoices raised after the year end.");
+  assert.equal(sampling.populationSize, null);
+  assert.equal(sampling.applicable, null);
+});
+
 check("an unstated population is null, not false", () => {
   // null and false say different things: "nobody established the size" versus "sampling is not
   // appropriate". Collapsing them would assert something nobody checked.
