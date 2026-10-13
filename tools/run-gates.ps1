@@ -811,6 +811,12 @@ try {
         "task-version-guard-contract",
         "taxworker-duplicate-audit-contract",
         "tax-period-quarters-contract",
+        # 2026-10-13: a reminder's activity reaches a person in words (calendar, email), never as its id.
+        "reminder-type-labels-contract",
+        # 2026-10-13: a sentence a person reads names rupees, never paise (TDS Health, working papers).
+        "rupee-wording-contract",
+        # 2026-10-13: a reviewer decision on a working-paper suggestion saves (it failed with a 500).
+        "working-paper-decision-save-contract",
         "case-verified-references-contract",
         "engagement-reviewer-authorization-contract",
         "deploy-archive-security",
@@ -950,6 +956,7 @@ try {
     # will touch a database at all.
     $mongoScratch = @{
         "provider-quota-contract" = "scratch-gates-quota"
+        "working-paper-decision-save-contract" = "scratch-gates-wp-decision"
         "data-retention-contract" = "scratch-gates-retention"
         "desktop-release-contract" = "scratch-gates-release"
         "terms-acceptance-contract" = "scratch-gates-terms"

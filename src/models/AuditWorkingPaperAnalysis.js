@@ -256,11 +256,16 @@ const AuditWorkingPaperAnalysisSchema = new mongoose.Schema(
 
 AuditWorkingPaperAnalysisSchema.pre("validate", function validateDurableProviderAdmission(next) {
   if (this.providerAdmissionVersion !== PROVIDER_ADMISSION_VERSION) return next();
+  // A field left out of the load (processingAttemptId is select: false) is not missing: these are
+  // immutable, written whole at creation - where every path counts as loaded - and a save never
+  // touches a path it did not load. Read as missing, every reviewer decision on a suggestion failed
+  // with a 500 (found recording the tutorials, 2026-10-13).
+  const absent = (path, value) => this.isSelected(path) && !value;
   const missingAdmissionMetadata =
-    !this.processingAttemptId ||
-    !this.processingStartedAt ||
-    !this.outboundPayloadHash ||
-    this.outboundDataClasses.length !== OUTBOUND_DATA_CLASSES.length;
+    absent("processingAttemptId", this.processingAttemptId) ||
+    absent("processingStartedAt", this.processingStartedAt) ||
+    absent("outboundPayloadHash", this.outboundPayloadHash) ||
+    (this.isSelected("outboundDataClasses") && this.outboundDataClasses.length !== OUTBOUND_DATA_CLASSES.length);
   if (missingAdmissionMetadata) {
     return next(new Error("Durable provider admission metadata is incomplete"));
   }

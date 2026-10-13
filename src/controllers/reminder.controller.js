@@ -7,6 +7,7 @@ import AppConfig from "../models/AppConfig.js";
 import { sendComplianceReminderEmail } from "../services/reminder.service.js";
 import { safeRecordActivity } from "../services/activity.service.js";
 import { parseStatutoryDayIso } from "../services/robust-normalize.service.js";
+import { reminderTypeLabel } from "../config/reminder-types.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DELIVERY_LOCK_MS = 10 * 60 * 1000;
@@ -342,7 +343,7 @@ async function sendDeliveryEmail(reminder, spec, providerKey) {
 
   return sendComplianceReminderEmail({
     toEmail: user.email,
-    title: reminder.typeId,
+    title: reminderTypeLabel(reminder.typeId),
     clientLabel: reminder.clientLabel,
     dueDateISO: reminder.dueDateISO,
     daysLeft: -offset,

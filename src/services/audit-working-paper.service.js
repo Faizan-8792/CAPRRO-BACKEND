@@ -25,12 +25,13 @@ import {
   callDeepSeek,
   parseJsonObject,
 } from "./deepseek-provider.service.js";
+import { rupeesFromPaise } from "../utils/rupees.js";
 
 const WORKING_PAPER_FLAGS = Object.freeze([
   "assuranceEngagements",
   "auditWorkingPapers",
 ]);
-const ANALYSIS_PROMPT_VERSION = "audit-working-paper-findings-v1";
+const ANALYSIS_PROMPT_VERSION = "audit-working-paper-findings-v2";
 const FINDING_RISKS = new Set(["UNASSESSED", "LOW", "MEDIUM", "HIGH", "CRITICAL"]);
 const PROPOSAL_DECISIONS = new Set(["ACCEPTED", "REJECTED", "EDITED"]);
 const MAX_ROWS_PER_ANALYSIS = 50;
@@ -877,7 +878,7 @@ function buildAuditAiPrompt({ paper, engagement, rows }) {
   return JSON.stringify(
     {
       instruction:
-        "Assess only the supplied immutable source rows. Return either source-row-cited finding proposals or an explicit insufficient-evidence result. Do not provide an audit opinion or professional conclusion.",
+        "Assess only the supplied immutable source rows. Return either source-row-cited finding proposals or an explicit insufficient-evidence result. Do not provide an audit opinion or professional conclusion. Each row's currentAmount is in Indian rupees, already written out; when a proposal mentions an amount, quote it exactly as written.",
       responseSchema: {
         result: "SUPPORTED or INSUFFICIENT_EVIDENCE",
         insufficientEvidenceReason: "required when result is INSUFFICIENT_EVIDENCE",
@@ -903,7 +904,9 @@ function buildAuditAiPrompt({ paper, engagement, rows }) {
         rowKey: row.rowKey,
         description: row.description,
         observedValue: row.observedValue,
-        currentAmountMinor: row.currentAmountMinor,
+        // Rupees as a person reads them: given paise, the model wrote "41,250,000 minor units" for
+        // a balance of Rs 4,12,500 (2026-10-13).
+        currentAmount: rupeesFromPaise(row.currentAmountMinor),
         sourceReference: row.sourceReference,
         assertionTags: row.assertionTags,
         note: row.note,
@@ -1491,7 +1494,10 @@ async function dispositionAuditFindingProposal({
       _id: checkedAnalysisId,
       firmId,
       workingPaperId: paper._id,
-    }).session(session);
+    })
+      // Saved below: loaded whole, so its admission record is checked whole (as the completion does).
+      .select("+processingAttemptId")
+      .session(session);
     if (!analysis) {
       throw httpError(404, "AI analysis not found", "AUDIT_ANALYSIS_NOT_FOUND");
     }
