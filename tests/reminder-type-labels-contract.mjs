@@ -3,7 +3,8 @@
 // Found while recording the tutorials: the compliance calendar titled reminders "Tax Audit 3cd",
 // "Mca Aoc4" and "Tds Return 26q", tax work "Itr Firm" and "Gst Monthly", and the reminder email's
 // subject read "Compliance Reminder: TAX_AUDIT_3CD". The words now come from the list the extension
-// offers when a reminder is set (popup.js and reminders.js) and from each tax work template's
+// offers when a reminder is set (reminder-types.js, shared by its popup, Reminders page and Daily
+// Work Planner) and from each tax work template's
 // displayName, as the Tax Work Tracker shows it. Runs with no database: everything here is pure,
 // or read from source.
 
@@ -37,7 +38,7 @@ const extensionTypes = (file) =>
 
 check("every activity the extension offers has the extension's own words", () => {
   assert.ok(existsSync(EXTENSION), "audit-nlp-extension is not checked out; run git submodule update --init");
-  for (const file of ["popup.js", "reminders.js"]) {
+  for (const file of ["reminder-types.js"]) {
     const offered = extensionTypes(file);
     assert.ok(offered.length >= 20, `${file}: found ${offered.length} reminder types`);
     for (const [id, label] of offered) assert.equal(reminderTypeLabel(id), label, `${file}: ${id}`);

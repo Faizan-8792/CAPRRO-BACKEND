@@ -1,7 +1,7 @@
 // The compliance activities a reminder can be for, in the words a person reads.
 //
 // A reminder stores only its type's id. The extension offers exactly these twenty when a reminder is
-// set (popup.js and reminders.js, REMINDER_TYPES, same ids and labels), so everything the server
+// set (audit-nlp-extension/reminder-types.js, same ids and labels), so everything the server
 // writes for a person names the activity from here - the compliance calendar's title, the reminder
 // email - never from the id itself. Found while recording the tutorials (2026-10-13): the calendar
 // read "Tax Audit 3cd" and "Mca Aoc4", and the email's subject "Compliance Reminder: TAX_AUDIT_3CD".
