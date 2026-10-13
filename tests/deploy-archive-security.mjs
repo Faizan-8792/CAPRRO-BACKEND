@@ -2412,9 +2412,14 @@ if (listed.status !== 0 || listed.error) {
   // use, never logs or returns it, and reads SESSION_MAX_AGE_DAYS bounded to 1..365);
   // src/controllers/auth-session-events.controller.js and src/controllers/auth-health.controller.js
   // (a fixed client vocabulary, and aggregate counts for the super admin only).
+  // 216 -> 218 on 2026-10-13, words and rupees where people read them, both confirmed clean by this
+  // scan (status 0, "JavaScript secret AST scan: PASS") before the pin moved:
+  // src/config/reminder-types.js (a frozen table of reminder labels and a pure formatter) and
+  // src/utils/rupees.js (paise to Indian-grouped rupees, pure, BigInt arithmetic). Neither makes a
+  // network call, reads storage or configuration, or holds a secret.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 216 && result.status === 0,
+    files.length === 218 && result.status === 0,
     result,
   );
 }
