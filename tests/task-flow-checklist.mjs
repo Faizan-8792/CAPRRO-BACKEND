@@ -13,15 +13,15 @@ const BACKEND = join(__dirname, "..");
 
 const ctrl = readFileSync(
   join(BACKEND, "src", "controllers", "task.controller.js"),
-  "utf8"
+  "utf8",
 );
 const routes = readFileSync(
   join(BACKEND, "src", "routes", "task.routes.js"),
-  "utf8"
+  "utf8",
 );
 const taskModel = readFileSync(
   join(BACKEND, "src", "models", "Task.js"),
-  "utf8"
+  "utf8",
 );
 
 const checks = [];
@@ -32,7 +32,9 @@ function check(name, pass, detail = "") {
 
 // --- 1. getMyOpenTasks scopes by assignedTo ---
 {
-  const m = ctrl.match(/getMyOpenTasks[\s\S]*?(?=export const|\nexport function|$)/);
+  const m = ctrl.match(
+    /getMyOpenTasks[\s\S]*?(?=export const|\nexport function|$)/,
+  );
   const block = m ? m[0] : "";
   const ok =
     /assignedTo:\s*user\.id/.test(block) &&
@@ -41,7 +43,7 @@ function check(name, pass, detail = "") {
   check(
     "getMyOpenTasks filters by firmId + isActive + assignedTo=user.id",
     ok,
-    ok ? "Only the logged-in assignee sees their tasks" : "Filter incomplete!"
+    ok ? "Only the logged-in assignee sees their tasks" : "Filter incomplete!",
   );
 }
 
@@ -60,13 +62,23 @@ function check(name, pass, detail = "") {
   check(
     "getMyOpenTasks status filter includes only open states (excludes CLOSED/FILED)",
     hasOpenStatuses && excludesClosed,
-    `Status filter: ${statusList || "MISSING"}`
+    `Status filter: ${statusList || "MISSING"}`,
   );
 }
 
 // --- 3. completeTaskFromUser requires assignedTo match ---
 {
-  const m = ctrl.match(/completeTaskFromUser[\s\S]*?(?=export const|$)/);
+  // Anchored on the DECLARATION, not on the first textual mention of the name.
+  //
+  // The previous pattern matched from wherever the string first appeared, so a comment ABOVE a
+  // different function that referred to this one by name captured that comment instead of this
+  // body - and then reported "Missing scope check!" about a function whose scope check was intact
+  // three lines further down. That happened: a doc comment on markTaskRead explaining that it is
+  // assignee-only "by the same means completeTaskFromUser uses" was enough to fail two checks.
+  //
+  // This is strictly more accurate rather than more permissive: it inspects exactly the function
+  // the check names, and the mutation below proves it still fails when the real guard is removed.
+  const m = ctrl.match(/export const completeTaskFromUser[\s\S]*?(?=export const|$)/);
   const block = m ? m[0] : "";
   const ok =
     /assignedTo:\s*user\.id/.test(block) &&
@@ -78,45 +90,92 @@ function check(name, pass, detail = "") {
     ok,
     ok
       ? "Only assignee can mark their own task done; sets status=CLOSED"
-      : "Missing scope check!"
+      : "Missing scope check!",
   );
 }
 
 // --- 4. completeTaskFromUser logs audit metadata ---
 {
-  const m = ctrl.match(/completeTaskFromUser[\s\S]*?(?=export const|$)/);
+  // Anchored on the DECLARATION, not on the first textual mention of the name.
+  //
+  // The previous pattern matched from wherever the string first appeared, so a comment ABOVE a
+  // different function that referred to this one by name captured that comment instead of this
+  // body - and then reported "Missing scope check!" about a function whose scope check was intact
+  // three lines further down. That happened: a doc comment on markTaskRead explaining that it is
+  // assignee-only "by the same means completeTaskFromUser uses" was enough to fail two checks.
+  //
+  // This is strictly more accurate rather than more permissive: it inspects exactly the function
+  // the check names, and the mutation below proves it still fails when the real guard is removed.
+  const m = ctrl.match(/export const completeTaskFromUser[\s\S]*?(?=export const|$)/);
   const block = m ? m[0] : "";
   const ok =
-    /completedByUserId:\s*user\.id/.test(block) &&
-    /completedAt:/.test(block);
+    /completedByUserId:\s*user\.id/.test(block) && /completedAt:/.test(block);
   check(
     "completeTaskFromUser logs completedBy + completedAt metadata",
     ok,
-    "Provides audit trail of who closed the task and when"
+    "Provides audit trail of who closed the task and when",
   );
 }
 
-// --- 5. createTask validates assignedTo belongs to same firm ---
+// --- 5. Both assignment sites resolve the assignee by ACTIVE MEMBERSHIP ---
+//
+// These two items used to grep for `User.findOne({ ..., firmId })`, and that was the wrong thing to
+// pin. FirmMembership.js states that `User.firmId` is the *active workspace* - which firm somebody
+// is looking at right now - while membership lives in FirmMembership. So the old check asked "is
+// this colleague's screen currently showing my firm?", and answered no for anybody working in a
+// second workspace, while the assign dropdown (GET /api/firms/:firmId/members, FirmMembership with
+// status ACTIVE) offered exactly those people.
+//
+// The item's stated intent never changed - "prevents assigning tasks to users outside the firm" -
+// so it now pins the mechanism that actually delivers it, and pins it harder: one shared resolver,
+// asking FirmMembership for ACTIVE status, used by BOTH sites.
 {
-  const m = ctrl.match(/createTask[\s\S]*?(?=export const|$)/);
-  const block = m ? m[0] : "";
-  const ok = /User\.findOne\(\s*\{[\s\S]{0,200}firmId\s*,?\s*\}/.test(block);
+  const resolver = ctrl.match(
+    /async function resolveFirmAssignee[\s\S]*?\n\}/,
+  );
+  const block = resolver ? resolver[0] : "";
+  const ok =
+    /FirmMembership\.findOne\(/.test(block) &&
+    /firmId/.test(block) &&
+    /userId/.test(block) &&
+    /"ACTIVE"/.test(block);
   check(
     "createTask validates assignedTo user is in the same firm",
     ok,
-    "Prevents assigning tasks to users outside the firm"
+    "Resolved by ACTIVE FirmMembership, not by the assignee's active workspace",
   );
 }
 
-// --- 6. updateTask validates assignedTo same-firm ---
+// --- 6. And neither site may silently drop a bad assignee ---
+//
+// THE DEFECT THIS PINS. createTask used to fall through to `assignedToUserId = null` when the
+// lookup missed, so an administrator could pick a real colleague, receive HTTP 201, and get a task
+// with nobody assigned - no error, no warning, and the work never reached anybody. Both sites must
+// now refuse.
 {
-  const m = ctrl.match(/export const updateTask[\s\S]*?(?=export const|$)/);
-  const block = m ? m[0] : "";
-  const ok = /User\.findOne\(\s*\{[\s\S]{0,200}firmId\s*,?\s*\}/.test(block);
+  // One handler's body, sliced on the export boundary. A lazy regex with a lookahead had to guess
+  // where a handler ended and guessed wrong, matching nothing and passing vacuously in one
+  // direction - which is worse than failing, so it is gone.
+  const bodyOf = (name) => {
+    const start = ctrl.indexOf(`export const ${name} =`);
+    if (start < 0) return "";
+    const next = ctrl.indexOf("\nexport const ", start + 1);
+    return ctrl.slice(start, next < 0 ? ctrl.length : next);
+  };
+
+  const ok = ["createTask", "updateTask"].every((name) => {
+    const body = bodyOf(name);
+    return (
+      body.length > 0 &&
+      /resolveFirmAssignee\(/.test(body) &&
+      /if \(!assignee\.ok\)/.test(body) &&
+      /status\(400\)/.test(body)
+    );
+  });
   check(
     "updateTask validates new assignedTo user is in the same firm",
     ok,
-    "Reassignment cannot leak tasks to other firms"
+    "Both sites REFUSE an unassignable person rather than quietly assigning the task to nobody",
   );
 }
 
@@ -133,7 +192,9 @@ function check(name, pass, detail = "") {
   let allScoped = true;
   const missing = [];
   for (const h of handlers) {
-    const re = new RegExp(`(export const|export function)\\s+${h}[\\s\\S]*?(?=export const|export function|$)`);
+    const re = new RegExp(
+      `(export const|export function)\\s+${h}[\\s\\S]*?(?=export const|export function|$)`,
+    );
     const block = (ctrl.match(re) || [""])[0];
     const ok =
       /firmId/.test(block) && /Firm not linked|firmId\s*[:,]/.test(block);
@@ -147,29 +208,50 @@ function check(name, pass, detail = "") {
     allScoped,
     allScoped
       ? "Cross-firm leakage prevented"
-      : `Missing firmId scope: ${missing.join(", ")}`
+      : `Missing firmId scope: ${missing.join(", ")}`,
   );
 }
 
-// --- 8. Routes are auth-protected ---
+// --- 8. Routes are auth-protected and firm-scoped ---
+//
+// The chain used to be one router.use(authRequired, requireFirmMember, requireFirmWriteAccess) and
+// this matched that literal shape. It is two calls now, because PATCH /:id/mark-read is deliberately
+// exempt from write policy -- a read-only member handed work has to be able to say they have seen
+// it. What THIS check is named for is unchanged and is what it now tests directly: authentication
+// and active membership gate every task route, before anything else.
+//
+// The write-policy half, and exactly which route is allowed to sit above it, is asserted by
+// firm-authorization-contract.mjs and task-assignment-receipt-contract.mjs. It is not restated here.
 {
-  const ok = /router\.use\(authRequired\)/.test(routes);
+  const memberGate =
+    /router\.use\(\s*authRequired\s*,\s*requireFirmMember\s*[,)]/.test(routes);
+
+  // Nothing may be declared before that gate: a route above it would answer to no membership check
+  // at all, which is the failure this item has always been about.
+  const gateAt = routes.search(/router\.use\(\s*authRequired\s*,\s*requireFirmMember\s*[,)]/);
+  const before = gateAt < 0 ? [] : [...routes.slice(0, gateAt).matchAll(/router\.(get|post|patch|delete)\(/g)];
+
   check(
-    "All /api/tasks routes require authentication",
-    ok,
-    "JWT required to access any task endpoint"
+    "All /api/tasks routes require authentication and active firm membership",
+    memberGate && before.length === 0,
+    memberGate
+      ? (before.length === 0
+        ? "JWT and active membership required before any task endpoint"
+        : `${before.length} route(s) declared ABOVE the membership gate`)
+      : "no router.use(authRequired, requireFirmMember) gate found",
   );
 }
 
 // --- 9. PATCH /:id/complete-from-user route exists ---
 {
-  const ok = /\.patch\(\s*["']\/:id\/complete-from-user["']\s*,\s*completeTaskFromUser/.test(
-    routes
-  );
+  const ok =
+    /\.patch\(\s*["']\/:id\/complete-from-user["']\s*,\s*completeTaskFromUser/.test(
+      routes,
+    );
   check(
     "PATCH /:id/complete-from-user route is wired",
     ok,
-    "Extension can mark tasks complete via this endpoint"
+    "Extension can mark tasks complete via this endpoint",
   );
 }
 
@@ -184,33 +266,35 @@ function check(name, pass, detail = "") {
     ok,
     ok
       ? "getMyOpenTasks lookup is O(log n) — fast even with many tasks"
-      : "MISSING INDEX — queries will be slow at scale"
+      : "MISSING INDEX — queries will be slow at scale",
   );
 }
 
 // --- 11. Status field uses enum (prevents arbitrary values) ---
 {
-  const ok = /enum:\s*\[\s*["']NOT_STARTED["'][\s\S]*?["']CLOSED["'][\s\S]*?\]/.test(
-    taskModel
-  );
+  const ok =
+    /enum:\s*\[\s*["']NOT_STARTED["'][\s\S]*?["']CLOSED["'][\s\S]*?\]/.test(
+      taskModel,
+    );
   check(
     "Task.status field uses Mongoose enum",
     ok,
-    "Mongoose validates status against allowed values; no rogue states"
+    "Mongoose validates status against allowed values; no rogue states",
   );
 }
 
 // --- 12. No code path silently un-closes tasks ---
 {
   // Search for any place that sets status away from CLOSED without explicit user intent
-  const closedReverse = /status\s*=\s*["'](?!CLOSED)(?:NOT_STARTED|WAITING_DOCS|IN_PROGRESS|FILED)["']/g;
+  const closedReverse =
+    /status\s*=\s*["'](?!CLOSED)(?:NOT_STARTED|WAITING_DOCS|IN_PROGRESS|FILED)["']/g;
   const matches = ctrl.match(closedReverse) || [];
   // only allowed in updateTask (admin can change status)
   const ok = matches.length === 0;
   check(
     "No automatic flip-back: only updateTask allows status changes from CLOSED",
     ok,
-    `Status reassignment count outside updateTask: ${matches.length}`
+    `Status reassignment count outside updateTask: ${matches.length}`,
   );
 }
 
@@ -226,25 +310,30 @@ checks.forEach((c, i) => {
   if (c.detail) console.log(`        ${c.detail}`);
 });
 
-console.log(`\nResult: ${passed} passed, ${failed} failed (out of ${checks.length})\n`);
+console.log(
+  `\nResult: ${passed} passed, ${failed} failed (out of ${checks.length})\n`,
+);
 
 if (failed === 0) {
   console.log("ALL CHECKS PASSED. Task flow integrity verified.\n");
   console.log("Manual test checklist (run in browser):");
+  console.log("  1. As Firm Admin: create task assigned to staff user A");
   console.log(
-    "  1. As Firm Admin: create task assigned to staff user A");
+    "  2. As staff A: open extension → My Tasks → task should appear",
+  );
   console.log(
-    "  2. As staff A: open extension → My Tasks → task should appear");
+    "  3. As staff B (different user, same firm): My Tasks → task should NOT appear",
+  );
+  console.log("  4. As staff A: click 'Mark Done' → task disappears from list");
   console.log(
-    "  3. As staff B (different user, same firm): My Tasks → task should NOT appear");
+    "  5. As staff A: refresh My Tasks → task still gone (no flip-back)",
+  );
   console.log(
-    "  4. As staff A: click 'Mark Done' → task disappears from list");
+    "  6. As Firm Admin: open Compliance Board → task shown in CLOSED column",
+  );
   console.log(
-    "  5. As staff A: refresh My Tasks → task still gone (no flip-back)");
-  console.log(
-    "  6. As Firm Admin: open Compliance Board → task shown in CLOSED column");
-  console.log(
-    "  7. As staff B: even after refresh, NEVER sees staff A's task\n");
+    "  7. As staff B: even after refresh, NEVER sees staff A's task\n",
+  );
 } else {
   console.log("FAILURES DETECTED — review code paths above.\n");
   process.exit(1);

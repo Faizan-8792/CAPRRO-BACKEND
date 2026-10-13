@@ -4,6 +4,7 @@ import Task from "../models/Task.js";
 import TaskBulkOperation from "../models/TaskBulkOperation.js";
 import User from "../models/User.js";
 import { safeRecordActivity } from "./activity.service.js";
+import { parseStatutoryDayIso } from "./robust-normalize.service.js";
 
 const MAX_ITEMS = 100;
 const PREVIEW_TTL_MS = 15 * 60 * 1000;
@@ -82,9 +83,16 @@ function normalizePatch(rawPatch, index) {
     }
   }
   if (Object.prototype.hasOwnProperty.call(rawPatch, "dueDateISO")) {
-    const parsed = new Date(rawPatch.dueDateISO);
-    const year = parsed.getUTCFullYear();
-    if (Number.isNaN(parsed.getTime()) || year < 2000 || year > 2200) {
+    // Strict on purpose -- new Date(string) silently mis-reads an ambiguous DD-MM/MM-DD
+    // statutory due date (see parseStatutoryDayIso's remarks in robust-normalize.service.js).
+    // Mirrors task.controller.js's createTask/updateTask guard on this same field (C13).
+    let parsed;
+    try {
+      parsed = parseStatutoryDayIso(
+        rawPatch.dueDateISO,
+        `items[${index}].patch.dueDateISO`
+      );
+    } catch {
       throw new TaskBulkError(`items[${index}].patch.dueDateISO is invalid`);
     }
     patch.dueDateISO = parsed.toISOString();

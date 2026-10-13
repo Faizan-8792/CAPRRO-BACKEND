@@ -1,3 +1,5 @@
+import ProviderUsage from "../models/ProviderUsage.js";
+
 const DEEPSEEK_URL =
   process.env.DEEPSEEK_URL || "https://api.deepseek.com/chat/completions";
 // Models are env-configurable so provider naming changes never need a code
@@ -8,9 +10,72 @@ const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-v4-flash";
 const DEEPSEEK_MODEL_FALLBACK =
   process.env.DEEPSEEK_MODEL_FALLBACK || "deepseek-v4-pro";
 
+// O10 spend meter/cap: DeepSeek is billed per call, and callDeepSeek is the one
+// choke point every caller (classifier, insights, reminder, standard-guidance,
+// audit working papers, case AI, the super-admin self-test) funnels through, so
+// this is where the whole app's DeepSeek spend is bounded.
+//
+// Per-user daily cap is an owner-set anti-abuse ceiling, not a usage estimate:
+// the product is free, and 200/day is deliberately generous headroom above what
+// any real working day of drafting needs (a single notice triggers only a
+// handful of calls -- refine + insights + a coverage follow-up + a reminder
+// message) while still bounding a single compromised or scripted account.
+// Monthly keeps the SAME ratio to the daily figure this task inherited (800/60
+// = ~13.3x, i.e. a sustained average of ~44% of the daily peak): 200 * 13.3 =
+// ~2667, rounded to 2700, so raising the daily number does not silently make
+// the monthly tier the only real constraint for ordinary bursty-but-not-daily
+// use, and does not silently stop being a genuine secondary ceiling either.
+// The global ceiling is deliberately NOT per-user-cap x expected-users -- it is
+// a flat backstop on the owner's own DeepSeek bill that stays in force no
+// matter how many accounts sign up, and is intentionally left untouched here:
+// raising it is a real recurring-cost decision for the owner, not a per-user
+// abuse-protection one. At the current 1500/day global ceiling, note for the
+// owner: roughly 7-8 users simultaneously at the new 200/day personal cap would
+// exhaust the whole app's shared daily budget for everyone else -- worth a
+// look if the user base grows past that.
+const DEEPSEEK_DAILY_CALL_CAP_PER_USER =
+  Number(process.env.DEEPSEEK_DAILY_CALL_CAP_PER_USER) || 200;
+const DEEPSEEK_MONTHLY_CALL_CAP_PER_USER =
+  Number(process.env.DEEPSEEK_MONTHLY_CALL_CAP_PER_USER) || 2700;
+const DEEPSEEK_GLOBAL_DAILY_CALL_CAP =
+  Number(process.env.DEEPSEEK_GLOBAL_DAILY_CALL_CAP) || 1500;
+
 function boundedString(value, max = 4000) {
   return String(value ?? "").slice(0, max);
 }
+
+// A business-document reference number, never itself PII, immediately preceding a
+// digit run. A purchase order, GRN, cheque, invoice, bill, voucher, challan, sales
+// order or generic order/transaction/receipt reference has exactly the same 8-14
+// digit shape as an Aadhaar number or a long account-style ID, so the label alone is
+// what tells the two apart. Deliberately does NOT include A/c, Account, DD or UTR:
+// those name a bank or payment identifier, which is exactly the PII this function
+// exists to remove, not a reference this function should protect.
+const REFERENCE_LABEL =
+  "(?:P\\.?O\\.?|Purchase\\s*Order|GRN|Cheque|Chq|Invoice|Inv|Bill|Voucher|Challan|" +
+  "Order|Ref(?:erence)?|Txn|Transaction|Receipt|Sale\\s*Order|SO)" +
+  "\\.?\\s*(?:No\\.?|Number|#)?\\s*[:#-]?\\s*";
+
+// Aadhaar: 12 digits, optionally grouped 4-4-4, unless immediately preceded by a
+// business-document reference label. Narrowed under B14/B6
+// (EXTENSION-DESKTOP-FEATURE-PARITY.md §4): the original bare `\d{4}...` rule matched
+// a purchase-order, GRN or cheque reference exactly as readily as a real Aadhaar
+// number and destroyed it as "[AADHAAR]" before the model ever saw it, at the same
+// time as the redaction correctly removing a genuine Aadhaar number a few words away.
+const AADHAAR_RULE = new RegExp(
+  `(?<!${REFERENCE_LABEL})\\b\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}\\b`,
+  "gi",
+);
+
+// Long bare digit runs (bank account / long IDs), unless immediately preceded by a
+// rupee sign, "Rs"/"INR", or a colon - the three shapes a stated integer-paise amount
+// or a JSON minor-unit field actually takes on this surface. Narrowed under B14/B6:
+// the original rule matched any 11-18 digit run with no such exemption, so an
+// ordinary amount above roughly Rs 2.5 crore (>= 25,000,000,000 paise, 11 digits)
+// was replaced with "[NUM]" and the figure the reviewer needed named was gone before
+// the model read it - silently, since callDeepSeek never logs what redactPII changed.
+const NUM_RULE =
+  /(?<![:\uFF1A]\s*|\u20B9\s*|\bRs\.?\s*|\bINR\s*)\b\d{11,18}\b/gi;
 
 // Best-effort redaction of Indian PII / financial identifiers before any text
 // leaves our servers for the third-party LLM. Applied at the single egress
@@ -20,19 +85,19 @@ function boundedString(value, max = 4000) {
 // are preserved because only identifiers, not domain terms, are removed.
 function redactPII(text) {
   if (typeof text !== "string" || !text) return text;
-  return text
-    // GSTIN (15 chars): 2-digit state + PAN(5A4D1A) + entity/Z/checksum
-    .replace(/\b\d{2}[A-Z]{5}\d{4}[A-Z][0-9A-Z]{3}\b/gi, "[GSTIN]")
-    // PAN: 5 letters + 4 digits + 1 letter
-    .replace(/\b[A-Z]{5}\d{4}[A-Z]\b/gi, "[PAN]")
-    // Email address
-    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "[EMAIL]")
-    // Aadhaar: 12 digits, optionally grouped 4-4-4
-    .replace(/\b\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g, "[AADHAAR]")
-    // Indian mobile: optional +91/0 prefix + 10 digits starting 6-9
-    .replace(/\b(?:\+91[\s-]?|0)?[6-9]\d{9}\b/g, "[PHONE]")
-    // Long bare digit runs (bank account / long IDs)
-    .replace(/\b\d{11,18}\b/g, "[NUM]");
+  return (
+    text
+      // GSTIN (15 chars): 2-digit state + PAN(5A4D1A) + entity/Z/checksum
+      .replace(/\b\d{2}[A-Z]{5}\d{4}[A-Z][0-9A-Z]{3}\b/gi, "[GSTIN]")
+      // PAN: 5 letters + 4 digits + 1 letter
+      .replace(/\b[A-Z]{5}\d{4}[A-Z]\b/gi, "[PAN]")
+      // Email address
+      .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "[EMAIL]")
+      .replace(AADHAAR_RULE, "[AADHAAR]")
+      // Indian mobile: optional +91/0 prefix + 10 digits starting 6-9
+      .replace(/\b(?:\+91[\s-]?|0)?[6-9]\d{9}\b/g, "[PHONE]")
+      .replace(NUM_RULE, "[NUM]")
+  );
 }
 
 function isRetriable(status) {
@@ -63,6 +128,24 @@ async function attemptDeepSeek({
       ],
       temperature: Math.max(0, Math.min(1, Number(temperature) || 0)),
       max_tokens: Math.max(1, Math.min(8000, Number(maxTokens) || 600)),
+      // DeepSeek V4 models run in "thinking" mode by default (effort "high"),
+      // which emits chain-of-thought into reasoning_content BEFORE the actual
+      // answer, and those reasoning tokens are billed against and count
+      // toward the same max_tokens ceiling as the answer itself. Every route
+      // here (insights, classifier, reminder, standard-guidance) was written
+      // assuming max_tokens bounds only the answer, so on a moderately
+      // complex prompt the model could spend its entire budget "thinking"
+      // and return finish_reason: "length" with content: "" - which is
+      // exactly the "LLM returned no content" failure this comment sits
+      // beside. Measured on the insights prompt at the production
+      // max_tokens: 3000: thinking enabled spent all 3000 tokens reasoning
+      // and returned empty content; thinking disabled returned a complete,
+      // evidence-grounded answer in ~870 tokens (~430ms). Disabling it also
+      // makes `temperature` actually take effect - the API docs state
+      // thinking mode ignores temperature/top_p/presence_penalty/
+      // frequency_penalty entirely, so the classifier's temperature: 0 was a
+      // silent no-op the whole time thinking was implicitly on.
+      thinking: { type: "disabled" },
     };
     if (jsonResponse) body.response_format = { type: "json_object" };
 
@@ -79,7 +162,9 @@ async function attemptDeepSeek({
     if (!response.ok) {
       const errBody = await response.text().catch(() => "");
       const snippet = boundedString(errBody, 400).replace(/\s+/g, " ").trim();
-      console.error(`DeepSeek HTTP ${response.status} (model=${model}): ${snippet}`);
+      console.error(
+        `DeepSeek HTTP ${response.status} (model=${model}): ${snippet}`,
+      );
       return {
         ok: false,
         status: response.status,
@@ -105,8 +190,15 @@ async function attemptDeepSeek({
 }
 
 // Resilient DeepSeek call: retries transient failures (network/timeout/429/5xx)
-// up to twice per model, and falls back to a second model on a hard 400 (e.g.
-// a retired/invalid model name) so provider changes degrade gracefully.
+// up to twice per model (default), and falls back to a second model on a hard
+// 400 (e.g. a retired/invalid model name) so provider changes degrade gracefully.
+//
+// maxAttemptsPerModel defaults to 2 for every existing caller (classifier,
+// reminder, standard-guidance), preserving their behaviour exactly. Insights
+// passes 1: a same-model retry at the same timeout mostly doubles the worst
+// case for a call whose failure mode is usually "the model is being slow on
+// this document", which a same-model retry does not fix, whereas the
+// fallback-model step already provides a genuinely different attempt.
 async function callDeepSeek({
   system,
   prompt,
@@ -115,11 +207,35 @@ async function callDeepSeek({
   timeoutMs = 25000,
   temperature = 0.3,
   model,
+  maxAttemptsPerModel = 2,
+  userId,
 }) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) {
     return { ok: false, reason: "DEEPSEEK_API_KEY not configured" };
   }
+  // Required, not optional with a fallback: a required parameter means a NEW
+  // call site added later cannot compile/run without deciding whose usage this
+  // call is billed against, so it cannot silently escape metering the way an
+  // optional param with a default could.
+  if (!userId) {
+    throw new Error("callDeepSeek requires userId for provider-usage metering");
+  }
+  // Quota check happens BEFORE the paid call, and the reservation it makes is
+  // only released (see ProviderUsage.reserveProviderCall) if a later tier in the
+  // same check refuses -- so a refused call is never counted, and an attempted
+  // one always is, regardless of whether the call below ultimately succeeds.
+  const reservation = await ProviderUsage.reserveProviderCall({
+    userId,
+    provider: "DEEPSEEK",
+    dailyCapPerUser: DEEPSEEK_DAILY_CALL_CAP_PER_USER,
+    monthlyCapPerUser: DEEPSEEK_MONTHLY_CALL_CAP_PER_USER,
+    globalDailyCap: DEEPSEEK_GLOBAL_DAILY_CALL_CAP,
+  });
+  if (!reservation.allowed) {
+    return { ok: false, reason: reservation.reason };
+  }
+  const attemptsPerModel = Math.max(1, Number(maxAttemptsPerModel) || 1);
   const primary = model || DEEPSEEK_MODEL;
   const models = [primary];
   if (DEEPSEEK_MODEL_FALLBACK && DEEPSEEK_MODEL_FALLBACK !== primary) {
@@ -127,7 +243,7 @@ async function callDeepSeek({
   }
   let last = { ok: false, reason: "LLM not attempted", status: 0 };
   for (const model of models) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < attemptsPerModel; attempt++) {
       const r = await attemptDeepSeek({
         apiKey,
         model,
@@ -270,10 +386,55 @@ function parseJsonObject(content) {
   return null;
 }
 
+// True only when parseJsonObject can succeed at all, and only via the
+// truncation-repair path above - i.e. the raw model output hit max_tokens
+// mid-object and never closed cleanly. Mirrors parseJsonObject's own attempt
+// order exactly so the two can never disagree about which path a given
+// response actually took.
+//
+// Exported so a caller can label a recovered result as partial rather than
+// silently returning it as complete. Added under B4 (EXTENSION-DESKTOP-FEATURE-
+// PARITY.md): the insights endpoint previously returned generated:true with no
+// signal that repairTruncatedJson had fired, so the document-specific findings
+// lost to truncation were dropped without anyone - server log or client - ever
+// being told.
+function wasJsonTruncated(content) {
+  if (typeof content !== "string") return false;
+  const tryParse = (s) => {
+    try {
+      return asJsonObject(JSON.parse(s));
+    } catch {
+      return null;
+    }
+  };
+
+  const trimmed = content.trim();
+  if (tryParse(trimmed)) return false;
+
+  const cleaned = trimmed
+    .replace(/```(?:json)?/gi, "")
+    .replace(/```/g, "")
+    .trim();
+  if (tryParse(cleaned) || tryParse(sanitizeJsonish(cleaned))) return false;
+
+  const balanced = extractFirstJsonObject(cleaned);
+  if (balanced && (tryParse(balanced) || tryParse(sanitizeJsonish(balanced)))) {
+    return false;
+  }
+
+  // Every clean path failed. Only the repair path is left, so success from here
+  // on means the object was genuinely truncated mid-value.
+  const repaired = repairTruncatedJson(cleaned);
+  return Boolean(
+    repaired && (tryParse(repaired) || tryParse(sanitizeJsonish(repaired))),
+  );
+}
+
 export {
   DEEPSEEK_MODEL,
   boundedString,
   redactPII,
   callDeepSeek,
   parseJsonObject,
+  wasJsonTruncated,
 };

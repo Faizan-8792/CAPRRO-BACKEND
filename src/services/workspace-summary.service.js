@@ -4,6 +4,8 @@ import Reminder from "../models/Reminder.js";
 import Task from "../models/Task.js";
 import TaxWorkSession from "../models/TaxWorkSession.js";
 import User from "../models/User.js";
+import { readableCode, reminderTypeLabel } from "../config/reminder-types.js";
+import { TAX_TEMPLATES } from "../config/tax-templates.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const OPEN_TASK_STATUSES = ["NOT_STARTED", "WAITING_DOCS", "IN_PROGRESS"];
@@ -303,15 +305,6 @@ function isoOrNull(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
-function humanizeCode(value) {
-  return String(value || "")
-    .trim()
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .toLowerCase()
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
 function lookupRecord(map, value) {
   const id = idString(value);
   return id ? map.get(id) || null : null;
@@ -410,7 +403,8 @@ function normalizeSession(doc, lookups) {
   const item = baseWorkspaceItem("TAX_WORK_SESSION", doc, lookups);
   item.dueDateISO = isoOrNull(doc.dueDate);
   item.completedAtISO = isoOrNull(doc.completedAt);
-  item.title = [humanizeCode(doc.taxType) || "Tax work", doc.period]
+  // The work type as the Tax Work Tracker names it (its template's displayName), not its code.
+  item.title = [TAX_TEMPLATES[doc.taxType]?.displayName || readableCode(doc.taxType) || "Tax work", doc.period]
     .filter(Boolean)
     .join(" — ");
   item.status = doc.status || "DRAFT";
@@ -424,7 +418,8 @@ function normalizeSession(doc, lookups) {
 function normalizeReminder(doc, lookups) {
   const item = baseWorkspaceItem("REMINDER", doc, lookups);
   item.dueDateISO = isoOrNull(doc.dueDateISO);
-  item.title = humanizeCode(doc.typeId) || "Reminder";
+  // The activity in the words the extension offered it in (config/reminder-types.js), not its id.
+  item.title = reminderTypeLabel(doc.typeId);
   item.status = doc.isActive === false ? "INACTIVE" : "ACTIVE";
   item.client = clientView(doc, lookups, doc.clientLabel || null);
   item.assignee = userView(doc.userId, lookups);

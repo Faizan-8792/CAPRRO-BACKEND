@@ -21,11 +21,10 @@ export function trackUsage(req, res, next) {
   memoryCache.set(userId, now);
 
   // Fire-and-forget DB write; don't block the request
-  const ip =
-    req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
-    req.ip ||
-    req.socket?.remoteAddress ||
-    null;
+  // req.ip, not the raw first X-Forwarded-For hop: the header is client-forgeable
+  // and express already resolves the trusted proxy chain (app.set("trust proxy"))
+  // into req.ip (IMPROVEMENT-PLAN-V2-2026-09-28 §3.1).
+  const ip = req.ip || req.socket?.remoteAddress || null;
 
   User.updateOne(
     { _id: userId },

@@ -1,4 +1,4 @@
-import { previewImport } from "../services/import-preview.service.js";
+import { previewImport, suggestImportMapping } from "../services/import-preview.service.js";
 import { convertGstr2bJson } from "../services/gstr2b-json.service.js";
 import {
   commitGstImport,
@@ -19,6 +19,7 @@ const PREVIEW_FIELDS = new Set([
   "text",
   "mapping",
   "delimiter",
+  "dateOrder",
   "clientId",
   "gstin",
   "period",
@@ -27,11 +28,15 @@ const PREVIEW_FIELDS = new Set([
   "quarter",
   "statementType",
 ]);
+// A suggestion needs the file and nothing else: no mapping (that is what it produces), and no
+// statutory context, because it neither previews figures nor authorizes a commit.
+const SUGGEST_FIELDS = new Set(["kind", "text", "delimiter"]);
 const COMMIT_FIELDS = new Set([
   "kind",
   "text",
   "mapping",
   "delimiter",
+  "dateOrder",
   "sourceName",
   "clientId",
   "gstin",
@@ -43,6 +48,7 @@ const TDS_COMMIT_FIELDS = new Set([
   "text",
   "mapping",
   "delimiter",
+  "dateOrder",
   "sourceName",
   "clientId",
   "tan",
@@ -74,6 +80,28 @@ function requestDelimiter(value) {
   return value === "TAB" ? "\t" : value || null;
 }
 
+/**
+ * Proposes a column mapping for a file, without importing anything.
+ *
+ * Deliberately issues NO commit token and touches no collection. It reads the header row and
+ * answers "which column looks like which field", so a person confirms a proposal instead of
+ * mapping ten columns by hand on every file. Everything it returns is overridable by the caller,
+ * and the preview it feeds still re-validates the file from scratch.
+ */
+export async function suggestImportMappingForFile(req, res, next) {
+  try {
+    validateBody(req.body, SUGGEST_FIELDS);
+    const suggestion = suggestImportMapping({
+      kind: req.body.kind,
+      text: req.body.text,
+      delimiter: requestDelimiter(req.body.delimiter),
+    });
+    return res.json({ ok: true, suggestion });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 export async function previewMappedImport(req, res, next) {
   try {
     validateBody(req.body, PREVIEW_FIELDS);
@@ -82,9 +110,18 @@ export async function previewMappedImport(req, res, next) {
       text: req.body.text,
       mapping: req.body.mapping,
       delimiter: requestDelimiter(req.body.delimiter),
+      dateOrder: req.body.dateOrder || null,
     });
     let authorization = {};
-    if (TDS_IMPORT_KINDS.includes(preview.kind)) {
+    // An AMBIGUOUS file with no resolved order must never carry a commit
+    // authorization, whatever kind it is -- the person has not yet said which
+    // reading of the dates the figures below actually mean.
+    const dateOrderUnanswered = preview.dateOrder
+      && preview.dateOrder.status === "AMBIGUOUS"
+      && !preview.dateOrder.resolved;
+    if (dateOrderUnanswered) {
+      // authorization stays {}; no commitToken is issued.
+    } else if (TDS_IMPORT_KINDS.includes(preview.kind)) {
       authorization = createTdsImportPreviewAuthorization({
         sourceHash: preview.sourceHash,
         kind: preview.kind,
@@ -95,16 +132,26 @@ export async function previewMappedImport(req, res, next) {
         financialYear: req.body.financialYear,
         quarter: req.body.quarter,
         statementType: req.body.statementType,
+        // This function does not re-parse the file, so it is given the
+        // ALREADY-RESOLVED order from the previewImport() call above, not the
+        // raw stated request value.
+        dateOrder: preview.dateOrder.resolved || "NOT_APPLICABLE",
       });
     } else if (preview.kind !== "CLIENTS") {
-      authorization = createGstImportPreviewAuthorization({
+      authorization = await createGstImportPreviewAuthorization({
+        firmId: req.user.firmId,
         sourceHash: preview.sourceHash,
         kind: preview.kind,
+        text: req.body.text,
         mapping: preview.mapping,
         delimiter: preview.delimiter,
         clientId: req.body.clientId,
         gstin: req.body.gstin,
         period: req.body.period,
+        // This function re-parses the file itself, so it is given the raw
+        // stated request value and derives its own authoritative resolution
+        // from that fresh parse.
+        dateOrder: req.body.dateOrder || null,
       });
     }
 
@@ -132,6 +179,7 @@ export async function commitMappedGstImport(req, res, next) {
       text: req.body.text,
       mapping: req.body.mapping,
       delimiter: requestDelimiter(req.body.delimiter),
+      dateOrder: req.body.dateOrder || null,
       previewToken: req.body.previewToken,
       clientId: req.body.clientId,
       gstin: req.body.gstin,
@@ -161,6 +209,7 @@ export async function commitMappedTdsImport(req, res, next) {
       text: req.body.text,
       mapping: req.body.mapping,
       delimiter: requestDelimiter(req.body.delimiter),
+      dateOrder: req.body.dateOrder || null,
       previewToken: req.body.previewToken,
       clientId: req.body.clientId,
       tan: req.body.tan,

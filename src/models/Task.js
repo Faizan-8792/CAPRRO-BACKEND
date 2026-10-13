@@ -38,6 +38,16 @@ const TaskSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    // What the administrator wants the assignee to know, as opposed to WHAT the work is.
+    // Deliberately its own field rather than more text crammed into title: the board, the matrix
+    // and every digest render title as a one-line label, and a paragraph of instructions in there
+    // would be truncated everywhere it appears.
+    remarks: {
+      type: String,
+      trim: true,
+      maxlength: 2000,
+      default: "",
+    },
 
     // Due date for this task
     dueDateISO: {
@@ -47,6 +57,24 @@ const TaskSchema = new mongoose.Schema(
 
     // Assigned staff
     assignedTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    // Whether the person it is assigned to has acknowledged it, and when.
+    //
+    // THIS BELONGS TO THE ASSIGNMENT, NOT TO THE TASK, and the difference is the whole point:
+    // both fields are cleared whenever assignedTo changes. A task handed to a second person has
+    // NOT been read by them, and an administrator looking at a tick left over from the previous
+    // assignee would draw exactly the wrong conclusion about whether the work has landed.
+    //
+    // assigneeReadBy is stored rather than inferred from assignedTo, so the record still says who
+    // acknowledged it even after a later reassignment clears the pair.
+    assigneeReadAt: {
+      type: Date,
+      default: null,
+    },
+    assigneeReadBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
@@ -213,6 +241,11 @@ const TaskSchema = new mongoose.Schema(
 TaskSchema.index({ firmId: 1, isActive: 1 });
 TaskSchema.index({ firmId: 1, status: 1 });
 TaskSchema.index({ firmId: 1, assignedTo: 1 });
+
+// "what have I been given that I have not acknowledged" is the assignee's own first question
+// every morning, and the administrator's "who has not read what I sent" is the same index read
+// the other way round.
+TaskSchema.index({ firmId: 1, assignedTo: 1, assigneeReadAt: 1 });
 TaskSchema.index({ firmId: 1, dueDateISO: 1 });
 TaskSchema.index(
   { firmId: 1, isActive: 1, status: 1, dueDateISO: 1, _id: 1 },

@@ -1,0 +1,80 @@
+STELLAR TEXTILES AND EXPORTS LIMITED
+
+Statutory Audit Working Papers — FY 2024-25
+
+Client: Stellar Textiles and Exports Limited
+Financial Year: 2024-25
+Engagement Type: Statutory Audit under Companies Act, 2013
+Materiality (Overall): Rs. 22,50,000 (1.5% of Revenue)
+Prepared By: N. Iyer, Audit Executive | Date: 14 April 2025
+Reviewed By: P. Sharma, Audit Manager | Date: 19 April 2025
+
+Trade Receivables — Provision for Doubtful Debts [WP Ref: A-01]
+
+Background: Total trade receivables at year-end stand at Rs. 4,10,00,000. Of this, Rs. 62,00,000 is outstanding from a single customer, Vantage Garments LLC, overdue by more than 400 days. No provision has been made against this balance. Correspondence shows the customer disputing quality of goods received in a shipment from August 2023.
+
+Procedures Performed: Obtained ageing schedule; reviewed correspondence with Vantage Garments; checked subsequent receipts post year-end (none received as of report date); inquired with credit control team.
+
+Findings: No provision recorded despite the balance being significantly overdue and actively disputed. Credit control confirmed no realistic recovery plan exists. Management believes the amount will "eventually be settled through arbitration."
+
+Preparer's Conclusion: Recoverability is doubtful based on evidence obtained; provisioning appears inadequate. Matter open pending management's response.
+
+Foreign Currency Transactions — Export Sales [WP Ref: B-02]
+
+Background: Export sales of Rs. 2,80,00,000 were recognized during the year. A sample review found that 11 invoices totaling Rs. 34,00,000 were converted using the exchange rate applicable at the time of order confirmation rather than the rate on the date of actual shipment/recognition, as required under Ind AS 21.
+
+Procedures Performed: Selected sample of 15 export invoices; verified exchange rate applied against RBI reference rate for date of recognition; recalculated impact.
+
+Findings: Rate mismatch identified in 11 of 15 sampled invoices, resulting in an overstatement of revenue of approximately Rs. 3,10,000 in the sample alone. Finance team stated this has been "standard practice for exports" for several years.
+
+Preparer's Conclusion: Potential systemic error in FX translation methodology; extrapolated impact across full population needs quantification before concluding on materiality.
+
+Related Party Transactions — Loan to Director [WP Ref: C-03]
+
+Background: An unsecured loan of Rs. 18,00,000 was disbursed to a whole-time director in June 2024, carrying no interest and no fixed repayment schedule. This was not reported to the Board prior to disbursement.
+
+Procedures Performed: Reviewed loan ledger and bank statement; checked Section 185 of Companies Act, 2013 applicability; reviewed board minutes for approval.
+
+Findings: No board or shareholder approval was obtained prior to or after disbursement. The transaction appears to contravene Section 185 restrictions on loans to directors. No interest has been charged or accrued.
+
+Preparer's Conclusion: Possible non-compliance with Section 185; requires legal assessment and disclosure evaluation. To be reported to those charged with governance.
+
+Fixed Assets — Capitalization of Repairs [WP Ref: D-04]
+
+Background: Rs. 26,50,000 relating to factory shed roof repairs and machine overhaul was capitalized as "Plant & Machinery — Additions" during the year, rather than expensed.
+
+Procedures Performed: Obtained breakup of additions to fixed assets; reviewed underlying vendor invoices and work orders; assessed nature of expenditure against capitalization criteria under Ind AS 16.
+
+Findings: Of the Rs. 26,50,000, approximately Rs. 19,20,000 relates to routine repair and maintenance (roof waterproofing, motor rewinding) that does not extend the useful life or capacity of the asset, and should have been expensed.
+
+Preparer's Conclusion: Inappropriate capitalization overstates fixed assets and understates current year expenses; adjustment recommended before finalization.
+
+Provisions — Warranty Claims [WP Ref: E-05]
+
+Background: The company provides a 12-month warranty on select export products. No warranty provision has been recognized in the financial statements. Historical claims data shows warranty costs averaging 1.8% of relevant sales over the last three years.
+
+Procedures Performed: Obtained historical warranty claims data; recalculated expected provision based on trailing three-year average; discussed with management on provisioning policy.
+
+Findings: Based on historical trend, an estimated provision of approximately Rs. 9,80,000 should have been recognized; none has been made. Management stated warranty costs are "expensed as incurred" rather than provided for upfront.
+
+Preparer's Conclusion: Policy applied is inconsistent with Ind AS 37 requirements for constructive obligations with reliable estimation basis. Matter remains open.
+
+Journal Entry Testing — Reversing Entries at Quarter-End [WP Ref: F-06]
+
+Background: Four manual journal entries totaling Rs. 41,00,000 were posted to "Other Income" on 30 September 2024 (Q2 close), all by the Deputy CFO. All four entries were reversed in the first week of October 2024.
+
+Procedures Performed: Extracted manual journal population for Q2; filtered entries above Rs. 5,00,000 posted to income accounts near quarter-end; traced reversal entries; requested supporting documentation.
+
+Findings: No supporting documentation (contracts, agreements, or third-party confirmation) was available for any of the four entries at the time of testing. Pattern of quarter-end posting followed by prompt reversal was noted.
+
+Preparer's Conclusion: Indicators consistent with possible earnings management around interim reporting; requires explanation from Deputy CFO and further corroboration before conclusion.
+
+Going Concern — Working Capital Facility [WP Ref: G-07]
+
+Background: The company's working capital facility of Rs. 3,00,00,000 is due for renewal in July 2025. The bank has verbally indicated renewal "may be subject to additional collateral" given a decline in EBITDA margins over the past two years (18% to 11%). No written renewal terms or sanction letter has been received as of the report date.
+
+Procedures Performed: Reviewed loan documentation and correspondence with the bank; reviewed EBITDA trend over three years; inquired with management on renewal status and contingency plans.
+
+Findings: No formal renewal confirmation exists; management has not documented an alternative funding plan should the facility not be renewed on similar terms.
+
+Preparer's Conclusion: Uncertainty exists around continued access to working capital; adequacy of disclosure and management's assessment remain open matters.

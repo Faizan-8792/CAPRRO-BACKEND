@@ -1,0 +1,222 @@
+ORION INDUSTRIAL SYSTEMS PRIVATE LIMITED
+
+Statutory Audit Working Papers — FY 2024-25
+
+Client: Orion Industrial Systems Private Limited
+Financial Year: 2024-25
+Engagement Type: Statutory Audit under Companies Act, 2013
+Overall Materiality: Rs. 32,00,000
+Prepared By: R. Kapoor, Audit Senior
+Date Prepared: 16 April 2025
+Reviewed By: N. Sharma, Audit Manager
+Date Reviewed: 21 April 2025
+
+Note to reviewer:
+These working papers record procedures performed and observations arising from the audit. Figures, names and circumstances are illustrative and intended for evaluation of an audit-review tool.
+
+Trade Receivables — Long Outstanding Balances [WP Ref: A-11]
+
+Objective
+To assess the existence, recoverability and appropriate presentation of trade receivables at year end.
+
+Background / Facts Noted
+Trade receivables as at 31 March 2025 amounted to Rs. 9,40,00,000.
+An ageing review identified Rs. 1,15,00,000 outstanding from three customers for more than 270 days.
+One customer, Apex Engineering Ltd., owed Rs. 48,00,000. The customer disputed Rs. 18,00,000 of this balance in correspondence dated January 2025, stating that certain supplied components were defective.
+Management has not recorded any specific provision against the disputed amount.
+Subsequent receipts from Apex Engineering between April and June 2025 totalled Rs. 22,00,000.
+
+Audit Procedures Performed
+Obtained the receivables ageing report and agreed the total to the general ledger.
+Sent external balance confirmations to the three customers.
+Examined subsequent receipts through bank statements.
+Reviewed correspondence available between the company and Apex Engineering.
+Discussed the disputed balance with the Finance Manager.
+
+Findings / Observations
+Confirmation responses were received from two of the three customers.
+Apex Engineering's confirmation was not returned.
+Rs. 22,00,000 was subsequently collected from Apex Engineering.
+Management continues to consider the entire remaining balance recoverable.
+No documented assessment of the disputed Rs. 18,00,000 has been prepared.
+
+Preparer's Conclusion
+Subsequent collections provide some evidence regarding recoverability; however, the disputed amount requires further evaluation before concluding on the adequacy of any expected credit loss provision.
+
+Revenue — Cut-off Around Year End [WP Ref: B-12]
+
+Objective
+To determine whether sales are recorded in the appropriate accounting period.
+
+Background / Facts Noted
+Revenue for FY 2024-25 was Rs. 18,60,00,000.
+During testing, 12 sales invoices dated 29–31 March 2025 were selected, representing total revenue of Rs. 74,00,000.
+For four invoices totalling Rs. 31,00,000, the corresponding goods dispatch documents showed that the goods left the company's warehouse between 2 April and 5 April 2025.
+The sales invoices had nevertheless been recorded in March 2025.
+Management stated that the invoices were raised before year end because customers had "confirmed their orders."
+
+Audit Procedures Performed
+Selected year-end sales invoices using a risk-based sample.
+Agreed invoice amounts to the sales ledger.
+Inspected dispatch documentation for selected transactions.
+Tested sales recorded during the first week of April for potential prior-period transactions.
+Discussed exceptions with the Sales Controller.
+
+Findings / Observations
+Four transactions totalling Rs. 31,00,000 were invoiced and recorded before year end although dispatch occurred after year end.
+No evidence was provided showing that control over the goods had transferred to the customers before 31 March 2025.
+The transactions were reversed from the sales ledger in April only after the audit team raised the issue.
+
+Preparer's Conclusion
+The identified transactions require adjustment to ensure revenue is recognized in the appropriate reporting period. The pattern also warrants consideration in the assessment of revenue cut-off risk.
+
+Payroll — Employee Master File Changes [WP Ref: C-13]
+
+Objective
+To assess whether payroll payments are made only to valid employees and whether changes to employee master data are appropriately controlled.
+
+Background / Facts Noted
+Monthly payroll averages approximately Rs. 1,35,00,000.
+The HR system maintains employee bank-account details and salary information.
+During the audit, the team obtained a report of employee master-file changes for March 2025.
+The report showed 17 changes to bank account details during the month.
+Of these, 11 changes were made by the Payroll Executive using the Payroll Administrator login.
+The Payroll Manager stated that the Payroll Administrator was on leave during several of the dates shown in the report.
+One employee's bank account was changed on 27 March 2025, and Rs. 3,80,000 was subsequently transferred to the new account.
+The employee confirmed that the new bank account belonged to them.
+
+Audit Procedures Performed
+Obtained the March payroll master-change report.
+Reviewed changes to employee bank details.
+Compared selected changes with employee confirmation records.
+Discussed access rights with HR and payroll personnel.
+Traced selected salary payments to bank statements.
+
+Findings / Observations
+Multiple bank-account changes were processed using a login assigned to an employee who was reportedly absent.
+No evidence of independent review or approval of the changes was available.
+The identified employee confirmed ownership of the new bank account.
+No unexplained payroll payment was identified from the sample tested.
+
+Preparer's Conclusion
+The absence of evidence of independent review over payroll master-file changes represents a control deficiency. Further investigation is required to determine whether the issue is isolated or indicative of broader unauthorized access.
+
+Inventory — Standard Cost vs. Net Realizable Value [WP Ref: D-14]
+
+Objective
+To determine whether inventory is carried at an appropriate amount at year end.
+
+Background / Facts Noted
+Finished goods inventory at 31 March 2025 amounted to Rs. 4,80,00,000.
+A product-level analysis identified Product X with inventory of Rs. 52,00,000.
+The standard cost per unit is Rs. 1,040.
+Recent sales invoices for Product X show selling prices ranging between Rs. 980 and Rs. 1,020 per unit.
+Management's inventory valuation report continues to value the product at standard cost of Rs. 1,040 per unit.
+Management explained that the standard cost includes normal production overheads and that the selling-price reduction is temporary.
+No subsequent sales above Rs. 1,040 per unit were identified in the documents provided to the audit team.
+
+Audit Procedures Performed
+Obtained the inventory valuation report.
+Tested standard costs to the approved costing records.
+Reviewed recent sales invoices for selected products.
+Compared selling prices with standard costs.
+Discussed pricing trends with the Production Manager.
+
+Findings / Observations
+Recent selling prices for Product X are consistently below its recorded standard cost.
+No formal NRV assessment for Product X was available.
+Management has not recorded a write-down against the Rs. 52,00,000 balance.
+
+Preparer's Conclusion
+Further work is required to determine whether the carrying amount of Product X exceeds its recoverable selling value after considering estimated costs necessary to complete and sell the inventory.
+
+Bank Reconciliation — Unreconciled Differences [WP Ref: E-15]
+
+Objective
+To assess whether bank balances are complete and accurately reconciled at year end.
+
+Background / Facts Noted
+The company maintains 14 bank accounts.
+Bank reconciliations are prepared monthly by the Treasury Accountant and reviewed by the Finance Manager.
+The March 2025 reconciliation for the company's principal operating account showed an unreconciled difference of Rs. 6,70,000.
+The difference consists of:
+Rs. 2,10,000 of cheques allegedly issued but not cleared for more than six months.
+Rs. 1,80,000 described as "bank charges to be confirmed."
+Rs. 2,80,000 described as "other reconciling items."
+The Finance Manager stated that these balances "usually clear in the following months."
+
+Audit Procedures Performed
+Obtained the March bank reconciliation.
+Agreed the book balance to the general ledger.
+Agreed the bank balance to the external bank statement.
+Tested selected outstanding cheques to subsequent bank statements.
+Requested explanations and supporting documents for reconciling items.
+
+Findings / Observations
+The Rs. 2,10,000 of outstanding cheques remained uncleared as of 30 June 2025.
+Supporting documentation for the Rs. 2,80,000 "other reconciling items" was not provided.
+The Rs. 1,80,000 bank-charge balance was subsequently identified as charges recorded by the bank but not entered in the company's books.
+
+Preparer's Conclusion
+The aged outstanding cheques and unsupported reconciling items require investigation and potential adjustment. The bank reconciliation control should also be evaluated for timely resolution of reconciling differences.
+
+Borrowings — Covenant Compliance [WP Ref: F-16]
+
+Objective
+To determine whether borrowings and related covenant compliance have been appropriately assessed and disclosed.
+
+Background / Facts Noted
+The company has a term loan of Rs. 12,00,00,000 from Zenith Bank.
+The loan agreement requires a minimum current ratio of 1.1:1 and a maximum debt-to-equity ratio of 2.5:1.
+At 31 March 2025, management's calculations showed:
+Current ratio: 1.08:1
+Debt-to-equity ratio: 2.3:1
+The bank waiver letter dated 10 April 2025 states that the current-ratio breach for the year ended 31 March 2025 is waived until 30 September 2025.
+The draft financial statements classify the entire Rs. 12,00,00,000 borrowing as a non-current liability.
+No reference to the covenant breach or waiver is currently included in the financial statement notes.
+
+Audit Procedures Performed
+Read the executed loan agreement.
+Recalculated covenant ratios using year-end financial information.
+Obtained the bank's waiver letter.
+Discussed the classification with the Finance Controller.
+Reviewed the draft borrowing note.
+
+Findings / Observations
+The current-ratio covenant was breached at the reporting date.
+A waiver was obtained after year end.
+The entire borrowing remains classified as non-current.
+No specific disclosure regarding the breach or subsequent waiver is included in the current draft.
+
+Preparer's Conclusion
+The accounting and disclosure implications of the covenant breach require further evaluation, including consideration of the timing and terms of the waiver.
+
+Management Override — Unusual Manual Journal Entries [WP Ref: G-17]
+
+Objective
+To identify unusual journal entries that may indicate management override or inappropriate financial reporting.
+
+Background / Facts Noted
+The audit team extracted all manual journal entries posted during March 2025.
+One entry dated 31 March 2025 debited "Miscellaneous Expenses" by Rs. 44,00,000 and credited "Accrued Expenses" by the same amount.
+The entry description stated: "Year-end adjustment — management request."
+No supporting invoice or third-party documentation was attached.
+During discussion, management stated that the amount represented "expected vendor costs relating to the current year."
+The underlying vendor invoices were received in April 2025 and totalled Rs. 41,50,000.
+The remaining Rs. 2,50,000 has not been supported by documentation.
+
+Audit Procedures Performed
+Extracted March manual journal entries.
+Identified entries posted above the audit team's journal-testing threshold.
+Inspected supporting documentation.
+Compared the accrual with invoices subsequently received.
+Discussed the entry with the Financial Controller.
+
+Findings / Observations
+Rs. 41,50,000 of the accrual was subsequently supported by vendor invoices relating to the current year.
+Rs. 2,50,000 remains unsupported.
+The journal was posted manually at period end at the request of management.
+No evidence of independent review of the journal entry was available.
+
+Preparer's Conclusion
+The supported portion appears consistent with a year-end accrual; however, the unsupported Rs. 2,50,000 requires resolution. The circumstances of the manual entry should also be considered in the overall assessment of management override risk.

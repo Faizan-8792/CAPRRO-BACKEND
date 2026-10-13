@@ -6,24 +6,32 @@ import {
 } from "node:crypto";
 import mongoose from "mongoose";
 import Client from "../models/Client.js";
-import ImportBatch from "../models/ImportBatch.js";
+import ImportBatch, {
+  GST_IMPORT_NORMALIZATION_VERSION,
+} from "../models/ImportBatch.js";
 import ImportRow, { GST_IMPORT_KINDS } from "../models/ImportRow.js";
 import { parseMappedImport } from "./import-preview.service.js";
 import { safeRecordActivity } from "./activity.service.js";
 import { assertGstStorageIndexes } from "./gst-storage-readiness.service.js";
 import {
-  calculateGstr3bClaimed,
+  calculateGstr3bControlTotals,
   isValidGstin,
   isValidPeriod,
   normalizeGstin,
 } from "./gst-normalization.service.js";
+import { userFacingMessage } from "../utils/user-facing-error.js";
 
-const GST_IMPORT_NORMALIZATION_VERSION = "gst-import-v2";
+// Bumped to v3 when dateOrder joined the fingerprint material (C3): a batch
+// committed under v2 has no dateOrder recorded and will not replay against a
+// re-submission of the same file, because its fingerprint no longer matches
+// one computed with a dateOrder value. That is the honest consequence of
+// closing the date-swap gap, not a bug -- see .kiro/finalreleasefix.md C3.
 const GST_IMPORT_PROCESSING_LEASE_MS = 10 * 60 * 1000;
 
-function serviceError(message, statusCode = 400, details = null) {
+function serviceError(message, statusCode = 400, details = null, code = "") {
   const error = new Error(message);
   error.statusCode = statusCode;
+  error.code = code || details?.code || "";
   if (details) error.details = details;
   return error;
 }
@@ -63,6 +71,7 @@ function buildImportFingerprint({
   clientId,
   gstin,
   period,
+  dateOrder,
 }) {
   const material = JSON.stringify(
     canonicalValue({
@@ -74,6 +83,11 @@ function buildImportFingerprint({
       clientId: String(clientId),
       gstin,
       period,
+      // Included so a file cannot be previewed under one date-order reading
+      // and committed under another with the same token -- see C3 in
+      // .kiro/finalreleasefix.md. "NOT_APPLICABLE" is a real, distinct value
+      // (every date in the file states its own order), not an absence.
+      dateOrder: dateOrder || "NOT_APPLICABLE",
     })
   );
   return createHash("sha256").update(material).digest("hex");
@@ -93,15 +107,27 @@ function previewTokenMatches(importFingerprint, received) {
   return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(received, "hex"));
 }
 
-function createGstImportPreviewAuthorization({
+function recipientGstinMismatchRows(parsed, normalizedKind, normalizedGstin) {
+  if (normalizedKind === "GSTR3B_SUMMARY") return [];
+  return parsed.rows
+    .filter((row) => isValidGstin(row.values.recipientGstin))
+    .filter((row) => row.values.recipientGstin !== normalizedGstin)
+    .map((row) => row.row);
+}
+
+async function createGstImportPreviewAuthorization({
+  firmId,
   sourceHash,
   kind,
+  text,
   mapping,
   delimiter,
   clientId,
   gstin,
   period,
+  dateOrder = null,
 }) {
+  assertObjectId(firmId, "Firm");
   assertObjectId(clientId, "Client");
   const normalizedKind = String(kind || "").toUpperCase();
   if (!GST_IMPORT_KINDS.includes(normalizedKind)) {
@@ -110,6 +136,46 @@ function createGstImportPreviewAuthorization({
   const normalizedGstin = normalizeGstin(gstin);
   if (!isValidGstin(normalizedGstin)) throw serviceError("A valid GSTIN is required");
   if (!isValidPeriod(period)) throw serviceError("Period must use YYYY-MM");
+
+  const clientExists = await Client.exists({ _id: clientId, firmId });
+  if (!clientExists) {
+    throw serviceError(
+      "Client not found in active firm",
+      404,
+      { code: "GST_IMPORT_CLIENT_NOT_FOUND" }
+    );
+  }
+
+  const parsed = parseMappedImport({
+    kind: normalizedKind,
+    text,
+    mapping,
+    delimiter: delimiter === "TAB" ? "\t" : delimiter,
+    dateOrder,
+  });
+  if (parsed.sourceHash !== sourceHash) {
+    throw serviceError(
+      "Import inputs changed while previewing; preview the current source and mapping again",
+      409,
+      { code: "GST_IMPORT_PREVIEW_STALE" }
+    );
+  }
+  const mismatchedRows = recipientGstinMismatchRows(parsed, normalizedKind, normalizedGstin);
+  if (mismatchedRows.length) {
+    throw serviceError(
+      "Recipient GSTIN does not match selected registration",
+      422,
+      {
+        code: "RECIPIENT_GSTIN_MISMATCH",
+        rows: mismatchedRows.slice(0, 100),
+      }
+    );
+  }
+
+  // Authoritative: the SERVER'S OWN resolution from this parse, never the raw
+  // request value, so the token is keyed to what the file itself proved (or to
+  // what the person explicitly answered), not to whatever a caller claims.
+  const resolvedDateOrder = parsed.dateOrder.resolved || "NOT_APPLICABLE";
   const importFingerprint = buildImportFingerprint({
     sourceHash,
     kind: normalizedKind,
@@ -118,6 +184,7 @@ function createGstImportPreviewAuthorization({
     clientId,
     gstin: normalizedGstin,
     period,
+    dateOrder: resolvedDateOrder,
   });
   return {
     importFingerprint,
@@ -148,6 +215,7 @@ function serializeImportBatch(batch) {
     importFingerprint: source.importFingerprint,
     normalizationVersion: source.normalizationVersion,
     delimiter: source.delimiter,
+    dateOrder: source.dateOrder || "",
     status: source.status,
     totalRows: source.totalRows || 0,
     validRows: source.validRows || 0,
@@ -171,6 +239,7 @@ export async function commitGstImport({
   text,
   mapping,
   delimiter = null,
+  dateOrder = null,
   previewToken,
   clientId,
   gstin,
@@ -190,6 +259,12 @@ export async function commitGstImport({
   if (!isValidGstin(normalizedGstin)) throw serviceError("A valid GSTIN is required");
   if (!isValidPeriod(period)) throw serviceError("Period must use YYYY-MM");
 
+  // Computed from the CALLER-supplied dateOrder, which a well-behaved desktop
+  // took verbatim from preview.dateOrder.resolved (never from its own UI
+  // control -- see C5). This is what makes previewing a file under one order
+  // and committing it under another fail the token check below: the token was
+  // minted over the order preview actually resolved to, so a different value
+  // here simply does not reproduce it.
   const importFingerprint = buildImportFingerprint({
     sourceHash: String(sourceHash).toLowerCase(),
     kind: normalizedKind,
@@ -198,11 +273,13 @@ export async function commitGstImport({
     clientId,
     gstin: normalizedGstin,
     period,
+    dateOrder,
   });
   if (!previewTokenMatches(importFingerprint, previewToken)) {
     throw serviceError(
       "Import inputs changed after preview; preview the current source and mapping again",
-      409
+      409,
+      { code: "GST_IMPORT_PREVIEW_STALE" }
     );
   }
 
@@ -211,7 +288,25 @@ export async function commitGstImport({
     text,
     mapping,
     delimiter,
+    dateOrder,
   });
+
+  // An unanswered ambiguous file must never reach storage, whatever the token
+  // situation is -- this is the hard backstop, independent of the controller
+  // convenience check and independent of a client that manufactured a token
+  // some other way.
+  if (parsed.dateOrder.status === "AMBIGUOUS" && !parsed.dateOrder.resolved) {
+    throw serviceError(
+      "This file has dates that could be read either day-first or month-first, and no answer was given for which. Read the file again and state the date order before committing it.",
+      409,
+      { code: "GST_IMPORT_PREVIEW_STALE" }
+    );
+  }
+
+  // Authoritative: the fresh re-parse's OWN resolution, not the value the
+  // caller sent, so a file that changed between preview and commit (or whose
+  // stated order no longer resolves the same way) fails this check rather
+  // than silently committing under a different reading than what was reviewed.
   const parsedFingerprint = buildImportFingerprint({
     sourceHash: parsed.sourceHash,
     kind: normalizedKind,
@@ -220,6 +315,7 @@ export async function commitGstImport({
     clientId,
     gstin: normalizedGstin,
     period,
+    dateOrder: parsed.dateOrder.resolved || "NOT_APPLICABLE",
   });
   if (
     parsed.sourceHash !== String(sourceHash).toLowerCase() ||
@@ -227,12 +323,19 @@ export async function commitGstImport({
   ) {
     throw serviceError(
       "Import inputs changed after preview; preview the current source and mapping again",
-      409
+      409,
+      { code: "GST_IMPORT_PREVIEW_STALE" }
     );
   }
 
   const clientExists = await Client.exists({ _id: clientId, firmId });
-  if (!clientExists) throw serviceError("Client not found in active firm", 404);
+  if (!clientExists) {
+    throw serviceError(
+      "Client not found in active firm",
+      404,
+      { code: "GST_IMPORT_CLIENT_NOT_FOUND" }
+    );
+  }
 
   if (parsed.summary.invalidRows > 0) {
     throw serviceError("Import contains invalid rows and was not committed", 422, {
@@ -241,27 +344,33 @@ export async function commitGstImport({
     });
   }
 
-  if (normalizedKind !== "GSTR3B_SUMMARY") {
-    const mismatchedRows = parsed.rows
-      .filter((row) => row.values.recipientGstin !== normalizedGstin)
-      .map((row) => row.row);
-    if (mismatchedRows.length) {
-      throw serviceError("Recipient GSTIN does not match selected registration", 422, {
-        code: "RECIPIENT_GSTIN_MISMATCH",
-        rows: mismatchedRows.slice(0, 100),
-      });
-    }
+  const mismatchedRows = recipientGstinMismatchRows(parsed, normalizedKind, normalizedGstin);
+  if (mismatchedRows.length) {
+    throw serviceError("Recipient GSTIN does not match selected registration", 422, {
+      code: "RECIPIENT_GSTIN_MISMATCH",
+      rows: mismatchedRows.slice(0, 100),
+    });
   }
 
   let gstr3bControl = null;
   if (normalizedKind === "GSTR3B_SUMMARY") {
     try {
-      gstr3bControl = calculateGstr3bClaimed(parsed.rows.map((row) => row.values));
+      gstr3bControl = calculateGstr3bControlTotals(parsed.rows.map((row) => row.values));
     } catch (error) {
-      throw serviceError(error.message, 422, { code: "INVALID_GSTR3B_SUMMARY" });
+      throw serviceError(
+      // V13-P12-F2. INVALID_GSTR3B_SUMMARY is not on PUBLIC_ERROR_CODES, so production
+      // already replaces this with generic 4xx copy - but development returns it verbatim,
+      // and the code could be made public later without anyone revisiting this line.
+      userFacingMessage(error, "This GSTR-3B summary could not be reconciled."),
+      422,
+      { code: "INVALID_GSTR3B_SUMMARY" },
+    );
     }
   }
-  const committedTaxMinor = gstr3bControl
+  // claimed is null for an OUTWARD-ONLY GSTR-3B, which is now a legitimate file: a return whose
+  // Table 3.1 was imported for the turnover reconciliation and whose Table 4 was not. Falling back
+  // to the parsed totals there records the tax the file actually carried rather than crashing.
+  const committedTaxMinor = gstr3bControl?.claimed
     ? gstr3bControl.claimed.totalTaxMinor
     : parsed.summary.financialTotals?.totalTaxMinor || 0;
   await assertGstStorageIndexes();
@@ -298,6 +407,7 @@ export async function commitGstImport({
           sourceHash: parsed.sourceHash,
           normalizationVersion: GST_IMPORT_NORMALIZATION_VERSION,
           delimiter: parsed.delimiter,
+          dateOrder: parsed.dateOrder.resolved || "NOT_APPLICABLE",
           mapping: parsed.mapping,
           status: "PROCESSING",
           processingToken,
@@ -400,6 +510,7 @@ export async function commitGstImport({
             sourceHash: parsed.sourceHash,
             importGeneration: processingToken,
             sourceRow: row.row,
+            dateOrder: parsed.dateOrder.resolved || "NOT_APPLICABLE",
             ...row.values,
             warnings: parsed.warnings
               .filter((warning) => warning.row === row.row)
@@ -433,7 +544,7 @@ export async function commitGstImport({
           totalTaxMinor: committedTaxMinor,
           errorSummary: {
             warnings: parsed.warnings.slice(0, 100),
-            ...(gstr3bControl ? { gstr3bBasis: gstr3bControl.basis } : {}),
+            ...(gstr3bControl?.claimedBasis ? { gstr3bBasis: gstr3bControl.claimedBasis } : {}),
           },
           completedAt: completionTime,
         },
@@ -459,7 +570,8 @@ export async function commitGstImport({
         totalRows: parsed.summary.totalRows,
         totalTaxMinor: committedTaxMinor,
         importFingerprint,
-        gstr3bBasis: gstr3bControl?.basis || null,
+        dateOrder: parsed.dateOrder.resolved || "NOT_APPLICABLE",
+        gstr3bBasis: gstr3bControl?.claimedBasis || null,
       },
     });
 
@@ -480,7 +592,10 @@ export async function commitGstImport({
             processingExpiresAt: null,
             errorSummary: {
               code: String(error.code || error.name || "IMPORT_FAILED").slice(0, 80),
-              message: String(error.message || "Import failed").slice(0, 500),
+              // V13-P12-F2. This record is read back to the client verbatim (see toBatchView
+              // and the FAILED branch of the status route), so it never passes through
+              // publicErrorMessage. Only authored copy may be stored here.
+              message: userFacingMessage(error, "Import failed. Check the file and try again.").slice(0, 500),
             },
             completedAt: new Date(),
           },

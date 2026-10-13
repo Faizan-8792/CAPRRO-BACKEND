@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { PAN_PATTERN, addSafeMinorUnits } from "./tds-normalization.service.js";
+import { rupeesText } from "../utils/rupees.js";
 
 const HEALTH_RULE_VERSION = "tds-health-v1-no-rate-engine";
 const HEALTH_SOURCE_REFERENCE =
@@ -241,7 +242,7 @@ function createDepositChecks(deductions, challans, checks) {
         sectionCode: section,
         expectedMinor,
         actualMinor,
-        explanation: `No section-mapped ITNS 281 deposit was found for ${section}; gap ${expectedMinor} minor units is an Estimate.`,
+        explanation: `No section-mapped ITNS 281 deposit was found for ${section}; gap ${rupeesText(expectedMinor)} is an Estimate.`,
         sourceLabel: "Deduction register compared with ITNS 281 challan evidence",
       }));
     } else if (expectedMinor > actualMinor) {
@@ -252,7 +253,7 @@ function createDepositChecks(deductions, challans, checks) {
         sectionCode: section,
         expectedMinor,
         actualMinor,
-        explanation: `Mapped deductions exceed ITNS 281 deposits for ${section} by ${expectedMinor - actualMinor} minor units. Estimate; professional confirmation required.`,
+        explanation: `Mapped deductions exceed ITNS 281 deposits for ${section} by ${rupeesText(expectedMinor - actualMinor)}. Estimate; professional confirmation required.`,
         sourceLabel: "Deduction register compared with ITNS 281 challan evidence",
       }));
     } else if (actualMinor > expectedMinor) {
@@ -263,7 +264,7 @@ function createDepositChecks(deductions, challans, checks) {
         sectionCode: section,
         expectedMinor,
         actualMinor,
-        explanation: `ITNS 281 deposits exceed mapped deductions for ${section} by ${actualMinor - expectedMinor} minor units.`,
+        explanation: `ITNS 281 deposits exceed mapped deductions for ${section} by ${rupeesText(actualMinor - expectedMinor)}.`,
         sourceLabel: "Deduction register compared with ITNS 281 challan evidence",
       }));
     }
@@ -308,7 +309,7 @@ function createStatementChecks(deductions, challans, statements, checks) {
       rows: comparisonRows,
       expectedMinor: deductedMinor,
       actualMinor: reportedMinor,
-      explanation: `Imported deductions exceed imported statement amounts by ${deductedMinor - reportedMinor} minor units.`,
+      explanation: `Imported deductions exceed imported statement amounts by ${rupeesText(deductedMinor - reportedMinor)}.`,
       sourceLabel: "Deduction register compared with user-imported statement data",
     }));
   } else if (reportedMinor > deductedMinor) {
@@ -318,7 +319,7 @@ function createStatementChecks(deductions, challans, statements, checks) {
       rows: comparisonRows,
       expectedMinor: deductedMinor,
       actualMinor: reportedMinor,
-      explanation: `Imported statement amounts exceed the deduction register by ${reportedMinor - deductedMinor} minor units.`,
+      explanation: `Imported statement amounts exceed the deduction register by ${rupeesText(reportedMinor - deductedMinor)}.`,
       sourceLabel: "User-imported statement data compared with deduction register",
     }));
   }
@@ -349,7 +350,7 @@ function createCreditChecks(statements, credits, checks) {
         rows: [...statements, ...credits],
         expectedMinor: reportedMinor,
         actualMinor: creditedMinor,
-        explanation: `Imported statement amount exceeds optional imported 26AS/TRACES credit by ${reportedMinor - creditedMinor} minor units.`,
+        explanation: `Imported statement amount exceeds optional imported 26AS/TRACES credit by ${rupeesText(reportedMinor - creditedMinor)}.`,
         sourceLabel: "Optional user-imported 26AS/TRACES evidence",
       }));
     }
@@ -370,7 +371,7 @@ function createCreditChecks(statements, credits, checks) {
         deducteePan: pan,
         expectedMinor: reportedMinor,
         actualMinor: creditedMinor,
-        explanation: `Statement credit for PAN ${pan} exceeds optional imported 26AS/TRACES evidence by ${reportedMinor - creditedMinor} minor units.`,
+        explanation: `Statement credit for PAN ${pan} exceeds optional imported 26AS/TRACES evidence by ${rupeesText(reportedMinor - creditedMinor)}.`,
         sourceLabel: "Optional user-imported 26AS/TRACES evidence",
       }));
     }

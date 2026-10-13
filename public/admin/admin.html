@@ -2,37 +2,38 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CA PRO Firm Admin</title>
 
-  <!-- Bootstrap -->
+  <!-- Bootstrap for its grid and spacing utilities only; capro-tokens.css, IBM Plex, the shared
+       component library and admin.css give the panel its look (DS24). -->
   <link rel="stylesheet" href="bootstrap.min.css" />
-  <link rel="stylesheet" href="admin.css?v=9" />
+  <link rel="stylesheet" href="capro-tokens.css?v=2" />
+  <link rel="stylesheet" href="ui/capro-fonts.css?v=1" />
+  <link rel="stylesheet" href="ui/capro-ui.css?v=1" />
+  <link rel="stylesheet" href="admin.css?v=17" />
   <link rel="icon" type="image/png" href="logo.png" />
 </head>
-<body>
+<body class="firm-admin">
+  <div class="admin-brand-rule" aria-hidden="true"></div>
 
-  <!-- TOP NAVBAR — IDs exactly as admin.js expects -->
-  <nav class="navbar navbar-expand-lg topbar">
+  <!-- TOP BAR — IDs exactly as admin.js expects -->
+  <nav class="navbar topbar" aria-label="Account">
     <div class="container-fluid">
-      <span class="navbar-brand mb-0 h1 d-flex align-items-center gap-2">
-        <img src="logo.png" alt="CA PRO" style="width:32px;height:32px;border-radius:6px;" />
-        <span>CA PRO Toolkit</span>
+      <!-- Below 992px the sidebar is a drawer behind this button (DS5). -->
+      <button id="sidebarToggle" class="btn btn-sm btn-outline-secondary sidebar-toggle" type="button" aria-controls="adminSidebar" aria-expanded="false">Menu</button>
+      <span class="admin-brand">
+        <span class="admin-brand__mark"><img src="ui/capro-mark.png" alt="" width="24" height="24" /></span>
+        <span class="admin-brand__name">CA PRO Toolkit</span>
+        <span class="admin-brand__role">Firm admin</span>
       </span>
 
-      <div class="d-flex flex-column flex-sm-row align-items-sm-center ms-auto gap-1">
-        <span id="topSub" class="topbar-sub small-label">
-          Loading firm...
-        </span>
+      <div class="d-flex flex-column flex-sm-row align-items-sm-center ms-auto gap-2">
+        <span id="topSub" class="topbar-sub">Loading firm...</span>
         <div class="d-flex align-items-center gap-2">
-          <span id="emailBadge" class="badge rounded-pill px-3 py-2 small-label">
-            -
-          </span>
-          <span id="roleBadge" class="badge rounded-pill px-3 py-2 small-label">
-            -
-          </span>
-          <button id="logoutBtn" class="btn btn-sm btn-light ms-1">
-            Logout
-          </button>
+          <span id="emailBadge">-</span>
+          <span id="roleBadge">-</span>
+          <button id="logoutBtn" class="btn btn-sm btn-outline-secondary" type="button">Sign out</button>
         </div>
       </div>
     </div>
@@ -41,41 +42,47 @@
   <!-- LAYOUT -->
   <div class="layout">
     <!-- SIDEBAR — matches admin.js showPage/onHashChange -->
-    <aside class="sidebar">
-      <div class="px-3 mb-2 small-label text-muted">Navigation</div>
+    <aside class="sidebar" id="adminSidebar" aria-label="Admin pages">
+      <div class="small-label">Pages</div>
       <a href="#dashboard" class="active">Dashboard</a>
       <a href="#tasks">Compliance board</a>
-      <a href="#assistant">Compliance Assistant</a>
+      <a href="#assistant">Compliance assistant</a>
       <a href="#firm">Firm profile</a>
       <a href="#users">Users</a>
       <a href="#join">Join code</a>
       <a href="#settings">Firm settings</a>
     </aside>
+    <div class="sidebar-scrim" id="sidebarScrim" hidden></div>
 
     <!-- CONTENT -->
     <main class="content">
 
       <!-- Pending approval banner -->
-      <div id="pendingBanner" class="alert alert-warning d-none mb-3">
-        <strong>Pending Approval</strong><br />
-        Your firm admin access is pending Super Admin approval. View-only mode until approved.
+      <div id="pendingBanner" class="alert alert-warning d-none mb-3" role="status">
+        <strong>Waiting for approval.</strong>
+        Your firm admin access is waiting for the CA PRO administrator's approval. Until then this panel is view-only.
       </div>
 
       <!-- DASHBOARD (page-dashboard) -->
-      <section id="page-dashboard">
-        <h4 class="mb-3">Dashboard</h4>
+      <section id="page-dashboard" aria-labelledby="dashboardTitle">
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="dashboardTitle">Dashboard</h1>
+            <p class="admin-page-lede">Your firm at a glance, today's reminders and the clients to follow up.</p>
+          </div>
+        </div>
 
-        <div class="row g-3 mb-4">
+        <div class="row g-3 mb-3">
           <div class="col-md-4">
-            <div class="card p-3">
+            <div class="card p-3 h-100 mb-0">
               <div class="kpi">Firm</div>
               <div class="kpi-value" id="kpiFirmName">-</div>
               <div class="small-label" id="kpiFirmHandle">@handle</div>
             </div>
           </div>
           <div class="col-md-4">
-            <div class="card p-3">
-              <div class="kpi">Total users</div>
+            <div class="card p-3 h-100 mb-0">
+              <div class="kpi">Users</div>
               <div class="kpi-value" id="kpiTotalUsers">0</div>
               <div class="small-label">
                 Active: <span id="kpiActiveUsers">0</span>
@@ -83,47 +90,39 @@
             </div>
           </div>
           <div class="col-md-4">
-            <div class="card p-3">
+            <div class="card p-3 h-100 mb-0">
               <div class="kpi">Access</div>
-              <div class="kpi-value" id="kpiPlanType">FREE</div>
+              <div class="kpi-value" id="kpiPlanType">Free</div>
               <div class="small-label" id="kpiPlanExpiry">All tools included</div>
             </div>
           </div>
         </div>
 
-        <!-- Last day notifications -->
-        <div class="card p-3 mb-4">
-          <div class="d-flex justify-content-between align-items-center mb-2">
-            <div>
-              <div class="kpi">📅 Last Day Notifications</div>
-              <div class="small-label">
-                Reminders due tomorrow for client follow-ups.
-              </div>
-            </div>
-          </div>
+        <!-- Reminders due today -->
+        <section class="card p-3" aria-labelledby="todayRemindersTitle">
+          <h2 class="admin-section-title" id="todayRemindersTitle">Reminders due today</h2>
+          <p class="admin-section-lede">Client follow-ups whose reminders fall due today.</p>
           <ul id="todayRemindersList" class="mb-2 small"></ul>
-          <div id="todayRemindersStatus" class="small-label"></div>
-        </div>
+          <div id="todayRemindersStatus" class="admin-status" role="status" aria-live="polite"></div>
+        </section>
 
-        <!-- Clients to Chase Today -->
-        <section id="clientsToChaseCard" class="card">
-          <h3>Clients to Chase Today</h3>
-          <p class="muted">
-            Auto-generated follow-up list from Tasks. Pending Docs shows items stuck in
-            'Waiting Docs/Open' for 3+ days; High Risk shows clients late in the last periods.
-            <br>
-            Click Done to mark handled and remove from this list.
+        <!-- Clients to chase today -->
+        <section id="clientsToChaseCard" class="card" aria-labelledby="clientsToChaseTitle">
+          <h2 id="clientsToChaseTitle">Clients to chase today</h2>
+          <p>
+            Built from your tasks. Pending documents lists work waiting for documents for three days or more;
+            priority follow-ups lists clients who were late in recent periods. Press Complete when a follow-up is handled.
           </p>
 
           <div class="smart-section">
-            <h4>Pending docs (above 3+ days)</h4>
-            <div id="chasePendingStatus" class="status-text"></div>
+            <h3>Pending documents (3 days or more)</h3>
+            <div id="chasePendingStatus" class="status-text" role="status" aria-live="polite"></div>
             <ul id="chasePendingList" class="smart-list"></ul>
           </div>
 
           <div class="smart-section">
-            <h4>Habitual late clients (High risk)</h4>
-            <div id="chaseRiskStatus" class="status-text"></div>
+            <h3>Priority follow-ups</h3>
+            <div id="chaseRiskStatus" class="status-text" role="status" aria-live="polite"></div>
             <ul id="chaseRiskList" class="smart-list"></ul>
           </div>
         </section>
@@ -131,20 +130,24 @@
       </section>
 
       <!-- TASK BOARD (page-tasks) -->
-      <section id="page-tasks" style="display:none">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <h4 class="mb-0">Compliance board</h4>
+      <section id="page-tasks" style="display:none" aria-labelledby="tasksTitle">
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="tasksTitle">Compliance board</h1>
+            <p class="admin-page-lede">Every task in the firm by status. Open a card to change its status.</p>
+          </div>
         </div>
 
-        <!-- Add Task small form -->
-        <div class="card p-3 mb-3">
-          <div class="row g-2">
+        <!-- Add a task -->
+        <section class="card p-3" aria-labelledby="addTaskTitle">
+          <h2 class="admin-section-title" id="addTaskTitle">Add a task</h2>
+          <div class="row g-3">
             <div class="col-md-3">
-              <label class="form-label small-label">Client name</label>
+              <label class="form-label" for="addTaskClient">Client name</label>
               <input id="addTaskClient" type="text" class="form-control" />
             </div>
             <div class="col-md-2">
-              <label class="form-label small-label">Service type</label>
+              <label class="form-label" for="addTaskService">Service type</label>
               <select id="addTaskService" class="form-select">
                 <option value="GST">GST</option>
                 <option value="TDS">TDS</option>
@@ -155,47 +158,50 @@
               </select>
             </div>
             <div class="col-md-3">
-              <label class="form-label small-label">Title</label>
+              <label class="form-label" for="addTaskTitle">Title</label>
               <input id="addTaskTitle" type="text" class="form-control" />
             </div>
             <div class="col-md-2">
-              <label class="form-label small-label">Due date</label>
+              <label class="form-label" for="addTaskDue">Due date</label>
               <input id="addTaskDue" type="date" class="form-control" />
             </div>
             <div class="col-md-2">
-              <label class="form-label small-label">Assign to</label>
+              <label class="form-label" for="addTaskAssignTo">Assign to</label>
               <select id="addTaskAssignTo" class="form-select">
                 <option value="">Unassigned</option>
               </select>
             </div>
           </div>
 
-          <div class="row g-2 mt-2">
+          <div class="row g-3 mt-0">
             <div class="col-md-3">
-              <label class="form-label small-label">Initial status</label>
+              <label class="form-label" for="addTaskStatusSelect">Starting status</label>
               <select id="addTaskStatusSelect" class="form-select">
-                <option value="NOT_STARTED">NOT_STARTED</option>
-                <option value="WAITING_DOCS">WAITING_DOCS</option>
-                <option value="IN_PROGRESS">IN_PROGRESS</option>
-                <option value="FILED">FILED</option>
-                <option value="CLOSED">CLOSED</option>
+                <option value="NOT_STARTED">Not started</option>
+                <option value="WAITING_DOCS">Waiting for documents</option>
+                <option value="IN_PROGRESS">In progress</option>
+                <option value="FILED">Filed</option>
+                <option value="CLOSED">Closed</option>
               </select>
             </div>
             <div class="col-md-9 d-flex align-items-end justify-content-end">
-              <button id="addTaskBtn" class="btn btn-primary btn-sm">
-                Add task
-              </button>
+              <button id="addTaskBtn" class="btn btn-primary" type="button">Add task</button>
             </div>
           </div>
 
-          <div id="addTaskStatus" class="small-label mt-2"></div>
-        </div>
+          <div id="addTaskStatus" class="admin-status" role="status" aria-live="polite"></div>
+        </section>
 
-        <!-- Filters -->
-        <div class="card p-3 mb-3">
-          <div class="row g-2 align-items-end">
+        <!-- Filters. Below 992px they open as a sheet from this button (DS5). -->
+        <button type="button" class="btn btn-sm btn-outline-secondary filter-toggle mb-3" aria-controls="taskFilters" aria-expanded="false">Filters</button>
+        <div class="card p-3 filter-sheet" id="taskFilters" aria-label="Task filters">
+          <div class="filter-sheet-head">
+            <strong>Filters</strong>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-close-filters>Close</button>
+          </div>
+          <div class="row g-3 align-items-end">
             <div class="col-md-3">
-              <label class="form-label small-label">Service type</label>
+              <label class="form-label" for="taskFilterService">Service type</label>
               <select id="taskFilterService" class="form-select">
                 <option value="">All</option>
                 <option value="GST">GST</option>
@@ -207,25 +213,21 @@
               </select>
             </div>
             <div class="col-md-3">
-              <label class="form-label small-label">Assigned staff</label>
+              <label class="form-label" for="taskFilterStaff">Assigned to</label>
               <select id="taskFilterStaff" class="form-select">
                 <option value="">All</option>
               </select>
             </div>
             <div class="col-md-3">
-              <label class="form-label small-label">Month (YYYY-MM)</label>
+              <label class="form-label" for="taskFilterMonth">Month</label>
               <input id="taskFilterMonth" type="month" class="form-control" />
             </div>
-            <div class="col-md-3 text-end">
-              <button id="taskFilterApply" class="btn btn-primary btn-sm">
-                Apply
-              </button>
-              <button id="taskFilterClear" class="btn btn-outline-secondary btn-sm">
-                Clear
-              </button>
+            <div class="col-md-3 d-flex justify-content-end gap-2">
+              <button id="taskFilterClear" class="btn btn-outline-secondary btn-sm" type="button">Clear</button>
+              <button id="taskFilterApply" class="btn btn-primary btn-sm" type="button">Apply</button>
             </div>
           </div>
-          <div id="taskBoardStatus" class="small-label mt-2"></div>
+          <div id="taskBoardStatus" class="admin-status" role="status" aria-live="polite"></div>
         </div>
 
         <!-- Board columns -->
@@ -233,22 +235,24 @@
       </section>
 
       <!-- COMPLIANCE ASSISTANT (page-assistant) -->
-      <section id="page-assistant" style="display:none">
-        <h4 class="mb-3">🧠 Compliance Assistant</h4>
+      <section id="page-assistant" style="display:none" aria-labelledby="assistantTitle">
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="assistantTitle">Compliance assistant</h1>
+            <p class="admin-page-lede">
+              Today's work in order of urgency, from due dates, overdue status and each task's risk signals.
+            </p>
+          </div>
+        </div>
 
-        <section id="adminComplianceAssistant" class="card">
-          <p class="muted">
-            Auto-prioritized compliance workload for today based on due dates,
-            overdue status, and task risk signals.
-          </p>
-
+        <section id="adminComplianceAssistant" class="card p-3">
           <div class="d-flex flex-wrap gap-2 mb-3">
-            <span class="badge bg-danger" id="caOverdueCount">Overdue: 0</span>
-            <span class="badge bg-warning" id="caTodayCount">Due Today: 0</span>
-            <span class="badge bg-primary" id="caUpcomingCount">Upcoming: 0</span>
+            <span class="cp-badge" data-tone="critical" id="caOverdueCount">Critical: 0</span>
+            <span class="cp-badge" data-tone="warning" id="caTodayCount">High: 0</span>
+            <span class="cp-badge" id="caUpcomingCount">Medium: 0</span>
           </div>
 
-          <div id="caStatus" class="small-label mb-2">
+          <div id="caStatus" class="admin-status mb-2" role="status" aria-live="polite">
             Loading today's compliance priorities...
           </div>
 
@@ -256,11 +260,11 @@
             <table class="table align-middle mb-0">
               <thead>
                 <tr>
-                  <th>Client</th>
-                  <th>Service</th>
-                  <th>Due Date</th>
-                  <th>Assigned</th>
-                  <th>Priority</th>
+                  <th scope="col">Client</th>
+                  <th scope="col">Service</th>
+                  <th scope="col">Due date</th>
+                  <th scope="col">Assigned to</th>
+                  <th scope="col">Priority</th>
                 </tr>
               </thead>
               <tbody id="caTaskTbody"></tbody>
@@ -270,53 +274,65 @@
       </section>
 
       <!-- FIRM PROFILE (page-firm) -->
-      <section id="page-firm" style="display:none">
-        <h4 class="mb-3">Firm profile</h4>
+      <section id="page-firm" style="display:none" aria-labelledby="firmTitle">
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="firmTitle">Firm profile</h1>
+            <p class="admin-page-lede">How your firm appears to its members.</p>
+          </div>
+        </div>
         <div class="card p-3">
           <div class="row g-3">
             <div class="col-md-4">
-              <label class="form-label small-label">Display name</label>
+              <label class="form-label" for="firmDisplayName">Display name</label>
               <input id="firmDisplayName" type="text" class="form-control" />
             </div>
             <div class="col-md-4">
-              <label class="form-label small-label">Handle</label>
+              <label class="form-label" for="firmHandle">Handle</label>
               <input id="firmHandle" type="text" class="form-control" readonly />
             </div>
             <div class="col-md-4">
-              <label class="form-label small-label">Practice areas</label>
-              <input id="firmPracticeAreas" type="text" class="form-control" />
+              <label class="form-label" for="firmPracticeAreas">Practice areas <span class="cp-label__optional">(optional)</span></label>
+              <input id="firmPracticeAreas" type="text" class="form-control" placeholder="GST, TDS, audit" />
             </div>
           </div>
           <div class="mt-3">
-            <label class="form-label small-label">Description</label>
+            <label class="form-label" for="firmDescription">Description <span class="cp-label__optional">(optional)</span></label>
             <textarea id="firmDescription" rows="3" class="form-control"></textarea>
           </div>
-          <div class="mt-3 text-end">
-            <button id="saveFirmBtn" class="btn btn-primary">Save</button>
+          <div class="admin-card-actions">
+            <span></span>
+            <button id="saveFirmBtn" class="btn btn-primary" type="button">Save firm details</button>
           </div>
-          <div id="firmStatus" class="small-label mt-2"></div>
+          <div id="firmStatus" class="admin-status" role="status" aria-live="polite"></div>
         </div>
       </section>
 
       <!-- USERS (page-users) -->
-      <section id="page-users" style="display:none">
-        <h4 class="mb-3">Users</h4>
+      <section id="page-users" style="display:none" aria-labelledby="usersTitle">
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="usersTitle">Users</h1>
+            <p class="admin-page-lede">Everyone in your firm. Removing someone ends their access to the firm's workspace.</p>
+          </div>
+        </div>
         <div class="card p-3">
           <div class="table-responsive">
             <table class="table align-middle mb-0">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Account</th>
-                  <th>Status</th>
-                  <th>Created</th>
+                  <th scope="col">Name</th>
+                  <th scope="col">Email</th>
+                  <th scope="col">Role</th>
+                  <th scope="col">Account</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Created</th>
+                  <th scope="col"><span class="visually-hidden">Actions</span></th>
                 </tr>
               </thead>
               <tbody id="usersTbody">
                 <tr>
-                  <td colspan="6" class="text-center text-muted">
+                  <td colspan="7" class="text-center text-muted">
                     Loading...
                   </td>
                 </tr>
@@ -327,49 +343,50 @@
       </section>
 
       <!-- JOIN CODE (page-join) -->
-      <section id="page-join" style="display:none">
-        <h4 class="mb-3">Join code</h4>
+      <section id="page-join" style="display:none" aria-labelledby="joinTitle">
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="joinTitle">Join code</h1>
+            <p class="admin-page-lede">People join your firm with this code. A new code stops the old one working at once.</p>
+          </div>
+        </div>
         <div class="card p-3">
           <div class="row g-3">
             <div class="col-md-4">
-              <label class="form-label small-label">Join code</label>
+              <label class="form-label" for="joinCodeField">Current join code</label>
               <input id="joinCodeField" type="text" class="form-control join-input" readonly />
             </div>
-            <div class="col-md-4 d-flex align-items-end gap-2">
-              <button id="revealJoinBtn" class="btn btn-outline-secondary btn-sm">
-                Reveal
-              </button>
-              <button id="copyJoinBtn" class="btn btn-outline-primary btn-sm">
-                Copy
-              </button>
-              <button id="rotateJoinBtn" class="btn btn-outline-danger btn-sm">
-                Rotate
-              </button>
+            <div class="col-md-8 d-flex align-items-end flex-wrap gap-2">
+              <button id="revealJoinBtn" class="btn btn-outline-secondary btn-sm" type="button">Reveal</button>
+              <button id="copyJoinBtn" class="btn btn-outline-primary btn-sm" type="button">Copy</button>
+              <button id="rotateJoinBtn" class="btn btn-outline-danger btn-sm" type="button">Make a new code</button>
             </div>
           </div>
 
-          <div class="row g-3 mt-3">
+          <div class="row g-3 mt-0">
             <div class="col-md-4">
-              <label class="form-label small-label">Custom join code</label>
-              <input id="editJoinCode" type="text" class="form-control" />
+              <label class="form-label" for="editJoinCode">Choose your own code <span class="cp-label__optional">(optional)</span></label>
+              <input id="editJoinCode" type="text" class="form-control" maxlength="10" placeholder="4 to 10 letters or numbers" autocomplete="off" />
             </div>
             <div class="col-md-3 d-flex align-items-end">
-              <button id="saveJoinCodeBtn" class="btn btn-primary">
-                Save
-              </button>
+              <button id="saveJoinCodeBtn" class="btn btn-primary" type="button">Save join code</button>
             </div>
           </div>
 
-          <div id="joinStatus" class="small-label mt-2"></div>
+          <div id="joinStatus" class="admin-status" role="status" aria-live="polite"></div>
         </div>
       </section>
 
       <!-- FIRM SETTINGS (page-settings) -->
-      <section id="page-settings" style="display:none">
-        <h4 class="mb-3">Firm settings</h4>
+      <section id="page-settings" style="display:none" aria-labelledby="settingsTitle">
+        <div class="admin-pagehead">
+          <div class="admin-pagehead__text">
+            <h1 class="admin-page-title" id="settingsTitle">Firm settings</h1>
+          </div>
+        </div>
         <div class="card p-3">
-          <div class="kpi">Free access is active</div>
-          <p class="small-label mb-0">
+          <h2 class="admin-section-title">Free access is active</h2>
+          <p class="admin-section-lede mb-0">
             Every CA PRO Toolkit feature is available without a user charge during the current rollout.
             Account status and firm permissions still apply.
           </p>
@@ -380,9 +397,11 @@
   </div>
 
   <!-- SCRIPTS -->
-  <script src="admin.js"></script>
-  <script src="admin-tasks.js"></script>
-  <script type="module" src="compliance-assistant/assistant.js"></script>
+  <script src="ui/capro-ui.js?v=2"></script>
+  <script src="admin.js?v=3"></script>
+  <script src="admin-tasks.js?v=2"></script>
+  <script type="module" src="compliance-assistant/assistant.js?v=2"></script>
+  <script src="admin-layout.js"></script>
 
 </body>
 </html>

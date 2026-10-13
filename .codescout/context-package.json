@@ -1,38 +1,159 @@
 {
   "schemaVersion": "1.0.0",
-  "task": "Locate exact monetization code only: subscription, billing, pricing, paid plan, free tier, entitlement, feature quota, upgrade paywall, trial, payment. Also separate rollout flags, auth, authorization, usage telemetry, consent, rate limits, and operational abuse controls.",
+  "task": "Fix deep system test stale cleanup retry DeepSeek evidence polling race ARIA focus exact assertions",
   "detectedStack": [
     "express"
   ],
   "selectedFiles": [
     {
-      "path": "src/middleware/auth.middleware.js",
+      "path": "src/controllers/firm.controller.js",
       "tags": [
-        "auth",
-        "authmiddleware",
+        "admin",
+        "by",
+        "code",
+        "controller",
+        "controllers",
+        "create",
+        "delete",
+        "firm",
+        "firmcontroller",
+        "get",
+        "id",
+        "join",
         "js",
-        "middleware",
-        "required",
+        "list",
+        "my",
+        "request",
+        "rotate",
         "src",
-        "tracking",
-        "usage",
-        "without"
+        "update",
+        "user",
+        "users"
       ],
-      "importance": 70,
+      "importance": 14,
       "role": "seed",
       "hopDistance": 0,
-      "matchScore": 280
+      "matchScore": 14
+    },
+    {
+      "path": "tests/taxworker-flow-checklist.mjs",
+      "tags": [
+        "checklist",
+        "flow",
+        "mjs",
+        "taxworker",
+        "tests"
+      ],
+      "importance": 9,
+      "role": "seed",
+      "hopDistance": 0,
+      "matchScore": 9
+    },
+    {
+      "path": "src/middleware/request-id.middleware.js",
+      "tags": [
+        "id",
+        "idmiddleware",
+        "js",
+        "middleware",
+        "request",
+        "src"
+      ],
+      "importance": 8,
+      "role": "seed",
+      "hopDistance": 0,
+      "matchScore": 8
+    },
+    {
+      "path": "src/middleware/sanitize.middleware.js",
+      "tags": [
+        "id",
+        "inputs",
+        "is",
+        "js",
+        "middleware",
+        "object",
+        "param",
+        "sanitize",
+        "sanitizemiddleware",
+        "src",
+        "valid",
+        "validate"
+      ],
+      "importance": 8,
+      "role": "seed",
+      "hopDistance": 0,
+      "matchScore": 8
+    },
+    {
+      "path": "src/models/Firm.js",
+      "tags": [
+        "firm",
+        "js",
+        "models",
+        "src"
+      ],
+      "importance": 33,
+      "role": "hop-1",
+      "hopDistance": 1,
+      "matchScore": 7
+    },
+    {
+      "path": "src/models/User.js",
+      "tags": [
+        "js",
+        "models",
+        "src",
+        "user"
+      ],
+      "importance": 56,
+      "role": "hop-1",
+      "hopDistance": 1,
+      "matchScore": 7
+    },
+    {
+      "path": "src/models/AppConfig.js",
+      "tags": [
+        "app",
+        "appconfig",
+        "config",
+        "default",
+        "feature",
+        "flags",
+        "js",
+        "models",
+        "src"
+      ],
+      "importance": 46,
+      "role": "hop-1",
+      "hopDistance": 1,
+      "matchScore": 7
+    },
+    {
+      "path": "src/routes/firm.routes.js",
+      "tags": [
+        "firm",
+        "firmroutes",
+        "js",
+        "routes",
+        "src"
+      ],
+      "importance": 13,
+      "role": "hop-1",
+      "hopDistance": 1,
+      "matchScore": 7
     }
   ],
   "warnings": [
-    "src/middleware/auth.middleware.js has fan-in > 10 (18 dependents)"
+    "src/models/User.js has fan-in > 10 (18 dependents)",
+    "src/models/AppConfig.js has fan-in > 10 (14 dependents)"
   ],
   "tokenBudget": {
-    "pointEstimate": 560,
+    "pointEstimate": 10843,
     "range": {
-      "low": 448,
-      "high": 672
+      "low": 8674,
+      "high": 13012
     },
-    "reductionPercent": 100
+    "reductionPercent": 96
   }
 }

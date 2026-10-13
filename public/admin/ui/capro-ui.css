@@ -1,0 +1,1177 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   CA PRO UI - the component library every web surface shares (DS17).
+
+   One source: design/ui/capro-ui.css. design/build-ui.mjs copies it, with the fonts, the icon
+   sprite and capro-ui.js, into the extension (audit-nlp-extension/ui/) and the admin panel
+   (capro-backend/public/admin/ui/); a test fails while a copy differs from this file.
+
+   Every value is a palette token (--capro-*: colours, type, space, radius, shadow, motion), so a
+   page that loads the palette and this sheet looks like caprotoolkit.in in both themes. Classes
+   are prefixed cp- so nothing here restyles a page that has not asked for it.
+
+   The rules this sheet keeps, from the DS16-DS17 research (DESIGN-SYSTEM-2026-10-07.md):
+   - Restraint. The page is neutral; the accent marks the one primary action, the selection, the
+     focus ring and links. Colour appears in status, and status is never colour alone: a badge
+     carries an icon or a dot and a word.
+   - A card is a surface with a hairline and at most the first shadow; only menus, popovers,
+     dialogs and toasts float.
+   - 12px is the smallest text (DS2); 14px is the body; regular and semibold only.
+   - Amounts are tabular and right-aligned; identifiers (GSTIN, PAN) are monospace.
+   - Productive motion: 100ms for a press, 150ms for a menu or toast, 250ms for a dialog; nothing
+     moves for a person who asked for reduced motion.
+   - Focus is always visible: a 2px accent outline, 2px away from the control.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* ---------- Base: opt in with class="cp" on <html> or <body> ---------- */
+
+.cp {
+  font-family: var(--capro-font-ui);
+  font-size: var(--capro-text-body);
+  line-height: var(--capro-leading-body);
+  font-weight: var(--capro-weight-regular);
+  color: var(--capro-ink);
+  background-color: var(--capro-canvas);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-variant-numeric: tabular-nums;
+}
+
+.cp *,
+.cp *::before,
+.cp *::after {
+  box-sizing: border-box;
+}
+
+.cp :where(h1, h2, h3, h4, h5, h6, p, ul, ol, figure, dl, dd) {
+  margin: 0;
+}
+
+.cp :where(button, input, select, textarea) {
+  font: inherit;
+  color: inherit;
+}
+
+.cp :where(a) {
+  color: var(--capro-accent-text);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.cp :where(a:hover) {
+  color: var(--capro-accent-hover);
+}
+
+.cp :where([hidden]) {
+  display: none !important;
+}
+
+/* The one focus ring. */
+.cp :where(a, button, input, select, textarea, summary, [tabindex], [role="button"], [role="tab"], [role="radio"], [role="switch"], [role="menuitem"]):focus-visible {
+  outline: 2px solid var(--capro-focus);
+  outline-offset: 2px;
+}
+
+/* ---------- Type ---------- */
+
+.cp-title-lg { font-size: var(--capro-text-title-large); line-height: var(--capro-leading-title-large); font-weight: var(--capro-weight-semibold); letter-spacing: -0.01em; }
+.cp-title { font-size: var(--capro-text-title); line-height: var(--capro-leading-title); font-weight: var(--capro-weight-semibold); }
+.cp-subtitle { font-size: var(--capro-text-subtitle); line-height: var(--capro-leading-subtitle); font-weight: var(--capro-weight-semibold); }
+.cp-body-lg { font-size: var(--capro-text-body-large); line-height: var(--capro-leading-body-large); }
+.cp-body { font-size: var(--capro-text-body); line-height: var(--capro-leading-body); }
+.cp-strong { font-weight: var(--capro-weight-semibold); }
+.cp-caption { font-size: var(--capro-text-caption); line-height: var(--capro-leading-caption); }
+.cp-muted { color: var(--capro-muted); }
+
+/* A short label above a heading, as caprotoolkit.in writes them: a rule and a word. */
+.cp-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--capro-space-2);
+  font-size: var(--capro-text-caption);
+  line-height: var(--capro-leading-caption);
+  font-weight: var(--capro-weight-semibold);
+  color: var(--capro-accent-text);
+}
+
+.cp-eyebrow::before {
+  content: "";
+  width: 14px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+/* Amounts: tabular, right-aligned in a table cell. */
+.cp-num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* GSTIN, PAN, TAN, ARN: every character in the same cell, never broken, selectable whole. */
+.cp-id {
+  font-family: var(--capro-font-mono);
+  font-size: max(12px, 0.95em);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  user-select: all;
+}
+
+.cp-kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 0 var(--capro-space-1);
+  border: 1px solid var(--capro-border-subtle);
+  border-bottom-width: 2px;
+  border-radius: var(--capro-radius-xs);
+  background: var(--capro-surface);
+  font-family: var(--capro-font-mono);
+  font-size: var(--capro-text-caption);
+  line-height: 18px;
+  text-align: center;
+  color: var(--capro-muted);
+}
+
+/* ---------- Icons: <svg class="cp-icon"><use href="ui/capro-icons.svg#name"/></svg> ---------- */
+
+.cp-icon {
+  display: inline-block;
+  flex: none;
+  width: 1.15em;
+  height: 1.15em;
+  vertical-align: -0.2em;
+  fill: currentColor;
+}
+
+.cp-icon--sm { width: 16px; height: 16px; }
+.cp-icon--md { width: 20px; height: 20px; }
+.cp-icon--lg { width: 24px; height: 24px; }
+
+/* ---------- Brand ---------- */
+
+.cp-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--capro-space-2);
+  min-width: 0;
+  color: var(--capro-ink);
+  text-decoration: none;
+}
+
+/* The logo mark sits on its own cream tile, as on caprotoolkit.in, so it reads on either theme. */
+.cp-brand__mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--capro-radius-md);
+  background: var(--capro-brand-cream);
+  box-shadow: inset 0 0 0 1px var(--capro-border-subtle);
+  overflow: hidden;
+}
+
+.cp-brand__mark img {
+  display: block;
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.cp-brand__name {
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: var(--capro-weight-semibold);
+  white-space: nowrap;
+}
+
+.cp-brand__tag {
+  display: block;
+  font-size: var(--capro-text-caption);
+  line-height: var(--capro-leading-caption);
+  color: var(--capro-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The logo's navy, teal and emerald as a thin rule along the top of a page or panel. */
+.cp-brand-rule {
+  height: 3px;
+  background: var(--capro-gradient-brand);
+}
+
+/* ---------- Layout helpers ---------- */
+
+.cp-stack { display: flex; flex-direction: column; gap: var(--cp-gap, var(--capro-space-3)); }
+.cp-row { display: flex; align-items: center; gap: var(--cp-gap, var(--capro-space-2)); flex-wrap: wrap; }
+.cp-row--nowrap { flex-wrap: nowrap; }
+.cp-row--between { justify-content: space-between; }
+.cp-row--end { justify-content: flex-end; }
+.cp-grow { flex: 1 1 auto; min-width: 0; }
+.cp-grid { display: grid; gap: var(--cp-gap, var(--capro-space-3)); grid-template-columns: repeat(auto-fill, minmax(var(--cp-min, 200px), 1fr)); }
+.cp-divider { height: 1px; border: 0; margin: 0; background: var(--capro-border-subtle); }
+.cp-truncate { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+
+.cp-visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* ---------- Buttons ---------- */
+
+.cp-btn {
+  --cp-btn-h: 36px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--capro-space-2);
+  min-height: var(--cp-btn-h);
+  padding: 0 14px;
+  border: 1px solid var(--capro-border);
+  border-radius: var(--capro-radius-md);
+  background: var(--capro-surface);
+  color: var(--capro-ink);
+  font-family: inherit;
+  font-size: var(--capro-text-body);
+  line-height: 20px;
+  font-weight: var(--capro-weight-semibold);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color var(--capro-duration-fast) var(--capro-ease-standard),
+    border-color var(--capro-duration-fast) var(--capro-ease-standard),
+    color var(--capro-duration-fast) var(--capro-ease-standard),
+    box-shadow var(--capro-duration-fast) var(--capro-ease-standard),
+    transform var(--capro-duration-fast) var(--capro-ease-standard);
+}
+
+.cp-btn:hover { background: var(--capro-element); border-color: var(--capro-border-hover); color: var(--capro-ink); }
+.cp-btn:active { background: var(--capro-element-active); transform: translateY(1px); }
+
+.cp-btn--primary {
+  border-color: var(--capro-accent);
+  background: var(--capro-accent);
+  color: var(--capro-on-accent);
+  box-shadow: var(--capro-shadow-1);
+}
+
+.cp-btn--primary:hover { border-color: var(--capro-accent-hover); background: var(--capro-accent-hover); color: var(--capro-on-accent); }
+.cp-btn--primary:active { border-color: var(--capro-accent-pressed); background: var(--capro-accent-pressed); }
+
+.cp-btn--secondary {
+  border-color: var(--capro-accent);
+  background: var(--capro-surface);
+  color: var(--capro-accent-text);
+}
+
+.cp-btn--secondary:hover { background: var(--capro-accent-soft); border-color: var(--capro-accent-hover); color: var(--capro-accent-deep); }
+
+.cp-btn--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--capro-ink);
+}
+
+.cp-btn--ghost:hover { background: var(--capro-element); border-color: transparent; }
+
+/* Red only on the action that destroys something (DS17 dialog rules). */
+.cp-btn--danger {
+  border-color: var(--capro-critical);
+  background: var(--capro-critical);
+  color: var(--capro-on-accent);
+}
+
+.cp-btn--danger:hover { border-color: var(--capro-critical); background: color-mix(in srgb, var(--capro-critical) 88%, var(--capro-ink)); color: var(--capro-on-accent); }
+
+.cp-btn--danger-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--capro-critical);
+}
+
+.cp-btn--danger-quiet:hover { background: var(--capro-critical-soft); border-color: transparent; color: var(--capro-critical); }
+
+.cp-btn--link {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--capro-accent-text);
+  font-weight: var(--capro-weight-semibold);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.cp-btn--link:hover { background: none; color: var(--capro-accent-hover); }
+.cp-btn--link:active { transform: none; }
+
+.cp-btn--sm { --cp-btn-h: 32px; padding: 0 10px; font-size: var(--capro-text-caption); gap: 6px; }
+.cp-btn--lg { --cp-btn-h: 44px; padding: 0 18px; font-size: 15px; }
+.cp-btn--block { display: flex; width: 100%; }
+.cp-btn--icon { width: var(--cp-btn-h); padding: 0; }
+
+.cp-btn:disabled,
+.cp-btn[aria-disabled="true"] {
+  cursor: not-allowed;
+  border-color: var(--capro-border-subtle);
+  background: var(--capro-element);
+  color: var(--capro-muted);
+  box-shadow: none;
+  transform: none;
+}
+
+.cp-btn--link:disabled,
+.cp-btn--link[aria-disabled="true"] { background: none; }
+
+/* Busy: the label stays (so the width does not jump) and a spinner sits over it. */
+.cp-btn[aria-busy="true"] { color: transparent; pointer-events: none; }
+.cp-btn[aria-busy="true"] > * { visibility: hidden; }
+.cp-btn[aria-busy="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--capro-muted);
+  border-right-color: transparent;
+  animation: cp-spin 700ms linear infinite;
+}
+
+.cp-btn--primary[aria-busy="true"]::after,
+.cp-btn--danger[aria-busy="true"]::after { border-color: var(--capro-on-accent); border-right-color: transparent; }
+
+.cp-btn-group { display: inline-flex; flex-wrap: wrap; gap: var(--capro-space-2); }
+
+/* ---------- Fields ---------- */
+
+.cp-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+.cp-label {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: var(--capro-weight-semibold);
+  color: var(--capro-ink);
+}
+
+.cp-label__optional { font-weight: var(--capro-weight-regular); color: var(--capro-muted); }
+.cp-hint { font-size: var(--capro-text-caption); line-height: var(--capro-leading-caption); color: var(--capro-muted); }
+
+.cp-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: var(--capro-text-caption);
+  line-height: var(--capro-leading-caption);
+  font-weight: var(--capro-weight-semibold);
+  color: var(--capro-critical);
+}
+
+.cp-input,
+.cp-select,
+.cp-textarea {
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid var(--capro-border);
+  border-radius: var(--capro-radius-md);
+  background-color: var(--capro-surface);
+  color: var(--capro-ink);
+  font-family: inherit;
+  font-size: var(--capro-text-body);
+  line-height: 20px;
+  transition:
+    border-color var(--capro-duration-fast) var(--capro-ease-standard),
+    box-shadow var(--capro-duration-fast) var(--capro-ease-standard);
+}
+
+.cp-input::placeholder,
+.cp-textarea::placeholder { color: var(--capro-muted); opacity: 1; }
+
+.cp-input:hover,
+.cp-select:hover,
+.cp-textarea:hover { border-color: var(--capro-border-hover); }
+
+.cp-input:focus,
+.cp-select:focus,
+.cp-textarea:focus {
+  border-color: var(--capro-accent);
+  box-shadow: 0 0 0 3px var(--capro-accent-soft);
+  outline: none;
+}
+
+.cp-input:focus-visible,
+.cp-select:focus-visible,
+.cp-textarea:focus-visible { outline: 2px solid var(--capro-focus); outline-offset: 1px; }
+
+.cp-input[aria-invalid="true"],
+.cp-select[aria-invalid="true"],
+.cp-textarea[aria-invalid="true"] { border-color: var(--capro-critical); }
+
+.cp-input:disabled,
+.cp-select:disabled,
+.cp-textarea:disabled { background-color: var(--capro-element); color: var(--capro-muted); cursor: not-allowed; }
+
+.cp-input[readonly] { background-color: var(--capro-subtle); }
+
+.cp-textarea { min-height: 88px; resize: vertical; }
+.cp-textarea--mono { font-family: var(--capro-font-mono); font-size: 13px; }
+
+/* A native select keeps its accessibility and its list; only the box is drawn here. */
+.cp-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  cursor: pointer;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--capro-muted) 50%),
+    linear-gradient(135deg, var(--capro-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 17px) 52%,
+    calc(100% - 12px) 52%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.cp-select--sm,
+.cp-input--sm { min-height: 32px; padding-top: 5px; padding-bottom: 5px; font-size: 13px; }
+
+.cp-input-group { position: relative; display: flex; align-items: center; }
+.cp-input-group > .cp-icon { position: absolute; left: 11px; color: var(--capro-muted); pointer-events: none; }
+.cp-input-group > .cp-input { padding-left: 34px; }
+
+/* Checkboxes and radios: native controls in the accent, with a label that is the target. */
+.cp-check {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--capro-space-2);
+  min-height: 24px;
+  cursor: pointer;
+  line-height: 20px;
+}
+
+.cp-check > input:not(.cp-switch) {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--capro-accent);
+  cursor: pointer;
+}
+
+/* A switch for a setting that applies immediately: <input type="checkbox" role="switch" class="cp-switch">. */
+.cp-switch {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  border: 1px solid var(--capro-border);
+  border-radius: var(--capro-radius-pill);
+  background: var(--capro-surface);
+  cursor: pointer;
+  transition: background-color var(--capro-duration-fast) var(--capro-ease-standard), border-color var(--capro-duration-fast) var(--capro-ease-standard);
+}
+
+.cp-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--capro-muted);
+  transition: transform var(--capro-duration-fast) var(--capro-ease-standard), background-color var(--capro-duration-fast) var(--capro-ease-standard);
+}
+
+/* Inside a .cp-check label the switch keeps its own size and sits on the first line. */
+.cp-check > .cp-switch { margin-top: 0; }
+
+.cp-switch:checked { border-color: var(--capro-accent); background: var(--capro-accent); }
+.cp-switch:checked::after { transform: translateX(16px); background: var(--capro-on-accent); }
+.cp-switch:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ---------- Segmented control: a radio group drawn as one bar ---------- */
+
+.cp-segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--capro-border-subtle);
+  border-radius: var(--capro-radius-md);
+  background: var(--capro-subtle);
+}
+
+.cp-segmented--block { display: flex; }
+.cp-segmented--block > * { flex: 1 1 0; }
+
+.cp-segmented > label,
+.cp-segmented > button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--capro-radius-sm);
+  background: transparent;
+  color: var(--capro-muted);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: var(--capro-weight-semibold);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--capro-duration-fast) var(--capro-ease-standard), color var(--capro-duration-fast) var(--capro-ease-standard);
+}
+
+.cp-segmented > label > input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.cp-segmented > label:hover,
+.cp-segmented > button:hover { color: var(--capro-ink); }
+
+.cp-segmented > label:has(> input:checked),
+.cp-segmented > button[aria-checked="true"],
+.cp-segmented > button[aria-pressed="true"],
+.cp-segmented > button[aria-selected="true"] {
+  background: var(--capro-surface);
+  color: var(--capro-ink);
+  box-shadow: var(--capro-shadow-1), inset 0 0 0 1px var(--capro-border-subtle);
+}
+
+.cp-segmented > label:has(> input:focus-visible) { outline: 2px solid var(--capro-focus); outline-offset: 1px; }
+.cp-segmented > label:has(> input:disabled),
+.cp-segmented > button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---------- Cards ---------- */
+
+.cp-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--capro-border-subtle);
+  border-radius: var(--capro-radius-lg);
+  background: var(--capro-surface);
+  box-shadow: var(--capro-shadow-1);
+}
+
+.cp-card--flat { box-shadow: none; }
+.cp-card--subtle { background: var(--capro-subtle); box-shadow: none; }
+.cp-card--accent { border-color: color-mix(in srgb, var(--capro-accent) 35%, var(--capro-border-subtle)); }
+
+.cp-card__header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--capro-space-3);
+  padding: var(--capro-space-4) var(--capro-space-4) 0;
+}
+
+.cp-card__title { font-size: var(--capro-text-body-large); line-height: var(--capro-leading-body-large); font-weight: var(--capro-weight-semibold); }
+.cp-card__subtitle { margin-top: 2px; font-size: 13px; line-height: 18px; color: var(--capro-muted); }
+.cp-card__body { display: flex; flex-direction: column; gap: var(--capro-space-3); padding: var(--capro-space-4); }
+.cp-card__footer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--capro-space-2); padding: var(--capro-space-3) var(--capro-space-4); border-top: 1px solid var(--capro-border-subtle); }
+
+/* A card that is one big target: a link or a button that opens something. */
+.cp-card--interactive {
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color var(--capro-duration-fast) var(--capro-ease-standard), box-shadow var(--capro-duration-moderate) var(--capro-ease-standard), transform var(--capro-duration-moderate) var(--capro-ease-standard);
+}
+
+.cp-card--interactive:hover { border-color: color-mix(in srgb, var(--capro-accent) 45%, var(--capro-border-subtle)); box-shadow: var(--capro-shadow-2); transform: translateY(-1px); }
+.cp-card--interactive:active { transform: translateY(0); box-shadow: var(--capro-shadow-1); }
+
+/* An icon on a soft tile: a tool, a module, an empty state. */
+.cp-tile-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--capro-radius-md);
+  background: var(--capro-accent-soft);
+  color: var(--capro-accent-text);
+}
+
+.cp-tile-icon > .cp-icon { width: 20px; height: 20px; }
+
+/* ---------- Lists: rows that open something ---------- */
+
+.cp-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+
+.cp-list-item {
+  display: flex;
+  align-items: center;
+  gap: var(--capro-space-3);
+  min-height: 48px;
+  padding: var(--capro-space-2) var(--capro-space-3);
+  border: 0;
+  border-radius: var(--capro-radius-md);
+  background: transparent;
+  color: var(--capro-ink);
+  text-align: left;
+  text-decoration: none;
+  width: 100%;
+  cursor: pointer;
+  transition: background-color var(--capro-duration-fast) var(--capro-ease-standard);
+}
+
+.cp-list-item:hover { background: var(--capro-element); color: var(--capro-ink); }
+.cp-list-item__text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.cp-list-item__title { font-weight: var(--capro-weight-semibold); }
+.cp-list-item__meta { font-size: var(--capro-text-caption); line-height: var(--capro-leading-caption); color: var(--capro-muted); }
+.cp-list-item__end { flex: none; color: var(--capro-muted); }
+
+.cp-list-item:disabled,
+.cp-list-item[aria-disabled="true"] { cursor: not-allowed; color: var(--capro-muted); }
+
+/* ---------- Badges and chips ---------- */
+
+.cp-badge {
+  --cp-tone: var(--capro-muted);
+  --cp-tone-soft: var(--capro-element);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 1px 8px;
+  border-radius: var(--capro-radius-pill);
+  background: var(--cp-tone-soft);
+  color: var(--cp-tone);
+  font-size: var(--capro-text-caption);
+  line-height: 16px;
+  font-weight: var(--capro-weight-semibold);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.cp-badge > .cp-icon { width: 14px; height: 14px; }
+
+/* A dot when the badge has no icon, so the state is never colour on its own word alone. */
+.cp-badge--dot::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.cp-badge[data-tone="accent"] { --cp-tone: var(--capro-accent-deep); --cp-tone-soft: var(--capro-accent-soft); }
+.cp-badge[data-tone="success"] { --cp-tone: var(--capro-success); --cp-tone-soft: var(--capro-success-soft); }
+.cp-badge[data-tone="warning"] { --cp-tone: var(--capro-warning); --cp-tone-soft: var(--capro-warning-soft); }
+.cp-badge[data-tone="needs-review"] { --cp-tone: var(--capro-needs-review); --cp-tone-soft: var(--capro-needs-review-soft); }
+.cp-badge[data-tone="critical"] { --cp-tone: var(--capro-critical); --cp-tone-soft: var(--capro-critical-soft); }
+.cp-badge[data-tone="provisional"] { --cp-tone: var(--capro-provisional); --cp-tone-soft: var(--capro-provisional-soft); }
+.cp-badge[data-tone="info"] { --cp-tone: var(--capro-info); --cp-tone-soft: var(--capro-info-soft); }
+.cp-badge--outline { background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cp-tone) 40%, transparent); }
+
+/* A count beside a label: tabs, filters, queue headings. */
+.cp-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--capro-radius-pill);
+  background: var(--capro-element);
+  color: var(--capro-ink);
+  font-size: var(--capro-text-caption);
+  line-height: 16px;
+  font-weight: var(--capro-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Alerts: a problem, a note or a result, with what to do next ---------- */
+
+.cp-alert {
+  --cp-tone: var(--capro-info);
+  --cp-tone-soft: var(--capro-info-soft);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--capro-space-3);
+  padding: var(--capro-space-3) var(--capro-space-4);
+  border: 1px solid color-mix(in srgb, var(--cp-tone) 28%, var(--capro-border-subtle));
+  border-radius: var(--capro-radius-md);
+  background: var(--cp-tone-soft);
+  color: var(--capro-ink);
+}
+
+.cp-alert > .cp-icon { grid-row: 1 / span 3; width: 20px; height: 20px; margin-top: 1px; color: var(--cp-tone); }
+.cp-alert__title { font-weight: var(--capro-weight-semibold); color: var(--capro-ink); }
+.cp-alert__text { font-size: 13px; line-height: 19px; color: var(--capro-ink); }
+.cp-alert__actions { display: flex; flex-wrap: wrap; gap: var(--capro-space-2); margin-top: var(--capro-space-2); }
+
+.cp-alert[data-tone="success"] { --cp-tone: var(--capro-success); --cp-tone-soft: var(--capro-success-soft); }
+.cp-alert[data-tone="warning"] { --cp-tone: var(--capro-warning); --cp-tone-soft: var(--capro-warning-soft); }
+.cp-alert[data-tone="needs-review"] { --cp-tone: var(--capro-needs-review); --cp-tone-soft: var(--capro-needs-review-soft); }
+.cp-alert[data-tone="critical"] { --cp-tone: var(--capro-critical); --cp-tone-soft: var(--capro-critical-soft); }
+.cp-alert[data-tone="provisional"] { --cp-tone: var(--capro-provisional); --cp-tone-soft: var(--capro-provisional-soft); }
+.cp-alert[data-tone="accent"] { --cp-tone: var(--capro-accent); --cp-tone-soft: var(--capro-accent-soft); }
+
+/* ---------- Tables ---------- */
+
+.cp-table-wrap {
+  overflow: auto;
+  max-width: 100%;
+  border: 1px solid var(--capro-border-subtle);
+  border-radius: var(--capro-radius-lg);
+  background: var(--capro-surface);
+}
+
+.cp-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--capro-text-body);
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cp-table th,
+.cp-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--capro-border-subtle);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.cp-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--capro-subtle);
+  color: var(--capro-muted);
+  font-size: var(--capro-text-caption);
+  line-height: 16px;
+  font-weight: var(--capro-weight-semibold);
+  white-space: nowrap;
+}
+
+.cp-table tbody tr { transition: background-color var(--capro-duration-fast) var(--capro-ease-standard); }
+.cp-table tbody tr:hover { background: color-mix(in srgb, var(--capro-element) 60%, transparent); }
+.cp-table tbody tr:last-child > * { border-bottom: 0; }
+.cp-table .cp-num,
+.cp-table th.cp-num { text-align: right; }
+.cp-table tfoot td { font-weight: var(--capro-weight-semibold); background: var(--capro-subtle); border-top: 1px solid var(--capro-border-subtle); }
+.cp-table--compact th,
+.cp-table--compact td { padding: 6px 10px; }
+
+/* ---------- Stat tiles ---------- */
+
+.cp-stat {
+  --cp-tone: var(--capro-ink);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--capro-space-3) var(--capro-space-4);
+  border: 1px solid var(--capro-border-subtle);
+  border-radius: var(--capro-radius-lg);
+  background: var(--capro-surface);
+}
+
+.cp-stat__label { font-size: var(--capro-text-caption); line-height: 16px; font-weight: var(--capro-weight-semibold); color: var(--capro-muted); }
+.cp-stat__value { font-size: var(--capro-text-display); line-height: var(--capro-leading-display); font-weight: var(--capro-weight-semibold); color: var(--cp-tone); font-variant-numeric: tabular-nums; }
+.cp-stat__meta { font-size: var(--capro-text-caption); line-height: 16px; color: var(--capro-muted); }
+
+.cp-stat[data-tone="success"] { --cp-tone: var(--capro-success); }
+.cp-stat[data-tone="warning"] { --cp-tone: var(--capro-warning); }
+.cp-stat[data-tone="needs-review"] { --cp-tone: var(--capro-needs-review); }
+.cp-stat[data-tone="critical"] { --cp-tone: var(--capro-critical); }
+.cp-stat[data-tone="provisional"] { --cp-tone: var(--capro-provisional); }
+.cp-stat[data-tone="info"] { --cp-tone: var(--capro-info); }
+.cp-stat[data-tone="accent"] { --cp-tone: var(--capro-accent-text); }
+
+/* ---------- Progress ---------- */
+
+.cp-progress {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--capro-radius-pill);
+  background: var(--capro-element);
+}
+
+.cp-progress__fill {
+  height: 100%;
+  width: var(--cp-progress, 0%);
+  border-radius: inherit;
+  background: var(--capro-accent);
+  transition: width var(--capro-duration-slow) var(--capro-ease-standard);
+}
+
+/* The brand gradient, only where a progress bar carries no meaning of its own (DS16). */
+.cp-progress--brand .cp-progress__fill { background: var(--capro-gradient-brand); background-size: 100vw 100%; }
+.cp-progress[data-tone="critical"] .cp-progress__fill { background: var(--capro-critical); }
+.cp-progress[data-tone="success"] .cp-progress__fill { background: var(--capro-success); }
+
+.cp-progress--indeterminate .cp-progress__fill {
+  width: 40%;
+  animation: cp-indeterminate 1400ms var(--capro-ease-standard) infinite;
+}
+
+.cp-spinner {
+  display: inline-block;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--capro-accent) 25%, transparent);
+  border-top-color: var(--capro-accent);
+  animation: cp-spin 700ms linear infinite;
+}
+
+.cp-spinner--sm { width: 14px; height: 14px; }
+
+/* ---------- Skeletons: the shape of what is loading ---------- */
+
+.cp-skeleton {
+  display: block;
+  height: 12px;
+  border-radius: var(--capro-radius-xs);
+  background: linear-gradient(90deg, var(--capro-skeleton) 0%, var(--capro-element) 50%, var(--capro-skeleton) 100%);
+  background-size: 200% 100%;
+  animation: cp-shimmer 1400ms linear infinite;
+}
+
+.cp-skeleton--title { height: 18px; width: 55%; }
+.cp-skeleton--text { height: 12px; }
+.cp-skeleton--block { height: 64px; border-radius: var(--capro-radius-md); }
+
+/* ---------- Empty states: what this is, why it is empty, and the one next step ---------- */
+
+.cp-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--capro-space-2);
+  padding: var(--capro-space-6) var(--capro-space-4);
+  text-align: center;
+}
+
+.cp-empty__icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: var(--capro-space-1);
+  border-radius: var(--capro-radius-lg);
+  background: var(--capro-accent-soft);
+  color: var(--capro-accent-text);
+}
+
+.cp-empty__icon > .cp-icon { width: 24px; height: 24px; }
+.cp-empty__title { font-size: var(--capro-text-body-large); line-height: var(--capro-leading-body-large); font-weight: var(--capro-weight-semibold); }
+.cp-empty__text { max-width: 44ch; color: var(--capro-muted); }
+.cp-empty__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--capro-space-2); margin-top: var(--capro-space-2); }
+
+/* ---------- Tabs ---------- */
+
+.cp-tabs {
+  display: flex;
+  gap: var(--capro-space-1);
+  border-bottom: 1px solid var(--capro-border-subtle);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.cp-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 var(--capro-space-3);
+  border: 0;
+  background: none;
+  color: var(--capro-muted);
+  font-weight: var(--capro-weight-semibold);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--capro-duration-fast) var(--capro-ease-standard);
+}
+
+.cp-tab:hover { color: var(--capro-ink); }
+
+.cp-tab[aria-selected="true"] { color: var(--capro-ink); }
+
+.cp-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: var(--capro-space-2);
+  right: var(--capro-space-2);
+  bottom: -1px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--capro-accent);
+}
+
+/* ---------- Disclosure: <details class="cp-disclosure"><summary>... ---------- */
+
+.cp-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--capro-space-2);
+  min-height: 36px;
+  list-style: none;
+  cursor: pointer;
+  font-weight: var(--capro-weight-semibold);
+  color: var(--capro-ink);
+}
+
+.cp-disclosure > summary::-webkit-details-marker { display: none; }
+
+.cp-disclosure > summary::after {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  margin-right: 4px;
+  border-right: 2px solid var(--capro-muted);
+  border-bottom: 2px solid var(--capro-muted);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform var(--capro-duration-moderate) var(--capro-ease-standard);
+}
+
+.cp-disclosure[open] > summary::after { transform: rotate(-135deg) translate(-2px, -2px); }
+
+/* ---------- Menus: a <details> trigger or a button, and a floating list ---------- */
+
+.cp-menu {
+  position: absolute;
+  z-index: 50;
+  min-width: 220px;
+  max-width: min(320px, calc(100vw - 24px));
+  padding: var(--capro-space-1);
+  border: 1px solid var(--capro-border-subtle);
+  border-radius: var(--capro-radius-md);
+  background: var(--capro-raised);
+  box-shadow: var(--capro-shadow-3);
+  animation: cp-pop var(--capro-duration-moderate) var(--capro-ease-enter);
+}
+
+.cp-menu__label { padding: 8px 10px 4px; font-size: var(--capro-text-caption); line-height: 16px; font-weight: var(--capro-weight-semibold); color: var(--capro-muted); }
+
+.cp-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--capro-space-2);
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--capro-radius-sm);
+  background: none;
+  color: var(--capro-ink);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.cp-menu__item:hover,
+.cp-menu__item:focus-visible { background: var(--capro-element); color: var(--capro-ink); }
+.cp-menu__item > .cp-icon { color: var(--capro-muted); }
+.cp-menu__item--danger,
+.cp-menu__item--danger > .cp-icon { color: var(--capro-critical); }
+.cp-menu__sep { height: 1px; margin: var(--capro-space-1) 6px; background: var(--capro-border-subtle); }
+
+/* ---------- Avatar ---------- */
+
+.cp-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--capro-accent-soft);
+  color: var(--capro-accent-deep);
+  font-size: var(--capro-text-caption);
+  line-height: 1;
+  font-weight: var(--capro-weight-semibold);
+  text-transform: uppercase;
+}
+
+/* ---------- Page and app headers ---------- */
+
+.cp-appbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--capro-space-3);
+  min-height: 56px;
+  padding: var(--capro-space-2) var(--capro-space-4);
+  border-bottom: 1px solid var(--capro-border-subtle);
+  background: color-mix(in srgb, var(--capro-canvas) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px);
+}
+
+.cp-pagehead { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--capro-space-3) var(--capro-space-4); }
+.cp-pagehead__text { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: var(--capro-space-1); }
+.cp-pagehead__title { font-size: var(--capro-text-title-large); line-height: var(--capro-leading-title-large); font-weight: var(--capro-weight-semibold); letter-spacing: -0.01em; }
+.cp-pagehead__subtitle { max-width: 72ch; color: var(--capro-muted); }
+.cp-pagehead__actions { display: flex; flex-wrap: wrap; gap: var(--capro-space-2); }
+
+/* A numbered step in a short flow: "1  Your clients". */
+.cp-step { display: flex; align-items: center; gap: var(--capro-space-2); }
+.cp-step__number {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--capro-accent-soft);
+  color: var(--capro-accent-deep);
+  font-size: var(--capro-text-caption);
+  font-weight: var(--capro-weight-semibold);
+}
+
+.cp-step[aria-current="step"] .cp-step__number { background: var(--capro-accent); color: var(--capro-on-accent); }
+.cp-step--done .cp-step__number { background: var(--capro-success-soft); color: var(--capro-success); }
+
+/* ---------- Dialogs: <dialog class="cp-dialog">, opened with showModal() by capro-ui.js ---------- */
+
+.cp-dialog {
+  width: min(var(--cp-dialog-w, 440px), calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--capro-border-subtle);
+  border-radius: var(--capro-radius-xl);
+  background: var(--capro-raised);
+  color: var(--capro-ink);
+  box-shadow: var(--capro-shadow-4);
+  overflow: hidden;
+}
+
+.cp-dialog[open] { display: flex; flex-direction: column; animation: cp-dialog-in var(--capro-duration-slow) var(--capro-ease-enter); }
+.cp-dialog::backdrop { background: color-mix(in srgb, var(--capro-scrim) 48%, transparent); animation: cp-fade var(--capro-duration-slow) var(--capro-ease-enter); }
+.cp-dialog--md { --cp-dialog-w: 560px; }
+.cp-dialog--lg { --cp-dialog-w: 720px; }
+
+.cp-dialog__header { display: flex; align-items: flex-start; gap: var(--capro-space-3); padding: var(--capro-space-5) var(--capro-space-5) 0; }
+.cp-dialog__icon { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 50%; background: var(--capro-accent-soft); color: var(--capro-accent-text); }
+.cp-dialog__icon > .cp-icon { width: 20px; height: 20px; }
+.cp-dialog[data-tone="danger"] .cp-dialog__icon { background: var(--capro-critical-soft); color: var(--capro-critical); }
+.cp-dialog[data-tone="warning"] .cp-dialog__icon { background: var(--capro-warning-soft); color: var(--capro-warning); }
+.cp-dialog__title { font-size: var(--capro-text-subtitle); line-height: var(--capro-leading-subtitle); font-weight: var(--capro-weight-semibold); padding-top: 6px; }
+.cp-dialog__body { display: flex; flex-direction: column; gap: var(--capro-space-3); padding: var(--capro-space-3) var(--capro-space-5) var(--capro-space-5); overflow: auto; color: var(--capro-ink); }
+.cp-dialog__body p { color: var(--capro-muted); }
+.cp-dialog__details { display: flex; flex-direction: column; gap: 4px; margin: 0; padding-left: 18px; color: var(--capro-ink); }
+.cp-dialog__footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--capro-space-2); padding: var(--capro-space-3) var(--capro-space-5); border-top: 1px solid var(--capro-border-subtle); background: var(--capro-subtle); }
+
+/* ---------- Toasts: a short confirmation of something just done ---------- */
+
+.cp-toasts {
+  position: fixed;
+  z-index: 2147483000;
+  right: var(--capro-space-4);
+  bottom: var(--capro-space-4);
+  display: flex;
+  flex-direction: column-reverse;
+  gap: var(--capro-space-2);
+  width: min(380px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.cp-toast {
+  --cp-tone: var(--capro-accent);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: var(--capro-space-3);
+  padding: var(--capro-space-3) var(--capro-space-3) var(--capro-space-3) var(--capro-space-4);
+  border: 1px solid var(--capro-border-subtle);
+  border-left: 3px solid var(--cp-tone);
+  border-radius: var(--capro-radius-md);
+  background: var(--capro-raised);
+  color: var(--capro-ink);
+  box-shadow: var(--capro-shadow-3);
+  pointer-events: auto;
+  animation: cp-toast-in var(--capro-duration-moderate) var(--capro-ease-enter);
+}
+
+.cp-toasts__polite,
+.cp-toasts__assertive { display: contents; }
+
+.cp-toast > .cp-icon { width: 20px; height: 20px; margin-top: 1px; color: var(--cp-tone); }
+.cp-toast__text { font-size: 13px; line-height: 19px; }
+.cp-toast__action { margin-top: var(--capro-space-1); }
+.cp-toast[data-tone="success"] { --cp-tone: var(--capro-success); }
+.cp-toast[data-tone="warning"] { --cp-tone: var(--capro-warning); }
+.cp-toast[data-tone="critical"] { --cp-tone: var(--capro-critical); }
+.cp-toast[data-tone="info"] { --cp-tone: var(--capro-info); }
+.cp-toast[data-leaving="true"] { animation: cp-toast-out var(--capro-duration-moderate) var(--capro-ease-exit) forwards; }
+
+/* ---------- Motion ---------- */
+
+@keyframes cp-spin { to { transform: rotate(360deg); } }
+@keyframes cp-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes cp-indeterminate { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+@keyframes cp-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cp-pop { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes cp-dialog-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes cp-toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes cp-toast-out { to { opacity: 0; transform: translateY(4px); } }
+
+/* Nothing moves for a person who asked for less motion; a spinner becomes still. */
+@media (prefers-reduced-motion: reduce) {
+  .cp *,
+  .cp *::before,
+  .cp *::after,
+  .cp-dialog,
+  .cp-dialog::backdrop,
+  .cp-toast,
+  .cp-menu {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .cp-skeleton { animation: none; background: var(--capro-skeleton); }
+  .cp-spinner,
+  .cp-btn[aria-busy="true"]::after { animation: none; border-right-color: var(--capro-accent); }
+}
+
+/* Windows high contrast: the system's colours, and outlines where shadows carried an edge. */
+@media (forced-colors: active) {
+  .cp-card,
+  .cp-stat,
+  .cp-menu,
+  .cp-dialog,
+  .cp-toast,
+  .cp-badge,
+  .cp-alert { border: 1px solid CanvasText; }
+  .cp-btn--primary,
+  .cp-btn--danger { border: 1px solid ButtonText; }
+  .cp-progress__fill { background: Highlight; }
+  .cp-tab[aria-selected="true"]::after { background: Highlight; }
+  .cp-switch:checked { background: Highlight; }
+}

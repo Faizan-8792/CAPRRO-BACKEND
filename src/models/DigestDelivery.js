@@ -30,7 +30,9 @@ const DigestDeliverySchema = new mongoose.Schema(
       validate: {
         validator(value) {
           try {
-            return Buffer.byteLength(JSON.stringify(value), "utf8") <= 32 * 1024;
+            return (
+              Buffer.byteLength(JSON.stringify(value), "utf8") <= 32 * 1024
+            );
           } catch {
             return false;
           }
@@ -44,15 +46,41 @@ const DigestDeliverySchema = new mongoose.Schema(
       default: "QUEUED",
     },
     email: {
+      // SENDING is a claim, not a result. Exactly one worker may hold it, and it
+      // exists so a second worker cannot call the email provider for the same
+      // delivery while the first call is still in flight. Clients render this
+      // value by humanizing it, so a new state is additive for them.
       state: {
         type: String,
-        enum: ["PENDING", "DISABLED", "ROLLOUT_BLOCKED", "SENT", "FAILED"],
+        enum: [
+          "PENDING",
+          "SENDING",
+          "DISABLED",
+          "ROLLOUT_BLOCKED",
+          "SENT",
+          "FAILED",
+        ],
         default: "PENDING",
       },
       attempts: { type: Number, min: 0, default: 0 },
-      providerMessageId: { type: String, trim: true, maxlength: 240, default: "" },
+      idempotencyKey: {
+        type: String,
+        trim: true,
+        maxlength: 240,
+        default: null,
+      },
+      providerMessageId: {
+        type: String,
+        trim: true,
+        maxlength: 240,
+        default: "",
+      },
       lastError: { type: String, trim: true, maxlength: 600, default: "" },
       sentAt: { type: Date, default: null },
+      // Who holds the send claim and since when. claimedAt lets a claim that
+      // died mid-send be reclaimed instead of blocking the digest forever.
+      claimToken: { type: String, trim: true, maxlength: 64, default: null },
+      claimedAt: { type: Date, default: null },
     },
     inApp: {
       state: {
@@ -68,13 +96,20 @@ const DigestDeliverySchema = new mongoose.Schema(
       ref: "AutomationJob",
       default: null,
     },
+    jobRecovery: {
+      // revision fences stale recovery holders after an expired lease is taken
+      // over; token alone identifies ownership only within one lease lifetime.
+      token: { type: String, trim: true, maxlength: 64, default: null },
+      expiresAt: { type: Date, default: null },
+      revision: { type: Number, min: 0, default: 0 },
+    },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 DigestDeliverySchema.index(
   { firmId: 1, kind: 1, periodKey: 1, recipientUserId: 1 },
-  { unique: true, name: "unique_digest_recipient_period" }
+  { unique: true, name: "unique_digest_recipient_period" },
 );
 DigestDeliverySchema.index({
   firmId: 1,
@@ -85,7 +120,44 @@ DigestDeliverySchema.index({
 });
 DigestDeliverySchema.index({ firmId: 1, status: 1, createdAt: -1 });
 
-const DigestDelivery = mongoose.model("DigestDelivery", DigestDeliverySchema);
+const DIGEST_RECOVERY_CURSOR_ID = "digest-delivery-recovery-v1";
+const DigestRecoveryCursorSchema = new mongoose.Schema(
+  {
+    _id: {
+      type: String,
+      enum: [DIGEST_RECOVERY_CURSOR_ID],
+      default: DIGEST_RECOVERY_CURSOR_ID,
+      required: true,
+    },
+    afterId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+    cycleEndId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+    lease: {
+      token: { type: String, trim: true, maxlength: 64, default: null },
+      expiresAt: { type: Date, default: null },
+    },
+  },
+  {
+    collection: "digest_recovery_cursors",
+    strict: "throw",
+    versionKey: false,
+  },
+);
 
-export { DELIVERY_STATUSES, DIGEST_KINDS };
+const DigestDelivery = mongoose.model("DigestDelivery", DigestDeliverySchema);
+const DigestRecoveryCursor =
+  mongoose.models.DigestRecoveryCursor ||
+  mongoose.model("DigestRecoveryCursor", DigestRecoveryCursorSchema);
+
+export {
+  DELIVERY_STATUSES,
+  DIGEST_KINDS,
+  DIGEST_RECOVERY_CURSOR_ID,
+  DigestRecoveryCursor,
+};
 export default DigestDelivery;

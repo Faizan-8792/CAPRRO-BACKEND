@@ -1,0 +1,259 @@
+// tests/super-emails-controller-contract.mjs
+//
+// Why this exists. The Emails routes (IMPROVEMENT-PLAN-V2 Part 1) had model-level
+// coverage but no contract that drives the CONTROLLERS, so `mongoose.isValidObjectId`
+// shipped in super.controller.js without the mongoose import and every affected call
+// answered 500 in production the first time the panel used it — the exact failure
+// shape usage-stats-contract.mjs was written to prevent after its own 500. This suite
+// drives the real controllers with seeded rows through a scratch database.
+//
+// Covered: email detail (200 + timeline + hash excluded, 404 invalid, 404 missing),
+// the list's firmId filter and recipientHash search (both reach mongoose.isValidObjectId),
+// suppression removal (200, row gone, 404s), and the super-admin-only guard on each.
+//
+// Run: MONGODB_URI=...scratch... node tests/super-emails-controller-contract.mjs
+
+import assert from "node:assert/strict";
+
+const uri = process.env.MONGODB_URI || "";
+if (!/^mongodb(\+srv)?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(uri) || !uri.includes("scratch")) {
+  console.error("Refusing to run: MONGODB_URI must be loopback and scratch-marked.");
+  process.exit(1);
+}
+
+const mongoose = (await import("mongoose")).default;
+await mongoose.connect(uri);
+
+const { default: EmailDelivery } = await import("../src/models/EmailDelivery.js");
+const { default: EmailSuppression } = await import("../src/models/EmailSuppression.js");
+const { default: Firm } = await import("../src/models/Firm.js");
+const { default: ActivityEvent } = await import("../src/models/ActivityEvent.js");
+const { default: User } = await import("../src/models/User.js");
+const { ensurePersonalFirm } = await import("../src/services/firm-provisioning.service.js");
+const {
+  getEmailDeliveryForSuper,
+  listEmailDeliveriesForSuper,
+  deleteEmailSuppressionForSuper,
+} = await import("../src/controllers/super.controller.js");
+
+const SUPER = { id: new mongoose.Types.ObjectId().toString(), role: "SUPER_ADMIN", email: "saifullahfaizan786@gmail.com" };
+
+const call = async (handler, req) => {
+  let status = 0;
+  let body = null;
+  const res = {
+    status(c) { status = c; return this; },
+    json(b) { body = b; return this; },
+  };
+  await handler({ user: SUPER, query: {}, params: {}, ...req }, res, (err) => {
+    status = err?.statusCode ?? 500;
+    body = { error: err?.message };
+  });
+  return { status, body };
+};
+
+const checks = [];
+const check = (name, pass, detail = "") => checks.push({ name, pass, detail });
+
+try {
+  // Sequential on purpose: this suite reproduces an intermittent
+  // DocumentNotFoundError when the five cleanup deletes race each other on the
+  // connection pool ahead of the seeding writes below (confirmed by bisection:
+  // wrapping User.create with an extra await made 10/12 failures vanish). The
+  // order is irrelevant; the point is that no delete is still in flight when
+  // the first seed is written.
+  for (const model of [EmailDelivery, EmailSuppression, Firm, User, ActivityEvent]) {
+    await model.deleteMany({}).catch(() => {});
+  }
+
+  const firmOwner = await User.create({
+    email: "firm-owner@example.com",
+    name: "Firm Owner",
+    role: "FIRM_ADMIN",
+    accountType: "INDIVIDUAL",
+    isActive: true,
+  });
+  await ensurePersonalFirm(firmOwner);
+  const firmId = firmOwner.firmId; // ensurePersonalFirm returns the USER, whose firmId is the Firm _id
+  const seed = async (over = {}) =>
+    EmailDelivery.create({
+      recipientEmailHash: EmailDelivery.hashRecipient(over.to || "a@example.com"),
+      recipientEmailLast4: ".com",
+      type: "test_email",
+      subjectTemplateName: "other",
+      providerMessageId: "contract-" + Math.random().toString(36).slice(2),
+      status: "sent",
+      errorClass: "none",
+      sentAt: new Date(),
+      ...over,
+    });
+
+  const standalone = await seed();
+  const firmRow = await seed({ firmId, type: "reminder", to: "firmrow@example.com" });
+
+  // --- detail ------------------------------------------------------------
+  const detail = await call(getEmailDeliveryForSuper, { params: { id: standalone._id.toString() } });
+  check("detail answers 200 with ok", detail.status === 0 && detail.body?.ok === true,
+    JSON.stringify(detail.body?.error ?? ""));
+  check("detail carries a timeline and excludes recipientEmailHash",
+    Array.isArray(detail.body?.email?.timeline) &&
+    !("recipientEmailHash" in detail.body.email) &&
+    detail.body.email.type === "test_email",
+    "keys=" + Object.keys(detail.body?.email ?? {}).length);
+
+  const badId = await call(getEmailDeliveryForSuper, { params: { id: "not-an-objectid" } });
+  check("detail with a non-ObjectId answers 404", badId.status === 404, "got " + badId.status);
+  const missingId = await call(getEmailDeliveryForSuper, { params: { id: new mongoose.Types.ObjectId().toString() } });
+  check("detail with an unknown ObjectId answers 404", missingId.status === 404, "got " + missingId.status);
+
+  // --- list filters (the firmId filter reached mongoose.isValidObjectId) ---
+  const byFirm = await call(listEmailDeliveriesForSuper, { query: { firmId: firmId.toString() } });
+  check("list filtered by firmId answers 200 and returns only that firm's rows",
+    byFirm.status === 0 && byFirm.body?.ok === true && byFirm.body?.total === 1 &&
+    String(byFirm.body?.emails?.[0]?._id) === String(firmRow._id),
+    "status=" + byFirm.status + " total=" + byFirm.body?.total + " err=" + JSON.stringify(byFirm.body?.error ?? ""));
+  check("firm filter joins the firm document", byFirm.body?.emails?.[0]?.firmId && typeof byFirm.body.emails[0].firmId === "object",
+    JSON.stringify(byFirm.body?.emails?.[0]?.firmId ?? null));
+
+  const byHash = await call(listEmailDeliveriesForSuper, {
+    query: { recipientHash: EmailDelivery.hashRecipient("a@example.com") },
+  });
+  check("list filtered by recipientHash answers 200 with the exact row",
+    byHash.status === 0 && byHash.body?.total === 1 && String(byHash.body?.emails?.[0]?._id) === String(standalone._id),
+    "status=" + byHash.status + " total=" + byHash.body?.total);
+  const byType = await call(listEmailDeliveriesForSuper, { query: { types: "reminder" } });
+  check("list filtered by type returns only that type",
+    byType.status === 0 && byType.body?.total === 1 && byType.body?.emails?.[0]?.type === "reminder",
+    "total=" + byType.body?.total);
+
+  // --- suppression removal -------------------------------------------------
+  const suppression = await EmailSuppression.suppress({ email: "bounced@example.com", reason: "hard_bounce" });
+  const removed = await call(deleteEmailSuppressionForSuper, { params: { id: suppression._id.toString() } });
+  check("suppression removal answers 200", removed.status === 0 && removed.body?.ok === true,
+    "status=" + removed.status + " err=" + JSON.stringify(removed.body?.error ?? ""));
+  const gone = !(await EmailSuppression.findById(suppression._id));
+  check("suppression row is actually deleted", gone === true);
+  const audit = await ActivityEvent.findOne({ action: "EMAIL_SUPPRESSION_REMOVED", entityId: suppression._id.toString() });
+  check("the removal left the promised audit event", Boolean(audit), audit ? "" : "no ActivityEvent persisted");
+  const badSuppress = await call(deleteEmailSuppressionForSuper, { params: { id: "junk" } });
+  check("suppression removal with a non-ObjectId answers 404", badSuppress.status === 404, "got " + badSuppress.status);
+
+  // --- guard ---------------------------------------------------------------
+  const asMember = async (handler, req) => {
+    let status = 0;
+    const res = { status(c) { status = c; return this; }, json() { return this; } };
+    await handler({ user: { id: SUPER.id, role: "USER", email: "x@example.com" }, query: {}, params: {}, ...req }, res, (err) => {
+      status = err?.statusCode ?? 500;
+    });
+    return status;
+  };
+  check("detail refuses a non-super-admin", (await asMember(getEmailDeliveryForSuper, { params: { id: standalone._id.toString() } })) === 403);
+  check("list refuses a non-super-admin", (await asMember(listEmailDeliveriesForSuper, {})) === 403);
+  check("suppression removal refuses a non-super-admin",
+    (await asMember(deleteEmailSuppressionForSuper, { params: { id: new mongoose.Types.ObjectId().toString() } })) === 403);
+
+  // --- webhook secret configuration (write-only, AppConfig-delivered) ------
+  // The hosting platform's environment cannot be managed through its API and
+  // everything under the served root is publicly downloadable, so the signing
+  // secret is delivered through the super-admin route into AppConfig. These
+  // checks pin: the write stores, the response never echoes, the public
+  // app-config serialization never names the field, and the webhook controller
+  // verifies against the stored value when the environment has none.
+  const {
+    configureResendWebhookSecret,
+    clearResendWebhookSecret,
+    getResendWebhookSecretState,
+  } = await import("../src/controllers/super.controller.js");
+  const { default: AppConfig } = await import("../src/models/AppConfig.js");
+  const { resendWebhook, verifySvixSignature } = await import("../src/controllers/webhook.controller.js");
+  const { createHmac, randomUUID } = await import("node:crypto");
+
+  const junk = await call(configureResendWebhookSecret, { body: { secret: "not-a-whsec-value" } });
+  check("a secret without the whsec_ prefix is refused 400", junk.status === 400, "got " + junk.status);
+  const short = await call(configureResendWebhookSecret, { body: { secret: "whsec_short" } });
+  check("a too-short secret is refused 400", short.status === 400, "got " + short.status);
+
+  const TEST_SECRET = "whsec_" + Buffer.from(randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", "")).toString("base64").slice(0, 32);
+  const stored = await call(configureResendWebhookSecret, { body: { secret: TEST_SECRET } });
+  check("storing a valid secret answers ok+configured", stored.status === 0 && stored.body?.ok === true && stored.body?.configured === true,
+    JSON.stringify(stored.body));
+  check("the store response never echoes the secret",
+    !JSON.stringify(stored.body ?? {}).includes(TEST_SECRET.slice(0, 10)));
+
+  const state = await call(getResendWebhookSecretState, {});
+  check("the state endpoint says configured without the value",
+    state.status === 0 && state.body?.configured === true && state.body?.source === "appconfig" &&
+    !JSON.stringify(state.body ?? {}).includes(TEST_SECRET.slice(0, 10)),
+    JSON.stringify(state.body));
+  check("a non-super-admin cannot store the secret",
+    (await asMember(configureResendWebhookSecret, { body: { secret: TEST_SECRET } })) === 403);
+
+  const { getAppConfig } = await import("../src/controllers/appconfig.controller.js");
+  let publicKeys = null;
+  {
+    let body = null;
+    const res = { status() { return this; }, json(b) { body = b; return this; } };
+    await getAppConfig({ query: {} }, res, () => {});
+    publicKeys = Object.keys(body?.config ?? {});
+  }
+  check("the public app-config serialization never names the secret field",
+    Array.isArray(publicKeys) && publicKeys.length > 0 && !publicKeys.includes("resendWebhookSecret"),
+    publicKeys?.join(","));
+
+  // The webhook controller verifies against the stored value when the
+  // environment carries none.
+  const previousEnvSecret = process.env.RESEND_WEBHOOK_SECRET;
+  delete process.env.RESEND_WEBHOOK_SECRET;
+  try {
+    const payload = JSON.stringify({ type: "email.sent", data: { email_id: "contract-secret-check" } });
+    const id = randomUUID();
+    const ts = Math.floor(Date.now() / 1000);
+    const key = Buffer.from(TEST_SECRET.replace(/^whsec_/, ""), "base64");
+    const sig = createHmac("sha256", key).update(`${id}.${ts}.${payload}`).digest("base64");
+    const webhookCall = async (body, headers) => {
+      let status = 0;
+      let json = null;
+      const res = { status(c) { status = c; return this; }, json(b) { json = b; return this; } };
+      await resendWebhook({ rawBody: body, headers }, res, (err) => { status = err?.statusCode ?? 500; });
+      return { status, json };
+    };
+    const accepted = await webhookCall(payload, {
+      "webhook-id": id, "webhook-timestamp": String(ts), "webhook-signature": `v1,${sig}`,
+    });
+    check("the webhook verifies against the AppConfig-stored secret when env has none",
+      (accepted.status === 0 || accepted.status === 200) && accepted.json?.ok === true && accepted.json?.type === "email.sent",
+      JSON.stringify(accepted.json ?? accepted.status));
+    const tampered = await webhookCall(payload.replace("sent", "delivered"), {
+      "webhook-id": id, "webhook-timestamp": String(ts), "webhook-signature": `v1,${sig}`,
+    });
+    check("the webhook still refuses a tampered payload under the stored secret", tampered.status === 401, "got " + tampered.status);
+
+    await AppConfig.setResendWebhookSecret(null);
+    const cleared = await call(getResendWebhookSecretState, {});
+    check("clearing works and reports unconfigured", cleared.status === 0 && cleared.body?.configured === false && cleared.body?.source === "none",
+      JSON.stringify(cleared.body));
+    const unconfigured = await webhookCall(payload, {
+      "webhook-id": id, "webhook-timestamp": String(ts), "webhook-signature": `v1,${sig}`,
+    });
+    check("with no secret anywhere the webhook stays fail-closed 503", unconfigured.status === 503, "got " + unconfigured.status);
+    check("verifySvixSignature stays exportable for the production verifier", typeof verifySvixSignature === "function");
+  } finally {
+    if (previousEnvSecret !== undefined) process.env.RESEND_WEBHOOK_SECRET = previousEnvSecret;
+  }
+
+  await Promise.all([
+    EmailDelivery.deleteMany({}),
+    EmailSuppression.deleteMany({}),
+    Firm.deleteMany({}),
+    User.deleteMany({}),
+    ActivityEvent.deleteMany({}),
+    AppConfig.deleteMany({}),
+  ]).catch(() => {});
+} finally {
+  await mongoose.disconnect();
+}
+
+const failed = checks.filter((c) => !c.pass);
+for (const c of failed) console.error(`FAIL: ${c.name}${c.detail ? ` — ${c.detail}` : ""}`);
+console.log(`super-emails-controller-contract: ${checks.length - failed.length}/${checks.length} checks passed`);
+if (failed.length > 0) process.exit(1);

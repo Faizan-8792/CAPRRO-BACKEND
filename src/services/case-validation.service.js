@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import mongoose from "mongoose";
+import { parseStatutoryDayIso } from "./robust-normalize.service.js";
 
 const MAX_SOURCE_TEXT = 250000;
 const DATE_FIELDS = new Set([
@@ -79,9 +80,15 @@ function parseDateValue(value, label, { required = false } = {}) {
     if (required) throw httpError(400, `${label} is required`);
     return null;
   }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) throw httpError(400, `${label} must be a valid date`);
-  return date;
+  // Strict on purpose: new Date('05-03-2026') silently reads as month-first (3 May, not
+  // 5 March), and this gates issueDate/receivedDate/responseDueDate/hearingDate/
+  // limitationDate -- getting one wrong can mean a missed statutory deadline. See
+  // parseStatutoryDayIso's own remarks in robust-normalize.service.js.
+  try {
+    return parseStatutoryDayIso(value, label);
+  } catch (error) {
+    throw httpError(error.statusCode || 400, error.message);
+  }
 }
 
 function parseSafeMinor(value, label) {

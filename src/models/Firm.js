@@ -67,6 +67,13 @@ const FirmSchema = new mongoose.Schema({
     enum: ["EDIT", "READ_ONLY"],
     default: "EDIT",
   },
+  // The GST downloader's recording switch (owner decisions OD4 and D4, 2026-10-04): when on, a
+  // run's metadata (GSTIN, period, return, status, file name) and the filing statuses it reads are
+  // recorded for the firm. Starts on; absent on legacy documents, which are treated as on.
+  gstDownloaderRecording: {
+    type: Boolean,
+    default: true,
+  },
   timezone: {
     type: String,
     trim: true,

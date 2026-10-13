@@ -1,0 +1,644 @@
+// tests/task-assignment-receipt-contract.mjs
+//
+// Part 3 of TASK-MANAGEMENT-PLAN.md: an administrator assigns work with remarks, the assignee
+// acknowledges it, and the administrator can see that they did.
+//
+// THE RULE THIS FILE EXISTS FOR, and the one worth reading twice: the read receipt belongs to the
+// ASSIGNMENT, not to the task. Both receipt fields are cleared when assignedTo changes, because a
+// task handed to a second person has not been read by them -- an administrator looking at a tick
+// left behind by the PREVIOUS assignee would conclude the new one has seen the work, which is the
+// exact opposite of the truth and precisely the mistake a read receipt is for.
+//
+// The other half of that rule matters just as much and is easier to get wrong: the receipt must NOT
+// be cleared when the SAME assignee is re-sent. A bulk edit, or any form that posts every field it
+// knows about, re-sends assignedTo unchanged all the time; clearing on "the field was present"
+// rather than on "the value actually changed" would silently discard acknowledgements that really
+// happened, and it would do it on the most ordinary edit there is.
+//
+// Follows the harness already used by tests/task-version-guard-contract.mjs: the real exported
+// controller functions run unmodified against monkey-patched Mongoose models, so what is proved here
+// is the shipped code path and not a re-description of it.
+
+import assert from "node:assert/strict";
+
+process.env.NODE_ENV = process.env.NODE_ENV || "development";
+process.env.JWT_SECRET = process.env.JWT_SECRET || "local-verification-only";
+process.env.MONGODB_URI =
+  process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/capro-task-receipt-check";
+
+const { default: Task } = await import("../src/models/Task.js");
+const { default: User } = await import("../src/models/User.js");
+const { default: FirmMembership } = await import(
+  "../src/models/FirmMembership.js"
+);
+const { updateTask, markTaskRead } = await import(
+  "../src/controllers/task.controller.js"
+);
+
+const originals = {
+  taskFindOne: Task.findOne,
+  userFindOne: User.findOne,
+  membershipFindOne: FirmMembership.findOne,
+};
+
+let passed = 0;
+let failed = 0;
+const failures = [];
+
+function test(name, fn) {
+  return fn()
+    .then(() => {
+      passed++;
+    })
+    .catch((error) => {
+      failed++;
+      failures.push(`${name}: ${error.message}`);
+    });
+}
+
+function fakeReq({ body = {}, taskId = "task-1", userId = "user-1" } = {}) {
+  return {
+    user: { id: userId, firmId: "firm-1" },
+    params: { id: taskId },
+    body,
+  };
+}
+
+function fakeRes() {
+  const res = {
+    statusCode: 200,
+    body: null,
+    status(code) {
+      res.statusCode = code;
+      return res;
+    },
+    json(payload) {
+      res.body = payload;
+      return res;
+    },
+  };
+  return res;
+}
+
+function fakeTaskDocument(overrides = {}) {
+  let saveCount = 0;
+  const doc = {
+    _id: "task-1",
+    firmId: "firm-1",
+    isActive: true,
+    status: "NOT_STARTED",
+    title: "GSTR-3B Apr 2025",
+    dueDateISO: "2025-05-20",
+    remarks: "",
+    assignedTo: null,
+    assigneeReadAt: null,
+    assigneeReadBy: null,
+    mutationVersion: 1,
+    meta: {},
+    async save() {
+      saveCount += 1;
+      return doc;
+    },
+    get saveCount() {
+      return saveCount;
+    },
+    ...overrides,
+  };
+  return doc;
+}
+
+let lastTaskFilter = null;
+
+function stubTaskFindOne(document) {
+  Task.findOne = (filter) => {
+    lastTaskFilter = filter;
+    return {
+      then: (onFulfilled, onRejected) =>
+        Promise.resolve(document).then(onFulfilled, onRejected),
+    };
+  };
+}
+
+// A stub that answers the chain the controller actually uses.
+//
+// resolveFirmAssignee calls .select(...).lean(), and this used to provide only .lean() - so the
+// call threw and the two reassignment tests failed for a reason that had nothing to do with
+// receipts. select() returns the same object so any order of chaining works.
+function leanResult(value) {
+  const result = {
+    select: () => result,
+    lean: () => Promise.resolve(value),
+  };
+  return result;
+}
+
+// Active membership by default, because that is the ordinary case every other test here assumes.
+// The tests that care about a REFUSAL set it explicitly.
+function stubMembership(status = "ACTIVE") {
+  FirmMembership.findOne = () =>
+    leanResult(status === null ? null : { status });
+}
+
+function stubUserFindOne(user) {
+  User.findOne = () => leanResult(user);
+  // Every existing caller of this helper means "this assignee is assignable", so the membership
+  // the resolver now also checks is stubbed alongside it rather than at 20 call sites.
+  stubMembership("ACTIVE");
+}
+
+// ---------------------------------------------------------------- marking work as read
+
+await test("marking read records when, and by whom", async () => {
+  const document = fakeTaskDocument({ assignedTo: "user-1" });
+  stubTaskFindOne(document);
+  const res = fakeRes();
+
+  await markTaskRead(fakeReq(), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ok, true);
+  assert.equal(res.body.alreadyRead, false);
+  assert.ok(document.assigneeReadAt instanceof Date, "a real timestamp must be stored");
+  assert.equal(document.assigneeReadBy, "user-1");
+  assert.equal(document.saveCount, 1);
+});
+
+await test("the route asks only for work assigned to the caller", async () => {
+  // The security property, and it is structural rather than a branch: assignedTo is part of the
+  // QUERY, so another person's task is simply not found. That keeps "not yours" and "does not
+  // exist" indistinguishable from outside, so this route cannot be used to confirm that somebody
+  // else's task exists.
+  const document = fakeTaskDocument({ assignedTo: "user-1" });
+  stubTaskFindOne(document);
+
+  await markTaskRead(fakeReq(), fakeRes());
+
+  assert.equal(lastTaskFilter.assignedTo, "user-1");
+  assert.equal(lastTaskFilter.firmId, "firm-1");
+  assert.equal(lastTaskFilter.isActive, true);
+});
+
+await test("somebody else's task is a 404, not a 403", async () => {
+  stubTaskFindOne(null);
+  const res = fakeRes();
+
+  await markTaskRead(fakeReq({ userId: "user-2" }), res);
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.body.ok, false);
+  assert.match(res.body.error, /not assigned to this user/);
+});
+
+await test("marking read twice does not move the timestamp", async () => {
+  // Idempotent on purpose. The administrator is reading "when did they first see this"; a timestamp
+  // that crept forward every time the task was opened would answer a different question, and two
+  // devices doing it at once would race.
+  const firstSeen = new Date("2026-09-01T10:00:00.000Z");
+  const document = fakeTaskDocument({
+    assignedTo: "user-1",
+    assigneeReadAt: firstSeen,
+    assigneeReadBy: "user-1",
+  });
+  stubTaskFindOne(document);
+  const res = fakeRes();
+
+  await markTaskRead(fakeReq(), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.alreadyRead, true, "the caller must be able to tell it was already read");
+  assert.equal(document.assigneeReadAt.toISOString(), firstSeen.toISOString());
+  assert.equal(document.saveCount, 0, "an already-read task must not be written again");
+});
+
+// ---------------------------------------------------------------- reassignment clears it
+
+await test("handing the task to somebody else clears the receipt", async () => {
+  // THE RULE. Without this, the administrator sees a tick that the new assignee never earned.
+  const document = fakeTaskDocument({
+    assignedTo: "user-1",
+    assigneeReadAt: new Date("2026-09-01T10:00:00.000Z"),
+    assigneeReadBy: "user-1",
+  });
+  stubTaskFindOne(document);
+  stubUserFindOne({ _id: "user-2" });
+  const res = fakeRes();
+
+  await updateTask(fakeReq({ body: { assignedTo: "user-2" } }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(document.assignedTo, "user-2");
+  assert.equal(document.assigneeReadAt, null, "the new assignee has not read it");
+  assert.equal(document.assigneeReadBy, null);
+});
+
+await test("re-sending the SAME assignee keeps the receipt", async () => {
+  // The half that is easy to get wrong. A bulk edit, or any form that posts every field, re-sends
+  // assignedTo unchanged constantly. Clearing on "the field was present" rather than on "the value
+  // changed" would throw away real acknowledgements on the most ordinary edit there is.
+  const firstSeen = new Date("2026-09-01T10:00:00.000Z");
+  const document = fakeTaskDocument({
+    assignedTo: "user-1",
+    assigneeReadAt: firstSeen,
+    assigneeReadBy: "user-1",
+  });
+  stubTaskFindOne(document);
+  stubUserFindOne({ _id: "user-1" });
+  const res = fakeRes();
+
+  await updateTask(fakeReq({ body: { assignedTo: "user-1", title: "Renamed" } }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(
+    document.assigneeReadAt?.toISOString(),
+    firstSeen.toISOString(),
+    "an unchanged assignee must keep their acknowledgement",
+  );
+  assert.equal(document.assigneeReadBy, "user-1");
+});
+
+await test("unassigning the task clears the receipt too", async () => {
+  const document = fakeTaskDocument({
+    assignedTo: "user-1",
+    assigneeReadAt: new Date("2026-09-01T10:00:00.000Z"),
+    assigneeReadBy: "user-1",
+  });
+  stubTaskFindOne(document);
+  const res = fakeRes();
+
+  await updateTask(fakeReq({ body: { assignedTo: null } }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(document.assignedTo, null);
+  assert.equal(document.assigneeReadAt, null);
+});
+
+await test("an edit that never mentions the assignee leaves the receipt alone", async () => {
+  const firstSeen = new Date("2026-09-01T10:00:00.000Z");
+  const document = fakeTaskDocument({
+    assignedTo: "user-1",
+    assigneeReadAt: firstSeen,
+    assigneeReadBy: "user-1",
+  });
+  stubTaskFindOne(document);
+  const res = fakeRes();
+
+  await updateTask(fakeReq({ body: { status: "IN_PROGRESS" } }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(document.assigneeReadAt?.toISOString(), firstSeen.toISOString());
+});
+
+// ---------------------------------------------------------------- remarks
+
+await test("remarks are stored, trimmed", async () => {
+  const document = fakeTaskDocument();
+  stubTaskFindOne(document);
+  const res = fakeRes();
+
+  await updateTask(
+    fakeReq({ body: { remarks: "  Collect the signed 26AS before filing.  " } }),
+    res,
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(document.remarks, "Collect the signed 26AS before filing.");
+});
+
+await test("an empty string CLEARS the remarks", async () => {
+  // `if (remarks)` would have made clearing them impossible, which is a real thing an administrator
+  // needs to be able to do after remarks stop applying.
+  const document = fakeTaskDocument({ remarks: "Old instruction" });
+  stubTaskFindOne(document);
+  const res = fakeRes();
+
+  await updateTask(fakeReq({ body: { remarks: "" } }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(document.remarks, "");
+});
+
+await test("an absent remarks field leaves existing remarks alone", async () => {
+  const document = fakeTaskDocument({ remarks: "Keep me" });
+  stubTaskFindOne(document);
+  const res = fakeRes();
+
+  await updateTask(fakeReq({ body: { status: "IN_PROGRESS" } }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(document.remarks, "Keep me");
+});
+
+await test("a non-string remarks value is ignored rather than stored", async () => {
+  const document = fakeTaskDocument({ remarks: "Keep me" });
+  stubTaskFindOne(document);
+  const res = fakeRes();
+
+  await updateTask(fakeReq({ body: { remarks: { evil: true } } }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(document.remarks, "Keep me", "an object must never reach the field");
+});
+
+// ---------------------------------------------------------------- the fields actually reach a screen
+//
+// THE CLASS OF BUG THIS PINS, and it is the quietest one in this backend: every task read projects
+// by hand. getTaskBoard composes its rows field by field, and getMyOpenTasks and getTaskSource use
+// written-out select lists. A new column on the model therefore reaches NOBODY until it is named in
+// each one - the model has the field, the API drops it, the screen shows nothing, and not one thing
+// fails anywhere. Both new fields were invisible to all three reads when they were first added.
+
+await test("the assignee's own queue asks for remarks, the receipt and the assignee", async () => {
+  const { getMyOpenTasks } = await import("../src/controllers/task.controller.js");
+
+  let selected = null;
+  const originalFind = Task.find;
+  const originalCount = Task.countDocuments;
+  Task.countDocuments = () => Promise.resolve(0);
+  Task.find = () => {
+    const chain = {
+      sort: () => chain,
+      skip: () => chain,
+      limit: () => chain,
+      select: (fields) => {
+        selected = fields;
+        return chain;
+      },
+      lean: () => Promise.resolve([]),
+    };
+    return chain;
+  };
+
+  try {
+    await getMyOpenTasks(fakeReq(), fakeRes());
+  } finally {
+    Task.find = originalFind;
+    Task.countDocuments = originalCount;
+  }
+
+  assert.ok(selected, "the query must project explicitly");
+  for (const field of ["remarks", "assigneeReadAt", "assignedTo"]) {
+    assert.ok(
+      selected.includes(field),
+      `${field} must be projected, or the assignee's own screen cannot show it`,
+    );
+  }
+});
+
+await test("the board's hand-built row names both new fields", async () => {
+  // Asserted against the source, deliberately. getTaskBoard composes its response object key by
+  // key, so the only way a field can be missing is by not being written there - and that is exactly
+  // what happened. A behavioural test would need half the board's dependencies stubbed to prove a
+  // property that is visible in one line.
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(
+    new URL("../src/controllers/task.controller.js", import.meta.url),
+    "utf8",
+  );
+
+  const start = source.indexOf("columns[key].push({");
+  assert.ok(start > 0, "the board's row builder moved; this test needs updating");
+
+  // Bounded on the object literal's actual CLOSING, not on a character count. The first version
+  // sliced a fixed 2000 characters and started failing the moment the row grew past it - it
+  // reported "the board row must carry remarks" about a row that carried remarks at offset 1976.
+  // A fixed window measures the comments as much as the code.
+  const end = source.indexOf("      });", start);
+  assert.ok(end > start, "the board's row builder no longer closes where expected");
+  const row = source.slice(start, end);
+
+  assert.ok(row.includes("remarks:"), "the board row must carry remarks");
+  assert.ok(
+    row.includes("assigneeReadAt:"),
+    "the board row must carry the read receipt, or an administrator cannot see it",
+  );
+  assert.ok(
+    row.includes("clientOwner:"),
+    "the board row must say which employee holds the client",
+  );
+});
+
+// ---------------------------------------------------------------- the model declares them
+
+await test("the schema carries the three new fields, with safe defaults", async () => {
+  const paths = Task.schema.paths;
+  assert.ok(paths.remarks, "Task.remarks must exist");
+  assert.ok(paths.assigneeReadAt, "Task.assigneeReadAt must exist");
+  assert.ok(paths.assigneeReadBy, "Task.assigneeReadBy must exist");
+  assert.equal(paths.remarks.options.default, "");
+  assert.equal(paths.assigneeReadAt.options.default, null);
+  assert.equal(paths.assigneeReadBy.options.ref, "User");
+  assert.equal(
+    paths.remarks.options.maxlength,
+    2000,
+    "remarks must stay capped so it cannot become an unbounded blob",
+  );
+});
+
+// ---------------------------------------------------------------- who work may be handed to
+
+// THE DEFECT THESE PIN, and it lost work silently.
+// Both assignment sites used to resolve the assignee with User.findOne({ _id, firmId }).
+// FirmMembership.js states that User.firmId is the ACTIVE WORKSPACE - which firm somebody is
+// looking at right now - not which firms they belong to. So the check asked "is this colleague's
+// screen currently showing my firm?" and answered no for anybody working in a second workspace,
+// while the assign dropdown offers exactly those people (it reads FirmMembership, status ACTIVE).
+//
+// createTask then fell through to assignedToUserId = null. An administrator picked a real
+// colleague, got HTTP 201, and the task was created with NOBODY ASSIGNED. Nothing was said.
+
+await test("a reassignment to an active member of the firm is accepted", async () => {
+  const document = fakeTaskDocument({ assignedTo: "user-1" });
+  stubTaskFindOne(document);
+  stubUserFindOne({ _id: "user-2" });
+  stubMembership("ACTIVE");
+  const res = fakeRes();
+
+  await updateTask(fakeReq({ body: { assignedTo: "user-2" } }), res);
+
+  assert.equal(res.statusCode, 200, "an active member must be assignable");
+  assert.equal(String(document.assignedTo), "user-2");
+});
+
+await test("a reassignment to somebody with NO membership is refused, not dropped", async () => {
+  const document = fakeTaskDocument({ assignedTo: "user-1" });
+  stubTaskFindOne(document);
+  stubUserFindOne({ _id: "user-2" });
+  stubMembership(null);
+  const res = fakeRes();
+
+  await updateTask(fakeReq({ body: { assignedTo: "user-2" } }), res);
+
+  assert.equal(res.statusCode, 400, "a non-member must be refused");
+  assert.match(String(res.body?.error ?? ""), /not a member of this firm/i);
+  assert.equal(
+    String(document.assignedTo),
+    "user-1",
+    "the existing assignee must be left alone - a refused edit must not half-apply",
+  );
+});
+
+await test("a reassignment to a REMOVED member is refused, and says so differently", async () => {
+  // A different remedy from "not a member": this person was in the firm and is not any more, so
+  // the answer is reactivate them, not invite them.
+  const document = fakeTaskDocument({ assignedTo: "user-1" });
+  stubTaskFindOne(document);
+  stubUserFindOne({ _id: "user-2" });
+  stubMembership("REMOVED");
+  const res = fakeRes();
+
+  await updateTask(fakeReq({ body: { assignedTo: "user-2" } }), res);
+
+  assert.equal(res.statusCode, 400);
+  assert.match(String(res.body?.error ?? ""), /no longer an active member/i);
+});
+
+await test("a membership row whose account is gone is refused", async () => {
+  // A dangling membership must not become an assignment to an id nothing answers to.
+  const document = fakeTaskDocument({ assignedTo: "user-1" });
+  stubTaskFindOne(document);
+  stubMembership("ACTIVE");
+  User.findOne = () => leanResult(null);
+  const res = fakeRes();
+
+  await updateTask(fakeReq({ body: { assignedTo: "user-2" } }), res);
+
+  assert.equal(res.statusCode, 400);
+  assert.match(String(res.body?.error ?? ""), /no longer exists/i);
+});
+
+// ------------------------------------------------- what the board actually PUTS ON THE WIRE
+
+// THE DEFECT THIS PINS, and it took a live run against the deployed API to find.
+// assigneeReadBy came back undefined on every board row while assigneeReadAt arrived fine. The
+// board's row is composed key by key, and that key had simply never been added - the query fetches
+// the whole document, so nothing was missing from the database and nothing errored.
+//
+// The tests that were supposed to cover this asserted the PROJECTION named the field. That is a
+// different claim, and the gap between them is exactly where this hid: a field can be selected out
+// of the database and still be dropped on the way into the response. So this checks the composed
+// ROW, which is the thing a client actually receives.
+//
+// Why it matters rather than being a tidy-up: with only a timestamp, a receipt left by the PREVIOUS
+// assignee is indistinguishable from one left by the current one - which is the precise confusion
+// the read receipt exists to prevent.
+
+const controllerSource = await import("node:fs").then(({ readFileSync }) =>
+  readFileSync(
+    new URL("../src/controllers/task.controller.js", import.meta.url),
+    "utf8",
+  ),
+);
+
+await test("the board's composed row names every field the receipt feature needs", async () => {
+  // getTaskBoard's body only. Another handler naming the field would not help a board reader.
+  const start = controllerSource.indexOf("export const getTaskBoard =");
+  const end = controllerSource.indexOf("\nexport const ", start + 1);
+  const board = controllerSource.slice(
+    start,
+    end < 0 ? controllerSource.length : end,
+  );
+
+  assert.ok(board.length > 0, "getTaskBoard not found - this parser needs updating");
+
+  // Each of these is a key the row must EMIT, not merely select.
+  const required = [
+    "remarks",
+    "assigneeReadAt",
+    "assigneeReadBy",
+    "clientOwner",
+  ];
+
+  const missing = required.filter(
+    (field) => !new RegExp(`\\b${field}:`).test(board),
+  );
+
+  assert.deepEqual(
+    missing,
+    [],
+    "the board composes its row key by key, and these keys are not among them - a client reading "
+      + "the board will get undefined for each, with nothing erroring anywhere",
+  );
+});
+
+// ---------------------------------------------------------------- who is allowed to acknowledge
+
+// THE DEFECT THIS PINS
+// requireFirmWriteAccess refuses every mutating method for a read-only member, and it used to gate
+// every route in task.routes.js - mark-read included. Meanwhile createTask validates an assignee
+// only as "a User in the same firm", with no write requirement, so a read-only member could be
+// handed work and then be refused when they tried to say they had seen it. The desktop shows them
+// the button regardless, on the stated reasoning that acknowledging your own assignment is not a
+// write against the firm's data. So the two halves disagreed, and the visible result was an enabled
+// control the server would refuse - plus an administrator whose "has he seen it?" answer read
+// "Not opened yet" forever for that member.
+//
+// These checks are TEXTUAL, on the route file, and that is on purpose: the thing being asserted is
+// middleware ORDER, which is a property of how the router is assembled and not something the
+// controller functions this file otherwise drives can show.
+
+const routesSource = await import("node:fs").then(({ readFileSync }) =>
+  readFileSync(new URL("../src/routes/task.routes.js", import.meta.url), "utf8"),
+);
+
+await test("mark-read is declared above the write gate, so a read-only assignee can acknowledge", async () => {
+  const markRead = routesSource.indexOf('router.patch("/:id/mark-read"');
+  const writeGate = routesSource.indexOf("router.use(requireFirmWriteAccess)");
+
+  assert.ok(markRead >= 0, "the mark-read route is gone from task.routes.js");
+  assert.ok(
+    writeGate >= 0,
+    "router.use(requireFirmWriteAccess) is gone - every task mutation is now unguarded, which is a "
+      + "far worse defect than the one this check was written for",
+  );
+  assert.ok(
+    markRead < writeGate,
+    "mark-read is declared BELOW the write gate, so a read-only member assigned work cannot "
+      + "acknowledge it - and the desktop still shows them the button",
+  );
+});
+
+await test("membership is still required for mark-read", async () => {
+  // The exemption is from WRITE ACCESS only. An inactive firm or a removed membership must still be
+  // refused, or this would have turned a narrow receipt into a way past the firm gate entirely.
+  const memberGate = routesSource.indexOf("router.use(authRequired, requireFirmMember)");
+  const markRead = routesSource.indexOf('router.patch("/:id/mark-read"');
+
+  assert.ok(memberGate >= 0, "the authRequired/requireFirmMember gate is gone");
+  assert.ok(
+    memberGate < markRead,
+    "mark-read is declared above the membership gate, so it would accept a caller with no active "
+      + "firm membership",
+  );
+});
+
+await test("no OTHER task mutation slipped above the write gate", async () => {
+  // The check that keeps the exemption a single named route rather than a hole that grows. Every
+  // mutating declaration except mark-read must sit below the gate.
+  const writeGate = routesSource.indexOf("router.use(requireFirmWriteAccess)");
+  const mutations = [...routesSource.matchAll(/router\.(post|patch|delete)\("([^"]+)"/g)];
+
+  assert.ok(mutations.length >= 5, `parsed only ${mutations.length} mutating routes`);
+
+  const above = mutations
+    .filter((match) => match.index < writeGate)
+    .map((match) => `${match[1].toUpperCase()} ${match[2]}`);
+
+  assert.deepEqual(
+    above,
+    ["PATCH /:id/mark-read"],
+    "a task mutation other than mark-read is declared above the write gate, so a read-only member "
+      + "can now perform it",
+  );
+});
+
+// ---------------------------------------------------------------- teardown
+
+Task.findOne = originals.taskFindOne;
+User.findOne = originals.userFindOne;
+FirmMembership.findOne = originals.membershipFindOne;
+
+console.log(`task assignment receipt contract: ${passed}/${passed + failed}`);
+for (const failure of failures) {
+  console.log(`  FAIL ${failure}`);
+}
+process.exitCode = failed > 0 ? 1 : 0;

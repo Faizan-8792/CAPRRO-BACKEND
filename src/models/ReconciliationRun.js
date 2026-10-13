@@ -181,6 +181,20 @@ const ReconciliationRunSchema = new mongoose.Schema(
         ref: "ImportBatch",
         default: null,
       },
+      // Optional like the GSTR-3B above, and for the same reason: a run is useful with only books
+      // and GSTR-2B, and each further source unlocks one more comparison rather than being a
+      // precondition for any of them. GSTR-1 unlocks the turnover reconciliation; the credit
+      // ledger unlocks the ledger reconciliation.
+      gstr1BatchId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "ImportBatch",
+        default: null,
+      },
+      creditLedgerBatchId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "ImportBatch",
+        default: null,
+      },
     },
     sourceFingerprint: { type: String, trim: true, maxlength: 128, required: true },
     revision: {

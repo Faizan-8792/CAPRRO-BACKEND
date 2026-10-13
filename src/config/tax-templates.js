@@ -349,13 +349,17 @@ export function suggestPeriodAndDueDate(taxType, today = new Date()) {
   }
 
   if (fmt === "quarterly") {
-    const q = Math.floor(mm / 3);
-    const prevQuarterIdx = q === 0 ? 3 : q - 1;
-    const yearAdj = q === 0 ? yyyy - 1 : yyyy;
-    const quarterStartMonth = prevQuarterIdx * 3;
-    const period = `Q${prevQuarterIdx + 1}-${yearAdj}-${String(yearAdj + 1).slice(-2)}`;
+    // Financial-year quarters, as TDS and GST number them: Q1 April-June, Q2 July-September,
+    // Q3 October-December, Q4 January-March. The suggestion is the quarter that ended last.
+    const fyQuarterNow = Math.floor(((mm - 3 + 12) % 12) / 3);
+    const fyStartNow = mm >= 3 ? yyyy : yyyy - 1;
+    const prevQuarter = fyQuarterNow === 0 ? 3 : fyQuarterNow - 1;
+    const fyStart = fyQuarterNow === 0 ? fyStartNow - 1 : fyStartNow;
+    // The quarter's first month, counted from January of the financial year's first year.
+    const quarterStartMonth = 3 + prevQuarter * 3;
+    const period = `Q${prevQuarter + 1}-${fyStart}-${String(fyStart + 1).slice(-2)}`;
     const dueDate = day
-      ? new Date(Date.UTC(yearAdj, quarterStartMonth + 3, day))
+      ? new Date(Date.UTC(fyStart, quarterStartMonth + 3, day))
       : null;
     return { period, dueDate: dueDate ? dueDate.toISOString() : null };
   }

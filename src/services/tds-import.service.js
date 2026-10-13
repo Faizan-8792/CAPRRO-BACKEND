@@ -18,6 +18,7 @@ import {
   normalizeTdsContext,
 } from "./tds-normalization.service.js";
 import { assertTdsImportStorageReady } from "./tds-storage-readiness.service.js";
+import { userFacingMessage } from "../utils/user-facing-error.js";
 
 const TDS_IMPORT_PROCESSING_LEASE_MS = 10 * 60 * 1000;
 const PREVIEW_TOKEN_TTL_MS = 15 * 60 * 1000;
@@ -55,6 +56,7 @@ function buildTdsImportFingerprint({
   financialYear,
   quarter,
   statementType,
+  dateOrder,
 }) {
   return createHash("sha256")
     .update(JSON.stringify(canonical({
@@ -68,6 +70,9 @@ function buildTdsImportFingerprint({
       quarter,
       statementType,
       normalizationVersion: TDS_NORMALIZATION_VERSION,
+      // See buildImportFingerprint in gst-import.service.js -- same anti-swap
+      // reasoning, mirrored here for the Income-tax TDS import path.
+      dateOrder: dateOrder || "NOT_APPLICABLE",
     })))
     .digest("hex");
 }
@@ -101,6 +106,7 @@ function createTdsImportPreviewAuthorization({
   financialYear,
   quarter,
   statementType,
+  dateOrder = null,
 }) {
   assertObjectId(clientId, "Client");
   const normalizedKind = String(kind || "").toUpperCase();
@@ -115,6 +121,7 @@ function createTdsImportPreviewAuthorization({
     delimiter,
     clientId,
     ...context,
+    dateOrder,
   });
   return {
     importFingerprint,
@@ -152,6 +159,7 @@ function serializeTdsImportBatch(batch) {
     sourceHash: batch.sourceHash,
     importFingerprint: batch.importFingerprint,
     normalizationVersion: batch.normalizationVersion,
+    dateOrder: batch.dateOrder || "",
     sourceLabel: SOURCE_LABELS[batch.kind],
     status: batch.status,
     totalRows: batch.totalRows,
@@ -176,6 +184,7 @@ async function commitTdsImport({
   text,
   mapping,
   delimiter = null,
+  dateOrder = null,
   previewToken,
   clientId,
   tan,
@@ -197,7 +206,17 @@ async function commitTdsImport({
     throw serviceError("Source hash must be a SHA-256 hex value");
   }
   const context = normalizeTdsContext({ tan, financialYear, quarter, statementType });
-  const parsed = parseMappedImport({ kind: normalizedKind, text, mapping, delimiter });
+  const parsed = parseMappedImport({ kind: normalizedKind, text, mapping, delimiter, dateOrder });
+
+  // An unanswered ambiguous file must never reach storage -- see the matching
+  // guard in commitGstImport (gst-import.service.js) for the full reasoning.
+  if (parsed.dateOrder.status === "AMBIGUOUS" && !parsed.dateOrder.resolved) {
+    throw serviceError(
+      "This file has dates that could be read either day-first or month-first, and no answer was given for which. Read the file again and state the date order before committing it.",
+      409
+    );
+  }
+
   const importFingerprint = buildTdsImportFingerprint({
     sourceHash: parsed.sourceHash,
     kind: normalizedKind,
@@ -205,6 +224,9 @@ async function commitTdsImport({
     delimiter: parsed.delimiter,
     clientId,
     ...context,
+    // The fresh re-parse's OWN resolution, not the raw request value -- same
+    // anti-swap reasoning as commitGstImport's parsedFingerprint.
+    dateOrder: parsed.dateOrder.resolved || "NOT_APPLICABLE",
   });
   if (
     parsed.sourceHash !== String(sourceHash).toLowerCase() ||
@@ -255,6 +277,7 @@ async function commitTdsImport({
           sourceHash: parsed.sourceHash,
           normalizationVersion: TDS_NORMALIZATION_VERSION,
           delimiter: parsed.delimiter,
+          dateOrder: parsed.dateOrder.resolved || "NOT_APPLICABLE",
           mapping: parsed.mapping,
           status: "PROCESSING",
           processingToken,
@@ -338,6 +361,7 @@ async function commitTdsImport({
             sourceHash: parsed.sourceHash,
             rowFingerprint: fingerprintTdsRow(normalizedKind, row.values),
             normalizationVersion: TDS_NORMALIZATION_VERSION,
+            dateOrder: parsed.dateOrder.resolved || "NOT_APPLICABLE",
             sourceLabel: SOURCE_LABELS[normalizedKind],
             ...context,
             ...row.values,
@@ -417,7 +441,9 @@ async function commitTdsImport({
             processingExpiresAt: null,
             errorSummary: {
               code: String(error.code || error.name || "IMPORT_FAILED").slice(0, 80),
-              message: String(error.message || "TDS import failed").slice(0, 500),
+              // V13-P12-F2. Returned to the client as `failure` on a FAILED batch, so this
+              // text never reaches publicErrorMessage and must be authored copy.
+              message: userFacingMessage(error, "TDS import failed. Check the file and try again.").slice(0, 500),
             },
             completedAt: new Date(),
           },

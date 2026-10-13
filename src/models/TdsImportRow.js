@@ -37,6 +37,7 @@ const TdsImportRowSchema = new mongoose.Schema(
     sourceHash: { type: String, required: true, trim: true, match: /^[a-f0-9]{64}$/i },
     rowFingerprint: { type: String, required: true, trim: true, match: /^[a-f0-9]{64}$/i },
     normalizationVersion: { type: String, required: true, trim: true, maxlength: 80 },
+    dateOrder: { type: String, enum: ["", "DAY_FIRST", "MONTH_FIRST", "NOT_APPLICABLE"], default: "" },
     sourceLabel: { type: String, required: true, trim: true, maxlength: 160 },
     tan: { type: String, required: true, uppercase: true, trim: true, match: /^[A-Z]{4}[0-9]{5}[A-Z]$/ },
     financialYear: { type: String, required: true, trim: true, match: /^\d{4}-\d{2}$/ },

@@ -687,7 +687,7 @@ async function createAnalysis({
         await beginNoticePublicationWrite(noticePublication);
         let generated = readCaseProviderOperationResult(reservation.operation);
         if (!generated) {
-          generated = await generateCaseAnalysis(initialCase);
+          generated = await generateCaseAnalysis(initialCase, actorUserId);
           reservation = {
             ...reservation,
             operation: await stageCaseProviderOperationResult(
@@ -894,7 +894,8 @@ async function createDraft({
             generated = await generateCaseDraft(
               initialCase,
               references,
-              input.instructions || ""
+              input.instructions || "",
+              actorUserId
             );
             reservation = {
               ...reservation,

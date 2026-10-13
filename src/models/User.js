@@ -1,5 +1,36 @@
 // User.js
 import mongoose from "mongoose";
+import { createHash } from "node:crypto";
+
+const WorkspaceOperationReceiptSchema = new mongoose.Schema(
+  {
+    operationId: {
+      type: String,
+      required: true,
+      lowercase: true,
+      trim: true,
+      match: /^[a-f0-9]{32}$/,
+    },
+    kind: {
+      type: String,
+      enum: ["CREATE", "SWITCH", "JOIN"],
+      required: true,
+    },
+    requestHash: {
+      type: String,
+      required: true,
+      match: /^[a-f0-9]{64}$/,
+    },
+    activeFirmId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Firm",
+      required: true,
+    },
+    startedAt: { type: Date, required: true },
+    completedAt: { type: Date, required: true },
+  },
+  { _id: false },
+);
 
 const UserSchema = new mongoose.Schema(
   {
@@ -16,7 +47,7 @@ const UserSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ["USER", "FIRM_ADMIN", "SUPER_ADMIN"],   // ✅ yahan underscore + caps
+      enum: ["USER", "FIRM_ADMIN", "SUPER_ADMIN"], // ✅ yahan underscore + caps
       default: "USER",
     },
     accountType: {
@@ -36,6 +67,37 @@ const UserSchema = new mongoose.Schema(
     personalFirmId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Firm",
+      default: null,
+    },
+    // Bounded terminal receipts make active-firm change and operation success
+    // one atomic User-document update. Status reads check these before the
+    // secondary operation record, closing the delayed-response race.
+    workspaceOperationReceipts: {
+      type: [WorkspaceOperationReceiptSchema],
+      default: [],
+      validate: {
+        validator: (values) =>
+          values.length <= 20 &&
+          new Set(values.map((value) => value.operationId)).size ===
+            values.length,
+        message: "Workspace operation receipts must be unique and bounded",
+      },
+    },
+    // When the user asked to become a firm admin. Pending approval is tracked
+    // here rather than by clearing isActive: overloading the activation flag let
+    // a suspended account look pending, and let a pending account be locked out
+    // with no route back once its role was recomputed on the next sign-in.
+    firmAdminRequestedAt: {
+      type: Date,
+      default: null,
+    },
+    // Set when the user asks for their account data to be erased. Deliberately the same shape as
+    // firmAdminRequestedAt above: a timestamp the user can set and clear, which a super
+    // administrator then honours out of band. It grants nothing and destroys nothing on its own.
+    // PLAN.md section 37 rules out self-service deletion — a CA firm's working papers must not be
+    // destroyable by one session — so the request and the erasure are deliberately separate acts.
+    erasureRequestedAt: {
+      type: Date,
       default: null,
     },
     otpCodeHash: String,
@@ -83,13 +145,54 @@ const UserSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // The desktop update announcement this user has dismissed, by announcement id rather than
+    // by version -- dismissing 0.1.2 must not silence 0.1.3. Persists across logout and
+    // reinstall, same as welcomeSeenVersion.
+    desktopUpdateSeenAnnouncementId: {
+      type: String,
+      default: null,
+    },
     digestPreferences: {
-      dailyEnabled: { type: Boolean, default: true },
+      // Cadence for the personal "daily work digest" email.
+      // DAILY = every day, EVERY_3_DAYS, WEEKLY = once a week, OFF = never.
+      dailyFrequency: {
+        type: String,
+        enum: ["DAILY", "EVERY_3_DAYS", "WEEKLY", "OFF"],
+        default: "OFF",
+      },
+      // Retained for backward compatibility and kept in sync with
+      // dailyFrequency (false === OFF). New clients use dailyFrequency.
+      dailyEnabled: { type: Boolean, default: false },
       weeklyEnabled: { type: Boolean, default: true },
       emailEnabled: { type: Boolean, default: true },
+      // Weekly mail is deliberately spread across these three days. A legacy
+      // account with no stored day receives its stable hash-derived day until
+      // the rollout tool backfills it; users may choose any of the same days.
+      weeklyDeliveryDay: {
+        type: Number,
+        enum: [0, 1, 4],
+        default() {
+          const days = [0, 1, 4];
+          return days[createHash("sha256").update(String(this._id)).digest()[0] % days.length];
+        },
+      },
+      dailyRolloutVersion: { type: String, trim: true, maxlength: 40, default: "" },
+      rolloutNotice: {
+        campaign: { type: String, trim: true, maxlength: 40, default: "" },
+        batch: { type: String, enum: ["A", "B", ""], default: "" },
+        state: {
+          type: String,
+          enum: ["", "PENDING", "SENDING", "SENT", "FAILED"],
+          default: "",
+        },
+        attempts: { type: Number, min: 0, default: 0 },
+        providerMessageId: { type: String, trim: true, maxlength: 240, default: "" },
+        lastError: { type: String, trim: true, maxlength: 600, default: "" },
+        sentAt: { type: Date, default: null },
+      },
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 const User = mongoose.model("User", UserSchema);

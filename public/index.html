@@ -6,327 +6,49 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <title>CA PRO Admin – Login</title>
-
-  <!-- Bootstrap -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
-
-  <!-- Google Fonts -->
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-
-  <style>
-    :root {
-      --cream: #f4efdb;
-      --cream-light: #faf6e8;
-      --teal: #176e87;
-      --teal-light: #2491b0;
-      --teal-lighter: #d4ebf2;
-      --teal-dark: #0e4f60;
-      --teal-glow: rgba(23, 110, 135, 0.18);
-      --gold: #c8924b;
-      --gold-light: #d9a868;
-      --bg: var(--cream);
-      --surface: #ffffff;
-      --border: rgba(23, 110, 135, 0.18);
-      --text: #1a3540;
-      --muted: #708590;
-      --ok: #2d7a55;
-      --danger: #b44545;
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background: var(--bg);
-      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-      position: relative;
-      overflow-x: hidden;
-      color: var(--text);
-    }
-
-    /* Animated background gradients */
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background:
-        radial-gradient(ellipse at 15% 0%, rgba(23, 110, 135, 0.10) 0%, transparent 55%),
-        radial-gradient(ellipse at 85% 100%, rgba(200, 146, 75, 0.08) 0%, transparent 55%);
-      animation: bgShift 14s ease-in-out infinite alternate;
-      pointer-events: none;
-      z-index: 0;
-    }
-
-    @keyframes bgShift {
-      0% { transform: translate(0,0) scale(1); }
-      100% { transform: translate(20px,-10px) scale(1.05); }
-    }
-
-    /* Floating teal orb */
-    body::after {
-      content: '';
-      position: fixed;
-      width: 320px;
-      height: 320px;
-      border-radius: 50%;
-      background: radial-gradient(circle, rgba(23, 110, 135, 0.12) 0%, transparent 70%);
-      top: 20%;
-      right: 10%;
-      animation: orbFloat 10s ease-in-out infinite;
-      pointer-events: none;
-      z-index: 0;
-    }
-
-    @keyframes orbFloat {
-      0%, 100% { transform: translate(0, 0) scale(1); }
-      50% { transform: translate(-40px, 50px) scale(1.15); }
-    }
-
-    .login-container {
-      width: 100%;
-      max-width: 460px;
-      position: relative;
-      z-index: 1;
-      animation: fadeUp 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    @keyframes fadeUp {
-      from { opacity: 0; transform: translateY(24px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    .login-card {
-      background: rgba(255, 253, 245, 0.85);
-      backdrop-filter: blur(20px) saturate(180%);
-      -webkit-backdrop-filter: blur(20px) saturate(180%);
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      padding: 40px 36px;
-      box-shadow: 0 20px 60px rgba(23, 110, 135, 0.15), 0 4px 12px rgba(23, 110, 135, 0.08);
-      position: relative;
-      overflow: hidden;
-    }
-
-    .login-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 3px;
-      background: linear-gradient(90deg, var(--teal), var(--gold));
-      animation: linePulse 2.5s ease-in-out infinite;
-    }
-
-    @keyframes linePulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-
-    .login-brand {
-      font-size: 24px;
-      font-weight: 800;
-      letter-spacing: -0.02em;
-      margin-bottom: 6px;
-      background: linear-gradient(135deg, var(--teal-dark), var(--teal), var(--gold));
-      background-size: 200% 200%;
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      animation: gradientText 5s ease-in-out infinite;
-    }
-
-    @keyframes gradientText {
-      0%, 100% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
-    }
-
-    .login-subtitle {
-      font-size: 13px;
-      color: var(--muted);
-      margin-bottom: 28px;
-      font-weight: 500;
-    }
-
-    .form-label {
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--teal-dark);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-bottom: 6px;
-    }
-
-    .form-control {
-      background: var(--surface);
-      border: 1.5px solid var(--border);
-      border-radius: 10px;
-      padding: 11px 16px;
-      font-size: 14px;
-      color: var(--text);
-      font-family: inherit;
-      font-weight: 500;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      box-shadow: 0 1px 2px rgba(23, 110, 135, 0.04);
-    }
-
-    .form-control:focus {
-      border-color: var(--teal);
-      box-shadow: 0 0 0 4px var(--teal-glow), 0 2px 4px rgba(23, 110, 135, 0.08);
-      outline: none;
-      background: var(--surface);
-      transform: scale(1.005);
-    }
-
-    .form-control:hover {
-      border-color: rgba(23, 110, 135, 0.4);
-    }
-
-    .form-control::placeholder {
-      color: #a0afb6;
-    }
-
-    .btn {
-      border-radius: 10px;
-      font-weight: 600;
-      font-size: 13px;
-      padding: 11px 20px;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      cursor: pointer;
-      font-family: inherit;
-      letter-spacing: 0.01em;
-      position: relative;
-      overflow: hidden;
-      border: none !important;
-    }
-
-    .btn::after {
-      content: '';
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 0;
-      height: 0;
-      border-radius: 50%;
-      background: rgba(255, 255, 255, 0.35);
-      transform: translate(-50%, -50%);
-      transition: width 0.5s ease, height 0.5s ease, opacity 0.5s ease;
-      opacity: 0;
-    }
-
-    .btn:active::after {
-      width: 300px;
-      height: 300px;
-      opacity: 1;
-      transition: 0s;
-    }
-
-    .btn:hover { transform: translateY(-2px); }
-    .btn:active { transform: translateY(0) scale(0.97); }
-
-    .btn-primary {
-      background: linear-gradient(135deg, var(--teal), var(--teal-light));
-      color: var(--cream-light);
-      box-shadow: 0 4px 14px rgba(23, 110, 135, 0.25);
-    }
-
-    .btn-primary:hover {
-      background: linear-gradient(135deg, var(--teal-dark), var(--teal));
-      box-shadow: 0 8px 25px rgba(23, 110, 135, 0.4);
-    }
-
-    .btn-outline-secondary {
-      background: var(--surface);
-      border: 1px solid var(--border) !important;
-      color: var(--teal-dark);
-      box-shadow: 0 1px 2px rgba(23, 110, 135, 0.04);
-    }
-
-    .btn-outline-secondary:hover {
-      background: var(--teal-lighter);
-      border-color: var(--teal-light) !important;
-      color: var(--teal-dark);
-      box-shadow: 0 4px 12px rgba(23, 110, 135, 0.12);
-    }
-
-    .btn-success {
-      background: linear-gradient(135deg, var(--ok), #379b6c);
-      color: #ffffff;
-      box-shadow: 0 4px 14px rgba(45, 122, 85, 0.25);
-    }
-
-    .btn-success:hover {
-      box-shadow: 0 8px 25px rgba(45, 122, 85, 0.4);
-    }
-
-    #status {
-      font-size: 13px;
-      color: var(--teal-dark);
-      padding: 11px 14px;
-      border-radius: 10px;
-      background: var(--teal-lighter);
-      border-left: 3px solid var(--teal);
-      min-height: 20px;
-      font-weight: 500;
-      animation: statusFade 0.3s ease;
-    }
-
-    @keyframes statusFade {
-      from { opacity: 0; transform: translateY(6px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    #status:empty { display: none; }
-
-    /* Scrollbar */
-    ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: linear-gradient(180deg, var(--teal-lighter), var(--border)); border-radius: 10px; }
-    ::-webkit-scrollbar-thumb:hover { background: var(--teal-light); }
-
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after {
-        animation-duration: 0.01ms !important;
-        transition-duration: 0.15s !important;
-      }
-    }
-  </style>
+  <title>CA PRO Admin – Sign in</title>
+  <!-- DS25: the design system the admin panels wear, served from this site. This page loaded
+       Bootstrap from jsDelivr and a Google font, with a palette of its own. -->
+  <link rel="stylesheet" href="/admin/capro-tokens.css?v=2" />
+  <link rel="stylesheet" href="/admin/ui/capro-fonts.css?v=1" />
+  <link rel="stylesheet" href="/admin/ui/capro-ui.css?v=1" />
+  <link rel="stylesheet" href="/capro-public.css?v=1" />
+  <link rel="icon" type="image/png" href="/logo.png" />
 </head>
-<body>
-
-  <div class="login-container">
-    <div class="login-card">
-      <div class="login-brand">CA PRO Toolkit</div>
-      <p class="login-subtitle">Login using OTP. Your session token will be stored securely in the browser.</p>
-
-      <label class="form-label">Email</label>
-      <input id="email" type="email" class="form-control" placeholder="you@office.com" />
-
-      <div class="d-flex gap-2 mt-3">
-        <button id="sendOtp" class="btn btn-outline-secondary w-100" type="button">Send OTP</button>
-        <button id="goVerify" class="btn btn-primary w-100" type="button">I have OTP</button>
+<body class="public-page">
+  <main class="public-card" aria-labelledby="signInTitle">
+    <div class="public-card__rule" aria-hidden="true"></div>
+    <div class="public-card__body">
+      <div class="public-brand">
+        <span class="public-brand__mark"><img src="/admin/ui/capro-mark.png" alt="" width="26" height="26" /></span>
+        <span class="public-brand__name">CA PRO Toolkit</span>
       </div>
 
-      <div id="otpBlock" style="display:none; margin-top:14px;">
-        <label class="form-label mt-2">OTP Code</label>
-        <input id="otp" type="text" class="form-control" placeholder="6-digit OTP" maxlength="6" />
+      <h1 class="public-title" id="signInTitle">Sign in to the admin panel</h1>
+      <p class="public-lede">We email you a one-time password (OTP). You stay signed in on this browser until you sign out.</p>
 
-        <button id="verifyOtp" class="btn btn-success w-100 mt-3" type="button">
-          Verify & Login
-        </button>
+      <div class="public-field">
+        <label class="cp-label" for="email">Email</label>
+        <input id="email" type="email" class="cp-input" placeholder="you@yourfirm.in" autocomplete="email" />
       </div>
 
-      <div id="status" class="mt-3"></div>
+      <div class="public-actions">
+        <button id="sendOtp" class="cp-btn cp-btn--primary" type="button">Send OTP</button>
+        <button id="goVerify" class="cp-btn" type="button">I already have an OTP</button>
+      </div>
+
+      <div id="otpBlock" style="display:none; margin-top:16px;">
+        <div class="public-field">
+          <label class="cp-label" for="otp">OTP code</label>
+          <input id="otp" type="text" class="cp-input cp-id" placeholder="6 digits" maxlength="6" inputmode="numeric" autocomplete="one-time-code" />
+        </div>
+        <button id="verifyOtp" class="cp-btn cp-btn--primary cp-btn--block" type="button">Verify and sign in</button>
+      </div>
+
+      <div id="status" class="public-status" role="status" aria-live="polite"></div>
     </div>
-  </div>
+  </main>
 
-  <script src="./admin/login.js?v=4"></script>
-
+  <script src="./admin/login.js?v=5"></script>
 </body>
 </html>

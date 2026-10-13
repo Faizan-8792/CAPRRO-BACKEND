@@ -13,6 +13,7 @@ import ReconciliationItem, {
   DISPOSITION_ACTIONS,
   RECONCILIATION_ITEM_STATUSES,
 } from "../models/ReconciliationItem.js";
+import FirmMembership from "../models/FirmMembership.js";
 import ReconciliationRun from "../models/ReconciliationRun.js";
 import Task from "../models/Task.js";
 import User from "../models/User.js";
@@ -21,7 +22,9 @@ import { recordActivity, safeRecordActivity } from "./activity.service.js";
 import { assertGstStorageIndexes } from "./gst-storage-readiness.service.js";
 import {
   addSafeIntegers,
-  calculateGstr3bClaimed,
+  calculateCreditLedgerBalance,
+  calculateGstr1Outward,
+  calculateGstr3bControlTotals,
   dateDifferenceDays,
   formatMoneyMinor,
   isValidGstin,
@@ -34,6 +37,8 @@ import {
   summarizeReconciliationItems,
   TAX_HEAD_FIELDS,
 } from "./gst-matching.service.js";
+import { csvCell } from "../utils/csv.js";
+import { userFacingMessage } from "../utils/user-facing-error.js";
 
 const GST_RECONCILIATION_JOB_KIND = "GST_RECONCILIATION";
 const MATCHING_CONFIG_VERSION = "gst-match-v1";
@@ -68,7 +73,9 @@ function boundedInteger(value, fallback, minimum, maximum, label) {
   if (value == null || value === "") return fallback;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
-    throw serviceError(`${label} must be an integer from ${minimum} to ${maximum}`);
+    throw serviceError(
+      `${label} must be an integer from ${minimum} to ${maximum}`,
+    );
   }
   return parsed;
 }
@@ -76,7 +83,9 @@ function boundedInteger(value, fallback, minimum, maximum, label) {
 function safeMinor(value, label) {
   const parsed = Number(value ?? 0);
   if (!Number.isSafeInteger(parsed)) {
-    throw serviceError(`${label} must be a safe integer in the smallest currency unit`);
+    throw serviceError(
+      `${label} must be a safe integer in the smallest currency unit`,
+    );
   }
   return parsed;
 }
@@ -86,9 +95,17 @@ function normalizeTaxHeads(value = {}, label = "Tax heads") {
     throw serviceError(`${label} must be an object`);
   }
   const unknown = Object.keys(value).filter(
-    (field) => !["igstMinor", "cgstMinor", "sgstMinor", "cessMinor", "totalTaxMinor"].includes(field)
+    (field) =>
+      ![
+        "igstMinor",
+        "cgstMinor",
+        "sgstMinor",
+        "cessMinor",
+        "totalTaxMinor",
+      ].includes(field),
   );
-  if (unknown.length) throw serviceError(`${label} has unknown fields: ${unknown.join(", ")}`);
+  if (unknown.length)
+    throw serviceError(`${label} has unknown fields: ${unknown.join(", ")}`);
   const heads = {
     igstMinor: safeMinor(value.igstMinor, `${label}.igstMinor`),
     cgstMinor: safeMinor(value.cgstMinor, `${label}.cgstMinor`),
@@ -101,17 +118,26 @@ function normalizeTaxHeads(value = {}, label = "Tax heads") {
     heads.sgstMinor,
     heads.cessMinor,
   ]);
-  if (value.totalTaxMinor != null && safeMinor(value.totalTaxMinor, `${label}.totalTaxMinor`) !== heads.totalTaxMinor) {
+  if (
+    value.totalTaxMinor != null &&
+    safeMinor(value.totalTaxMinor, `${label}.totalTaxMinor`) !==
+      heads.totalTaxMinor
+  ) {
     throw serviceError(`${label}.totalTaxMinor must equal tax-head sum`);
   }
   return heads;
 }
 
 function plain(document) {
-  return typeof document?.toObject === "function" ? document.toObject() : document;
+  return typeof document?.toObject === "function"
+    ? document.toObject()
+    : document;
 }
 
-function reviewFinalizationForRun(run, { includeRecoveryCommand = false } = {}) {
+function reviewFinalizationForRun(
+  run,
+  { includeRecoveryCommand = false } = {},
+) {
   const transition = run.pendingReviewTransition || {};
   const bulk = run.bulkReviewOperation || {};
   let state = "CLEAN";
@@ -187,6 +213,12 @@ function serializeRun(document, { includeRecoveryCommand = false } = {}) {
       gstr3bBatchId: run.sourceImports.gstr3bBatchId
         ? String(run.sourceImports.gstr3bBatchId)
         : null,
+      gstr1BatchId: run.sourceImports.gstr1BatchId
+        ? String(run.sourceImports.gstr1BatchId)
+        : null,
+      creditLedgerBatchId: run.sourceImports.creditLedgerBatchId
+        ? String(run.sourceImports.creditLedgerBatchId)
+        : null,
     },
     matchingConfig: run.matchingConfig,
     priorPeriodAdjustment: run.priorPeriodAdjustment,
@@ -214,7 +246,9 @@ function serializeItem(document) {
     booksRowId: item.booksRowId ? String(item.booksRowId) : null,
     portalRowId: item.portalRowId ? String(item.portalRowId) : null,
     candidatePortalRowIds: (item.candidatePortalRowIds || []).map(String),
-    candidateHistoryPortalRowIds: (item.candidateHistoryPortalRowIds || []).map(String),
+    candidateHistoryPortalRowIds: (item.candidateHistoryPortalRowIds || []).map(
+      String,
+    ),
     booksSourceRow: item.booksSourceRow,
     portalSourceRow: item.portalSourceRow,
     supplierGstin: item.supplierGstin,
@@ -239,7 +273,9 @@ function serializeItem(document) {
           candidatePortalRowId: item.pendingTransition.candidatePortalRowId
             ? String(item.pendingTransition.candidatePortalRowId)
             : null,
-          expectedDecisionVersion: Number(item.pendingTransition.expectedDecisionVersion || 0),
+          expectedDecisionVersion: Number(
+            item.pendingTransition.expectedDecisionVersion || 0,
+          ),
           startedAt: item.pendingTransition.startedAt || null,
         }
       : null,
@@ -258,6 +294,8 @@ function fingerprintForRun({
   booksBatchId,
   portalBatchId,
   gstr3bBatchId,
+  gstr1BatchId,
+  creditLedgerBatchId,
   matchingConfig,
   priorPeriodAdjustment,
   assignedTo,
@@ -275,6 +313,19 @@ function fingerprintForRun({
     priorPeriodAdjustment,
     assignedTo: assignedTo ? String(assignedTo) : null,
     parentRunId: parentRunId ? String(parentRunId) : null,
+
+    // Appended, and ONLY when set. The fingerprint is the idempotency key behind a unique
+    // {firmId, sourceFingerprint, revision} index: two runs that hash alike are treated as one
+    // create being retried. Without these, a run created WITH a GSTR-1 attached would collide with
+    // an earlier run over the same books and portal batches and be replayed as that run, silently
+    // discarding the source the person had just chosen.
+    //
+    // Conditional rather than always-present so that every fingerprint written before these
+    // sources existed still hashes to exactly the same value. Making them unconditional nulls
+    // would change the hash of every run in the field, and a create retried across the deploy
+    // would produce a duplicate run instead of replaying the original.
+    ...(gstr1BatchId ? { gstr1BatchId: String(gstr1BatchId) } : {}),
+    ...(creditLedgerBatchId ? { creditLedgerBatchId: String(creditLedgerBatchId) } : {}),
   });
   return createHash("sha256").update(source).digest("hex");
 }
@@ -305,7 +356,7 @@ function requireGenerationItemScope(run) {
   if (scope.generationAttempt < 1) {
     throw serviceError(
       "Reconciliation item generation is unavailable; recreate the run after the approved GST storage rollout",
-      409
+      409,
     );
   }
   return scope;
@@ -316,7 +367,7 @@ function requireActiveItemScope(run) {
   if (scope.generationAttempt < 1) {
     throw serviceError(
       "Reconciliation item generation is unavailable; recreate the run after the approved GST storage rollout",
-      409
+      409,
     );
   }
   return scope;
@@ -340,9 +391,19 @@ async function ensureRunJob(run, requestId = "") {
   return job;
 }
 
-function validateBatchContext(batch, { firmId, clientId, gstin, period, kind }) {
-  if (!batch || String(batch.firmId) !== String(firmId) || batch.status !== "COMPLETED") {
-    throw serviceError(`${kind} import must be a completed batch in active firm`, 409);
+function validateBatchContext(
+  batch,
+  { firmId, clientId, gstin, period, kind },
+) {
+  if (
+    !batch ||
+    String(batch.firmId) !== String(firmId) ||
+    batch.status !== "COMPLETED"
+  ) {
+    throw serviceError(
+      `${kind} import must be a completed batch in active firm`,
+      409,
+    );
   }
   if (
     batch.kind !== kind ||
@@ -350,7 +411,10 @@ function validateBatchContext(batch, { firmId, clientId, gstin, period, kind }) 
     batch.gstin !== gstin ||
     batch.period !== period
   ) {
-    throw serviceError(`${kind} import does not match selected client, GSTIN, or period`, 409);
+    throw serviceError(
+      `${kind} import does not match selected client, GSTIN, or period`,
+      409,
+    );
   }
   if (
     !batch.importFingerprint ||
@@ -359,7 +423,7 @@ function validateBatchContext(batch, { firmId, clientId, gstin, period, kind }) 
   ) {
     throw serviceError(
       `${kind} import predates generation-safe GST storage; re-import it after the approved storage rollout`,
-      409
+      409,
     );
   }
 }
@@ -374,6 +438,8 @@ export async function createReconciliationRun({
   booksBatchId,
   portalBatchId,
   gstr3bBatchId = null,
+  gstr1BatchId = null,
+  creditLedgerBatchId = null,
   revisionOf = null,
   roundingToleranceMinor = DEFAULT_ROUNDING_TOLERANCE_MINOR,
   dateToleranceDays = DEFAULT_DATE_TOLERANCE_DAYS,
@@ -386,11 +452,14 @@ export async function createReconciliationRun({
   assertObjectId(booksBatchId, "Purchase Register batch");
   assertObjectId(portalBatchId, "GSTR-2B batch");
   if (gstr3bBatchId) assertObjectId(gstr3bBatchId, "GSTR-3B batch");
+  if (gstr1BatchId) assertObjectId(gstr1BatchId, "GSTR-1 batch");
+  if (creditLedgerBatchId) assertObjectId(creditLedgerBatchId, "Credit ledger batch");
   if (revisionOf) assertObjectId(revisionOf, "Parent run");
   if (assignedTo) assertObjectId(assignedTo, "Assignee");
 
   const normalizedGstin = normalizeGstin(gstin);
-  if (!isValidGstin(normalizedGstin)) throw serviceError("A valid GSTIN is required");
+  if (!isValidGstin(normalizedGstin))
+    throw serviceError("A valid GSTIN is required");
   if (!isValidPeriod(period)) throw serviceError("Period must use YYYY-MM");
   const matchingConfig = {
     version: MATCHING_CONFIG_VERSION,
@@ -399,23 +468,32 @@ export async function createReconciliationRun({
       DEFAULT_ROUNDING_TOLERANCE_MINOR,
       0,
       10000,
-      "Rounding tolerance"
+      "Rounding tolerance",
     ),
     dateToleranceDays: boundedInteger(
       dateToleranceDays,
       DEFAULT_DATE_TOLERANCE_DAYS,
       0,
       31,
-      "Date tolerance"
+      "Date tolerance",
     ),
   };
-  const adjustment = normalizeTaxHeads(priorPeriodAdjustment, "Prior-period adjustment");
+  const adjustment = normalizeTaxHeads(
+    priorPeriodAdjustment,
+    "Prior-period adjustment",
+  );
   await assertGstStorageIndexes({ reconciliation: true });
 
   const clientExists = await Client.exists({ _id: clientId, firmId });
   if (!clientExists) throw serviceError("Client not found in active firm", 404);
 
-  const requestedBatchIds = [booksBatchId, portalBatchId, gstr3bBatchId].filter(Boolean);
+  const requestedBatchIds = [
+    booksBatchId,
+    portalBatchId,
+    gstr3bBatchId,
+    gstr1BatchId,
+    creditLedgerBatchId,
+  ].filter(Boolean);
   const batches = await ImportBatch.find({
     _id: { $in: requestedBatchIds },
     firmId,
@@ -442,6 +520,27 @@ export async function createReconciliationRun({
       gstin: normalizedGstin,
       period,
       kind: "GSTR3B_SUMMARY",
+    });
+  }
+  // Same firm, same client, same GSTIN, same period as every other source. A turnover
+  // reconciliation against another period would compare two unrelated returns and call the
+  // difference an exception.
+  if (gstr1BatchId) {
+    validateBatchContext(byId.get(String(gstr1BatchId)), {
+      firmId,
+      clientId,
+      gstin: normalizedGstin,
+      period,
+      kind: "GSTR1_SUMMARY",
+    });
+  }
+  if (creditLedgerBatchId) {
+    validateBatchContext(byId.get(String(creditLedgerBatchId)), {
+      firmId,
+      clientId,
+      gstin: normalizedGstin,
+      period,
+      kind: "ECREDIT_LEDGER",
     });
   }
 
@@ -476,7 +575,8 @@ export async function createReconciliationRun({
       firmId,
       isActive: { $ne: false },
     });
-    if (!assigneeExists) throw serviceError("Assignee not found in active firm", 404);
+    if (!assigneeExists)
+      throw serviceError("Assignee not found in active firm", 404);
   }
 
   const sourceFingerprint = fingerprintForRun({
@@ -486,6 +586,8 @@ export async function createReconciliationRun({
     booksBatchId,
     portalBatchId,
     gstr3bBatchId,
+    gstr1BatchId,
+    creditLedgerBatchId,
     matchingConfig,
     priorPeriodAdjustment: adjustment,
     assignedTo: effectiveAssignedTo,
@@ -499,7 +601,10 @@ export async function createReconciliationRun({
     run = await ReconciliationRun.findOne({ firmId, parentRunId: parent._id });
     if (run) {
       if (run.sourceFingerprint !== sourceFingerprint) {
-        throw serviceError("Locked parent already has a different revision", 409);
+        throw serviceError(
+          "Locked parent already has a different revision",
+          409,
+        );
       }
       replayed = true;
     } else {
@@ -508,7 +613,10 @@ export async function createReconciliationRun({
         $or: [{ rootRunId }, { _id: rootRunId }],
       }).sort({ revision: -1, createdAt: -1 });
       if (!latest || String(latest._id) !== String(parent._id)) {
-        throw serviceError("Only the latest locked revision can be revised", 409);
+        throw serviceError(
+          "Only the latest locked revision can be revised",
+          409,
+        );
       }
     }
   } else {
@@ -531,6 +639,8 @@ export async function createReconciliationRun({
           booksBatchId,
           portalBatchId,
           gstr3bBatchId: gstr3bBatchId || null,
+          gstr1BatchId: gstr1BatchId || null,
+          creditLedgerBatchId: creditLedgerBatchId || null,
         },
         rootRunId: effectiveRootRunId,
         parentRunId,
@@ -547,7 +657,10 @@ export async function createReconciliationRun({
         : await ReconciliationRun.findOne(identity);
       if (!run) throw error;
       if (run.sourceFingerprint !== sourceFingerprint) {
-        throw serviceError("Concurrent revision used different immutable inputs", 409);
+        throw serviceError(
+          "Concurrent revision used different immutable inputs",
+          409,
+        );
       }
       replayed = true;
     }
@@ -559,7 +672,9 @@ export async function createReconciliationRun({
       firmId,
       actorUserId,
       source: "USER",
-      action: revisionOf ? "GST_RECONCILIATION_REVISION_CREATED" : "GST_RECONCILIATION_CREATED",
+      action: revisionOf
+        ? "GST_RECONCILIATION_REVISION_CREATED"
+        : "GST_RECONCILIATION_CREATED",
       entityType: "ReconciliationRun",
       entityId: run._id,
       requestId,
@@ -582,7 +697,7 @@ export async function createReconciliationRun({
 
 export async function processGstReconciliationJob(
   job,
-  { assertLease = async () => {} } = {}
+  { assertLease = async () => {} } = {},
 ) {
   if (job.kind !== GST_RECONCILIATION_JOB_KIND) {
     throw new Error(`Unsupported GST job kind: ${job.kind}`);
@@ -596,7 +711,11 @@ export async function processGstReconciliationJob(
   let run = await ReconciliationRun.findOne({ _id: runId, firmId: job.firmId });
   if (!run) throw serviceError("Reconciliation run no longer exists", 404);
   if (["REVIEW", "LOCKED"].includes(run.status)) {
-    return { outcome: "ALREADY_PROCESSED", runId: String(run._id), summary: run.summary };
+    return {
+      outcome: "ALREADY_PROCESSED",
+      runId: String(run._id),
+      summary: run.summary,
+    };
   }
 
   run = await ReconciliationRun.findOneAndUpdate(
@@ -622,9 +741,13 @@ export async function processGstReconciliationJob(
         lastError: "",
       },
     },
-    { new: true }
+    { new: true },
   );
-  if (!run) throw serviceError("Reconciliation run is owned by another worker attempt", 409);
+  if (!run)
+    throw serviceError(
+      "Reconciliation run is owned by another worker attempt",
+      409,
+    );
 
   const ownership = {
     _id: run._id,
@@ -651,7 +774,10 @@ export async function processGstReconciliationJob(
       }).lean(),
     ]);
     if (!booksBatch || !portalBatch) {
-      throw serviceError("Required completed source imports are unavailable", 409);
+      throw serviceError(
+        "Required completed source imports are unavailable",
+        409,
+      );
     }
     validateBatchContext(booksBatch, {
       firmId: run.firmId,
@@ -673,12 +799,16 @@ export async function processGstReconciliationJob(
         firmId: run.firmId,
         batchId: booksBatch._id,
         importGeneration: booksBatch.activeImportGeneration,
-      }).sort({ sourceRow: 1 }).lean(),
+      })
+        .sort({ sourceRow: 1 })
+        .lean(),
       ImportRow.find({
         firmId: run.firmId,
         batchId: portalBatch._id,
         importGeneration: portalBatch.activeImportGeneration,
-      }).sort({ sourceRow: 1 }).lean(),
+      })
+        .sort({ sourceRow: 1 })
+        .lean(),
     ]);
     await assertLease();
     const generated = buildReconciliationItems({
@@ -687,8 +817,14 @@ export async function processGstReconciliationJob(
       roundingToleranceMinor: run.matchingConfig.roundingToleranceMinor,
       dateToleranceDays: run.matchingConfig.dateToleranceDays,
     });
-    if (generated.some((item) => item.status === "AMBIGUOUS_MATCH" && item.autoAccepted)) {
-      throw new Error("Matcher safety invariant failed: ambiguous item auto-accepted");
+    if (
+      generated.some(
+        (item) => item.status === "AMBIGUOUS_MATCH" && item.autoAccepted,
+      )
+    ) {
+      throw new Error(
+        "Matcher safety invariant failed: ambiguous item auto-accepted",
+      );
     }
 
     const operations = generated.map((item) => ({
@@ -754,9 +890,12 @@ export async function processGstReconciliationJob(
           processingJobId: null,
         },
       },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
-    if (!run) throw new Error("Worker attempt lost reconciliation ownership before completion");
+    if (!run)
+      throw new Error(
+        "Worker attempt lost reconciliation ownership before completion",
+      );
 
     await safeRecordActivity({
       firmId: run.firmId,
@@ -771,16 +910,19 @@ export async function processGstReconciliationJob(
     });
     return { outcome: "RECONCILED", runId: String(run._id), summary };
   } catch (error) {
-    await ReconciliationRun.updateOne(
-      ownership,
-      {
-        $set: {
-          status: "FAILED",
-          processingJobId: null,
-          lastError: String(error.message || "Reconciliation failed").slice(0, 600),
-        },
-      }
-    );
+    await ReconciliationRun.updateOne(ownership, {
+      $set: {
+        status: "FAILED",
+        processingJobId: null,
+        // V13-P12-F2. This field is read back verbatim into the run view (see the serialiser
+        // above, `lastError: run.lastError || ""`), so it is shown to the firm without ever
+        // passing through publicErrorMessage. Only authored copy may be stored here.
+        lastError: userFacingMessage(
+          error,
+          "Reconciliation could not be completed. Try again, or contact support if it continues.",
+        ).slice(0, 600),
+      },
+    });
     throw error;
   }
 }
@@ -804,7 +946,9 @@ export async function listReconciliationRuns({
   }
   if (status) {
     const normalized = String(status).toUpperCase();
-    if (!ReconciliationRun.schema.path("status").enumValues.includes(normalized)) {
+    if (
+      !ReconciliationRun.schema.path("status").enumValues.includes(normalized)
+    ) {
       throw serviceError("Unknown run status");
     }
     filter.status = normalized;
@@ -821,7 +965,12 @@ export async function listReconciliationRuns({
   ]);
   return {
     runs: runs.map(serializeRun),
-    pagination: { page: safePage, limit: safeLimit, total, pages: Math.ceil(total / safeLimit) },
+    pagination: {
+      page: safePage,
+      limit: safeLimit,
+      total,
+      pages: Math.ceil(total / safeLimit),
+    },
   };
 }
 
@@ -832,7 +981,9 @@ export async function getReconciliationRun({ firmId, runId }) {
 }
 
 function escapedRegex(value) {
-  return String(value || "").slice(0, 80).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return String(value || "")
+    .slice(0, 80)
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export async function listReconciliationItems({
@@ -866,7 +1017,13 @@ export async function listReconciliationItems({
   const safeLimit = boundedInteger(limit, 50, 1, MAX_PAGE_SIZE, "Limit");
   const [items, total] = await Promise.all([
     ReconciliationItem.find(filter)
-      .sort({ status: 1, supplierGstin: 1, booksSourceRow: 1, portalSourceRow: 1, _id: 1 })
+      .sort({
+        status: 1,
+        supplierGstin: 1,
+        booksSourceRow: 1,
+        portalSourceRow: 1,
+        _id: 1,
+      })
       .skip((safePage - 1) * safeLimit)
       .limit(safeLimit)
       .lean(),
@@ -874,14 +1031,23 @@ export async function listReconciliationItems({
   ]);
   return {
     items: items.map(serializeItem),
-    pagination: { page: safePage, limit: safeLimit, total, pages: Math.ceil(total / safeLimit) },
+    pagination: {
+      page: safePage,
+      limit: safeLimit,
+      total,
+      pages: Math.ceil(total / safeLimit),
+    },
   };
 }
 
 function cleanDispositionPayload(payload = {}) {
   const output = {
-    reason: String(payload.reason || "").trim().slice(0, 500),
-    note: String(payload.note || "").trim().slice(0, 1000),
+    reason: String(payload.reason || "")
+      .trim()
+      .slice(0, 500),
+    note: String(payload.note || "")
+      .trim()
+      .slice(0, 1000),
     chaseState: String(payload.chaseState || "MARKED").toUpperCase(),
   };
   if (payload.ownerUserId) {
@@ -903,7 +1069,13 @@ function reviewOperationId(material) {
   return createHash("sha256").update(JSON.stringify(material)).digest("hex");
 }
 
-function itemDispositionOperationId({ runId, itemId, expectedVersion, action, payload }) {
+function itemDispositionOperationId({
+  runId,
+  itemId,
+  expectedVersion,
+  action,
+  payload,
+}) {
   return reviewOperationId({
     type: "GST_ITEM_DISPOSITION",
     runId: String(runId),
@@ -914,7 +1086,13 @@ function itemDispositionOperationId({ runId, itemId, expectedVersion, action, pa
   });
 }
 
-function bulkDispositionOperationId({ runId, itemIds, action, payload, previewToken }) {
+function bulkDispositionOperationId({
+  runId,
+  itemIds,
+  action,
+  payload,
+  previewToken,
+}) {
   return reviewOperationId({
     type: "GST_BULK_DISPOSITION",
     runId: String(runId),
@@ -945,7 +1123,8 @@ function bulkDispositionSet({ item, action, payload, actorUserId, startedAt }) {
 }
 
 function dispositionSet({ item, action, payload, actorUserId, now }) {
-  if (!DISPOSITION_ACTIONS.includes(action)) throw serviceError("Unknown disposition action");
+  if (!DISPOSITION_ACTIONS.includes(action))
+    throw serviceError("Unknown disposition action");
   const set = {
     "userDisposition.action": action,
     "userDisposition.reason": payload.reason,
@@ -953,7 +1132,8 @@ function dispositionSet({ item, action, payload, actorUserId, now }) {
     "userDisposition.updatedBy": actorUserId,
     "userDisposition.updatedAt": now,
   };
-  if (payload.ownerUserId) set["userDisposition.ownerUserId"] = payload.ownerUserId;
+  if (payload.ownerUserId)
+    set["userDisposition.ownerUserId"] = payload.ownerUserId;
   if (payload.taskId) set.taskId = payload.taskId;
 
   if (action === "UNMATCH") {
@@ -963,28 +1143,33 @@ function dispositionSet({ item, action, payload, actorUserId, now }) {
     set.resolutionState = "OPEN";
     set.reviewedAt = null;
   } else if (action === "SUPPLIER_FOLLOW_UP") {
-    if (!CHASE_STATES.has(payload.chaseState)) throw serviceError("Unknown chase state");
+    if (!CHASE_STATES.has(payload.chaseState))
+      throw serviceError("Unknown chase state");
     set["chase.required"] = true;
     set["chase.state"] = payload.chaseState;
     set["chase.lastActionAt"] = now;
     set.reviewedAt = item.reviewedAt || null;
   } else if (["BOOKS_CORRECTION", "PORTAL_CORRECTION"].includes(action)) {
-    if (!payload.reason) throw serviceError("Reason is required for correction follow-up");
+    if (!payload.reason)
+      throw serviceError("Reason is required for correction follow-up");
     set.status = "NEEDS_REVIEW";
     set.resolutionState = "OPEN";
     set.reviewedAt = null;
   } else if (action === "ACCEPT_EXCEPTION") {
-    if (!payload.reason) throw serviceError("Reason is required for accepted exceptions");
+    if (!payload.reason)
+      throw serviceError("Reason is required for accepted exceptions");
     set.status = "USER_ACCEPTED_EXCEPTION";
     set.resolutionState = "RESOLVED";
     set.reviewedAt = now;
   } else if (action === "MARK_INELIGIBLE") {
-    if (!payload.reason) throw serviceError("Reason is required for ineligible or blocked ITC");
+    if (!payload.reason)
+      throw serviceError("Reason is required for ineligible or blocked ITC");
     set.status = "INELIGIBLE_OR_BLOCKED";
     set.resolutionState = "RESOLVED";
     set.reviewedAt = now;
   } else if (action === "DEFER") {
-    if (!payload.reason) throw serviceError("Reason is required to defer an item");
+    if (!payload.reason)
+      throw serviceError("Reason is required to defer an item");
     set.status = "DEFERRED_TO_NEXT_PERIOD";
     set.resolutionState = "RESOLVED";
     set.reviewedAt = now;
@@ -1001,17 +1186,51 @@ function dispositionSet({ item, action, payload, actorUserId, now }) {
 async function validateDispositionReferences({ firmId, ownerUserId, taskId }) {
   const checks = [];
   if (ownerUserId) {
+    // Firm authority comes from FirmMembership, not from User.firmId.
+    //
+    // This was User.exists({ _id, firmId, isActive }) alone, which was wrong in
+    // both directions:
+    //
+    // 1. It accepted a REMOVED member. FirmMembership is the source of truth for
+    //    who belongs to a firm; User.firmId only records which workspace a user is
+    //    currently switched into. A User row still carrying firmId after their
+    //    membership went to REMOVED was therefore accepted as the owner of a
+    //    statutory input-tax-credit line. Only a client-side filter stood in the
+    //    way, and client filtering is not authorization.
+    // 2. It rejected a legitimate member. A user may hold ACTIVE memberships in
+    //    several firms while User.firmId points at just one, so an active colleague
+    //    who happened to be working in another workspace was refused. Since
+    //    GET /api/firms/:firmId/members lists ACTIVE memberships, a client picker
+    //    offers exactly those users and the assignment then failed with a 404.
+    //
+    // Requiring an ACTIVE membership fixes (1) and is strictly stronger than the
+    // firmId condition it replaces, so dropping firmId from the User query fixes
+    // (2) without widening authority: firm scoping is now enforced by the
+    // membership, and isActive still excludes a deactivated account.
+    //
+    // The 404 wording is deliberately unchanged. It is accurate for both causes --
+    // a removed member genuinely is not in the active firm -- and the desktop
+    // surfaces this string verbatim to the reviewer as of ledger task T17a.
     checks.push(
-      User.exists({ _id: ownerUserId, firmId, isActive: { $ne: false } }).then((found) => {
-        if (!found) throw serviceError("Owner not found in active firm", 404);
-      })
+      Promise.all([
+        User.exists({ _id: ownerUserId, isActive: { $ne: false } }),
+        FirmMembership.exists({
+          userId: ownerUserId,
+          firmId,
+          status: "ACTIVE",
+        }),
+      ]).then(([user, activeMembership]) => {
+        if (!user || !activeMembership) {
+          throw serviceError("Owner not found in active firm", 404);
+        }
+      }),
     );
   }
   if (taskId) {
     checks.push(
       Task.exists({ _id: taskId, firmId }).then((found) => {
         if (!found) throw serviceError("Task not found in active firm", 404);
-      })
+      }),
     );
   }
   await Promise.all(checks);
@@ -1044,14 +1263,16 @@ async function beginReviewMutation({ firmId, runId }) {
         $set: {
           reviewMutationActive: true,
           reviewMutationToken: token,
-          reviewMutationExpiresAt: { $add: ["$$NOW", REVIEW_MUTATION_LEASE_MS] },
+          reviewMutationExpiresAt: {
+            $add: ["$$NOW", REVIEW_MUTATION_LEASE_MS],
+          },
           reviewMutationFence: {
             $add: [{ $ifNull: ["$reviewMutationFence", 0] }, 1],
           },
         },
       },
     ],
-    { new: true }
+    { new: true },
   );
   if (run) {
     return {
@@ -1069,7 +1290,10 @@ async function beginReviewMutation({ firmId, runId }) {
     throw serviceError("Run is not ready for review", 409);
   }
   requireActiveItemScope(current);
-  throw serviceError("Another review mutation is in progress; retry after reload", 409);
+  throw serviceError(
+    "Another review mutation is in progress; retry after reload",
+    409,
+  );
 }
 
 function mutationFence(run, fence = undefined) {
@@ -1080,7 +1304,13 @@ function mutationFence(run, fence = undefined) {
   return value;
 }
 
-async function renewReviewMutation({ firmId, run, token, fence, itemIds = [] }) {
+async function renewReviewMutation({
+  firmId,
+  run,
+  token,
+  fence,
+  itemIds = [],
+}) {
   const expectedFence = mutationFence(run, fence);
   const renewed = await ReconciliationRun.findOneAndUpdate(
     {
@@ -1095,13 +1325,19 @@ async function renewReviewMutation({ firmId, run, token, fence, itemIds = [] }) 
     [
       {
         $set: {
-          reviewMutationExpiresAt: { $add: ["$$NOW", REVIEW_MUTATION_LEASE_MS] },
+          reviewMutationExpiresAt: {
+            $add: ["$$NOW", REVIEW_MUTATION_LEASE_MS],
+          },
         },
       },
     ],
-    { new: true }
+    { new: true },
   );
-  if (!renewed) throw serviceError("Review mutation ownership expired; reload and retry", 409);
+  if (!renewed)
+    throw serviceError(
+      "Review mutation ownership expired; reload and retry",
+      409,
+    );
 
   const expiresAt = new Date(renewed.reviewMutationExpiresAt);
   const uniqueItemIds = [...new Set(itemIds.map(String))];
@@ -1116,7 +1352,7 @@ async function renewReviewMutation({ firmId, run, token, fence, itemIds = [] }) 
         reviewMutationFence: expectedFence,
         $expr: { $gt: ["$reviewMutationExpiresAt", "$$NOW"] },
       },
-      { $set: { reviewMutationExpiresAt: expiresAt } }
+      { $set: { reviewMutationExpiresAt: expiresAt } },
     );
     if (Number(extended.matchedCount || 0) !== uniqueItemIds.length) {
       throw serviceError("Review item mutation ownership was lost", 409);
@@ -1125,13 +1361,21 @@ async function renewReviewMutation({ firmId, run, token, fence, itemIds = [] }) 
   return expiresAt;
 }
 
-async function claimReviewItems({ firmId, run, token, fence, expiresAt, items }) {
+async function claimReviewItems({
+  firmId,
+  run,
+  token,
+  fence,
+  expiresAt,
+  items,
+}) {
   const expectedFence = mutationFence(run, fence);
   const claims = items.map((item) => ({
     _id: item._id,
-    decisionVersion: Number(item.decisionVersion || 0) === 0
-      ? { $in: [0, null] }
-      : Number(item.decisionVersion),
+    decisionVersion:
+      Number(item.decisionVersion || 0) === 0
+        ? { $in: [0, null] }
+        : Number(item.decisionVersion),
   }));
   const result = await ReconciliationItem.updateMany(
     {
@@ -1169,7 +1413,7 @@ async function claimReviewItems({ firmId, run, token, fence, expiresAt, items })
         reviewMutationFence: expectedFence,
         reviewMutationExpiresAt: expiresAt,
       },
-    }
+    },
   );
   if (Number(result.matchedCount || 0) !== claims.length) {
     await ReconciliationItem.updateMany(
@@ -1180,9 +1424,12 @@ async function claimReviewItems({ firmId, run, token, fence, expiresAt, items })
         reviewMutationToken: token,
         reviewMutationFence: expectedFence,
       },
-      { $set: { reviewMutationToken: null, reviewMutationExpiresAt: null } }
+      { $set: { reviewMutationToken: null, reviewMutationExpiresAt: null } },
     ).catch(() => {});
-    throw serviceError("One or more review items changed or are busy; reload and retry", 409);
+    throw serviceError(
+      "One or more review items changed or are busy; reload and retry",
+      409,
+    );
   }
 }
 
@@ -1198,7 +1445,7 @@ async function releaseReviewItems({ firmId, run, token, fence, itemIds }) {
       reviewMutationToken: token,
       reviewMutationFence: mutationFence(run, fence),
     },
-    { $set: { reviewMutationToken: null, reviewMutationExpiresAt: null } }
+    { $set: { reviewMutationToken: null, reviewMutationExpiresAt: null } },
   );
 }
 
@@ -1217,7 +1464,7 @@ async function endReviewMutation({ firmId, runId, token, fence }) {
         reviewMutationToken: null,
         reviewMutationExpiresAt: null,
       },
-    }
+    },
   );
   if (result.matchedCount !== 1) {
     throw serviceError("Review mutation ownership was lost", 409);
@@ -1233,7 +1480,8 @@ async function markSummaryDirty({
   bulkReviewOperation,
 }) {
   const set = { summaryDirty: true };
-  if (pendingReviewTransition) set.pendingReviewTransition = pendingReviewTransition;
+  if (pendingReviewTransition)
+    set.pendingReviewTransition = pendingReviewTransition;
   if (bulkReviewOperation) set.bulkReviewOperation = bulkReviewOperation;
   const updated = await ReconciliationRun.findOneAndUpdate(
     {
@@ -1246,9 +1494,10 @@ async function markSummaryDirty({
       $expr: { $gt: ["$reviewMutationExpiresAt", "$$NOW"] },
     },
     { $set: set },
-    { new: true, runValidators: true }
+    { new: true, runValidators: true },
   );
-  if (!updated) throw serviceError("Review mutation ownership expired before write", 409);
+  if (!updated)
+    throw serviceError("Review mutation ownership expired before write", 409);
   return updated;
 }
 
@@ -1290,7 +1539,10 @@ async function recomputeRunSummary({
       "pendingTransition.action": { $ne: null },
     });
     if (pendingItem) {
-      throw serviceError("A reconciliation transition is still incomplete", 409);
+      throw serviceError(
+        "A reconciliation transition is still incomplete",
+        409,
+      );
     }
     update.$set.summaryDirty = false;
     if (transitionOperationId) {
@@ -1309,7 +1561,9 @@ async function recomputeRunSummary({
     }
   }
 
-  const result = await ReconciliationRun.updateOne(filter, update, { runValidators: true });
+  const result = await ReconciliationRun.updateOne(filter, update, {
+    runValidators: true,
+  });
   if (result.matchedCount !== 1) {
     throw serviceError("Run changed while review summary was updating", 409);
   }
@@ -1426,16 +1680,17 @@ async function upsertPortalOnlyCandidates({
     if (error?.code === 11000) {
       throw serviceError(
         "Portal-only lifecycle ownership changed; retry the reserved transition",
-        409
+        409,
       );
     }
     throw error;
   }
-  const applied = Number(result.matchedCount || 0) + Number(result.upsertedCount || 0);
+  const applied =
+    Number(result.matchedCount || 0) + Number(result.upsertedCount || 0);
   if (applied !== candidates.length) {
     throw serviceError(
       "Portal-only lifecycle ownership changed; retry the reserved transition",
-      409
+      409,
     );
   }
 }
@@ -1470,7 +1725,7 @@ async function retirePortalOnlyItems({
           reviewMutationExpiresAt: null,
         },
       },
-    ]
+    ],
   );
 }
 
@@ -1515,19 +1770,26 @@ export async function applyItemDisposition({
       action: normalizedAction,
       payload: cleaned,
     });
-    const transitionAction = ["ACCEPT_MATCH", "UNMATCH"].includes(normalizedAction);
+    const transitionAction = ["ACCEPT_MATCH", "UNMATCH"].includes(
+      normalizedAction,
+    );
     const pendingAction = item.pendingTransition?.action || null;
     const pendingRun = run.pendingReviewTransition || {};
     const bulkPending = run.bulkReviewOperation?.state === "PENDING";
     if (bulkPending) {
-      throw serviceError("Complete the pending bulk review before changing an item", 409);
+      throw serviceError(
+        "Complete the pending bulk review before changing an item",
+        409,
+      );
     }
 
     if (
       item.lastReviewOperationId === operationId &&
       Number(item.decisionVersion || 0) === expectedVersion + 1
     ) {
-      const needsSummaryRepair = Boolean(run.summaryDirty || pendingRun.operationId);
+      const needsSummaryRepair = Boolean(
+        run.summaryDirty || pendingRun.operationId,
+      );
       const summary = needsSummaryRepair
         ? await recomputeRunSummary({
             firmId,
@@ -1540,10 +1802,18 @@ export async function applyItemDisposition({
           })
         : run.summary;
       changed = needsSummaryRepair;
-      return { item: serializeItem(item), summary, operationId, replayed: true };
+      return {
+        item: serializeItem(item),
+        summary,
+        operationId,
+        replayed: true,
+      };
     }
     if (Number(item.decisionVersion || 0) !== expectedVersion) {
-      throw serviceError("Reconciliation item changed; reload before applying a decision", 409);
+      throw serviceError(
+        "Reconciliation item changed; reload before applying a decision",
+        409,
+      );
     }
 
     const pendingItem = await ReconciliationItem.findOne({
@@ -1551,13 +1821,16 @@ export async function applyItemDisposition({
       runId,
       ...itemScope,
       "pendingTransition.action": { $ne: null },
-    }).select({
-      _id: 1,
-      pendingTransition: 1,
-    }).lean();
+    })
+      .select({
+        _id: 1,
+        pendingTransition: 1,
+      })
+      .lean();
     if (pendingItem) {
       const pending = pendingItem.pendingTransition || {};
-      const sameCandidate = normalizedAction !== "ACCEPT_MATCH" ||
+      const sameCandidate =
+        normalizedAction !== "ACCEPT_MATCH" ||
         String(pending.candidatePortalRowId || "") ===
           String(cleaned.candidatePortalRowId || "");
       if (
@@ -1570,12 +1843,13 @@ export async function applyItemDisposition({
       ) {
         throw serviceError(
           `Complete the pending ${pending.action || "item"} transition before another review`,
-          409
+          409,
         );
       }
     }
     if (pendingRun.operationId) {
-      const sameCandidate = normalizedAction !== "ACCEPT_MATCH" ||
+      const sameCandidate =
+        normalizedAction !== "ACCEPT_MATCH" ||
         String(pendingRun.candidatePortalRowId || "") ===
           String(cleaned.candidatePortalRowId || "");
       if (
@@ -1585,24 +1859,29 @@ export async function applyItemDisposition({
         !sameCandidate ||
         Number(pendingRun.expectedDecisionVersion || 0) !== expectedVersion
       ) {
-        throw serviceError("Complete the reserved item transition before another review", 409);
+        throw serviceError(
+          "Complete the reserved item transition before another review",
+          409,
+        );
       }
     }
     if (pendingAction) {
-      const sameCandidate = normalizedAction !== "ACCEPT_MATCH" ||
+      const sameCandidate =
+        normalizedAction !== "ACCEPT_MATCH" ||
         String(item.pendingTransition?.candidatePortalRowId || "") ===
           String(cleaned.candidatePortalRowId || "");
       if (
         !transitionAction ||
         pendingAction !== normalizedAction ||
         !sameCandidate ||
-        Number(item.pendingTransition?.expectedDecisionVersion || 0) !== expectedVersion ||
+        Number(item.pendingTransition?.expectedDecisionVersion || 0) !==
+          expectedVersion ||
         (item.pendingTransition?.operationId &&
           item.pendingTransition.operationId !== operationId)
       ) {
         throw serviceError(
           `Item has an incomplete ${pendingAction} transition; retry that action first`,
-          409
+          409,
         );
       }
     }
@@ -1645,10 +1924,16 @@ export async function applyItemDisposition({
     let restoredCandidateIds = [];
 
     if (normalizedAction === "ACCEPT_MATCH") {
-      if (!cleaned.candidatePortalRowId) throw serviceError("Candidate portal row is required");
-      const candidateIds = [...new Set((item.candidatePortalRowIds || []).map(String))];
+      if (!cleaned.candidatePortalRowId)
+        throw serviceError("Candidate portal row is required");
+      const candidateIds = [
+        ...new Set((item.candidatePortalRowIds || []).map(String)),
+      ];
       if (!candidateIds.includes(String(cleaned.candidatePortalRowId))) {
-        throw serviceError("Selected row is not a candidate for this item", 409);
+        throw serviceError(
+          "Selected row is not a candidate for this item",
+          409,
+        );
       }
       const candidateRows = await ImportRow.find({
         _id: { $in: candidateIds },
@@ -1658,10 +1943,13 @@ export async function applyItemDisposition({
         kind: "GSTR2B",
       }).lean();
       if (candidateRows.length !== candidateIds.length) {
-        throw serviceError("One or more candidate portal rows are unavailable", 409);
+        throw serviceError(
+          "One or more candidate portal rows are unavailable",
+          409,
+        );
       }
       const portal = candidateRows.find(
-        (row) => String(row._id) === String(cleaned.candidatePortalRowId)
+        (row) => String(row._id) === String(cleaned.candidatePortalRowId),
       );
       const existingPortalMatch = await ReconciliationItem.exists({
         firmId,
@@ -1672,7 +1960,10 @@ export async function applyItemDisposition({
         _id: { $ne: item._id },
       });
       if (existingPortalMatch) {
-        throw serviceError("Candidate portal row is already accepted by another item", 409);
+        throw serviceError(
+          "Candidate portal row is already accepted by another item",
+          409,
+        );
       }
       conflictingPortalOnlyItem = await ReconciliationItem.findOne({
         firmId,
@@ -1681,7 +1972,9 @@ export async function applyItemDisposition({
         portalRowId: portal._id,
         booksRowId: null,
         _id: { $ne: item._id },
-      }).select({ _id: 1, portalRowId: 1 }).lean();
+      })
+        .select({ _id: 1, portalRowId: 1 })
+        .lean();
       const books = {
         taxableValueMinor: item.booksAmounts.taxableValueMinor,
         igstMinor: item.booksAmounts.igstMinor,
@@ -1691,10 +1984,12 @@ export async function applyItemDisposition({
         totalTaxMinor: item.booksAmounts.totalTaxMinor,
         documentDate: item.documentDate,
       };
-      const candidateHistory = [...new Set([
-        ...(item.candidateHistoryPortalRowIds || []).map(String),
-        ...candidateIds,
-      ])];
+      const candidateHistory = [
+        ...new Set([
+          ...(item.candidateHistoryPortalRowIds || []).map(String),
+          ...candidateIds,
+        ]),
+      ];
       set.portalRowId = portal._id;
       set.portalSourceRow = portal.sourceRow;
       set.portalAmounts = {
@@ -1706,7 +2001,10 @@ export async function applyItemDisposition({
         totalTaxMinor: portal.totalTaxMinor,
       };
       set.differences = amountDifferences(books, portal);
-      set.dateDifferenceDays = dateDifferenceDays(item.documentDate, portal.documentDate);
+      set.dateDifferenceDays = dateDifferenceDays(
+        item.documentDate,
+        portal.documentDate,
+      );
       set.candidatePortalRowIds = [];
       set.candidateHistoryPortalRowIds = candidateHistory;
       set.status = "MATCHED";
@@ -1715,17 +2013,22 @@ export async function applyItemDisposition({
       set.resolutionState = "RESOLVED";
       set.reviewedAt = now;
       remainingCandidates = candidateRows.filter(
-        (row) => String(row._id) !== String(portal._id)
+        (row) => String(row._id) !== String(portal._id),
       );
     } else if (normalizedAction === "UNMATCH") {
       if (!item.booksRowId) {
-        throw serviceError("A portal-only item cannot be unmatched; use a resolving disposition", 409);
+        throw serviceError(
+          "A portal-only item cannot be unmatched; use a resolving disposition",
+          409,
+        );
       }
-      restoredCandidateIds = [...new Set([
-        ...(item.candidateHistoryPortalRowIds || []).map(String),
-        ...(item.candidatePortalRowIds || []).map(String),
-        ...(item.portalRowId ? [String(item.portalRowId)] : []),
-      ])];
+      restoredCandidateIds = [
+        ...new Set([
+          ...(item.candidateHistoryPortalRowIds || []).map(String),
+          ...(item.candidatePortalRowIds || []).map(String),
+          ...(item.portalRowId ? [String(item.portalRowId)] : []),
+        ]),
+      ];
       set.portalRowId = null;
       set.portalSourceRow = null;
       set.portalAmounts = {};
@@ -1734,8 +2037,11 @@ export async function applyItemDisposition({
       set.candidatePortalRowIds = restoredCandidateIds;
       set.candidateHistoryPortalRowIds = restoredCandidateIds;
       if (restoredCandidateIds.length) {
-        set.status = ["AMBIGUOUS_MATCH", "POSSIBLE_AMENDMENT", "DUPLICATE_IN_BOOKS"]
-          .includes(item.originalStatus)
+        set.status = [
+          "AMBIGUOUS_MATCH",
+          "POSSIBLE_AMENDMENT",
+          "DUPLICATE_IN_BOOKS",
+        ].includes(item.originalStatus)
           ? item.originalStatus
           : "NEEDS_REVIEW";
         set.matchRule = "CANDIDATE";
@@ -1773,7 +2079,10 @@ export async function applyItemDisposition({
         decisionVersion: before.decisionVersion,
       },
       afterSummary: { action: normalizedAction, payload: cleaned },
-      metadata: { runId: String(runId), resumedTransition: Boolean(pendingAction) },
+      metadata: {
+        runId: String(runId),
+        resumedTransition: Boolean(pendingAction),
+      },
     });
 
     const reservedTransition = transitionAction
@@ -1781,9 +2090,10 @@ export async function applyItemDisposition({
           operationId,
           itemId: item._id,
           action: normalizedAction,
-          candidatePortalRowId: normalizedAction === "ACCEPT_MATCH"
-            ? cleaned.candidatePortalRowId
-            : null,
+          candidatePortalRowId:
+            normalizedAction === "ACCEPT_MATCH"
+              ? cleaned.candidatePortalRowId
+              : null,
           expectedDecisionVersion: expectedVersion,
           payload: cleaned,
           actorUserId: commandActorUserId,
@@ -1809,9 +2119,8 @@ export async function applyItemDisposition({
           ...itemScope,
           reviewMutationToken: mutation.token,
           reviewMutationFence: mutation.fence,
-          decisionVersion: expectedVersion === 0
-            ? { $in: [0, null] }
-            : expectedVersion,
+          decisionVersion:
+            expectedVersion === 0 ? { $in: [0, null] } : expectedVersion,
           "pendingTransition.action": null,
           $expr: { $gt: ["$reviewMutationExpiresAt", "$$NOW"] },
         },
@@ -1819,16 +2128,21 @@ export async function applyItemDisposition({
           $set: {
             "pendingTransition.operationId": operationId,
             "pendingTransition.action": normalizedAction,
-            "pendingTransition.candidatePortalRowId": normalizedAction === "ACCEPT_MATCH"
-              ? cleaned.candidatePortalRowId
-              : null,
+            "pendingTransition.candidatePortalRowId":
+              normalizedAction === "ACCEPT_MATCH"
+                ? cleaned.candidatePortalRowId
+                : null,
             "pendingTransition.expectedDecisionVersion": expectedVersion,
             "pendingTransition.startedAt": now,
           },
         },
-        { new: true, runValidators: true }
+        { new: true, runValidators: true },
       );
-      if (!intent) throw serviceError("Item transition could not be reserved; reload and retry", 409);
+      if (!intent)
+        throw serviceError(
+          "Item transition could not be reserved; reload and retry",
+          409,
+        );
       item = intent;
       changed = true;
     }
@@ -1845,9 +2159,11 @@ export async function applyItemDisposition({
         (row) =>
           row.supplierGstin === item.supplierGstin &&
           row.invoiceNumberNormalized === item.invoiceNumberNormalized &&
-          row.documentType === item.documentType
+          row.documentType === item.documentType,
       );
-      const remainderStatus = exactDuplicate ? "DUPLICATE_IN_2B" : "MISSING_IN_BOOKS";
+      const remainderStatus = exactDuplicate
+        ? "DUPLICATE_IN_2B"
+        : "MISSING_IN_BOOKS";
       await upsertPortalOnlyCandidates({
         firmId,
         run,
@@ -1927,9 +2243,8 @@ export async function applyItemDisposition({
           ...itemScope,
           reviewMutationToken: mutation.token,
           reviewMutationFence: mutation.fence,
-          decisionVersion: expectedVersion === 0
-            ? { $in: [0, null] }
-            : expectedVersion,
+          decisionVersion:
+            expectedVersion === 0 ? { $in: [0, null] } : expectedVersion,
           ...(transitionAction
             ? {
                 "pendingTransition.action": normalizedAction,
@@ -1939,16 +2254,22 @@ export async function applyItemDisposition({
           $expr: { $gt: ["$reviewMutationExpiresAt", "$$NOW"] },
         },
         { $set: set, $inc: { decisionVersion: 1 } },
-        { new: true, runValidators: true }
+        { new: true, runValidators: true },
       );
     } catch (error) {
       if (error?.code === 11000 && normalizedAction === "ACCEPT_MATCH") {
-        throw serviceError("Candidate portal row was accepted by another item; reload and review", 409);
+        throw serviceError(
+          "Candidate portal row was accepted by another item; reload and review",
+          409,
+        );
       }
       throw error;
     }
     if (!updated) {
-      throw serviceError("Review ownership expired or item changed; reload before retrying", 409);
+      throw serviceError(
+        "Review ownership expired or item changed; reload before retrying",
+        409,
+      );
     }
     changed = true;
 
@@ -1975,7 +2296,10 @@ export async function applyItemDisposition({
       entityType: "ReconciliationItem",
       entityId: item._id,
       requestId,
-      beforeSummary: { status: before.status, disposition: before.userDisposition },
+      beforeSummary: {
+        status: before.status,
+        disposition: before.userDisposition,
+      },
       afterSummary: {
         status: updated.status,
         resolutionState: updated.resolutionState,
@@ -1993,7 +2317,10 @@ export async function applyItemDisposition({
         token: mutation.token,
         fence: mutation.fence,
       }).catch((summaryError) => {
-        console.error("[GST] Failed to repair run summary after item error:", summaryError.message);
+        console.error(
+          "[GST] Failed to repair run summary after item error:",
+          summaryError.message,
+        );
       });
     }
     throw error;
@@ -2005,7 +2332,10 @@ export async function applyItemDisposition({
       fence: mutation.fence,
       itemIds: claimedItemIds,
     }).catch((releaseError) => {
-      console.error("[GST] Failed to release review item lease:", releaseError.message);
+      console.error(
+        "[GST] Failed to release review item lease:",
+        releaseError.message,
+      );
     });
     try {
       await endReviewMutation({
@@ -2017,7 +2347,10 @@ export async function applyItemDisposition({
       });
     } catch (endError) {
       if (!operationError) throw endError;
-      console.error("[GST] Failed to release item review mutation:", endError.message);
+      console.error(
+        "[GST] Failed to release item review mutation:",
+        endError.message,
+      );
     }
   }
 }
@@ -2047,7 +2380,10 @@ function bulkToken(material) {
 
 function tokenMatches(expected, received) {
   if (!/^[a-f0-9]{64}$/i.test(String(received || ""))) return false;
-  return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(received, "hex"));
+  return timingSafeEqual(
+    Buffer.from(expected, "hex"),
+    Buffer.from(received, "hex"),
+  );
 }
 
 export async function bulkDisposition({
@@ -2070,7 +2406,11 @@ export async function bulkDisposition({
   if (!BULK_ACTIONS.has(normalizedAction)) {
     throw serviceError("Action is not supported for bulk review");
   }
-  if (!Array.isArray(itemIds) || itemIds.length < 1 || itemIds.length > MAX_BULK_ITEMS) {
+  if (
+    !Array.isArray(itemIds) ||
+    itemIds.length < 1 ||
+    itemIds.length > MAX_BULK_ITEMS
+  ) {
     throw serviceError(`Select 1 to ${MAX_BULK_ITEMS} items`);
   }
   const uniqueIds = [...new Set(itemIds.map(String))];
@@ -2085,7 +2425,10 @@ export async function bulkDisposition({
     });
     const run = await requireRun({ firmId, runId });
     if (run.status === "LOCKED" || run.status === "LOCKING") {
-      throw serviceError("Locked run cannot be changed; create a revision", 423);
+      throw serviceError(
+        "Locked run cannot be changed; create a revision",
+        423,
+      );
     }
     if (
       run.status !== "REVIEW" ||
@@ -2112,7 +2455,10 @@ export async function bulkDisposition({
       "pendingTransition.action": { $ne: null },
     });
     if (pendingTransition) {
-      throw serviceError("Complete pending item transitions before bulk review", 409);
+      throw serviceError(
+        "Complete pending item transitions before bulk review",
+        409,
+      );
     }
     const items = await ReconciliationItem.find({
       _id: { $in: uniqueIds },
@@ -2124,13 +2470,27 @@ export async function bulkDisposition({
       throw serviceError("One or more selected items are unavailable", 409);
     }
     if (items.some((item) => item.pendingTransition?.action)) {
-      throw serviceError("Complete pending item transitions before bulk review", 409);
+      throw serviceError(
+        "Complete pending item transitions before bulk review",
+        409,
+      );
     }
     const now = new Date();
     items.forEach((item) => {
-      dispositionSet({ item, action: normalizedAction, payload: cleaned, actorUserId, now });
+      dispositionSet({
+        item,
+        action: normalizedAction,
+        payload: cleaned,
+        actorUserId,
+        now,
+      });
     });
-    const material = bulkMaterial({ run, items, action: normalizedAction, payload: cleaned });
+    const material = bulkMaterial({
+      run,
+      items,
+      action: normalizedAction,
+      payload: cleaned,
+    });
     const affectedByStatus = items.reduce((counts, item) => {
       counts[item.status] = (counts[item.status] || 0) + 1;
       return counts;
@@ -2168,7 +2528,10 @@ export async function bulkDisposition({
   let operationError = null;
   try {
     if (run.pendingReviewTransition?.operationId) {
-      throw serviceError("Complete the pending item transition before bulk review", 409);
+      throw serviceError(
+        "Complete the pending item transition before bulk review",
+        409,
+      );
     }
     const pendingItem = await ReconciliationItem.exists({
       firmId,
@@ -2177,7 +2540,10 @@ export async function bulkDisposition({
       "pendingTransition.action": { $ne: null },
     });
     if (pendingItem) {
-      throw serviceError("Complete pending item transitions before bulk review", 409);
+      throw serviceError(
+        "Complete pending item transitions before bulk review",
+        409,
+      );
     }
 
     const storedOperation = run.bulkReviewOperation || {};
@@ -2197,7 +2563,9 @@ export async function bulkDisposition({
       changed = Boolean(run.summaryDirty);
       return {
         mode: "commit",
-        affectedCount: Number(storedOperation.affectedCount || uniqueIds.length),
+        affectedCount: Number(
+          storedOperation.affectedCount || uniqueIds.length,
+        ),
         action: storedOperation.action || normalizedAction,
         summary,
         operationId: requestedOperationId,
@@ -2208,13 +2576,20 @@ export async function bulkDisposition({
       storedOperation.state === "PENDING" &&
       storedOperation.operationId !== requestedOperationId
     ) {
-      throw serviceError("A different bulk review is incomplete; retry its original commit", 409);
+      throw serviceError(
+        "A different bulk review is incomplete; retry its original commit",
+        409,
+      );
     }
 
     const resuming = storedOperation.state === "PENDING";
-    const operationId = resuming ? storedOperation.operationId : requestedOperationId;
+    const operationId = resuming
+      ? storedOperation.operationId
+      : requestedOperationId;
     const selectedIds = resuming
-      ? (storedOperation.itemVersions || []).map((entry) => String(entry.itemId))
+      ? (storedOperation.itemVersions || []).map((entry) =>
+          String(entry.itemId),
+        )
       : uniqueIds;
     const items = await ReconciliationItem.find({
       _id: { $in: selectedIds },
@@ -2226,7 +2601,10 @@ export async function bulkDisposition({
       throw serviceError("One or more selected items are unavailable", 409);
     }
     if (items.some((item) => item.pendingTransition?.action)) {
-      throw serviceError("Complete pending item transitions before bulk review", 409);
+      throw serviceError(
+        "Complete pending item transitions before bulk review",
+        409,
+      );
     }
 
     let itemVersions;
@@ -2238,20 +2616,29 @@ export async function bulkDisposition({
         decisionVersion: Number(entry.decisionVersion || 0),
       }));
       const versionsById = new Map(
-        itemVersions.map((entry) => [String(entry.itemId), entry.decisionVersion])
+        itemVersions.map((entry) => [
+          String(entry.itemId),
+          entry.decisionVersion,
+        ]),
       );
       for (const item of items) {
         const baseVersion = versionsById.get(String(item._id));
         const completed = item.lastReviewOperationId === operationId;
         const expectedCurrent = baseVersion + (completed ? 1 : 0);
         if (Number(item.decisionVersion || 0) !== expectedCurrent) {
-          throw serviceError("Bulk review item changed outside its durable operation", 409);
+          throw serviceError(
+            "Bulk review item changed outside its durable operation",
+            409,
+          );
         }
       }
       affectedByStatus = storedOperation.affectedByStatus || {};
       const storedAction = String(storedOperation.action || "").toUpperCase();
       if (storedAction !== normalizedAction) {
-        throw serviceError("Bulk review command action changed after admission", 409);
+        throw serviceError(
+          "Bulk review command action changed after admission",
+          409,
+        );
       }
       uniformSet = bulkDispositionSet({
         item: items[0],
@@ -2273,10 +2660,18 @@ export async function bulkDisposition({
         changed = true;
       }
     } else {
-      const material = bulkMaterial({ run, items, action: normalizedAction, payload: cleaned });
+      const material = bulkMaterial({
+        run,
+        items,
+        action: normalizedAction,
+        payload: cleaned,
+      });
       const expectedToken = bulkToken(material);
       if (!tokenMatches(expectedToken, previewToken)) {
-        throw serviceError("Bulk preview is stale or invalid; preview again", 409);
+        throw serviceError(
+          "Bulk preview is stale or invalid; preview again",
+          409,
+        );
       }
       await validateDispositionReferences({
         firmId,
@@ -2308,7 +2703,10 @@ export async function bulkDisposition({
         entityType: "ReconciliationRun",
         entityId: runId,
         requestId,
-        beforeSummary: { affectedByStatus, reviewVersion: run.reviewVersion || 0 },
+        beforeSummary: {
+          affectedByStatus,
+          reviewVersion: run.reviewVersion || 0,
+        },
         afterSummary: {
           affectedCount: items.length,
           action: normalizedAction,
@@ -2379,10 +2777,13 @@ export async function bulkDisposition({
             lastReviewOperationId: operationId,
           },
           $inc: { decisionVersion: 1 },
-        }
+        },
       );
       if (Number(result.matchedCount || 0) !== remainingIds.length) {
-        throw serviceError("Bulk review remains incomplete; retry the same commit", 409);
+        throw serviceError(
+          "Bulk review remains incomplete; retry the same commit",
+          409,
+        );
       }
     }
 
@@ -2398,17 +2799,28 @@ export async function bulkDisposition({
       firmId,
       runId,
       ...itemScope,
-    }).select({ _id: 1, decisionVersion: 1, lastReviewOperationId: 1 }).lean();
+    })
+      .select({ _id: 1, decisionVersion: 1, lastReviewOperationId: 1 })
+      .lean();
     const baseVersions = new Map(
-      itemVersions.map((entry) => [String(entry.itemId), Number(entry.decisionVersion || 0)])
+      itemVersions.map((entry) => [
+        String(entry.itemId),
+        Number(entry.decisionVersion || 0),
+      ]),
     );
-    const allCompleted = completedItems.length === selectedIds.length &&
-      completedItems.every((item) =>
-        item.lastReviewOperationId === operationId &&
-        Number(item.decisionVersion || 0) === baseVersions.get(String(item._id)) + 1
+    const allCompleted =
+      completedItems.length === selectedIds.length &&
+      completedItems.every(
+        (item) =>
+          item.lastReviewOperationId === operationId &&
+          Number(item.decisionVersion || 0) ===
+            baseVersions.get(String(item._id)) + 1,
       );
     if (!allCompleted) {
-      throw serviceError("Bulk review remains incomplete; retry the same commit", 409);
+      throw serviceError(
+        "Bulk review remains incomplete; retry the same commit",
+        409,
+      );
     }
 
     const summary = await recomputeRunSummary({
@@ -2453,7 +2865,10 @@ export async function bulkDisposition({
         token: mutation.token,
         fence: mutation.fence,
       }).catch((summaryError) => {
-        console.error("[GST] Failed to repair run summary after bulk error:", summaryError.message);
+        console.error(
+          "[GST] Failed to repair run summary after bulk error:",
+          summaryError.message,
+        );
       });
     }
     throw error;
@@ -2465,7 +2880,10 @@ export async function bulkDisposition({
       fence: mutation.fence,
       itemIds: claimedItemIds,
     }).catch((releaseError) => {
-      console.error("[GST] Failed to release bulk review item leases:", releaseError.message);
+      console.error(
+        "[GST] Failed to release bulk review item leases:",
+        releaseError.message,
+      );
     });
     try {
       await endReviewMutation({
@@ -2477,7 +2895,10 @@ export async function bulkDisposition({
       });
     } catch (endError) {
       if (!operationError) throw endError;
-      console.error("[GST] Failed to release bulk review mutation:", endError.message);
+      console.error(
+        "[GST] Failed to release bulk review mutation:",
+        endError.message,
+      );
     }
   }
 }
@@ -2493,18 +2914,24 @@ export async function recoverReviewOperation({
   const run = await requireRun({ firmId, runId });
   const pendingTransition = run.pendingReviewTransition || {};
   const pendingBulk = run.bulkReviewOperation || {};
-  const rawPendingOperationId = pendingTransition.operationId ||
+  const rawPendingOperationId =
+    pendingTransition.operationId ||
     (pendingBulk.state === "PENDING" ? pendingBulk.operationId : null);
   const pendingOperationId = rawPendingOperationId
     ? String(rawPendingOperationId).toLowerCase()
     : null;
-  const requestedOperationId = operationId ? String(operationId).toLowerCase() : null;
+  const requestedOperationId = operationId
+    ? String(operationId).toLowerCase()
+    : null;
 
   if (requestedOperationId && !/^[a-f0-9]{64}$/.test(requestedOperationId)) {
     throw serviceError("Recovery operation ID is invalid", 400);
   }
   if (pendingOperationId && !requestedOperationId) {
-    throw serviceError("Recovery operation ID is required for a pending review command", 400);
+    throw serviceError(
+      "Recovery operation ID is required for a pending review command",
+      400,
+    );
   }
   if (pendingOperationId && pendingOperationId !== requestedOperationId) {
     throw serviceError("A different review operation is pending", 409);
@@ -2523,7 +2950,10 @@ export async function recoverReviewOperation({
     throw serviceError("Recovery operation is no longer pending", 409);
   }
   if (run.status !== "REVIEW") {
-    throw serviceError("Only a review run can recover review finalization", 409);
+    throw serviceError(
+      "Only a review run can recover review finalization",
+      409,
+    );
   }
 
   await safeRecordActivity({
@@ -2536,7 +2966,11 @@ export async function recoverReviewOperation({
     requestId,
     afterSummary: {
       operationId: pendingOperationId || null,
-      kind: pendingTransition.operationId ? "ITEM" : pendingBulk.state === "PENDING" ? "BULK" : "SUMMARY",
+      kind: pendingTransition.operationId
+        ? "ITEM"
+        : pendingBulk.state === "PENDING"
+          ? "BULK"
+          : "SUMMARY",
     },
   });
 
@@ -2591,7 +3025,10 @@ export async function recoverReviewOperation({
         });
       } catch (endError) {
         if (!recoveryError) throw endError;
-        console.error("[GST] Failed to release review recovery mutation:", endError.message);
+        console.error(
+          "[GST] Failed to release review recovery mutation:",
+          endError.message,
+        );
       }
     }
   } else {
@@ -2626,7 +3063,10 @@ export async function recoverReviewOperation({
 export async function getGstr3bControl({ firmId, runId }) {
   const run = await requireRun({ firmId, runId });
   if (!["REVIEW", "LOCKED"].includes(run.status)) {
-    throw serviceError("Run must finish reconciliation before GSTR-3B control is available", 409);
+    throw serviceError(
+      "Run must finish reconciliation before GSTR-3B control is available",
+      409,
+    );
   }
   const itemScope = requireActiveItemScope(run);
   if (
@@ -2634,7 +3074,10 @@ export async function getGstr3bControl({ firmId, runId }) {
     run.pendingReviewTransition?.operationId ||
     run.bulkReviewOperation?.state === "PENDING"
   ) {
-    throw serviceError("Review finalization is incomplete; retry it before viewing control", 409);
+    throw serviceError(
+      "Review finalization is incomplete; retry it before viewing control",
+      409,
+    );
   }
   if (run.status === "REVIEW") {
     const activeMutation = await ReconciliationRun.exists({
@@ -2655,11 +3098,15 @@ export async function getGstr3bControl({ firmId, runId }) {
     "pendingTransition.action": { $ne: null },
   });
   if (pendingTransition) {
-    throw serviceError("A reconciliation transition is incomplete; retry it before viewing control", 409);
+    throw serviceError(
+      "A reconciliation transition is incomplete; retry it before viewing control",
+      409,
+    );
   }
 
   let claimed = Object.fromEntries(TAX_HEAD_FIELDS.map((field) => [field, 0]));
   let claimedBasis = "NOT_IMPORTED";
+  let gstr3bOutward = null;
   if (run.sourceImports.gstr3bBatchId) {
     const batch = await ImportBatch.findOne({
       _id: run.sourceImports.gstr3bBatchId,
@@ -2682,11 +3129,80 @@ export async function getGstr3bControl({ firmId, runId }) {
       importGeneration: batch.activeImportGeneration,
     }).lean();
     try {
-      const calculated = calculateGstr3bClaimed(rows);
-      claimed = calculated.claimed;
-      claimedBasis = calculated.basis;
+      const calculated = calculateGstr3bControlTotals(rows);
+      if (calculated.claimed) {
+        claimed = calculated.claimed;
+        claimedBasis = calculated.claimedBasis;
+      }
+      // The SAME rows read for their other half. Table 3.1 is the outward supply the return
+      // declares, and it is what GSTR-1 is compared against - so one GSTR-3B upload serves both
+      // comparisons and costs one query, not two.
+      gstr3bOutward = calculated.outward;
     } catch (error) {
-      throw serviceError(`GSTR-3B control input is invalid: ${error.message}`, 409);
+      throw serviceError(
+        `GSTR-3B control input is invalid: ${error.message}`,
+        409,
+      );
+    }
+  }
+
+  // ---- GSTR-1 outward supply, for the turnover comparison ----
+  let gstr1Outward = null;
+  if (run.sourceImports.gstr1BatchId) {
+    const batch = await ImportBatch.findOne({
+      _id: run.sourceImports.gstr1BatchId,
+      firmId,
+      kind: "GSTR1_SUMMARY",
+      status: "COMPLETED",
+    }).lean();
+    validateBatchContext(batch, {
+      firmId,
+      clientId: run.clientId,
+      gstin: run.gstin,
+      period: run.period,
+      kind: "GSTR1_SUMMARY",
+    });
+    const rows = await ImportRow.find({
+      firmId,
+      clientId: run.clientId,
+      batchId: batch._id,
+      kind: "GSTR1_SUMMARY",
+      importGeneration: batch.activeImportGeneration,
+    }).lean();
+    try {
+      gstr1Outward = calculateGstr1Outward(rows);
+    } catch (error) {
+      throw serviceError(`GSTR-1 control input is invalid: ${error.message}`, 409);
+    }
+  }
+
+  // ---- electronic credit ledger, for the ledger comparison ----
+  let creditLedger = null;
+  if (run.sourceImports.creditLedgerBatchId) {
+    const batch = await ImportBatch.findOne({
+      _id: run.sourceImports.creditLedgerBatchId,
+      firmId,
+      kind: "ECREDIT_LEDGER",
+      status: "COMPLETED",
+    }).lean();
+    validateBatchContext(batch, {
+      firmId,
+      clientId: run.clientId,
+      gstin: run.gstin,
+      period: run.period,
+      kind: "ECREDIT_LEDGER",
+    });
+    const rows = await ImportRow.find({
+      firmId,
+      clientId: run.clientId,
+      batchId: batch._id,
+      kind: "ECREDIT_LEDGER",
+      importGeneration: batch.activeImportGeneration,
+    }).lean();
+    try {
+      creditLedger = calculateCreditLedgerBalance(rows);
+    } catch (error) {
+      throw serviceError(`Credit ledger control input is invalid: ${error.message}`, 409);
     }
   }
 
@@ -2715,7 +3231,10 @@ export async function getGstr3bControl({ firmId, runId }) {
       },
     }).lean();
     if (!stableRun) {
-      throw serviceError("Review changed while control was loading; reload", 409);
+      throw serviceError(
+        "Review changed while control was loading; reload",
+        409,
+      );
     }
   }
 
@@ -2730,12 +3249,13 @@ export async function getGstr3bControl({ firmId, runId }) {
     ]);
     difference[field] = safeMinor(
       adjustedEligible[field] - Number(claimed[field] || 0),
-      `Difference ${field}`
+      `Difference ${field}`,
     );
   }
   return {
     label: "CONTROL_ESTIMATE",
-    basis: "Reviewed Purchase Register vs GSTR-2B invoice reconciliation; GSTR-3B is summary-level only.",
+    basis:
+      "Reviewed Purchase Register vs GSTR-2B invoice reconciliation; GSTR-3B is summary-level only.",
     claimedBasis,
     professionalConfirmed: Boolean(stableRun.reviewedAt),
     eligible,
@@ -2745,7 +3265,129 @@ export async function getGstr3bControl({ firmId, runId }) {
     adjustedEligible,
     claimedGstr3b: claimed,
     difference,
-    hasImportedGstr3b: Boolean(stableRun.sourceImports.gstr3bBatchId),
+    // Whether the ITC HALF of a GSTR-3B was imported, which is not the same as whether a GSTR-3B
+    // batch is attached. A return whose Table 3.1 was imported for the turnover comparison and
+    // whose Table 4 was not is a legitimate file - this change is what made it one - and for the
+    // ITC comparison it is exactly as un-imported as no file at all.
+    //
+    // Reading the batch id here instead reported "imported", left claimedGstr3b at zeros, and so
+    // rendered the WHOLE reviewed credit as a shortfall with no bar saying why. claimedBasis
+    // already carries the answer, so it is the single source for it.
+    hasImportedGstr3b: claimedBasis !== "NOT_IMPORTED",
+
+    // ---- the two comparisons the ITC control never covered ----
+    //
+    // Both are stated the same way as the ITC one above: the two sides, their per-head
+    // difference, and whether each source was actually imported. A section whose sources are
+    // absent reports available:false rather than zeroes, so a screen can say "not imported" and
+    // never present an un-run comparison as a clean one.
+    turnover: buildTurnoverControl(gstr1Outward, gstr3bOutward, {
+      hasGstr1Batch: Boolean(stableRun.sourceImports.gstr1BatchId),
+    }),
+    creditLedger: buildCreditLedgerControl(claimed, claimedBasis, creditLedger),
+  };
+}
+
+/**
+ * GSTR-1 declared outward supply against GSTR-3B Table 3.1, per tax head and on taxable value.
+ *
+ * The sign convention is stated rather than assumed: difference = GSTR-1 minus GSTR-3B. A
+ * POSITIVE difference means more was declared in GSTR-1 than in GSTR-3B - supplies invoiced but
+ * not carried into the summary return. A NEGATIVE difference means the summary return declared
+ * more than the invoice-level return supports.
+ */
+function buildTurnoverControl(gstr1Outward, gstr3bOutward, { hasGstr1Batch = false } = {}) {
+  const available = Boolean(gstr1Outward && gstr3bOutward);
+  const fields = ["taxableValueMinor", ...TAX_HEAD_FIELDS];
+  const zero = Object.fromEntries(fields.map((field) => [field, 0]));
+
+  const left = gstr1Outward || zero;
+  const right = gstr3bOutward || zero;
+  const difference = {};
+  for (const field of fields) {
+    difference[field] = safeMinor(
+      Number(left[field] || 0) - Number(right[field] || 0),
+      `Turnover difference ${field}`,
+    );
+  }
+
+  return {
+    available,
+    basis: "GSTR-1 declared outward supply vs GSTR-3B Table 3.1, taxable and zero-rated only.",
+    // Whether a GSTR-1 was IMPORTED, which is not the same as whether it produced turnover. A
+    // firm whose only supplies are nil-rated or exempt files a real GSTR-1 that contributes
+    // nothing to this comparison; deriving the flag from the calculation told them to import a
+    // file they had already imported.
+    hasImportedGstr1: hasGstr1Batch || Boolean(gstr1Outward),
+    // The distinction the message needs: imported, but with nothing turnover-bearing in it.
+    gstr1HasTurnoverRows: Boolean(gstr1Outward),
+    hasImportedGstr3bOutward: Boolean(gstr3bOutward),
+    gstr1: gstr1Outward,
+    gstr3b: gstr3bOutward,
+    difference: available ? difference : null,
+    // Only meaningful when both sides exist; null keeps a screen from rendering "agreed" for a
+    // comparison that never happened.
+    agrees: available ? fields.every((field) => difference[field] === 0) : null,
+  };
+}
+
+/**
+ * ITC claimed in GSTR-3B against the credit the electronic credit ledger received.
+ *
+ * difference = claimed minus the period's CREDIT movement, per head. This is the third of the
+ * three reconciliations a CA runs on a period, and the one that catches credit taken in the return
+ * that the ledger never received.
+ *
+ * A POSITIVE difference means more was claimed than the ledger received. A NEGATIVE difference
+ * means the ledger received credit the return did not claim.
+ */
+function buildCreditLedgerControl(claimed, claimedBasis, creditLedger) {
+  const zero = Object.fromEntries(TAX_HEAD_FIELDS.map((field) => [field, 0]));
+
+  // Compared against the credit the ledger RECEIVED in the period, not its closing balance.
+  //
+  // The closing balance is a stock: it carries forward whatever was already in the ledger and is
+  // reduced by every lawful utilisation. Subtracting it from a period's ITC claim mixes a stock
+  // with a flow, and gets the answer wrong in both directions. A firm claiming 45,000 whose ledger
+  // received only 20,000 read as AGREEING when 25,000 had been carried forward - the exact
+  // shortfall this control exists to catch, reported as clean. And any firm that utilised credit
+  // during the month drew a difference that was nothing but its own utilisation.
+  const credited = creditLedger?.credited || zero;
+  const hasClaim = claimedBasis !== "NOT_IMPORTED";
+
+  // A ledger that states only a closing balance carries no movement, so it cannot say what was
+  // received. That is reported as un-comparable rather than answered with the stock figure.
+  const available = Boolean(creditLedger?.hasCreditMovement && hasClaim);
+
+  const difference = {};
+  for (const field of TAX_HEAD_FIELDS) {
+    difference[field] = safeMinor(
+      Number(claimed[field] || 0) - Number(credited[field] || 0),
+      `Credit ledger difference ${field}`,
+    );
+  }
+
+  return {
+    available,
+    basis:
+      "GSTR-3B ITC claimed vs the credit the electronic credit ledger received in this period. "
+      + "The closing balance is shown for context and is not what the claim is compared against, "
+      + "because it carries the opening balance forward and is reduced by utilisation.",
+    hasImportedLedger: Boolean(creditLedger),
+    // Distinguished from hasImportedLedger so a screen can say WHICH of the two is missing: a
+    // ledger nobody imported, or one that states a balance without the movements behind it.
+    hasCreditMovement: Boolean(creditLedger?.hasCreditMovement),
+    hasClaimedItc: hasClaim,
+    ledgerBasis: creditLedger?.basis || "NOT_IMPORTED",
+    // A file that states a closing balance AND the movements that should produce it, where the
+    // two disagree, is reported rather than silently resolved in favour of either.
+    ledgerStatedDiffersFromMovement: Boolean(creditLedger?.statedDiffers),
+    claimedGstr3b: claimed,
+    ledgerCredited: creditLedger ? credited : null,
+    // Context only. Kept in the payload because a reviewer wants to see it, never compared.
+    ledgerClosing: creditLedger?.closing || null,
+    difference: available ? difference : null,
+    agrees: available ? TAX_HEAD_FIELDS.every((field) => difference[field] === 0) : null,
   };
 }
 
@@ -2756,7 +3398,9 @@ export async function getSupplierChase({ firmId, runId }) {
     runId,
     ...requireActiveItemScope(run),
     "chase.required": true,
-  }).sort({ supplierGstin: 1, booksSourceRow: 1 }).lean();
+  })
+    .sort({ supplierGstin: 1, booksSourceRow: 1 })
+    .lean();
   const groups = new Map();
   for (const item of items) {
     const key = item.supplierGstin || "UNKNOWN";
@@ -2772,7 +3416,11 @@ export async function getSupplierChase({ firmId, runId }) {
     }
     const group = groups.get(key);
     group.itemIds.push(String(item._id));
-    group.documentReferences.push(item.invoiceNumberOriginal || item.invoiceNumberNormalized || `row ${item.booksSourceRow}`);
+    group.documentReferences.push(
+      item.invoiceNumberOriginal ||
+        item.invoiceNumberNormalized ||
+        `row ${item.booksSourceRow}`,
+    );
     group.affectedTaxMinor = addSafeIntegers([
       group.affectedTaxMinor,
       Number(item.booksAmounts?.totalTaxMinor || 0),
@@ -2785,7 +3433,11 @@ export async function getSupplierChase({ firmId, runId }) {
     deterministicMessage: `Please review ${group.documentReferences.length} document(s) for GSTIN ${group.supplierGstin} for period ${group.period}. Tax affected: INR ${formatMoneyMinor(group.affectedTaxMinor)}. Please share the correction or amendment status.`,
     deliveryEvidence: "ACTION_RECORDED_ONLY",
   }));
-  return { suppliers, totalSuppliers: suppliers.length, totalItems: items.length };
+  return {
+    suppliers,
+    totalSuppliers: suppliers.length,
+    totalItems: items.length,
+  };
 }
 
 export async function lockReconciliationRun({
@@ -2842,7 +3494,10 @@ export async function lockReconciliationRun({
           });
         } catch (endError) {
           if (!recoveryError) throw endError;
-          console.error("[GST] Failed to release summary recovery mutation:", endError.message);
+          console.error(
+            "[GST] Failed to release summary recovery mutation:",
+            endError.message,
+          );
         }
       }
       return lockReconciliationRun({ firmId, runId, actorUserId, requestId });
@@ -2853,7 +3508,10 @@ export async function lockReconciliationRun({
     current.pendingReviewTransition?.operationId ||
     current.bulkReviewOperation?.state === "PENDING"
   ) {
-    throw serviceError("Complete pending review finalization before locking reconciliation", 409);
+    throw serviceError(
+      "Complete pending review finalization before locking reconciliation",
+      409,
+    );
   }
   const itemScope = requireActiveItemScope(current);
   const generationScope = requireGenerationItemScope(current);
@@ -2885,10 +3543,7 @@ export async function lockReconciliationRun({
         {
           status: "LOCKING",
           $expr: {
-            $lte: [
-              { $ifNull: ["$lockExpiresAt", new Date(0)] },
-              "$$NOW",
-            ],
+            $lte: [{ $ifNull: ["$lockExpiresAt", new Date(0)] }, "$$NOW"],
           },
         },
       ],
@@ -2909,10 +3564,13 @@ export async function lockReconciliationRun({
         },
       },
     ],
-    { new: true }
+    { new: true },
   );
   if (!locking) {
-    throw serviceError("Run changed or another review/lock mutation is active; reload and retry", 409);
+    throw serviceError(
+      "Run changed or another review/lock mutation is active; reload and retry",
+      409,
+    );
   }
 
   let locked = null;
@@ -2929,7 +3587,7 @@ export async function lockReconciliationRun({
           reviewMutationExpiresAt: null,
           reviewMutationFence: Number(locking.reviewMutationFence),
         },
-      }
+      },
     );
     if (Number(invalidated.matchedCount || 0) < 1) {
       const itemCount = await ReconciliationItem.countDocuments({
@@ -2951,7 +3609,7 @@ export async function lockReconciliationRun({
     if (pendingTransition) {
       throw serviceError(
         "Complete pending item transitions before locking reconciliation",
-        409
+        409,
       );
     }
 
@@ -2962,9 +3620,13 @@ export async function lockReconciliationRun({
     }).lean();
     const summary = summarizeReconciliationItems(items);
     if (summary.reviewCount > 0) {
-      throw serviceError("All exceptions require a resolving disposition before locking", 409, {
-        reviewCount: summary.reviewCount,
-      });
+      throw serviceError(
+        "All exceptions require a resolving disposition before locking",
+        409,
+        {
+          reviewCount: summary.reviewCount,
+        },
+      );
     }
 
     await recordActivity({
@@ -3012,9 +3674,10 @@ export async function lockReconciliationRun({
           lockedAt: true,
         },
       },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
-    if (!locked) throw serviceError("Run changed before lock; reload and retry", 409);
+    if (!locked)
+      throw serviceError("Run changed before lock; reload and retry", 409);
 
     await safeRecordActivity({
       firmId,
@@ -3044,19 +3707,16 @@ export async function lockReconciliationRun({
             lockToken: null,
             lockExpiresAt: null,
           },
-        }
+        },
       ).catch((resetError) => {
-        console.error("[GST] Failed to release reconciliation lock:", resetError.message);
+        console.error(
+          "[GST] Failed to release reconciliation lock:",
+          resetError.message,
+        );
       });
     }
     throw error;
   }
-}
-
-function csvCell(value) {
-  let text = String(value ?? "");
-  if (/^[=+@-]/.test(text)) text = `'${text}`;
-  return `"${text.replace(/"/g, '""')}"`;
 }
 
 export async function exportReconciliationRun({ firmId, runId }) {
@@ -3087,23 +3747,29 @@ export async function exportReconciliationRun({ firmId, runId }) {
   ];
   const lines = [header.map(csvCell).join(",")];
   for (const item of items) {
-    lines.push([
-      item._id,
-      item.status,
-      item.supplierGstin,
-      item.invoiceNumberOriginal,
-      item.documentDate || "",
-      item.booksSourceRow || "",
-      item.portalSourceRow || "",
-      formatMoneyMinor(Number(item.booksAmounts?.totalTaxMinor || 0)),
-      formatMoneyMinor(Number(item.portalAmounts?.totalTaxMinor || 0)),
-      formatMoneyMinor(Number(item.differences?.totalTaxMinor || 0)),
-      item.userDisposition?.action || "",
-      item.resolutionState === "RESOLVED" ||
-      (!item.resolutionState && item.status === "MATCHED" && item.autoAccepted)
-        ? "YES"
-        : "NO",
-    ].map(csvCell).join(","));
+    lines.push(
+      [
+        item._id,
+        item.status,
+        item.supplierGstin,
+        item.invoiceNumberOriginal,
+        item.documentDate || "",
+        item.booksSourceRow || "",
+        item.portalSourceRow || "",
+        formatMoneyMinor(Number(item.booksAmounts?.totalTaxMinor || 0)),
+        formatMoneyMinor(Number(item.portalAmounts?.totalTaxMinor || 0)),
+        formatMoneyMinor(Number(item.differences?.totalTaxMinor || 0)),
+        item.userDisposition?.action || "",
+        item.resolutionState === "RESOLVED" ||
+        (!item.resolutionState &&
+          item.status === "MATCHED" &&
+          item.autoAccepted)
+          ? "YES"
+          : "NO",
+      ]
+        .map(csvCell)
+        .join(","),
+    );
   }
   lines.push("");
   lines.push(["Displayed summary", "Count / INR"].map(csvCell).join(","));
@@ -3114,10 +3780,22 @@ export async function exportReconciliationRun({ firmId, runId }) {
     ["Missing in books", run.summary.missingInBooksCount],
     ["Mismatches", run.summary.mismatchCount],
     ["Needs review", run.summary.reviewCount],
-    ["Eligible ITC", formatMoneyMinor(Number(run.summary.eligible?.totalTaxMinor || 0))],
-    ["Ineligible or blocked", formatMoneyMinor(Number(run.summary.ineligible?.totalTaxMinor || 0))],
-    ["Deferred", formatMoneyMinor(Number(run.summary.deferred?.totalTaxMinor || 0))],
-    ["Review value", formatMoneyMinor(Number(run.summary.reviewValueMinor || 0))],
+    [
+      "Eligible ITC",
+      formatMoneyMinor(Number(run.summary.eligible?.totalTaxMinor || 0)),
+    ],
+    [
+      "Ineligible or blocked",
+      formatMoneyMinor(Number(run.summary.ineligible?.totalTaxMinor || 0)),
+    ],
+    [
+      "Deferred",
+      formatMoneyMinor(Number(run.summary.deferred?.totalTaxMinor || 0)),
+    ],
+    [
+      "Review value",
+      formatMoneyMinor(Number(run.summary.reviewValueMinor || 0)),
+    ],
   ];
   summaryRows.forEach((row) => lines.push(row.map(csvCell).join(",")));
   return {
@@ -3128,7 +3806,11 @@ export async function exportReconciliationRun({ firmId, runId }) {
   };
 }
 
-export async function listReconciliationActivity({ firmId, runId, limit = 100 }) {
+export async function listReconciliationActivity({
+  firmId,
+  runId,
+  limit = 100,
+}) {
   await requireRun({ firmId, runId });
   const safeLimit = boundedInteger(limit, 100, 1, 200, "Limit");
   const events = await ActivityEvent.find({
@@ -3137,7 +3819,10 @@ export async function listReconciliationActivity({ firmId, runId, limit = 100 })
       { entityType: "ReconciliationRun", entityId: String(runId) },
       { entityType: "ReconciliationItem", "metadata.runId": String(runId) },
     ],
-  }).sort({ occurredAt: -1, _id: -1 }).limit(safeLimit).lean();
+  })
+    .sort({ occurredAt: -1, _id: -1 })
+    .limit(safeLimit)
+    .lean();
   return events.map((event) => ({
     id: String(event._id),
     actorUserId: event.actorUserId ? String(event.actorUserId) : null,

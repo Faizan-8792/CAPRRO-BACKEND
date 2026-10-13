@@ -133,7 +133,7 @@ function excerptAppearsInSource(excerpt, source) {
   return normalizedExcerpt.length >= 3 && normalizedSource.includes(normalizedExcerpt);
 }
 
-async function proposeCaseExtraction(caseMatter) {
+async function proposeCaseExtraction(caseMatter, userId) {
   const source = String(caseMatter?.source?.extractedText || "").trim();
   if (!source) throw httpError(422, "Source text is required for AI extraction");
   const fields = CASE_FIELD_NAMES.join(", ");
@@ -146,6 +146,7 @@ SOURCE:\n${source.slice(0, 90000)}`,
     jsonResponse: true,
     maxTokens: 2200,
     temperature: 0,
+    userId,
   });
   const parsed = ensureJson(result);
   const proposals = [];
@@ -173,7 +174,10 @@ SOURCE:\n${source.slice(0, 90000)}`,
     });
   }
   if (!proposals.length) {
-    throw httpError(422, "AI extraction produced no source-verifiable proposals", "CASE_AI_NO_VERIFIABLE_FIELDS");
+    // Public (app.js PUBLIC_ERROR_CODES), so this sentence is what the user reads; it is the desktop's
+    // own wording for this code (CaseExtractionService.NoVerifiableProposalsMessage), pinned equal by
+    // tests/notice-case-contract.mjs.
+    throw httpError(422, "The model returned nothing it could trace back to the notice text, so no fields were proposed. Nothing was changed on this case.", "CASE_AI_NO_VERIFIABLE_FIELDS");
   }
   return { proposals, provider: result.provider, model: result.model };
 }
@@ -189,7 +193,7 @@ function confirmedFactsForPrompt(caseMatter) {
   );
 }
 
-async function generateCaseAnalysis(caseMatter) {
+async function generateCaseAnalysis(caseMatter, userId) {
   const facts = confirmedFactsForPrompt(caseMatter);
   if (!Object.keys(facts).length) {
     throw httpError(422, "Confirm at least one case fact before AI analysis");
@@ -203,6 +207,7 @@ CONFIRMED_FACTS:\n${stableJson(facts)}\nSOURCE_TEXT:\n${source}`,
     jsonResponse: true,
     maxTokens: 2600,
     temperature: 0.1,
+    userId,
   });
   const parsed = ensureJson(result);
   const output = {};
@@ -312,7 +317,7 @@ function buildDraftAuthorityBindings(content, references) {
   });
 }
 
-async function generateCaseDraft(caseMatter, references, instructions = "") {
+async function generateCaseDraft(caseMatter, references, instructions = "", userId) {
   const facts = confirmedFactsForPrompt(caseMatter);
   if (!Object.keys(facts).length) {
     throw httpError(422, "Confirm case facts before generating a response draft");
@@ -327,6 +332,7 @@ CONFIRMED_FACTS:\n${stableJson(facts)}\nVERIFIED_REFERENCES:\n${referenceBlock}\
     jsonResponse: true,
     maxTokens: 4000,
     temperature: 0.15,
+    userId,
   });
   const parsed = ensureJson(result);
   const content = boundedText(parsed.content, 250000, { required: true, label: "AI draft content" });

@@ -14,13 +14,18 @@ const db = readFileSync(join(BACKEND, "src", "config", "db.js"), "utf8");
 const auth = readFileSync(join(BACKEND, "src", "middleware", "auth.middleware.js"), "utf8");
 const usage = readFileSync(join(BACKEND, "src", "middleware", "usage-tracker.middleware.js"), "utf8");
 const reqId = readFileSync(join(BACKEND, "src", "middleware", "request-id.middleware.js"), "utf8");
+const authRoutes = readFileSync(join(BACKEND, "src", "routes", "auth.routes.js"), "utf8");
 const userModel = readFileSync(join(BACKEND, "src", "models", "User.js"), "utf8");
 const superCtrl = readFileSync(join(BACKEND, "src", "controllers", "super.controller.js"), "utf8");
+const adminPanel = readFileSync(join(BACKEND, "public", "admin", "admin.js"), "utf8");
+const superAdminPanel = readFileSync(join(BACKEND, "public", "admin", "super.js"), "utf8");
 
 const checks = [];
 const check = (name, pass, detail = "") => checks.push({ name, pass, detail });
 
 // ─── Security ──────────────────────────────────────────────────────
+
+const bearerTokenUrlConsumer = /\?t=|searchParams\.get\(["']t["']\)|absorbTokenFromUrl/;
 
 check(
   "Helmet middleware with CSP active",
@@ -30,8 +35,12 @@ check(
 
 check(
   "Rate limiting: global, auth, super tiers",
-  /globalLimiter/.test(app) && /authLimiter/.test(app) && /superLimiter/.test(app),
-  "Three-tier rate limiting prevents abuse"
+  /globalLimiter/.test(app) &&
+    /superLimiter/.test(app) &&
+    /sendOtpLimiter/.test(authRoutes) &&
+    /verifyOtpLimiter/.test(authRoutes) &&
+    /googleLoginLimiter/.test(authRoutes),
+  "Global and super tiers plus endpoint-specific OTP and Google auth limits prevent abuse"
 );
 
 check(
@@ -172,11 +181,13 @@ check(
 // ─── Audit log / Security headers ──────────────────────────────────
 
 check(
-  "Additional security headers set (XSS, Frame, MIME, Permissions)",
+  "Browser security headers and credential boundaries enforced",
   /X-Content-Type-Options/.test(app) &&
     /X-Frame-Options/.test(app) &&
-    /Permissions-Policy/.test(app),
-  "Browser-side defenses layered with server-side"
+    /Permissions-Policy/.test(app) &&
+    !bearerTokenUrlConsumer.test(adminPanel) &&
+    !bearerTokenUrlConsumer.test(superAdminPanel),
+  "Layered browser headers; hosted admin auth stays origin-local or returns to OTP login"
 );
 
 // ─── Print ──────────────────────────────────────────────────────────

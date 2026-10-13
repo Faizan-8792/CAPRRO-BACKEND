@@ -14,6 +14,7 @@ import ComplianceOverride, {
 import Firm from "../models/Firm.js";
 import { safeRecordActivity } from "../services/activity.service.js";
 import { resolveApplicableComplianceRule } from "../services/compliance-period.service.js";
+import { parseStatutoryDayIso } from "../services/robust-normalize.service.js";
 
 const PROFILE_FREQUENCIES = Object.freeze([
   "MONTHLY",
@@ -116,11 +117,14 @@ function normalizeRequiredText(value, fieldName, maxLength) {
 
 function parseDate(value, fieldName, { nullable = false } = {}) {
   if (nullable && (value === null || value === "")) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    throw httpError(400, `${fieldName} must be a valid date`);
+  // Strict on purpose -- new Date(string) silently mis-reads an ambiguous DD-MM/MM-DD
+  // date, and this gates a reviewed compliance due-date override. See
+  // parseStatutoryDayIso's remarks in robust-normalize.service.js.
+  try {
+    return parseStatutoryDayIso(value, fieldName);
+  } catch (error) {
+    throw httpError(error.statusCode || 400, error.message);
   }
-  return parsed;
 }
 
 function parseLimit(value) {
