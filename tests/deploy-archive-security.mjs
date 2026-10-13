@@ -2417,9 +2417,15 @@ if (listed.status !== 0 || listed.error) {
   // src/config/reminder-types.js (a frozen table of reminder labels and a pure formatter) and
   // src/utils/rupees.js (paise to Indian-grouped rupees, pure, BigInt arithmetic). Neither makes a
   // network call, reads storage or configuration, or holds a secret.
+  // 218 -> 220 on 2026-10-14 for DS44 and DS43, both confirmed clean by this scan (status 0,
+  // "JavaScript secret AST scan: PASS (220 files)") before the pin moved:
+  // src/services/google-identity.service.js (classifies google-auth-library's errors by their opening
+  // words and retries a check once; it never logs or stores a token, an email or an error message,
+  // and makes no request of its own) and src/services/owner-accounts.service.js (the owner's account
+  // patterns, OWNER_ACCOUNT_PATTERNS read at call time, and read-only queries; no secret, no network).
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 218 && result.status === 0,
+    files.length === 220 && result.status === 0,
     result,
   );
 }

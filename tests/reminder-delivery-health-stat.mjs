@@ -94,6 +94,9 @@ const { deliveryHealth, getAttemptEntries } = await import(
 // ─── getReminderDeliveryHealthStats: gate + aggregation, DB stubbed ───
 
 const { default: Reminder } = await import("../src/models/Reminder.js");
+// DS43: the report first asks User.find for the owner's own accounts to leave out; none here.
+const { default: User } = await import("../src/models/User.js");
+User.find = () => ({ select: () => ({ lean: async () => [] }) });
 const { getReminderDeliveryHealthStats } = await import(
   "../src/controllers/super.controller.js"
 );

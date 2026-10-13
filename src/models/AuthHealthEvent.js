@@ -46,6 +46,26 @@ const AUTH_HEALTH_REASONS = Object.freeze([
   // recovered after a browser or app restart, and a refresh that lost a race.
   "restart",
   "race",
+  // DS44: why a sign-in failed, precisely enough to tell a person's own slip from a defect.
+  // The OTP sign-in (the hosted admin pages):
+  "no_account", // no account has this email
+  "no_otp", // no code was asked for, or it was already used
+  "otp_expired", // the code was older than ten minutes
+  "wrong_otp", // the code did not match
+  "otp_locked", // five wrong codes: locked for fifteen minutes
+  // Google sign-in (extension and desktop):
+  "google_unreachable", // the server could not reach Google, even on a second try
+  "google_expired", // Google's token had expired, or the access token was revoked
+  "google_rejected", // Google refused the desktop app's one-time sign-in code
+  "audience", // a Google token issued to an app this server does not serve
+  "desktop_audience", // the desktop app's request carried a token issued to another app
+  "email_unverified", // the Google account has no verified email
+  "clock", // the token is dated after the server's clock: the server clock is behind
+  "terms_required", // the desktop app sent no acceptance of the current terms
+  "terms_outdated", // the acceptance was for an earlier version of the terms
+  // Either:
+  "bad_request", // the app's request was incomplete (no token, no code)
+  "not_configured", // the server is missing its Google settings
   "unknown",
 ]);
 

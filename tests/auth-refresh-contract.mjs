@@ -244,10 +244,11 @@ async function runSuite() {
     check("twenty anonymous refusals are written as one row", rowsAfter - rowsBefore === 1, `${rowsAfter - rowsBefore} rows`);
     check("the coalesced row counts all twenty", (await sumOf({ kind: "auth_rejection", reason: "no_credentials" })) >= 20);
 
-    // 9. Login failures are recorded (OTP path, unknown account).
+    // 9. Login failures are recorded (OTP path, unknown account). Since DS44 the reason names the
+    // cause - no account has the address - rather than the catch-all "invalid".
     const otpFail = await call("/api/auth/verify-otp", { body: { email: "nobody-here@example.com", otp: "000000" } });
     check("a failed OTP sign-in is refused", otpFail.status === 404);
-    check("the failed sign-in is a login_fail for the website", (await sumOf({ kind: "login_fail", reason: "invalid", platform: "website" })) === 1);
+    check("the failed sign-in is a login_fail for the website", (await sumOf({ kind: "login_fail", reason: "no_account", platform: "website" })) === 1);
 
     // 10. The admin summary: super-admin only, aggregate only.
     const notAdmin = await call("/api/super/auth-health?days=7", { token: goodToken, method: "GET" });

@@ -30,8 +30,8 @@
 
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
-import rateLimit from "express-rate-limit";
 import { recordAuthHealth } from "../services/auth-health.service.js";
+import { recordedLimiter } from "../middleware/rate-limit.middleware.js";
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error("JWT_SECRET env var is required");
@@ -57,13 +57,15 @@ const MIN_RENEWED_LIFETIME_SECONDS = 60;
 // 30 per 15 minutes is far above any honest pattern and far below anything
 // that could be used to keep a stolen token warm against a revocation the
 // attacker cannot see.
-export const refreshLimiter = rateLimit({
+// A refusal is recorded as a refused renewal (DS44, recordedLimiter).
+export const refreshLimiter = recordedLimiter({
   windowMs: 15 * 60 * 1000,
   limit: 30,
   standardHeaders: "draft-7",
   legacyHeaders: false,
   keyGenerator: (req) => req.user?.id || req.ip,
   message: { ok: false, error: "Too many session refreshes. Wait a few minutes." },
+  event: (req) => ({ kind: "refresh_fail", platform: platformOf(req) }),
 });
 
 function platformOf(req) {

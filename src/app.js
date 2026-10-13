@@ -2,13 +2,13 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
-import rateLimit from "express-rate-limit";
 import hpp from "hpp";
 import compression from "compression";
 import path from "path";
 import { fileURLToPath } from "url";
 
 import authRoutes from "./routes/auth.routes.js";
+import { signInEventOf } from "./controllers/auth.controller.js";
 import reminderRoutes from "./routes/reminder.routes.js";
 import firmRoutes from "./routes/firm.routes.js";
 import statsRoutes from "./routes/stats.routes.js";
@@ -36,7 +36,7 @@ import { trackUsage } from "./middleware/usage-tracker.middleware.js";
 import { requestId } from "./middleware/request-id.middleware.js";
 import { maintenanceGate } from "./middleware/maintenance.middleware.js";
 import { clientVersionGate } from "./middleware/client-version.middleware.js";
-import { superLimiter } from "./middleware/rate-limit.middleware.js";
+import { recordedLimiter, superLimiter } from "./middleware/rate-limit.middleware.js";
 import { DEFAULT_FEATURE_FLAGS } from "./models/AppConfig.js";
 
 const PUBLIC_ERROR_CODES = new Set([
@@ -282,13 +282,15 @@ app.use(
 /* ===============================
    RATE LIMITING
 ================================ */
-// Global: 200 requests per 15 minutes per IP
-const globalLimiter = rateLimit({
+// Global: 200 requests per 15 minutes per IP. A sign-in or renewal it refuses is recorded on the
+// admin panel's Sign-in health page (DS44); every other refusal records nothing.
+const globalLimiter = recordedLimiter({
   windowMs: 15 * 60 * 1000,
   max: 200,
   standardHeaders: true,
   legacyHeaders: false,
   message: { ok: false, error: "Too many requests, please try again later." },
+  event: signInEventOf,
 });
 app.use(globalLimiter);
 

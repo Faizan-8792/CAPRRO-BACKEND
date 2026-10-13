@@ -153,11 +153,14 @@ const TERMINAL_REASONS = ["expired", "revoked", "inactive", "missing_user"];
  * version over the requested window. Pure aggregation - no user rows leave
  * this function, so the dashboard sees totals only.
  */
-export async function authHealthSummary({ days = 30 } = {}) {
+export async function authHealthSummary({ days = 30, excludeUserIds = [] } = {}) {
   await flushAuthHealth();
   const windowDays = clampDays(days);
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
-  const inWindow = { $match: { occurredAt: { $gte: since } } };
+  // DS43: the owner's own accounts' events are left out (an event with no account stays in, since
+  // nothing ties it to anyone). $nin also keeps every row whose userId is null.
+  const notExcluded = excludeUserIds.length ? { userId: { $nin: excludeUserIds } } : {};
+  const inWindow = { $match: { occurredAt: { $gte: since }, ...notExcluded } };
 
   const [byDay, byKindReason, byVersion, totals, sessionDurations] = await Promise.all([
     AuthHealthEvent.aggregate([
@@ -204,7 +207,7 @@ export async function authHealthSummary({ days = 30 } = {}) {
     // Bounded to the window; a sign-in with no ending in-window is still a
     // live session and is not counted.
     AuthHealthEvent.aggregate([
-      { $match: { occurredAt: { $gte: since }, userId: { $ne: null } } },
+      { $match: { occurredAt: { $gte: since }, userId: { $ne: null, ...(excludeUserIds.length ? { $nin: excludeUserIds } : {}) } } },
       { $sort: { userId: 1, occurredAt: 1 } },
       {
         $group: {

@@ -1148,6 +1148,8 @@ await test("Super firm list redacts PERSONAL and legacy codes but preserves SHAR
         ControllerUser,
         "find",
         (filter) => {
+          // DS43: the report first asks for the owner's own accounts by address pattern; none here.
+          if (filter?.email?.$regex) return controllerQuery(() => []);
           assert.deepEqual(filter, {
             _id: { $in: firms.map((firm) => firm.ownerUserId) },
           });

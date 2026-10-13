@@ -775,6 +775,12 @@ try {
         # renews, expired/revoked/inactive/forged ones cannot, the 30-day session cap holds,
         # anonymous refusals coalesce, the admin summary is super-admin only (scratch Mongo).
         "auth-refresh-contract",
+        # DS44 (2026-10-14): every failed sign-in recorded with its own cause and app, a moment
+        # Google could not be reached retried, limiter refusals recorded (scratch-marked).
+        "sign-in-failure-contract",
+        # DS43 (2026-10-14): the super-admin reports leave out the owner's own accounts unless
+        # asked, and say which; nothing deleted (scratch-marked).
+        "owner-accounts-contract",
         # GD30 (owner decision OD4): the GST downloader's run records - server-side validation,
         # firm A cannot read B, idempotent upsert, newer-wins, the recording switch off writes
         # nothing, the bounds, the unique key (Mongo subset, scratch-marked).
@@ -975,6 +981,8 @@ try {
         "api-not-found-contract" = "scratch-gates-api-not-found"
         "gst-captcha-route-contract" = "scratch-gates-captcha-route"
         "auth-refresh-contract" = "scratch-gates-auth-refresh"
+        "sign-in-failure-contract" = "scratch-gates-sign-in-failures"
+        "owner-accounts-contract" = "scratch-gates-owner-accounts"
         "gst-downloads-contract" = "scratch-gates-gst-downloads"
         "control-change-reason" = "scratch-gates-control-change"
     }

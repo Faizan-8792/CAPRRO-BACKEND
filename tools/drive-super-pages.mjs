@@ -439,7 +439,8 @@ try {
       check("sessions-unknown-app-shown-verbatim", unknownApps.every((p) => shown.pageText.includes(p)), unknownApps.length ? `unknown app(s) ${unknownApps.join(", ")} shown` : "no unknown app in this payload");
       const failureRows = (health.byKindReason || []).filter((r) => ["login_fail", "refresh_fail", "refresh_retry", "signed_out"].includes(r.kind));
       check("sessions-failures", failureRows.length === 0 ? shown.failures.length === 1 : shown.failures.length === failureRows.length
-        && shown.failures.every((cells, i) => cells.length === 4), `${shown.failures.length} row(s) for ${failureRows.length} payload row(s)`);
+        // DS44: Cause, What happened, Reason, App, Count.
+        && shown.failures.every((cells, i) => cells.length === 5), `${shown.failures.length} row(s) for ${failureRows.length} payload row(s)`);
       const buckets = health.sessionDurationHours || [];
       check("sessions-durations", buckets.length === 0 ? shown.durations.length === 1 : JSON.stringify(shown.durations.map((c) => n(c[1]))) === JSON.stringify(buckets.map((b) => b.count)),
         shown.durations.map((c) => c.join(" ")).join("; "));

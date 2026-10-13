@@ -65,6 +65,13 @@
         </aside>
         <div class="content">
 
+      <!-- DS43: the owner's own accounts are left out of the reports unless switched back on. The
+           server says what it left out in every report; super.js shows that, never a guess. -->
+      <div class="alert alert-secondary d-flex flex-wrap align-items-center gap-2 py-2 px-3 small" id="ownAccountsBar" role="note" hidden>
+        <span id="ownAccountsNote" class="flex-grow-1"></span>
+        <label class="admin-check mb-0"><input type="checkbox" id="includeOwnAccounts" /><span>Include my own accounts</span></label>
+      </div>
+
       <!-- DEEP SYSTEM REVIEW -->
       <section id="page-review" class="super-page" aria-labelledby="deepSystemReviewTitle">
         <div class="admin-pagehead">
@@ -485,11 +492,13 @@
           <div class="col-lg-6">
             <div class="card p-3">
               <h2 class="admin-section-title">Failed sign-ins, renewals and sign-outs</h2>
-              <p class="admin-section-lede">A renewal stopped at the maximum session age does not end the sign-in: it stays valid until it expires, and the user then signs in again.</p>
+              <p class="admin-section-lede">A renewal stopped at the maximum session age does not end the sign-in: it stays valid until it expires, and the user then signs in again. Cause sorts each row: a person's own slip (a wrong or expired code, terms not accepted), network or Google trouble that passed, too many tries, a session that ended as designed, or one that needs a look.</p>
+              <p class="admin-section-lede" id="sessionsFailuresSummary" aria-live="polite"></p>
               <div class="table-responsive">
                 <table class="table table-sm mb-0">
                   <thead>
                     <tr>
+                      <th scope="col">Cause</th>
                       <th scope="col">What happened</th>
                       <th scope="col">Reason</th>
                       <th scope="col">App</th>
@@ -983,6 +992,6 @@
     <!-- Bootstrap JS no longer needed (custom modal). Kept removed. -->
     <script src="ui/capro-ui.js?v=2"></script>
     <script src="file-tools.js"></script>
-    <script src="super.js?v=29"></script>
+    <script src="super.js?v=30"></script>
   </body>
 </html>

@@ -76,10 +76,77 @@ function superPlainError(status) {
   return "The server could not complete that request. Try again in a moment.";
 }
 
+// ─── Your own accounts (DS43) ───────────────────────────────────────
+// The server leaves the owner's own accounts out of every report unless asked (includeOwn=1) and
+// says in each answer which accounts it left out. The bar above the pages shows that answer, never
+// an assumption: it stays hidden until a report has said so, and on pages that are not reports.
+const OWN_ACCOUNTS_KEY = "caproSuperIncludeOwnAccounts";
+const OWN_ACCOUNTS_REPORT_PAGES = new Set(["overview", "controls", "analytics", "sessions", "emails", "users", "firms", "approvals", "terms"]);
+let ownAccountsNote = null;
+
+function includeOwnAccounts() {
+  try {
+    return localStorage.getItem(OWN_ACCOUNTS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function currentSuperPage() {
+  const wanted = String(location.hash || "").replace(/^#/, "");
+  return SUPER_PAGES.includes(wanted) ? wanted : SUPER_DEFAULT_PAGE;
+}
+
+function renderOwnAccountsBar(page = currentSuperPage()) {
+  const bar = qs("ownAccountsBar");
+  const text = qs("ownAccountsNote");
+  const toggle = qs("includeOwnAccounts");
+  if (!bar || !text) return;
+  const note = ownAccountsNote;
+  if (!note || !OWN_ACCOUNTS_REPORT_PAGES.has(page)) {
+    bar.hidden = true;
+    return;
+  }
+  const emails = Array.isArray(note.emails) ? note.emails.map(String) : [];
+  const count = Number(note.count) || emails.length;
+  const list = emails.length ? `: ${emails.join(", ")}` : "";
+  text.textContent = note.included
+    ? `The figures and lists on this page include your own accounts (${superCount(count)})${list}.`
+    : count
+      ? `The figures and lists on this page leave out your own accounts (${superCount(count)})${list}.`
+      : "No account matches your own, so nothing is left out.";
+  if (toggle) toggle.checked = Boolean(note.included);
+  bar.hidden = false;
+}
+
+function bindOwnAccountsToggle() {
+  const toggle = qs("includeOwnAccounts");
+  if (!toggle) return;
+  toggle.checked = includeOwnAccounts();
+  toggle.addEventListener("change", () => {
+    try {
+      localStorage.setItem(OWN_ACCOUNTS_KEY, toggle.checked ? "1" : "0");
+    } catch {
+      // Without storage the choice lasts until the page is reloaded.
+    }
+    // Every report is read again with the new choice: the page on screen now, the rest when opened.
+    superPagesRequested.clear();
+    emailsPageState.loaded = false;
+    superLoadPage(currentSuperPage());
+  });
+}
+document.addEventListener("DOMContentLoaded", bindOwnAccountsToggle);
+
 async function api(path, opts = {}) {
   const token = getToken();
   const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
   if (token) headers.Authorization = `Bearer ${token}`;
+
+  const method = opts.method || "GET";
+  // Reports are the super-admin GETs; the server ignores the flag everywhere else.
+  if (method === "GET" && path.startsWith("/super/") && includeOwnAccounts()) {
+    path += `${path.includes("?") ? "&" : "?"}includeOwn=1`;
+  }
 
   const res = await fetch(`${API_BASE}${path}`, {
     method: opts.method || "GET",
@@ -96,6 +163,10 @@ async function api(path, opts = {}) {
     err.status = res.status;
     err.data = data;
     throw err;
+  }
+  if (data && typeof data.ownAccounts === "object" && data.ownAccounts) {
+    ownAccountsNote = data.ownAccounts;
+    renderOwnAccountsBar();
   }
   return data;
 }
@@ -2459,8 +2530,55 @@ const SESSION_REASON_LABELS = {
   signed_out: "User pressed Sign out",
   restart: "Browser or app restart",
   race: "Lost a race with another renewal",
+  // DS44: why a sign-in failed.
+  no_account: "No account has this email",
+  no_otp: "No code was asked for",
+  otp_expired: "Code had expired",
+  wrong_otp: "Wrong code typed",
+  otp_locked: "Locked after five wrong codes",
+  google_unreachable: "Google could not be reached",
+  google_expired: "Google sign-in had expired",
+  google_rejected: "Google refused the desktop sign-in code",
+  audience: "Token issued to another app",
+  desktop_audience: "Desktop request with another app's token",
+  email_unverified: "Google email not verified",
+  clock: "Server clock behind Google's",
+  terms_required: "Terms not accepted",
+  terms_outdated: "Accepted an earlier version of the terms",
+  bad_request: "Incomplete request from the app",
+  not_configured: "Google sign-in not set up on the server",
   unknown: "Not recorded",
 };
+
+// DS44: what each failure comes down to, so a person's own slip is not read as a defect and a
+// defect is not lost among slips. Listed in the order the table shows them; a reason this panel
+// does not know yet (a newer server) falls into "Needs a look".
+const SESSION_FAILURE_CAUSES = [
+  { key: "look", label: "Needs a look" },
+  { key: "limit", label: "Too many tries" },
+  { key: "passing", label: "Network or Google, passed" },
+  { key: "person", label: "The person's own" },
+  { key: "ended", label: "Session ended as designed" },
+];
+const SESSION_PERSON_REASONS = new Set([
+  "wrong_otp", "otp_expired", "no_otp", "otp_locked", "no_account", "email_unverified", "terms_required",
+]);
+const SESSION_PASSING_REASONS = new Set(["google_unreachable", "network", "restart", "race"]);
+const SESSION_ENDED_REASONS = new Set(["expired", "max_age", "revoked", "inactive", "missing_user"]);
+
+function sessionFailureCause(kind, reason) {
+  if (kind === "signed_out") return reason === "signed_out" ? "person" : "ended";
+  if (kind === "refresh_retry") return "passing";
+  if (reason === "rate_limited") return "limit";
+  if (SESSION_PERSON_REASONS.has(reason)) return "person";
+  if (SESSION_PASSING_REASONS.has(reason)) return "passing";
+  if (kind === "refresh_fail" && SESSION_ENDED_REASONS.has(reason)) return "ended";
+  return "look";
+}
+
+function sessionCauseLabel(key) {
+  return SESSION_FAILURE_CAUSES.find((cause) => cause.key === key)?.label || key;
+}
 const SESSION_PLATFORM_LABELS = { extension: "Extension", desktop: "Desktop", website: "Website", unknown: "Unknown" };
 const SESSION_PLATFORMS = ["extension", "desktop", "website", "unknown"];
 const SESSION_DURATION_LABELS = {
@@ -2535,6 +2653,9 @@ function renderSessionHealth(data) {
   const count = (kind) => Number(totals[kind]) || 0;
   const explicitSignOuts = sessionSum(rows, (r) => r.kind === "signed_out" && r.reason === "signed_out");
   const otherSignOuts = count("signed_out") - explicitSignOuts;
+  const signInFailures = rows.filter((r) => r.kind === "login_fail");
+  const failedBy = (cause) => sessionSum(signInFailures, (r) => sessionFailureCause(r.kind, r.reason) === cause);
+  const failedNeedingLook = failedBy("look");
 
   const grid = qs("sessionsGrid");
   if (grid) {
@@ -2545,7 +2666,12 @@ function renderSessionHealth(data) {
         <div class="stat-sub">${escapeHtml(sub)}</div>
       </div>`;
     grid.innerHTML = [
-      card("primary", "Sign-ins", count("login_success"), `${superCount(count("login_fail"))} failed`),
+      card(
+        "primary",
+        "Sign-ins",
+        count("login_success"),
+        `${superCount(count("login_fail"))} failed${failedNeedingLook ? `, ${superCount(failedNeedingLook)} need a look` : ""}`,
+      ),
       card("success", "Renewed", count("refresh_success"), `${superCount(count("refresh_fail"))} refused by the server`),
       card("gold", "Restored after restart", count("session_restored"), "Still signed in after the browser or app restarted"),
       card("gold", "Renewals retried", count("refresh_retry"), "Network or server trouble; the session was kept"),
@@ -2600,20 +2726,37 @@ function renderSessionHealth(data) {
       : sessionEmptyRow(6, "No refused requests in this window.");
   }
 
+  const failuresSummary = qs("sessionsFailuresSummary");
+  if (failuresSummary) {
+    const parts = SESSION_FAILURE_CAUSES
+      .map((cause) => [cause, failedBy(cause.key)])
+      .filter(([, n]) => n > 0)
+      .map(([cause, n]) => `${cause.label}: ${superCount(n)}.`);
+    failuresSummary.textContent = signInFailures.length
+      ? `Failed sign-ins: ${superCount(count("login_fail"))}. ${parts.join(" ")}`
+      : "No failed sign-ins in this window.";
+  }
+
   const failuresBody = qs("sessionsFailuresBody");
   if (failuresBody) {
     const failureKinds = ["login_fail", "refresh_fail", "refresh_retry", "signed_out"];
+    const causeOrder = SESSION_FAILURE_CAUSES.map((cause) => cause.key);
+    const causeOf = (r) => causeOrder.indexOf(sessionFailureCause(r.kind, r.reason));
     const failures = rows
       .filter((r) => failureKinds.includes(r.kind))
-      .sort((a, b) => failureKinds.indexOf(a.kind) - failureKinds.indexOf(b.kind) || (Number(b.count) || 0) - (Number(a.count) || 0));
+      .sort((a, b) =>
+        causeOf(a) - causeOf(b) ||
+        failureKinds.indexOf(a.kind) - failureKinds.indexOf(b.kind) ||
+        (Number(b.count) || 0) - (Number(a.count) || 0));
     failuresBody.innerHTML = failures.length
       ? failures.map((r) => `<tr>
+          <td>${escapeHtml(sessionCauseLabel(sessionFailureCause(r.kind, r.reason)))}</td>
           <td>${escapeHtml(sessionLabel(SESSION_KIND_LABELS, r.kind))}</td>
           <td>${escapeHtml(sessionLabel(SESSION_REASON_LABELS, r.reason))}</td>
           <td>${escapeHtml(sessionLabel(SESSION_PLATFORM_LABELS, r.platform))}</td>
           <td>${superCount(r.count)}</td>
         </tr>`).join("")
-      : sessionEmptyRow(4, "No failed sign-ins, renewals or sign-outs in this window.");
+      : sessionEmptyRow(5, "No failed sign-ins, renewals or sign-outs in this window.");
   }
 
   const durationsBody = qs("sessionsDurationsBody");
@@ -3396,6 +3539,7 @@ function superShowPage(hash) {
       else a.removeAttribute("aria-current");
     });
   }
+  renderOwnAccountsBar(page);
   return page;
 }
 

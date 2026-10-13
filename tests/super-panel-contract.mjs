@@ -448,6 +448,53 @@ check(
 
 // --- Report -------------------------------------------------------
 
+// --- Sign-in health: every failure reason has words, and a cause (DS44) --------
+//
+// The server records why a sign-in failed (AuthHealthEvent's reasons). A reason the panel has
+// no label for is shown as its raw key, and one with no cause was the bug DS44 exists for: a
+// mistyped code and a forged token looked alike. So a reason added on the server without a
+// label here fails the gates, and the cause of each kind of failure is pinned.
+
+const modelText = readFileSync(join(here, "..", "src", "models", "AuthHealthEvent.js"), "utf8");
+const reasonsBlock = (modelText.match(/const AUTH_HEALTH_REASONS = Object\.freeze\(\[([\s\S]*?)\]\);/) || [])[1] || "";
+const serverReasons = [...reasonsBlock.matchAll(/^\s*"([a-z_]+)"/gm)].map((m) => m[1]);
+const labelsBlock = (superJs.match(/const SESSION_REASON_LABELS = \{([\s\S]*?)\n\};/) || [])[1] || "";
+const labelled = new Set([...labelsBlock.matchAll(/^\s*([a-z_]+):/gm)].map((m) => m[1]));
+const unlabelled = serverReasons.filter((reason) => !labelled.has(reason));
+check(
+  "every reason the server records has a label on the Sign-in health page",
+  serverReasons.length >= 30 && unlabelled.length === 0,
+  unlabelled.length ? "no label: " + unlabelled.join(", ") : serverReasons.length + " reasons"
+);
+
+const causeStart = superJs.indexOf("const SESSION_FAILURE_CAUSES");
+const causeEnd = superJs.indexOf("\nfunction sessionCauseLabel");
+const causeOf = causeStart >= 0 && causeEnd > causeStart
+  ? new Function(superJs.slice(causeStart, causeEnd) + "; return sessionFailureCause;")()
+  : null;
+check(
+  "a person's own slip, a passing trouble, a limit and a defect each have their own cause",
+  Boolean(causeOf) &&
+    causeOf("login_fail", "wrong_otp") === "person" &&
+    causeOf("login_fail", "otp_expired") === "person" &&
+    causeOf("login_fail", "terms_required") === "person" &&
+    causeOf("login_fail", "google_unreachable") === "passing" &&
+    causeOf("login_fail", "rate_limited") === "limit" &&
+    causeOf("login_fail", "invalid") === "look" &&
+    causeOf("login_fail", "clock") === "look" &&
+    causeOf("login_fail", "a_reason_from_a_newer_server") === "look" &&
+    causeOf("refresh_fail", "expired") === "ended" &&
+    causeOf("refresh_retry", "server_error") === "passing" &&
+    causeOf("signed_out", "signed_out") === "person",
+  causeOf ? "sessionFailureCause" : "SESSION_FAILURE_CAUSES block missing"
+);
+const failureHead = (superHtml.match(/<th scope="col">Cause<\/th>([\s\S]*?)<tbody id="sessionsFailuresBody">/) || [])[0] || "";
+check(
+  "the failures table heads five columns, the five cells each row renders",
+  (failureHead.match(/<th scope="col">/g) || []).length === 5 && superHtml.includes('id="sessionsFailuresSummary"'),
+  failureHead ? "Cause, What happened, Reason, App, Count" : "Cause column missing"
+);
+
 let passed = 0;
 for (const entry of checks) {
   const mark = entry.pass ? "PASS" : "FAIL";

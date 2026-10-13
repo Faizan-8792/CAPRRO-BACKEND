@@ -1,6 +1,7 @@
 import { CURRENT_TERMS } from "../config/current-terms.js";
 import TermsAcceptance from "../models/TermsAcceptance.js";
 import { SUPER_ADMIN_EMAIL } from "../middleware/authorization.middleware.js";
+import { reportScope, without } from "../services/owner-accounts.service.js";
 
 const VERSION_PATTERN = /^[A-Za-z0-9._-]+$/;
 const ISO_TIMESTAMP_PATTERN =
@@ -89,7 +90,9 @@ export async function listTermsAcceptances(req, res, next) {
       );
     }
 
-    const filter = {};
+    // DS43: the owner's own accounts are left out unless the panel asks for them.
+    const scope = await reportScope(req);
+    const filter = { ...without("userId", scope.userIds) };
     if (search) {
       const safeSearch = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       filter.email = new RegExp(safeSearch, "i");
@@ -133,6 +136,7 @@ export async function listTermsAcceptances(req, res, next) {
         totalPages: Math.max(1, Math.ceil(total / limit)),
         hasMore: skip + acceptances.length < total,
       },
+      ownAccounts: scope.note,
     });
   } catch (error) {
     return next(error);

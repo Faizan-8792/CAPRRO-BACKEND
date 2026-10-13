@@ -36,6 +36,10 @@ import ProviderUsage, {
   monthlyPeriodKey,
 } from "../models/ProviderUsage.js";
 
+// DS43: every report below leaves out the owner's own accounts unless the panel asks for them
+// (?includeOwn=1), and answers with `ownAccounts` saying what it left out.
+import { reportScope, without } from "../services/owner-accounts.service.js";
+
 const PROVIDER_USAGE_PROVIDERS = ["DEEPSEEK", "OCR_SPACE"];
 
 const SUPER_EMAIL = "saifullahfaizan786@gmail.com";
@@ -103,15 +107,20 @@ export const getUsageStats = async (req, res, next) => {
     const fourteenAgoKey = dayKey(new Date(now.getTime() - 13 * dayMs));
     const perUserWindowKey = dayKey(new Date(now.getTime() - 29 * dayMs));
 
+    const scope = await reportScope(req);
+    const notOwnUser = without("_id", scope.userIds);
+    const notOwnUsage = without("userId", scope.userIds);
+
     const [dau, wau, mau, qau, totalEverActive, totalUsers, totalApiCallsAgg] =
       await Promise.all([
-        User.countDocuments({ lastActiveAt: { $gte: oneDay } }),
-        User.countDocuments({ lastActiveAt: { $gte: sevenDay } }),
-        User.countDocuments({ lastActiveAt: { $gte: thirtyDay } }),
-        User.countDocuments({ lastActiveAt: { $gte: ninetyDay } }),
-        User.countDocuments({ lastActiveAt: { $ne: null } }),
-        User.countDocuments({}),
+        User.countDocuments({ ...notOwnUser, lastActiveAt: { $gte: oneDay } }),
+        User.countDocuments({ ...notOwnUser, lastActiveAt: { $gte: sevenDay } }),
+        User.countDocuments({ ...notOwnUser, lastActiveAt: { $gte: thirtyDay } }),
+        User.countDocuments({ ...notOwnUser, lastActiveAt: { $gte: ninetyDay } }),
+        User.countDocuments({ ...notOwnUser, lastActiveAt: { $ne: null } }),
+        User.countDocuments({ ...notOwnUser }),
         User.aggregate([
+          { $match: { ...notOwnUser } },
           { $group: { _id: null, total: { $sum: "$totalApiCalls" } } },
         ]),
       ]);
@@ -122,6 +131,7 @@ export const getUsageStats = async (req, res, next) => {
     const dailyActivity = await User.aggregate([
       {
         $match: {
+          ...notOwnUser,
           lastActiveAt: { $gte: new Date(now.getTime() - 14 * dayMs) },
         },
       },
@@ -137,7 +147,7 @@ export const getUsageStats = async (req, res, next) => {
     ]);
 
     // Top 5 most active users (highest API calls)
-    const topUsers = await User.find({ totalApiCalls: { $gt: 0 } })
+    const topUsers = await User.find({ ...notOwnUser, totalApiCalls: { $gt: 0 } })
       .select("email name role totalApiCalls lastActiveAt firmId")
       .sort({ totalApiCalls: -1 })
       .limit(5)
@@ -150,7 +160,7 @@ export const getUsageStats = async (req, res, next) => {
     // in one day counts once under each — that is the split, not a dedupe.
     const activesByClient = async (fromKey) => {
       const rows = await WorkflowUsage.aggregate([
-        { $match: { periodDay: { $gte: fromKey } } },
+        { $match: { ...notOwnUsage, periodDay: { $gte: fromKey } } },
         {
           $group: {
             _id: { client: "$client", userId: "$userId" },
@@ -171,7 +181,7 @@ export const getUsageStats = async (req, res, next) => {
 
     // Real 14-day per-day series: distinct users recorded per day per client.
     const dailyActivityByClientRows = await WorkflowUsage.aggregate([
-      { $match: { periodDay: { $gte: fourteenAgoKey } } },
+      { $match: { ...notOwnUsage, periodDay: { $gte: fourteenAgoKey } } },
       {
         $group: {
           _id: { day: "$periodDay", client: "$client" },
@@ -192,7 +202,7 @@ export const getUsageStats = async (req, res, next) => {
 
     // Per-workflow actives and volume over the 30-day window.
     const workflowBreakdown = await WorkflowUsage.aggregate([
-      { $match: { periodDay: { $gte: monthAgoKey } } },
+      { $match: { ...notOwnUsage, periodDay: { $gte: monthAgoKey } } },
       {
         $group: {
           _id: "$workflow",
@@ -218,7 +228,7 @@ export const getUsageStats = async (req, res, next) => {
     // (PLAN.md forbids employee ranking), and that is enforced by the route
     // guard, not by UI absence.
     const perUserRows = await WorkflowUsage.aggregate([
-      { $match: { periodDay: { $gte: perUserWindowKey } } },
+      { $match: { ...notOwnUsage, periodDay: { $gte: perUserWindowKey } } },
       {
         $group: {
           _id: { userId: "$userId", client: "$client" },
@@ -297,6 +307,7 @@ export const getUsageStats = async (req, res, next) => {
         perUser: perUserRows,
         perUserWindowDays: 30,
       },
+      ownAccounts: scope.note,
     });
   } catch (err) {
     next(err);
@@ -332,7 +343,10 @@ export const getProviderUsageStats = async (req, res, next) => {
 
     const dayKey = dailyPeriodKey();
     const monthKey = monthlyPeriodKey();
-    const realUserFilter = { userId: { $ne: GLOBAL_USAGE_USER_ID } };
+    // DS43: the owner's own calls are left out with the sentinel unless asked for. The caps are
+    // enforced on every call regardless; this only narrows what the card counts.
+    const scope = await reportScope(req);
+    const realUserFilter = { userId: { $nin: [GLOBAL_USAGE_USER_ID, ...scope.userIds] } };
 
     const totalsByProvider = (rows) =>
       Object.fromEntries(
@@ -382,6 +396,7 @@ export const getProviderUsageStats = async (req, res, next) => {
         thisMonth: totalsByProvider(monthlyTotalsRaw),
         topUsersToday,
       },
+      ownAccounts: scope.note,
     });
   } catch (err) {
     next(err);
@@ -406,7 +421,10 @@ export const getReminderDeliveryHealthStats = async (req, res, next) => {
     // Cheap pre-filter: only reminders that have ever recorded an attempt can
     // possibly be unhealthy. deliveryAttempts defaults to {} until the first
     // send is attempted, so this excludes reminders nobody has tried yet.
+    const scope = await reportScope(req);
     const candidates = await Reminder.find({
+      ...without("userId", scope.userIds),
+      ...without("firmId", scope.firmIds),
       isActive: true,
       deliveryAttempts: { $ne: {} },
     })
@@ -452,6 +470,7 @@ export const getReminderDeliveryHealthStats = async (req, res, next) => {
         candidatesScanTruncated: candidates.length === DELIVERY_STAT_CANDIDATE_LIMIT,
         generatedAt: now.toISOString(),
       },
+      ownAccounts: scope.note,
     });
   } catch (err) {
     next(err);
@@ -462,6 +481,15 @@ export const getReminderDeliveryHealthStats = async (req, res, next) => {
 export const getSuperDashboardStats = async (req, res, next) => {
   try {
     assertSuper(req.user);
+
+    // DS43: the owner's accounts, the firms they own, and the tasks, reminders and memberships in
+    // those firms or by those accounts are left out unless asked for.
+    const scope = await reportScope(req);
+    const notOwnUser = without("_id", scope.userIds);
+    const notOwnFirm = without("_id", scope.firmIds);
+    const notOwnTask = { ...without("firmId", scope.firmIds), ...without("createdBy", scope.userIds) };
+    const notOwnReminder = { ...without("firmId", scope.firmIds), ...without("userId", scope.userIds) };
+    const notOwnMembership = { ...without("firmId", scope.firmIds), ...without("userId", scope.userIds) };
 
     const [
       totalUsers,
@@ -475,27 +503,27 @@ export const getSuperDashboardStats = async (req, res, next) => {
       pendingAdmins,
       totalReminders,
     ] = await Promise.all([
-      User.countDocuments({}),
-      User.countDocuments({ isActive: true }),
-      User.countDocuments({ isActive: false }),
-      User.countDocuments({ role: "FIRM_ADMIN" }),
-      Firm.countDocuments({}),
-      Firm.countDocuments({ isActive: true }),
-      Task.countDocuments({}),
-      Task.countDocuments({ isActive: true }),
-      User.countDocuments(PENDING_FIRM_ADMIN_FILTER),
-      Reminder.countDocuments({}),
+      User.countDocuments({ ...notOwnUser }),
+      User.countDocuments({ ...notOwnUser, isActive: true }),
+      User.countDocuments({ ...notOwnUser, isActive: false }),
+      User.countDocuments({ ...notOwnUser, role: "FIRM_ADMIN" }),
+      Firm.countDocuments({ ...notOwnFirm }),
+      Firm.countDocuments({ ...notOwnFirm, isActive: true }),
+      Task.countDocuments({ ...notOwnTask }),
+      Task.countDocuments({ ...notOwnTask, isActive: true }),
+      User.countDocuments({ ...notOwnUser, ...PENDING_FIRM_ADMIN_FILTER }),
+      Reminder.countDocuments({ ...notOwnReminder }),
     ]);
 
     // Collaboration signals: shared firms vs personal workspaces, and total
     // active memberships (a firm with more than one member is collaborating).
     const [sharedFirms, personalFirms, totalMemberships, collaboratingFirms] =
       await Promise.all([
-        Firm.countDocuments({ kind: "SHARED" }),
-        Firm.countDocuments({ kind: "PERSONAL" }),
-        FirmMembership.countDocuments({ status: "ACTIVE" }),
+        Firm.countDocuments({ ...notOwnFirm, kind: "SHARED" }),
+        Firm.countDocuments({ ...notOwnFirm, kind: "PERSONAL" }),
+        FirmMembership.countDocuments({ ...notOwnMembership, status: "ACTIVE" }),
         FirmMembership.aggregate([
-          { $match: { status: "ACTIVE" } },
+          { $match: { ...notOwnMembership, status: "ACTIVE" } },
           { $group: { _id: "$firmId", members: { $sum: 1 } } },
           { $match: { members: { $gt: 1 } } },
           { $count: "count" },
@@ -504,7 +532,7 @@ export const getSuperDashboardStats = async (req, res, next) => {
 
     // Task status breakdown
     const taskStatusBreakdown = await Task.aggregate([
-      { $match: { isActive: true } },
+      { $match: { ...notOwnTask, isActive: true } },
       { $group: { _id: "$status", count: { $sum: 1 } } },
     ]);
 
@@ -512,17 +540,19 @@ export const getSuperDashboardStats = async (req, res, next) => {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     const recentSignups = await User.countDocuments({
+      ...notOwnUser,
       createdAt: { $gte: sevenDaysAgo },
     });
 
     // Recent tasks (last 7 days)
     const recentTasks = await Task.countDocuments({
+      ...notOwnTask,
       createdAt: { $gte: sevenDaysAgo },
     });
 
     // Service type breakdown
     const serviceBreakdown = await Task.aggregate([
-      { $match: { isActive: true } },
+      { $match: { ...notOwnTask, isActive: true } },
       { $group: { _id: "$serviceType", count: { $sum: 1 } } },
     ]);
 
@@ -561,6 +591,7 @@ export const getSuperDashboardStats = async (req, res, next) => {
           total: totalReminders,
         },
       },
+      ownAccounts: scope.note,
     });
   } catch (err) {
     next(err);
@@ -591,7 +622,8 @@ export const listAllUsers = async (req, res, next) => {
       .trim()
       .toLowerCase();
 
-    const filter = {};
+    const scope = await reportScope(req);
+    const filter = { ...without("_id", scope.userIds) };
     if (search) {
       const safe = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const rx = new RegExp(safe, "i");
@@ -695,6 +727,7 @@ export const listAllUsers = async (req, res, next) => {
         totalPages: Math.max(1, Math.ceil(total / limit)),
         hasMore: skip + users.length < total,
       },
+      ownAccounts: scope.note,
     });
   } catch (err) {
     next(err);
@@ -706,7 +739,8 @@ export const listPendingAdmins = async (req, res, next) => {
   try {
     assertSuper(req.user);
 
-    const users = await User.find(PENDING_FIRM_ADMIN_FILTER)
+    const scope = await reportScope(req);
+    const users = await User.find({ ...without("_id", scope.userIds), ...PENDING_FIRM_ADMIN_FILTER })
       .select("email name firmId createdAt firmAdminRequestedAt isActive role")
       .sort({ createdAt: -1 })
       .lean();
@@ -721,6 +755,7 @@ export const listPendingAdmins = async (req, res, next) => {
           ? "REQUESTED"
           : "LEGACY_INACTIVE",
       })),
+      ownAccounts: scope.note,
     });
   } catch (err) {
     next(err);
@@ -819,8 +854,10 @@ export const listFirms = async (req, res, next) => {
     // it is showing a capped list rather than implying it is showing all of
     // them.
     const FIRM_LIST_LIMIT = 200;
-    const totalFirms = await Firm.countDocuments({});
-    const firms = await Firm.find({})
+    const scope = await reportScope(req);
+    const firmFilter = { ...without("_id", scope.firmIds) };
+    const totalFirms = await Firm.countDocuments(firmFilter);
+    const firms = await Firm.find(firmFilter)
       .sort({ createdAt: -1 })
       .limit(FIRM_LIST_LIMIT)
       .lean();
@@ -854,6 +891,7 @@ export const listFirms = async (req, res, next) => {
       returnedFirms: enriched.length,
       truncated: totalFirms > enriched.length,
       limit: FIRM_LIST_LIMIT,
+      ownAccounts: scope.note,
     });
   } catch (err) {
     next(err);
@@ -1310,7 +1348,10 @@ export const listEmailDeliveriesForSuper = async (req, res, next) => {
     const toRaw = parseEmailDateBoundary(req.query.to, now);
     const to = new Date(Math.min(toRaw.getTime(), now.getTime()));
 
-    const filter = { sentAt: { $gte: from, $lte: to } };
+    // DS43: email to or about the owner's own accounts, and email in the firms they own, is left
+    // out unless asked for. An explicit firm or recipient search narrows within that.
+    const scope = await reportScope(req);
+    const filter = { sentAt: { $gte: from, $lte: to }, ...without("userId", scope.userIds) };
     const types = String(req.query.types || "")
       .split(",")
       .map((t) => t.trim())
@@ -1321,13 +1362,17 @@ export const listEmailDeliveriesForSuper = async (req, res, next) => {
       .map((s) => s.trim())
       .filter(Boolean);
     if (statuses.length) filter.status = { $in: statuses };
+    const firmCondition = { ...without("firmId", scope.firmIds).firmId };
     if (req.query.firmId && mongoose.isValidObjectId(req.query.firmId)) {
-      filter.firmId = req.query.firmId;
+      firmCondition.$eq = new mongoose.Types.ObjectId(String(req.query.firmId));
     }
+    if (Object.keys(firmCondition).length) filter.firmId = firmCondition;
     // Exact-address search: the client hashes the address (sha256 of the
     // lowercased trimmed value) so no raw address is sent or stored.
     const hash = String(req.query.recipientHash || "").trim().toLowerCase();
-    if (/^[0-9a-f]{64}$/.test(hash)) filter.recipientEmailHash = hash;
+    const recipientCondition = { ...without("recipientEmailHash", scope.emailHashes).recipientEmailHash };
+    if (/^[0-9a-f]{64}$/.test(hash)) recipientCondition.$eq = hash;
+    if (Object.keys(recipientCondition).length) filter.recipientEmailHash = recipientCondition;
 
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(EMAILS_MAX_LIMIT, Math.max(1, Number(req.query.limit) || EMAILS_PAGE_LIMIT));
@@ -1365,6 +1410,7 @@ export const listEmailDeliveriesForSuper = async (req, res, next) => {
       total,
       pages: Math.ceil(total / limit) || 1,
       summary: { ...summary, bounceRate, window: { from: from.toISOString(), to: to.toISOString() } },
+      ownAccounts: scope.note,
     });
   } catch (err) {
     next(err);

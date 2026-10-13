@@ -1,7 +1,13 @@
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
-import { OAuth2Client } from "google-auth-library";
 import User from "../models/User.js";
+import {
+  classifyGoogleError,
+  createGoogleVerifier,
+  isConnectError,
+  pause,
+  platformFromGoogleToken,
+} from "../services/google-identity.service.js";
 import { recordAuthHealth } from "../services/auth-health.service.js";
 import { sendOtpEmail } from "../services/email.service.js";
 import { ensurePersonalFirm } from "../services/firm-provisioning.service.js";
@@ -34,7 +40,8 @@ const GOOGLE_CLIENT_IDS = [
   .map((value) => String(value || "").trim())
   .filter(Boolean)
   .filter((value, index, values) => values.indexOf(value) === index);
-const googleClient = GOOGLE_CLIENT_IDS.length ? new OAuth2Client() : null;
+// Retries once after a passing trouble reaching Google (DS44, google-identity.service.js).
+const googleVerifier = GOOGLE_CLIENT_IDS.length ? createGoogleVerifier() : null;
 
 // Google issues installed-app ("Desktop app") clients a client secret and
 // requires it at the token endpoint. Installed apps cannot keep a secret
@@ -52,6 +59,41 @@ const CODE_VERIFIER_PATTERN = /^[A-Za-z0-9\-._~]+$/;
 const SUPER_ADMIN_EMAIL = "saifullahfaizan786@gmail.com";
 
 // ---------------- Helpers ----------------
+
+// The app a Google sign-in request comes from, for the Sign-in health record only (DS44): read
+// from the token's audience before it is verified, so it labels the event and decides nothing.
+function googlePlatformOf(body) {
+  const oidcToken = body?.idToken || body?.credential;
+  if (oidcToken) {
+    return platformFromGoogleToken(oidcToken, {
+      desktopClientId: DESKTOP_GOOGLE_CLIENT_ID,
+      clientIds: GOOGLE_CLIENT_IDS,
+    });
+  }
+  return body?.accessToken ? "extension" : "unknown";
+}
+
+// What a refusal by a rate limiter means on each sign-in route (DS44): the event the Sign-in
+// health page counts it as, and the app. null on every other route, which records nothing.
+export function signInEventOf(req) {
+  const path = String(req.originalUrl || req.url || "").split("?")[0].replace(/\/+$/, "");
+  switch (path) {
+    case "/api/auth/google":
+      return { kind: "login_fail", platform: googlePlatformOf(req.body) };
+    case "/api/auth/google/desktop-token":
+      return { kind: "login_fail", platform: "desktop" };
+    case "/api/auth/send-otp":
+    case "/api/auth/verify-otp":
+      return { kind: "login_fail", platform: "website" };
+    case "/api/auth/refresh":
+      return {
+        kind: "refresh_fail",
+        platform: req.user ? (req.user.client === "desktop" ? "desktop" : "extension") : "unknown",
+      };
+    default:
+      return null;
+  }
+}
 
 function hashOtp(otp) {
   return crypto.createHash("sha256").update(String(otp)).digest("hex");
@@ -162,6 +204,7 @@ export const verifyOtpAndLogin = async (req, res, next) => {
     const otpValue = otpCode ?? otp;
 
     if (!email || !otpValue) {
+      recordAuthHealth({ kind: "login_fail", reason: "bad_request", platform: "website" });
       return res
         .status(400)
         .json({ ok: false, error: "Email and OTP are required" });
@@ -170,14 +213,17 @@ export const verifyOtpAndLogin = async (req, res, next) => {
     const normalizedEmail = String(email).trim().toLowerCase();
     const user = await User.findOne({ email: normalizedEmail });
 
+    // DS44: each refusal below names its own reason. All of them used to be "invalid" (shown on
+    // the panel as "Token not recognised") or "rate_limited", so a mistyped code could not be
+    // told from a forged one.
     if (!user) {
-      recordAuthHealth({ kind: "login_fail", reason: "invalid", platform: "website" });
+      recordAuthHealth({ kind: "login_fail", reason: "no_account", platform: "website" });
       return res.status(404).json({ ok: false, error: "User not found" });
     }
 
     // Brute-force lockout: too many wrong OTPs → temporary hard stop.
     if (user.otpLockedUntil && user.otpLockedUntil.getTime() > Date.now()) {
-      recordAuthHealth({ kind: "login_fail", reason: "rate_limited", platform: "website", userId: user._id });
+      recordAuthHealth({ kind: "login_fail", reason: "otp_locked", platform: "website", userId: user._id });
       return res.status(429).json({
         ok: false,
         error: "Too many incorrect attempts. Please request a new OTP shortly.",
@@ -195,14 +241,14 @@ export const verifyOtpAndLogin = async (req, res, next) => {
     }
 
     if (!user.otpCodeHash || !user.otpExpiresAt) {
-      recordAuthHealth({ kind: "login_fail", reason: "invalid", platform: "website", userId: user._id });
+      recordAuthHealth({ kind: "login_fail", reason: "no_otp", platform: "website", userId: user._id });
       return res
         .status(400)
         .json({ ok: false, error: "No active OTP for this user" });
     }
 
     if (user.otpExpiresAt.getTime() < Date.now()) {
-      recordAuthHealth({ kind: "login_fail", reason: "expired", platform: "website", userId: user._id });
+      recordAuthHealth({ kind: "login_fail", reason: "otp_expired", platform: "website", userId: user._id });
       return res.status(400).json({ ok: false, error: "OTP expired" });
     }
 
@@ -219,7 +265,7 @@ export const verifyOtpAndLogin = async (req, res, next) => {
       await user.save();
       recordAuthHealth({
         kind: "login_fail",
-        reason: locked ? "rate_limited" : "invalid",
+        reason: locked ? "otp_locked" : "wrong_otp",
         platform: "website",
         userId: user._id,
       });
@@ -266,7 +312,12 @@ export const verifyOtpAndLogin = async (req, res, next) => {
 // and returns { ok, token, user } with an identical JWT payload.
 export const googleLogin = async (req, res, next) => {
   try {
-    if (!googleClient) {
+    // DS44: every refusal below records its own reason and, from the token's audience, which app
+    // it came from. All of them used to be one "invalid" from an "unknown" app.
+    const platform = googlePlatformOf(req.body);
+
+    if (!googleVerifier) {
+      recordAuthHealth({ kind: "login_fail", reason: "not_configured", platform });
       return res
         .status(500)
         .json({ ok: false, error: "Google sign-in is not configured on the server" });
@@ -282,6 +333,7 @@ export const googleLogin = async (req, res, next) => {
     const oidcToken = idToken || credential;
 
     if (!oidcToken && !accessToken) {
+      recordAuthHealth({ kind: "login_fail", reason: "bad_request", platform });
       return res
         .status(400)
         .json({ ok: false, error: "A Google ID token or access token is required" });
@@ -295,11 +347,7 @@ export const googleLogin = async (req, res, next) => {
     try {
       if (oidcToken) {
         // Web / GIS path: verify the ID token (JWT) and read its claims.
-        const ticket = await googleClient.verifyIdToken({
-          idToken: oidcToken,
-          audience: GOOGLE_CLIENT_IDS,
-        });
-        const payload = ticket.getPayload();
+        const payload = await googleVerifier.verifyIdToken(oidcToken, GOOGLE_CLIENT_IDS);
         email = payload?.email;
         emailVerified = payload?.email_verified;
         name = payload?.name;
@@ -307,9 +355,9 @@ export const googleLogin = async (req, res, next) => {
       } else {
         // Chrome extension path (chrome.identity.getAuthToken): validate the
         // access token, ensure it was minted for OUR client, then read profile.
-        const info = await googleClient.getTokenInfo(accessToken);
+        const info = await googleVerifier.getTokenInfo(accessToken);
         if (!GOOGLE_CLIENT_IDS.includes(info.aud)) {
-          recordAuthHealth({ kind: "login_fail", reason: "invalid", platform: "unknown" });
+          recordAuthHealth({ kind: "login_fail", reason: "audience", platform: "unknown" });
           return res
             .status(401)
             .json({ ok: false, error: "Google token audience mismatch" });
@@ -334,13 +382,22 @@ export const googleLogin = async (req, res, next) => {
           // Name is optional - ignore userinfo failures.
         }
       }
-    } catch {
-      recordAuthHealth({ kind: "login_fail", reason: "invalid", platform: "unknown" });
-      return res.status(401).json({ ok: false, error: "Invalid Google token" });
+    } catch (err) {
+      // A passing trouble reaching Google has already been retried once by googleVerifier.
+      const verdict = classifyGoogleError(err);
+      recordAuthHealth({ kind: "login_fail", reason: verdict.reason, platform });
+      return res.status(verdict.status).json({
+        ok: false,
+        ...(verdict.code ? { code: verdict.code } : {}),
+        error: verdict.error,
+      });
     }
 
+    // From here on the token is Google's own, so its audience names the app for certain.
+    const verifiedPlatform = googleAudience === DESKTOP_GOOGLE_CLIENT_ID ? "desktop" : "extension";
+
     if (!email || emailVerified === false) {
-      recordAuthHealth({ kind: "login_fail", reason: "invalid", platform: "unknown" });
+      recordAuthHealth({ kind: "login_fail", reason: "email_unverified", platform: verifiedPlatform });
       return res
         .status(401)
         .json({ ok: false, error: "Google account email is not verified" });
@@ -355,7 +412,9 @@ export const googleLogin = async (req, res, next) => {
       declaredClientType === "DESKTOP" &&
       googleAudience !== DESKTOP_GOOGLE_CLIENT_ID
     ) {
-      recordAuthHealth({ kind: "login_fail", reason: "invalid", platform: "unknown" });
+      // Recorded without an account: a refused desktop sign-in never looks the user up
+      // (pinned by tests/terms-acceptance-contract.mjs).
+      recordAuthHealth({ kind: "login_fail", reason: "desktop_audience", platform: "desktop" });
       return res.status(401).json({
         ok: false,
         code: "GOOGLE_DESKTOP_AUDIENCE_REQUIRED",
@@ -369,6 +428,11 @@ export const googleLogin = async (req, res, next) => {
     if (isDesktopSignIn) {
       const acceptanceError = validateCurrentTermsAcceptance(termsAcceptance);
       if (acceptanceError) {
+        recordAuthHealth({
+          kind: "login_fail",
+          reason: acceptanceError.code === "TERMS_VERSION_MISMATCH" ? "terms_outdated" : "terms_required",
+          platform: "desktop",
+        });
         return res.status(acceptanceError.status).json({
           ok: false,
           code: acceptanceError.code,
@@ -451,8 +515,12 @@ export const googleLogin = async (req, res, next) => {
 // OpenID Connect ID token is returned; Google access and refresh tokens are
 // discarded here and never persisted.
 export const googleDesktopToken = async (req, res, next) => {
+  // DS44: none of this route's refusals used to be recorded, so a desktop sign-in that failed
+  // here never reached the admin panel's Sign-in health page at all.
+  const failed = (reason) => recordAuthHealth({ kind: "login_fail", reason, platform: "desktop" });
   try {
     if (!DESKTOP_GOOGLE_CLIENT_SECRET) {
+      failed("not_configured");
       return res.status(500).json({
         ok: false,
         error: "Desktop Google sign-in is not configured on the server",
@@ -466,6 +534,7 @@ export const googleDesktopToken = async (req, res, next) => {
     const redirect = String(redirectUri || "").trim();
 
     if (!authorizationCode || authorizationCode.length > MAX_AUTHORIZATION_CODE_LENGTH) {
+      failed("bad_request");
       return res
         .status(400)
         .json({ ok: false, error: "A Google authorization code is required" });
@@ -476,21 +545,22 @@ export const googleDesktopToken = async (req, res, next) => {
       verifier.length > MAX_CODE_VERIFIER_LENGTH ||
       !CODE_VERIFIER_PATTERN.test(verifier)
     ) {
+      failed("bad_request");
       return res
         .status(400)
         .json({ ok: false, error: "A valid PKCE code verifier is required" });
     }
 
     if (!isLoopbackRedirectUri(redirect)) {
+      failed("bad_request");
       return res.status(400).json({
         ok: false,
         error: "The redirect URI must be an HTTP loopback address",
       });
     }
 
-    let googleResponse;
-    try {
-      googleResponse = await fetch(GOOGLE_TOKEN_ENDPOINT, {
+    const exchange = () =>
+      fetch(GOOGLE_TOKEN_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
@@ -502,11 +572,30 @@ export const googleDesktopToken = async (req, res, next) => {
           redirect_uri: redirect,
         }),
       });
-    } catch {
+    const unreachable = () => {
+      failed("google_unreachable");
       return res
         .status(502)
         .json({ ok: false, error: "Google could not be reached. Try again." });
+    };
+
+    let googleResponse;
+    try {
+      googleResponse = await exchange();
+    } catch (err) {
+      // A sign-in code can be used once. Only a request that never connected is safe to send
+      // again; one that failed later may already have used the code up at Google.
+      if (!isConnectError(err)) return unreachable();
+      await pause(400);
+      try {
+        googleResponse = await exchange();
+      } catch {
+        return unreachable();
+      }
     }
+
+    // Google's own trouble is not a refusal of this person's sign-in.
+    if (googleResponse.status >= 500) return unreachable();
 
     let payload = {};
     try {
@@ -516,6 +605,7 @@ export const googleDesktopToken = async (req, res, next) => {
     }
 
     if (!googleResponse.ok) {
+      failed("google_rejected");
       // Surface only Google's short description, never the secret or request body.
       const description = String(payload?.error_description || "").slice(0, 240);
       return res.status(401).json({
@@ -526,6 +616,7 @@ export const googleDesktopToken = async (req, res, next) => {
 
     const idToken = payload?.id_token;
     if (typeof idToken !== "string" || !idToken) {
+      failed("google_rejected");
       return res
         .status(502)
         .json({ ok: false, error: "Google did not return an identity token" });
