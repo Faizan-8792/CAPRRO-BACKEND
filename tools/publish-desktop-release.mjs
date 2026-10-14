@@ -25,6 +25,9 @@
 //     --notes "Fixes Windows notifications not registering on a clean install." \
 //     [--mandatory] [--min-supported-version 0.1.2] [--skip-notify] [--dry-run]
 //
+// --min-supported-version raises (or lowers) the floor below which installed apps are refused (426)
+//   until they update. Without it the floor stays at the value the live API already serves.
+//
 // --version is the AppConfig/latest.json style version (e.g. "0.1.2"), independent of whatever
 //   4-part version is baked into the .exe's own filename -- the remote filename is always just
 //   the local file's own basename, never reconstructed from --version, so there is no risk of
@@ -75,6 +78,22 @@ function readAdminToken() {
   throw new ExitRequest(2, "No admin token. Set CAPRO_SUPER_ADMIN_JWT in the environment or capro-backend/.env.");
 }
 
+// The minimum supported version the live API serves now (GET /api/app-config, public).
+async function liveMinSupportedVersion() {
+  let body = null;
+  try {
+    const res = await fetch(`${API_BASE}/api/app-config`);
+    body = res.ok ? await res.json() : null;
+  } catch {
+    body = null;
+  }
+  const floor = body?.config?.desktopRelease?.minSupportedVersion;
+  if (typeof floor !== "string" || !floor) {
+    throw new ExitRequest(2, "Could not read the live minimum supported version; pass --min-supported-version to set it explicitly.");
+  }
+  return floor;
+}
+
 // Every step runs inside main(), which RETURNS the exit code (or throws an ExitRequest): nothing here
 // calls process.exit(), which aborts Node 24 on Windows after a fetch (V32, tools/lib/exit-code.mjs).
 async function main() {
@@ -82,13 +101,22 @@ async function main() {
   const version = arg("version", { required: true });
   const notes = arg("notes", { required: true });
   const mandatory = arg("mandatory", { flag: true });
-  const minSupportedVersion = arg("min-supported-version") || version;
+  // The floor every installed app is held to: client-version.middleware.js answers 426 to a build
+  // below it. This used to default to the NEW version, so a publish without the flag cut off every
+  // older install until it updated - a forced update while "mandatory" said false (caught in the
+  // 0.1.28 dry run, 2026-10-14). Without the flag the floor now stays where it is: the value the
+  // live API serves, read before anything is uploaded. Raising it is a decision, made with the flag.
+  const minSupportedVersionArg = arg("min-supported-version");
   const skipNotify = arg("skip-notify", { flag: true });
   const dryRun = arg("dry-run", { flag: true });
 
   const VERSION_PATTERN = /^\d{1,5}(\.\d{1,5}){0,3}$/;
   if (!VERSION_PATTERN.test(version)) {
     console.error(`--version must be plain dotted digits (e.g. 0.1.2), got: ${version}`);
+    return 2;
+  }
+  if (minSupportedVersionArg && !VERSION_PATTERN.test(minSupportedVersionArg)) {
+    console.error(`--min-supported-version must be plain dotted digits (e.g. 0.1.2), got: ${minSupportedVersionArg}`);
     return 2;
   }
   if (!existsSync(exePath)) {
@@ -115,7 +143,7 @@ async function main() {
   console.log(`  installer     : ${exePath}`);
   console.log(`  size          : ${exeSize} bytes`);
   console.log(`  sha256        : ${exeSha256}`);
-  console.log(`  version       : ${version}  (minSupportedVersion: ${minSupportedVersion})`);
+  console.log(`  version       : ${version}  (minSupportedVersion: ${minSupportedVersionArg || "unchanged - the live floor, read before uploading"})`);
   console.log(`  mandatory     : ${mandatory}`);
   console.log(`  downloadUrl   : ${downloadUrl}`);
   console.log(`  notes         : ${notes}`);
@@ -129,6 +157,10 @@ async function main() {
   function fail(step, detail) {
     throw new ExitRequest(1, `\nFAILED at ${step}: ${detail}`);
   }
+
+  // Resolved before anything is uploaded, so a floor that cannot be read stops the publish whole.
+  const minSupportedVersion = minSupportedVersionArg || (await liveMinSupportedVersion());
+  console.log(`  floor         : ${minSupportedVersion}${minSupportedVersionArg ? " (from --min-supported-version)" : " (kept: the live value)"}`);
 
   // ── lever 1: the installer itself ──────────────────────────────────────────
   console.log("\n=== 1. upload the installer ===");
