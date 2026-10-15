@@ -2423,9 +2423,21 @@ if (listed.status !== 0 || listed.error) {
   // words and retries a check once; it never logs or stores a token, an email or an error message,
   // and makes no request of its own) and src/services/owner-accounts.service.js (the owner's account
   // patterns, OWNER_ACCOUNT_PATTERNS read at call time, and read-only queries; no secret, no network).
+  // 220 -> 234 on 2026-10-15 for W10 (the trial-balance import and the audit packs), all fourteen
+  // confirmed clean by this scan before the pin moved. Models with fixed vocabularies and no
+  // secret: src/models/BooksImportRow.js, AuditPackRun.js, AuditPackRow.js,
+  // AuditPackEvidenceLink.js, PartyMaster.js. Pure computation with no network, storage or
+  // configuration: src/services/audit-pack-engine/clause44.engine.js (the Clause 44 rules),
+  // src/services/books-normalization.service.js (trial-balance rows) and
+  // src/services/workbook.service.js (the xlsx writer). Database work behind the same firm
+  // scoping as every other service, no network call: src/services/books-import.service.js (signs
+  // its preview with BOOKS_IMPORT_PREVIEW_SECRET or JWT_SECRET read at call time, never logged or
+  // returned), src/services/audit-pack.service.js, src/services/audit-pack-export.service.js and
+  // src/services/audit-pack-index-readiness.service.js. HTTP glue with no secret:
+  // src/controllers/audit-pack.controller.js and src/routes/audit-pack.routes.js.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 220 && result.status === 0,
+    files.length === 234 && result.status === 0,
     result,
   );
 }

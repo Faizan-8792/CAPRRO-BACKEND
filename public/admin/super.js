@@ -305,6 +305,7 @@ const FEATURE_FLAG_KEYS = [
   "filingDashboard",
   "teamWorkload",
   "auditWorkingPapers",
+  "auditPacks",
   "dailyDigest",
   "weeklySummary",
 ];
@@ -905,6 +906,7 @@ const WORKFLOW_USAGE_LABELS = {
   downloader_run: "GST downloader runs",
   engagement: "Engagements",
   working_paper: "Working papers",
+  audit_pack: "Audit packs",
 };
 
 function renderClientSplit(u) {

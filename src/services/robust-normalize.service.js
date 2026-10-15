@@ -72,6 +72,8 @@ const DATE_FIELDS_BY_KIND = Object.freeze({
   TDS_CHALLANS: ["challanDate"],
   TDS_STATEMENTS: ["filedDate"],
   TDS_26AS: ["creditDate"],
+  // A trial balance is one balance per ledger at the year end; the year comes with the import.
+  TRIAL_BALANCE: [],
 });
 
 // Classifies ONE value's numeric-date shape without deciding an order. Used to
@@ -428,6 +430,25 @@ const HEADER_SYNONYMS = Object.freeze({
     deducteeName: ["deductee name", "name", "deductor name"],
     sectionCode: ["section code", "section", "tds section", "sec"],
   },
+  // W10 AP5: a trial balance exported from Tally, Busy or Zoho, or kept by hand. A plain
+  // "Particulars | Debit | Credit" sheet's Debit and Credit ARE the closing balances, so the bare
+  // words map there; transactions need their own words. Tally's two-row heading ("Closing Balance"
+  // over "Debit" and "Credit") reaches here already merged by import-shape.service.js into
+  // "Closing Balance Debit" and "Closing Balance Credit".
+  BOOKS: {
+    ledgerName: ["particulars", "ledger", "ledger name", "ledger account", "name of ledger", "account name", "account head", "ledger head"],
+    groupName: ["group", "group name", "under", "parent group", "primary group", "account group", "schedule head"],
+    openingBalance: ["opening balance", "opening", "op balance", "opening bal"],
+    openingDebit: ["opening balance debit", "opening debit", "opening dr"],
+    openingCredit: ["opening balance credit", "opening credit", "opening cr"],
+    debitTotal: ["transactions debit", "debit transactions", "total debits", "debit total", "debit turnover"],
+    creditTotal: ["transactions credit", "credit transactions", "total credits", "credit total", "credit turnover"],
+    closingBalance: ["closing balance", "closing", "cl balance", "closing bal", "net balance", "balance"],
+    // Not the bare two-letter "Dr" and "Cr": one edit apart from each other and from "Sr", they
+    // would let the near-match fallback map a serial-number column as a balance.
+    closingDebit: ["closing balance debit", "closing debit", "closing dr", "debit balance", "dr balance", "debit"],
+    closingCredit: ["closing balance credit", "closing credit", "closing cr", "credit balance", "cr balance", "credit"],
+  },
 });
 
 function levenshtein(a, b, max = 2) {
@@ -459,6 +480,7 @@ const KIND_DICTIONARIES = Object.freeze({
   GSTR1_SUMMARY: "GST_SUMMARY",
   ECREDIT_LEDGER: "GST_SUMMARY",
   CLIENTS: "CLIENTS",
+  TRIAL_BALANCE: "BOOKS",
 });
 
 function dictionaryForKind(kind) {

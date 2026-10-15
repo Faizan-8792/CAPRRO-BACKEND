@@ -123,6 +123,11 @@ export const PINNED_FIRM_SCOPED = Object.freeze([
   // TdsImportRow - firmId, a client's ledger names and balances, no identity field and no
   // append-only guard - so the derived PURGE applies: the firm's imported books, deleted with it.
   "BooksImportRow",
+  // AuditPackRun, AuditPackRow, AuditPackEvidenceLink and PartyMaster added 2026-10-15 with the
+  // audit packs (W10 AP6-AP8). Firm work product with no append-only guard, deleted with the firm
+  // (derived PURGE). A run and a row carry the deciding user's id and a party the confirming user's
+  // id; purging the document removes that link with it, as it does for Task.createdBy.
+  "AuditPackRun", "AuditPackRow", "AuditPackEvidenceLink", "PartyMaster",
 ]);
 
 /**

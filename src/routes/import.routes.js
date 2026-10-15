@@ -1,8 +1,10 @@
 import { Router } from "express";
 import {
+  commitMappedBooksImport,
   commitMappedGstImport,
   commitMappedTdsImport,
   convertGstr2bImport,
+  showBooksImportBatch,
   previewMappedImport,
   suggestImportMappingForFile,
   showGstImportBatch,
@@ -21,10 +23,13 @@ import {
 import { requireFeatureFlag } from "../middleware/rollout.middleware.js";
 import { GST_IMPORT_KINDS } from "../models/ImportRow.js";
 import { TDS_IMPORT_KINDS } from "../models/TdsImportRow.js";
+import { BOOKS_IMPORT_KINDS } from "../models/BooksImportRow.js";
 
 const router = Router();
 const requireGstReconciliation = requireFeatureFlag("gstReconciliation");
 const requireTdsHealth = requireFeatureFlag("tdsHealth");
+// W10 AP5: the trial balance belongs to the audit packs and is switched on with them.
+const requireAuditPacks = requireFeatureFlag("auditPacks");
 
 function requireImportPreviewFeature(req, res, next) {
   const kind = String(req.body?.kind || "").toUpperCase();
@@ -33,6 +38,9 @@ function requireImportPreviewFeature(req, res, next) {
   }
   if (TDS_IMPORT_KINDS.includes(kind)) {
     return requireTdsHealth(req, res, next);
+  }
+  if (BOOKS_IMPORT_KINDS.includes(kind)) {
+    return requireAuditPacks(req, res, next);
   }
   return next();
 }
@@ -51,6 +59,8 @@ router.post("/preview", requireImportPreviewFeature, previewMappedImport);
 // caller supplied and returns nothing about any stored record, but it is still import work.
 router.post("/suggest-mapping", requireImportPreviewFeature, suggestImportMappingForFile);
 router.post("/gstr2b/convert", requireGstReconciliation, convertGstr2bImport);
+router.post("/:sourceHash/books-commit", requireAuditPacks, commitMappedBooksImport);
+router.get("/books/:id", requireAuditPacks, showBooksImportBatch);
 router.post("/:sourceHash/tds-commit", requireTdsHealth, commitMappedTdsImport);
 router.get("/tds/:id/errors", requireTdsHealth, showTdsImportErrors);
 router.get("/tds/:id", requireTdsHealth, showTdsImportBatch);

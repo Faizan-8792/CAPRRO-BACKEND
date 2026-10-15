@@ -228,6 +228,12 @@ export const updateFeatureFlags = async (req, res, next) => {
         await import("../services/audit-working-paper-index-readiness.service.js");
       await assertAuditWorkingPaperIndexesReady();
     }
+    // W10: the audit packs cannot be switched on over a database missing their unique keys.
+    if (featureFlags.auditPacks === true) {
+      const { assertAuditPackStorageReady } =
+        await import("../services/audit-pack-index-readiness.service.js");
+      await assertAuditPackStorageReady();
+    }
 
     const versionIncrements = {};
     if (Object.prototype.hasOwnProperty.call(featureFlags, "tdsHealth")) {
@@ -249,6 +255,10 @@ export const updateFeatureFlags = async (req, res, next) => {
     ) {
       versionIncrements["featureFlagVersions.auditWorkingPapers"] = 1;
       update["featureFlagPublicationFences.auditWorkingPapers"] = randomUUID();
+    }
+    if (Object.prototype.hasOwnProperty.call(featureFlags, "auditPacks")) {
+      versionIncrements["featureFlagVersions.auditPacks"] = 1;
+      update["featureFlagPublicationFences.auditPacks"] = randomUUID();
     }
     update.updatedBy = req.user.id;
     const flagSummary = Object.keys(DEFAULT_FEATURE_FLAGS)

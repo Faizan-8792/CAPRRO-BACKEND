@@ -11,6 +11,8 @@ const IMPORT_KINDS = Object.freeze([
   "TDS_CHALLANS",
   "TDS_STATEMENTS",
   "TDS_26AS",
+  // W10 AP5 (2026-10-15): the firm's own books. Context is the client and the financial year.
+  "TRIAL_BALANCE",
 ]);
 const TDS_STATEMENT_TYPES = Object.freeze(["24Q", "26Q", "27Q", "27EQ"]);
 const TDS_QUARTERS = Object.freeze(["Q1", "Q2", "Q3", "Q4"]);

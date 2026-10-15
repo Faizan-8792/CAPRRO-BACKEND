@@ -12,7 +12,8 @@ async function featureState(flagName) {
       flagName === "tdsHealth" ||
       flagName === "noticeCases" ||
       flagName === "assuranceEngagements" ||
-      flagName === "auditWorkingPapers",
+      flagName === "auditWorkingPapers" ||
+      flagName === "auditPacks",
   });
 }
 

@@ -21,6 +21,8 @@ export const DEFAULT_FEATURE_FLAGS = Object.freeze({
   filingDashboard: false,
   teamWorkload: false,
   auditWorkingPapers: false,
+  // W10 (2026-10-15): the trial-balance import and the audit packs.
+  auditPacks: false,
   dailyDigest: false,
   weeklySummary: false,
 });
@@ -102,6 +104,7 @@ const AppConfigSchema = new mongoose.Schema(
       filingDashboard: { type: Boolean, default: false },
       teamWorkload: { type: Boolean, default: false },
       auditWorkingPapers: { type: Boolean, default: false },
+      auditPacks: { type: Boolean, default: false },
       dailyDigest: { type: Boolean, default: false },
       weeklySummary: { type: Boolean, default: false },
     },
@@ -110,12 +113,14 @@ const AppConfigSchema = new mongoose.Schema(
       noticeCases: { type: Number, min: 0, default: 0 },
       assuranceEngagements: { type: Number, min: 0, default: 0 },
       auditWorkingPapers: { type: Number, min: 0, default: 0 },
+      auditPacks: { type: Number, min: 0, default: 0 },
     },
     featureFlagPublicationFences: {
       tdsHealth: { type: String, trim: true, maxlength: 80, default: "" },
       noticeCases: { type: String, trim: true, maxlength: 80, default: "" },
       assuranceEngagements: { type: String, trim: true, maxlength: 80, default: "" },
       auditWorkingPapers: { type: String, trim: true, maxlength: 80, default: "" },
+      auditPacks: { type: String, trim: true, maxlength: 80, default: "" },
     },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     // T3 (.kiro/PLAN.md): durable state for

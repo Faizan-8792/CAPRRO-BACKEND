@@ -47,6 +47,8 @@ export const WORKFLOW_USAGE_WORKFLOWS = Object.freeze([
   // whether they were used. Counted separately so each surface's use can be read on its own.
   "engagement",
   "working_paper",
+  // W10 AP8: the audit packs and their trial-balance import.
+  "audit_pack",
 ]);
 
 const WorkflowUsageSchema = new mongoose.Schema(

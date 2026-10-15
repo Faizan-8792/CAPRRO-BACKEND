@@ -26,6 +26,7 @@ import tdsHealthRoutes from "./routes/tds-health.routes.js";
 import operationsRoutes from "./routes/operations.routes.js";
 import caseRoutes from "./routes/case.routes.js";
 import engagementRoutes from "./routes/engagement.routes.js";
+import auditPackRoutes from "./routes/audit-pack.routes.js";
 import firmOperationsRoutes from "./routes/firm-operations.routes.js";
 import digestRoutes from "./routes/digest.routes.js";
 import portalMapRoutes from "./routes/portal-map.routes.js";
@@ -617,6 +618,8 @@ app.use("/api/tds-health", tdsHealthRoutes);
 app.use("/api/operations", operationsRoutes);
 app.use("/api/cases", caseRoutes);
 app.use("/api/engagements", engagementRoutes);
+// W10: audit packs (Clause 44 first). Behind the auditPacks flag; mounted before the catch-all.
+app.use("/api/audit-packs", auditPackRoutes);
 app.use("/api/digests", digestRoutes);
 // GD28: the GST downloader's signed portal map. Mounted before the /api
 // catch-all below, which would otherwise answer every one of its paths.

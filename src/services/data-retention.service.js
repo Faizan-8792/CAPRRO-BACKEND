@@ -154,6 +154,16 @@ export const RETENTION_CLASSIFICATION = Object.freeze({
   // erasure-classification.js); firm-scoped rows therefore do not outlive their firm.
   WorkflowUsage: RETENTION_CLASSES.RETAIN,
   WorkspaceOperation: RETENTION_CLASSES.SELF_EXPIRING,
+  // W10 (2026-10-15): the trial-balance import and the audit packs. All RETAIN, for the reason
+  // TdsImportRow and the TDS health records are: they are the firm's working papers for a tax audit
+  // (the imported books, the computed pack, every person's decision on it, and the suppliers' GST
+  // statuses people set), kept as long as the firm keeps its records, and purged with the firm on
+  // erasure (erasure-classification.js). None has a TTL, so none is called SELF_EXPIRING.
+  BooksImportRow: RETENTION_CLASSES.RETAIN,
+  AuditPackRun: RETENTION_CLASSES.RETAIN,
+  AuditPackRow: RETENTION_CLASSES.RETAIN,
+  AuditPackEvidenceLink: RETENTION_CLASSES.RETAIN,
+  PartyMaster: RETENTION_CLASSES.RETAIN,
 });
 
 // Named so the skip is visible in the run report and in logs, not only in PLAN.md.

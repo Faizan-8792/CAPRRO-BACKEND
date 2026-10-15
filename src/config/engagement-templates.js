@@ -10,8 +10,14 @@ const ENGAGEMENT_STATUSES = Object.freeze([
   "ARCHIVED",
 ]);
 
+// The order both clients show. W10 AP2 (2026-10-15): the audit season of a small practice is the
+// statutory audit, the tax audit (Form 3CD) and the GST annual return (GSTR-9/9C), so those three
+// come first; the last two did not exist before. GST_AUDIT stays: it is support for a departmental
+// GST audit, a different engagement from the annual return.
 const ENGAGEMENT_TYPES = Object.freeze([
   "STATUTORY_AUDIT",
+  "TAX_AUDIT",
+  "GST_ANNUAL_RETURN",
   "INTERNAL_AUDIT",
   "STOCK_AUDIT",
   "BANK_AUDIT",
@@ -104,6 +110,83 @@ function defineTemplate({
 }
 
 const ENGAGEMENT_TEMPLATES = {
+  TAX_AUDIT: defineTemplate({
+    engagementType: "TAX_AUDIT",
+    title: "Tax Audit (Form 3CD)",
+    purpose: "Plan, prepare, review and record a tax audit under section 44AB: Form 3CA or 3CB with the Form 3CD particulars, prepared from the books and signed by the auditor. Nothing is uploaded and no opinion is generated.",
+    checklist: [
+      item("acceptance", "Acceptance, independence and the member's tax-audit count", "INTAKE"),
+      item("applicability", "Section 44AB applicability: turnover, receipts and presumptive-scheme test", "SCOPE"),
+      item("books_received", "Trial balance, ledgers and bank statements received", "PLANNING"),
+      item("prior_year", "Previous year's Form 3CD and its observations", "PLANNING"),
+      item("clause_44", "Clause 44: expenditure by the supplier's GST status", "FIELDWORK"),
+      item("clause_22_43bh", "Clause 22: MSME payments and section 43B(h)", "FIELDWORK"),
+      item("clause_26", "Clause 26: statutory dues under section 43B", "FIELDWORK"),
+      item("clause_31", "Clause 31: loans, deposits and cash receipts", "FIELDWORK"),
+      item("clause_34", "Clause 34: TDS and TCS compliance against TRACES", "FIELDWORK"),
+      item("clause_21", "Clause 21: disallowances, including cash payments under section 40A(3)", "FIELDWORK"),
+      item("other_clauses", "Remaining Form 3CD clauses", "FIELDWORK"),
+      item("observations", "Qualifications and observations for Form 3CA or 3CB", "REVIEW"),
+    ],
+    milestones: [
+      item("books_received", "Books and records received", "PLANNING"),
+      item("workings_complete", "Clause workings complete", "FIELDWORK"),
+      item("review_complete", "Partner review complete", "REVIEW"),
+      item("uploaded_by_auditor", "Uploaded on the income-tax portal by the auditor", "CLOSURE"),
+    ],
+    clientRequests: [
+      item("books", "Trial balance, ledgers, bank statements and fixed asset register", "PLANNING"),
+      item("gst_returns", "GST returns for the year (GSTR-1, GSTR-3B, GSTR-2B)", "PLANNING"),
+      item("tds_records", "TDS returns, challans and Form 26AS or AIS", "PLANNING"),
+      item("msme_status", "Udyam registration of MSME suppliers", "PLANNING"),
+      item("loan_confirmations", "Loan and deposit confirmations", "PLANNING", false),
+      item("representations", "Management representation letter", "DELIVERY"),
+    ],
+    deliverables: [
+      item("form_3cd_record", "Human-approved Form 3CA/3CB and 3CD record", "DELIVERY"),
+      item("clause_workings", "Clause workings file", "DELIVERY"),
+      item("acknowledgement", "Upload acknowledgement reference", "CLOSURE", false),
+    ],
+    findingCategories: ["COMPLIANCE", "DISCLOSURE", "RECONCILIATION", "DOCUMENT_GAP", "OTHER"],
+    safetyBoundaries: [
+      "Form 3CA or 3CB and Form 3CD are prepared, signed and uploaded by the auditor; nothing is uploaded automatically.",
+      "Clause figures computed by CA PRO stay drafts until a person confirms them.",
+    ],
+  }),
+  GST_ANNUAL_RETURN: defineTemplate({
+    engagementType: "GST_ANNUAL_RETURN",
+    title: "GST Annual Return (GSTR-9/9C)",
+    purpose: "Reconcile the year's books with GSTR-1, GSTR-3B and GSTR-2B, and prepare GSTR-9 and, where turnover requires it, the GSTR-9C reconciliation statement for a person to file. Nothing is filed automatically.",
+    checklist: [
+      item("applicability", "GSTR-9 and GSTR-9C applicability for the year's turnover", "SCOPE"),
+      item("returns_collected", "The year's GSTR-1, GSTR-3B and GSTR-2B for every GSTIN", "PLANNING"),
+      item("books_received", "Trial balance and GST ledgers received", "PLANNING"),
+      item("turnover_reconciled", "Turnover reconciled: books, GSTR-1 and GSTR-3B", "FIELDWORK"),
+      item("itc_reconciled", "ITC reconciled: books, GSTR-3B and GSTR-2B (table 8A)", "FIELDWORK"),
+      item("cross_year_items", "Previous year's transactions reported this year, and the reverse", "FIELDWORK"),
+      item("differences", "Unreconciled differences and their reasons", "REVIEW"),
+    ],
+    milestones: [
+      item("returns_collected", "Returns and books collected", "PLANNING"),
+      item("reconciliation_complete", "Reconciliation complete", "FIELDWORK"),
+      item("review_complete", "Review complete", "REVIEW"),
+      item("filed_by_person", "Filed on the GST portal by a person", "CLOSURE"),
+    ],
+    clientRequests: [
+      item("books", "Trial balance, GST ledgers and purchase register", "PLANNING"),
+      item("explanations", "Explanations for unreconciled differences", "RESPONSE"),
+    ],
+    deliverables: [
+      item("gstr9_working", "Human-approved GSTR-9 working", "DELIVERY"),
+      item("gstr9c_working", "Human-approved GSTR-9C reconciliation statement", "DELIVERY", false),
+      item("differences_note", "Differences and reasons note", "DELIVERY", false),
+    ],
+    findingCategories: ["RECONCILIATION", "COMPLIANCE", "DOCUMENT_GAP", "OTHER"],
+    safetyBoundaries: [
+      "GSTR-9 and GSTR-9C are filed on the GST portal by a person; nothing is filed automatically.",
+      "A difference is never forced to zero; it stays unexplained until a person records the reason.",
+    ],
+  }),
   STATUTORY_AUDIT: defineTemplate({
     engagementType: "STATUTORY_AUDIT",
     title: "Statutory Audit",

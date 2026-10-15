@@ -221,21 +221,75 @@ export function classifyNonDataRow(row, headers, dataRowLabels = new Set()) {
   return null;
 }
 
+// Words that name the SIDE or the MEASURE of a column under a wider heading: Tally and Busy print
+// "Closing Balance" across two cells with "Debit" and "Credit" beneath. Kept separate from the
+// synonym dictionaries on purpose, so recognising a sub-heading never changes which row is chosen
+// as the heading row for any other kind of file.
+const SUB_HEADING_WORDS = new Set(["debit", "credit", "dr", "cr", "amount", "quantity", "qty", "rate", "value"]);
+
+// W10 AP5 (2026-10-15): a TWO-ROW heading. The row under the heading row is read as part of the
+// heading only when ALL of these hold, which no data row of any kind meets:
+//   - it has at least two filled cells, and none of them looks like data (a figure, a date, a GSTIN);
+//   - every filled cell is a recognised heading or a sub-heading word (Debit, Credit, Amount ...);
+//   - at least one of its filled cells sits under a blank cell of the heading row - the space a
+//     merged cell like "Closing Balance" leaves when it spans two columns.
+export function isSubHeadingRow(parentRow, childRow) {
+  const parent = (Array.isArray(parentRow) ? parentRow : []).map((cell) => String(cell ?? "").trim());
+  const child = (Array.isArray(childRow) ? childRow : []).map((cell) => String(cell ?? "").trim());
+  const filled = child.map((cell, index) => ({ cell, index })).filter(({ cell }) => cell !== "");
+  if (filled.length < 2) return false;
+  if (filled.some(({ cell }) => looksLikeData(cell))) return false;
+  const known = (cell) => {
+    const normalized = compare(cell);
+    return SUB_HEADING_WORDS.has(normalized) || ALL_SYNONYMS.includes(normalized);
+  };
+  if (!filled.every(({ cell }) => known(cell))) return false;
+  return filled.some(({ index }) => !parent[index]);
+}
+
+// "Particulars | Closing Balance | (blank)" over "(blank) | Debit | Credit" reads as
+// "Particulars | Closing Balance Debit | Closing Balance Credit": a parent's name carries right
+// across the blank cells its merged span left, and each column adds its own word.
+export function mergeHeadingRows(parentRow, childRow) {
+  const parent = (Array.isArray(parentRow) ? parentRow : []).map((cell) => String(cell ?? "").trim());
+  const child = (Array.isArray(childRow) ? childRow : []).map((cell) => String(cell ?? "").trim());
+  const width = Math.max(parent.length, child.length);
+  const merged = [];
+  let carried = "";
+  for (let index = 0; index < width; index += 1) {
+    const own = parent[index] || "";
+    const sub = child[index] || "";
+    if (own) carried = own;
+    const base = own || (sub ? carried : "");
+    merged.push(base && sub ? `${base} ${sub}` : base || sub);
+    if (!sub && !own) carried = "";
+  }
+  return merged;
+}
+
 // Applies the shape decisions to a parsed grid. Returns the header names, the
 // data rows padded to the header width, and the notes describing every
 // adjustment made.
 export function shapeTable(rows, { dataRowLabels = new Set() } = {}) {
   const grid = Array.isArray(rows) ? rows : [];
   const headerRowIndex = findHeaderRow(grid);
-  const { headers, keptColumns, notes } = normalizeHeaderRow(grid[headerRowIndex] || []);
+  const twoRowHeading = isSubHeadingRow(grid[headerRowIndex] || [], grid[headerRowIndex + 1] || []);
+  const headingCells = twoRowHeading
+    ? mergeHeadingRows(grid[headerRowIndex] || [], grid[headerRowIndex + 1] || [])
+    : grid[headerRowIndex] || [];
+  const { headers, keptColumns, notes } = normalizeHeaderRow(headingCells);
 
   if (headerRowIndex > 0) {
     notes.unshift({ code: "PREAMBLE_ROWS_SKIPPED", count: headerRowIndex });
   }
+  if (twoRowHeading) {
+    // Reported, like every other reshaping: the person sees that two rows were read as one heading.
+    notes.push({ code: "TWO_ROW_HEADING_MERGED", rows: [headerRowIndex + 1, headerRowIndex + 2] });
+  }
 
   const dataRows = [];
   const skipped = [];
-  for (let index = headerRowIndex + 1; index < grid.length; index += 1) {
+  for (let index = headerRowIndex + (twoRowHeading ? 2 : 1); index < grid.length; index += 1) {
     const row = (grid[index] || []).slice(0, keptColumns);
     while (row.length < keptColumns) row.push("");
     const nonData = classifyNonDataRow(row, headers, dataRowLabels);

@@ -22,6 +22,10 @@ import {
   DIGEST_JOB_KIND,
   processDigestDeliveryJob,
 } from "./digest.service.js";
+import {
+  AUDIT_PACK_JOB_KIND,
+  processAuditPackJob,
+} from "./audit-pack.service.js";
 
 const DEFAULT_BATCH_SIZE = 5;
 const MAX_BATCH_SIZE = 20;
@@ -30,6 +34,8 @@ const JOB_HANDLERS = new Map([
   [GST_RECONCILIATION_JOB_KIND, processGstReconciliationJob],
   [TDS_HEALTH_JOB_KIND, processTdsHealthJob],
   [DIGEST_JOB_KIND, processDigestDeliveryJob],
+  // W10 AP8: an audit pack's rows, computed and verified before the run is published.
+  [AUDIT_PACK_JOB_KIND, processAuditPackJob],
 ]);
 
 function boundedBatchSize(value) {

@@ -71,8 +71,8 @@ check(
   (() => {
     const expected = ["import", "gst_recon", "tds_health", "notice_case", "compliance_calendar",
       "task", "digest_view", "audit_review", "export", "ocr_consent", "downloader_run",
-      // AP1: engagements and working papers, each counted on its own.
-      "engagement", "working_paper"];
+      // AP1: engagements and working papers, each counted on its own. AP8: the audit packs.
+      "engagement", "working_paper", "audit_pack"];
     return expected.every((w) => WORKFLOW_USAGE_WORKFLOWS.includes(w)) &&
       WORKFLOW_USAGE_CLIENTS.length === 2 &&
       WORKFLOW_USAGE_CLIENTS.includes("desktop") &&

@@ -13,6 +13,12 @@ import {
   getTdsImportErrors,
 } from "../services/tds-import.service.js";
 import { TDS_IMPORT_KINDS } from "../services/tds-normalization.service.js";
+import {
+  commitBooksImport,
+  createBooksImportPreviewAuthorization,
+  getBooksImportBatch,
+} from "../services/books-import.service.js";
+import { BOOKS_IMPORT_KINDS } from "../models/BooksImportRow.js";
 
 const PREVIEW_FIELDS = new Set([
   "kind",
@@ -41,6 +47,18 @@ const COMMIT_FIELDS = new Set([
   "clientId",
   "gstin",
   "period",
+  "previewToken",
+]);
+// W10 AP5: a trial balance commits with its client and financial year; no date order (it has no
+// dates) and no GST or TDS context.
+const BOOKS_COMMIT_FIELDS = new Set([
+  "kind",
+  "text",
+  "mapping",
+  "delimiter",
+  "sourceName",
+  "clientId",
+  "financialYear",
   "previewToken",
 ]);
 const TDS_COMMIT_FIELDS = new Set([
@@ -121,6 +139,17 @@ export async function previewMappedImport(req, res, next) {
       && !preview.dateOrder.resolved;
     if (dateOrderUnanswered) {
       // authorization stays {}; no commitToken is issued.
+    } else if (BOOKS_IMPORT_KINDS.includes(preview.kind)) {
+      // Checked before the GST branch on purpose: that branch is the fallback for every kind it
+      // does not name, so a books kind reaching it would be authorised as a GST import.
+      authorization = createBooksImportPreviewAuthorization({
+        sourceHash: preview.sourceHash,
+        kind: preview.kind,
+        mapping: preview.mapping,
+        delimiter: preview.delimiter,
+        clientId: req.body.clientId,
+        financialYear: req.body.financialYear,
+      });
     } else if (TDS_IMPORT_KINDS.includes(preview.kind)) {
       authorization = createTdsImportPreviewAuthorization({
         sourceHash: preview.sourceHash,
@@ -191,6 +220,43 @@ export async function commitMappedGstImport(req, res, next) {
       batch: result.batch,
       requestId: req.id || "",
     });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function commitMappedBooksImport(req, res, next) {
+  try {
+    validateBody(req.body, BOOKS_COMMIT_FIELDS);
+    const result = await commitBooksImport({
+      firmId: req.user.firmId,
+      actorUserId: req.user.id,
+      requestId: req.id || "",
+      sourceHash: req.params.sourceHash,
+      sourceName: req.body.sourceName,
+      kind: req.body.kind,
+      text: req.body.text,
+      mapping: req.body.mapping,
+      delimiter: requestDelimiter(req.body.delimiter),
+      previewToken: req.body.previewToken,
+      clientId: req.body.clientId,
+      financialYear: req.body.financialYear,
+    });
+    return res.status(result.replayed ? 200 : 201).json({
+      ok: true,
+      replayed: result.replayed,
+      batch: result.batch,
+      requestId: req.id || "",
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function showBooksImportBatch(req, res, next) {
+  try {
+    const batch = await getBooksImportBatch({ firmId: req.user.firmId, batchId: req.params.id });
+    return res.json({ ok: true, batch, requestId: req.id || "" });
   } catch (error) {
     return next(error);
   }

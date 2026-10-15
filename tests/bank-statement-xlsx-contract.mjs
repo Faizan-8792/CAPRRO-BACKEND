@@ -32,4 +32,18 @@ const transactions = result.bytes.toString("latin1");
 assert.ok(transactions.includes("t=\"inlineStr\""), "untrusted text must be inline strings");
 assert.ok(transactions.includes(">=UPI/ABC &lt;stores&gt;<"), "formula-like narration must remain literal escaped text");
 assert.ok(BANK_STATEMENT_TRANSACTION_HEADERS.every((header) => transactions.includes(header)));
-console.log("bank-statement xlsx contract passed: 9/9");
+
+// W10 AP9 sweep (2026-10-15): money is grouped the Indian way with the one format code every CA PRO
+// workbook shares, and the package's main part carries the officeDocument relationship type.
+const { INDIAN_RUPEE_FORMAT, readWorkbookParts } = await import("../src/services/workbook.service.js");
+const parts = readWorkbookParts(result.bytes);
+const styles = parts.get("xl/styles.xml").toString("utf8");
+const escapedFormat = INDIAN_RUPEE_FORMAT
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+assert.ok(styles.includes(`<numFmt numFmtId="165" formatCode="${escapedFormat}"/>`), "money must use the shared Indian-grouped format");
+assert.ok(!styles.includes("#,##0.00;[Red]"), "the Western money format must be gone");
+assert.ok(
+  parts.get("_rels/.rels").toString("utf8").includes('Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"'),
+  "the root relationship must be typed officeDocument",
+);
+console.log("bank-statement xlsx contract passed: 12/12");

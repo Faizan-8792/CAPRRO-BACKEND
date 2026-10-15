@@ -750,6 +750,19 @@ try {
         # their own name through the real app, and the dashboard's engagement counts with the
         # owner's accounts left out (Mongo, scratch-marked; no AI key, no provider call).
         "audit-usage-tracking-contract",
+        # W10 AP2: Tax audit and GST annual return engagement types, the three season types first,
+        # the Windows app's type list equal to the server's (Mongo for the live create and list).
+        "engagement-season-types-contract",
+        # W10 AP5: the trial-balance import - Tally's two-row heading, the closing-balance layouts,
+        # and preview, commit and replay through the real app (Mongo, scratch-marked).
+        "books-import-contract",
+        # W10 AP7: the Clause 44 engine against hand-worked fixtures (pure; no database).
+        "audit-pack-engine-contract",
+        # W10 AP6/AP8/AP9: pack runs through the real app and worker, decisions, the party master
+        # and the export (Mongo, scratch-marked; no AI key).
+        "audit-pack-route-contract",
+        # W10 AP9: the shared workbook writer - exact paise, Indian grouping, no formulas (pure).
+        "workbook-indian-grouping-contract",
         # IMPROVEMENT-PLAN-V2-2026-09-28 Part 1: email observability. Pins the single
         # transport path through services/mailer.js, the suppression gate, the
         # forward-only webhook transitions, the Svix signature scheme, and the
@@ -981,6 +994,9 @@ try {
         "usage-stats-contract" = "scratch-gates-usage-stats"
         "workflow-usage-contract" = "scratch-gates-workflow-usage"
         "audit-usage-tracking-contract" = "scratch-gates-audit-usage"
+        "engagement-season-types-contract" = "scratch-gates-season-types"
+        "books-import-contract" = "scratch-gates-books-import"
+        "audit-pack-route-contract" = "scratch-gates-audit-pack"
         "email-delivery-contract" = "scratch-gates-email-delivery"
         "super-emails-controller-contract" = "scratch-gates-super-emails"
         "api-not-found-contract" = "scratch-gates-api-not-found"

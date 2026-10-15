@@ -13,6 +13,12 @@ import {
   summarizeTdsRows,
 } from "./tds-normalization.service.js";
 import {
+  BOOKS_IMPORT_KINDS,
+  BOOKS_IMPORT_SPECS,
+  normalizeBooksImportRow,
+  summarizeBooksRows,
+} from "./books-normalization.service.js";
+import {
   DATE_FIELDS_BY_KIND,
   DATE_ORDER_STATUS,
   classifyDateColumn,
@@ -72,6 +78,8 @@ const IMPORT_SPECS = Object.freeze({
   },
   ...GST_IMPORT_SPECS,
   ...TDS_IMPORT_SPECS,
+  // W10 AP5: the firm's own books - a trial balance today.
+  ...BOOKS_IMPORT_SPECS,
 });
 
 // How many lines the delimiter vote looks at. Enough to see past any title block a
@@ -291,6 +299,19 @@ function validateRequest({ kind, text, mapping, delimiter, dateOrder }) {
       { fields: missingRequired }
     );
   }
+  // A kind whose figure can come from either of two column layouts (a trial balance's closing
+  // balance as one signed column, or as a Debit and a Credit column) names the layouts; one must be
+  // mapped in full. Half a layout - a Debit column without its Credit - would read every balance on
+  // the other side as nil.
+  if (Array.isArray(spec.requiredOneOf) &&
+    !spec.requiredOneOf.some((group) => group.every((field) => mapping[field]))) {
+    const fields = [...new Set(spec.requiredOneOf.flat())];
+    throw importRequestError(
+      `Map one of: ${spec.requiredOneOf.map((group) => group.join(" and ")).join(", or ")}`,
+      "IMPORT_MAPPING_MISSING_FIELDS",
+      { fields }
+    );
+  }
 
   const fieldsBySourceHeader = new Map();
   for (const [field, sourceHeader] of Object.entries(mapping)) {
@@ -332,6 +353,7 @@ export function parseMappedImport({ kind, text, mapping, delimiter = null, dateO
   const warnings = [];
   const normalizedRows = [];
   const isTdsImport = TDS_IMPORT_KINDS.includes(normalizedKind);
+  const isBooksImport = BOOKS_IMPORT_KINDS.includes(normalizedKind);
 
   // Resolve the date order ONCE for the whole file, before parsing a single row.
   // This is the root fix: the old per-row guess in parseFlexibleDateIso is
@@ -414,9 +436,13 @@ export function parseMappedImport({ kind, text, mapping, delimiter = null, dateO
       return;
     }
 
-    const normalized = isTdsImport
-      ? normalizeTdsImportRow(normalizedKind, mapped, { dateOrder: rowDateOrder })
-      : normalizeGstImportRow(normalizedKind, mapped, { dateOrder: rowDateOrder });
+    // Each family normalises its own kinds; a kind no family claims never reaches this point
+    // (validateRequest refuses it), so nothing unknown is ever read as GST.
+    const normalized = isBooksImport
+      ? normalizeBooksImportRow(normalizedKind, mapped)
+      : isTdsImport
+        ? normalizeTdsImportRow(normalizedKind, mapped, { dateOrder: rowDateOrder })
+        : normalizeGstImportRow(normalizedKind, mapped, { dateOrder: rowDateOrder });
     normalized.errors.forEach((error) => errors.push({ row: displayRow, ...error }));
     normalized.warnings.forEach((warning) => warnings.push({ row: displayRow, ...warning }));
     normalizedRows.push({ row: displayRow, values: normalized.values });
@@ -463,6 +489,8 @@ export function parseMappedImport({ kind, text, mapping, delimiter = null, dateO
   const validRows = normalizedRows.filter((row) => !invalidRows.has(row.row));
   const financialTotals = normalizedKind === "CLIENTS"
     ? null
+    : isBooksImport
+      ? summarizeBooksRows(normalizedKind, validRows)
     : isTdsImport
       ? summarizeTdsRows(normalizedKind, validRows)
       : normalizedKind === "GSTR3B_SUMMARY" && gstr3bControl?.claimed
@@ -580,6 +608,14 @@ export function suggestImportMapping({ kind, text, delimiter = null }) {
 
   const required = spec.required || [];
   const missingRequired = required.filter((field) => !suggestedMapping[field]);
+  // A kind that takes one of two layouts (a trial balance's closing balance) is complete only when
+  // one layout was found whole; otherwise the first layout's missing columns are named.
+  if (Array.isArray(spec.requiredOneOf) &&
+    !spec.requiredOneOf.some((group) => group.every((field) => suggestedMapping[field]))) {
+    const partial = spec.requiredOneOf.find((group) => group.some((field) => suggestedMapping[field]))
+      || spec.requiredOneOf[0];
+    missingRequired.push(...partial.filter((field) => !suggestedMapping[field]));
+  }
 
   return {
     kind: normalizedKind,

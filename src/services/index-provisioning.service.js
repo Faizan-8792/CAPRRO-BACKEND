@@ -23,6 +23,7 @@ import { REQUIRED_ENGAGEMENT_INDEXES } from "./engagement-index-readiness.servic
 import { REQUIRED_PROVIDER_USAGE_INDEXES } from "./provider-usage-index-readiness.service.js";
 import { REQUIRED_WORKFLOW_USAGE_INDEXES } from "./workflow-usage-index-readiness.service.js";
 import { REQUIRED_EMAIL_INDEXES } from "./email-index-readiness.service.js";
+import { REQUIRED_AUDIT_PACK_INDEXES } from "./audit-pack-index-readiness.service.js";
 import { REQUIRED_GST_STORAGE_INDEXES } from "./gst-storage-readiness.service.js";
 
 // Taking the model set from the same requirement lists startup asserts against
@@ -56,6 +57,9 @@ const REQUIREMENT_GROUPS = Object.freeze([
   // else would ever create them -- so a fresh deployment, or a restore into a new cluster, would
   // come up with GST permanently answering 503. See the export's own comment for the reproduction.
   ["gstStorage", REQUIRED_GST_STORAGE_INDEXES],
+  // W10 (2026-10-15): the trial-balance import and the audit packs. Provisioned every boot, flag or
+  // no flag, so switching auditPacks on never meets a database without its unique keys.
+  ["auditPacks", REQUIRED_AUDIT_PACK_INDEXES],
 ]);
 
 function isNamespaceMissing(error) {
