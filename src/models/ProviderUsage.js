@@ -40,6 +40,30 @@ const PROVIDER_LABELS = Object.freeze({
   OCR_SPACE: "OCR.space",
 });
 
+// AP3 (2026-10-15): the feature each DeepSeek call serves. `calls` was one number for every AI
+// feature at once, so a month of zero calls could not say WHICH features went unused, and a
+// busy month could not say which one was busy. callDeepSeek requires one of these names; the
+// count lands on the caller's own daily row (so the admin report can leave the owner's accounts
+// out, like every other count) and never takes part in the quota. A name is a feature, never
+// content: no document text, client, amount or identifier is ever recorded here.
+export const DEEPSEEK_OPERATIONS = Object.freeze([
+  "audit_classify",
+  "audit_insights",
+  "audit_insights_coverage",
+  "reminder_draft",
+  "standard_guidance",
+  "working_paper_analysis",
+  "case_extraction",
+  "case_analysis",
+  "case_draft",
+  "audit_pack_draft",
+  "self_test",
+]);
+
+const OPERATION_COUNTER_FIELDS = Object.fromEntries(
+  DEEPSEEK_OPERATIONS.map((name) => [name, { type: Number, min: 0 }]),
+);
+
 const ProviderUsageSchema = new mongoose.Schema(
   {
     userId: {
@@ -67,6 +91,9 @@ const ProviderUsageSchema = new mongoose.Schema(
       immutable: true,
     },
     calls: { type: Number, default: 0, min: 0 },
+    // AP3: per-feature counts, on daily rows only, written by recordOperation below. No default,
+    // so the weekly, monthly and provider-wide rows never carry the field at all.
+    operations: { type: new mongoose.Schema(OPERATION_COUNTER_FIELDS, { _id: false }), default: undefined },
   },
   { timestamps: true },
 );
@@ -211,6 +238,29 @@ ProviderUsageSchema.statics.reserveProviderCall = async function reserveProvider
   }
 
   return { allowed: true };
+};
+
+// AP3: count one call against the feature it served, on the caller's own daily row. Called by the
+// choke point only after reserveProviderCall allowed the call, so a refused call is never counted
+// here either. Best-effort by contract: a failure to count must never fail or delay the call
+// itself, so errors are reported to the caller as `false`, never thrown.
+ProviderUsageSchema.statics.recordOperation = async function recordOperation({
+  userId,
+  provider,
+  operation,
+  now = new Date(),
+}) {
+  if (!DEEPSEEK_OPERATIONS.includes(operation)) return false;
+  try {
+    await this.updateOne(
+      { userId, provider, periodKey: dailyPeriodKey(now) },
+      { $inc: { [`operations.${operation}`]: 1 } },
+      { upsert: true },
+    );
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 const ProviderUsage = mongoose.model("ProviderUsage", ProviderUsageSchema);

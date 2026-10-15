@@ -43,6 +43,10 @@ export const WORKFLOW_USAGE_WORKFLOWS = Object.freeze([
   "export",
   "ocr_consent",
   "downloader_run",
+  // AP1 (2026-10-15): engagements and working papers were never counted, so nobody could tell
+  // whether they were used. Counted separately so each surface's use can be read on its own.
+  "engagement",
+  "working_paper",
 ]);
 
 const WorkflowUsageSchema = new mongoose.Schema(

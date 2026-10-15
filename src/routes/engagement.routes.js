@@ -25,15 +25,25 @@ import {
   requireFirmWriteAccess,
 } from "../middleware/authorization.middleware.js";
 import { requireFeatureFlag } from "../middleware/rollout.middleware.js";
+import { trackWorkflow } from "../middleware/workflow-usage.middleware.js";
 
 const router = Router();
 const requireAuditWorkingPapers = requireFeatureFlag("auditWorkingPapers");
+
+// AP1 (2026-10-15): engagements and working papers were never counted. Each request is counted
+// under exactly one name, chosen by its path, so the two surfaces can be read apart.
+const countWorkingPaper = trackWorkflow("working_paper");
+const countEngagement = trackWorkflow("engagement");
+const isWorkingPaperPath = (path) =>
+  path === "/working-papers" || path.startsWith("/working-papers/");
 
 router.use(
   authRequired,
   requireFirmMember,
   requireFirmWriteAccess,
-  requireFeatureFlag("assuranceEngagements")
+  requireFeatureFlag("assuranceEngagements"),
+  (req, res, next) =>
+    (isWorkingPaperPath(req.path) ? countWorkingPaper : countEngagement)(req, res, next)
 );
 
 router.post("/working-papers", requireAuditWorkingPapers, createWorkingPaper);

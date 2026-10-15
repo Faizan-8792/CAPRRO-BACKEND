@@ -224,6 +224,7 @@ export async function refineAuditClassification(req, res, next) {
       temperature: 0,
       model: classifierModel,
       userId: req.user.id,
+      operation: "audit_classify",
     });
 
     if (!r.ok) {
@@ -1683,6 +1684,7 @@ export async function generateInsights(req, res, next) {
       maxAttemptsPerModel: 1,
       model: INSIGHTS_MODEL,
       userId: req.user.id,
+      operation: "audit_insights",
     });
 
     if (!r.ok) {
@@ -1826,6 +1828,7 @@ export async function generateInsights(req, res, next) {
           maxAttemptsPerModel: 1,
           model: INSIGHTS_MODEL,
           userId: req.user.id,
+          operation: "audit_insights_coverage",
         });
 
         if (coverageResponse.ok) {
@@ -2001,6 +2004,7 @@ Goal: remind them documents have been pending for ${daysPending}+ days and reque
       maxTokens: 400,
       temperature: 0.6,
       userId: req.user.id,
+      operation: "reminder_draft",
     });
 
     if (!r.ok || !r.content?.trim()) {
@@ -2089,6 +2093,7 @@ Keep it 120-200 words, professional and specific to Indian practice. If "${code}
       timeoutMs: 30000,
       model: INSIGHTS_MODEL,
       userId: req.user.id,
+      operation: "standard_guidance",
     });
 
     if (!r.ok || !r.content?.trim()) {

@@ -2,6 +2,7 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { authRequired } from "../middleware/auth.middleware.js";
+import { trackWorkflow } from "../middleware/workflow-usage.middleware.js";
 import {
   refineAuditClassification,
   generateInsights,
@@ -11,7 +12,10 @@ import {
 
 const router = Router();
 
-router.use(authRequired);
+// AP1 (2026-10-15): "audit_review" sat in the workflow enum from the start, but no route recorded
+// it, so the admin panel could never show whether anyone used audit assistance. Every route here
+// now counts once per answered request (a refused 4xx, including the limiter's 429, is not use).
+router.use(authRequired, trackWorkflow("audit_review"));
 
 // O10: cheap second line of defense on every DeepSeek-backed route here, on top
 // of (not instead of) the per-user/monthly/global quota enforced inside

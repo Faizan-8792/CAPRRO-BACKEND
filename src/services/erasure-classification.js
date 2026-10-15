@@ -119,6 +119,10 @@ export const PINNED_FIRM_SCOPED = Object.freeze([
   // FilingStatusObservation added 2026-10-04 with the filing board (decision D4, GD33): firmId and
   // no identity field, so the same derived PURGE - deleted with the firm.
   "FilingStatusObservation",
+  // BooksImportRow added 2026-10-15 with the trial-balance import (W10 AP5). Same shape as
+  // TdsImportRow - firmId, a client's ledger names and balances, no identity field and no
+  // append-only guard - so the derived PURGE applies: the firm's imported books, deleted with it.
+  "BooksImportRow",
 ]);
 
 /**

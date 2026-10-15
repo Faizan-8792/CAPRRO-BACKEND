@@ -746,6 +746,10 @@ try {
         # deliberate trackWorkflow wiring on the four previously invisible workflows,
         # and the model's atomic-upsert behaviour (Mongo subset, scratch-marked).
         "workflow-usage-contract",
+        # W10 AP1 (2026-10-15): audit, engagement and working-paper requests each counted under
+        # their own name through the real app, and the dashboard's engagement counts with the
+        # owner's accounts left out (Mongo, scratch-marked; no AI key, no provider call).
+        "audit-usage-tracking-contract",
         # IMPROVEMENT-PLAN-V2-2026-09-28 Part 1: email observability. Pins the single
         # transport path through services/mailer.js, the suppression gate, the
         # forward-only webhook transitions, the Svix signature scheme, and the
@@ -976,6 +980,7 @@ try {
         "resend-webhook-e2e" = "scratch-gates-webhook-e2e"
         "usage-stats-contract" = "scratch-gates-usage-stats"
         "workflow-usage-contract" = "scratch-gates-workflow-usage"
+        "audit-usage-tracking-contract" = "scratch-gates-audit-usage"
         "email-delivery-contract" = "scratch-gates-email-delivery"
         "super-emails-controller-contract" = "scratch-gates-super-emails"
         "api-not-found-contract" = "scratch-gates-api-not-found"

@@ -1428,6 +1428,7 @@ function deepSeekGroup(runtime, requestedBy) {
           // and in no danger of tripping a per-user quota meant to catch a
           // runaway retry loop, not one deliberate low-volume admin check.
           userId: requestedBy,
+          operation: "self_test",
         });
       } catch {
         runtime.deepSeekReview = {

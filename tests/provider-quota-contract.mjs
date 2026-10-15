@@ -144,20 +144,35 @@ function installFakeProviderUsageStore() {
     return null;
   };
 
-  ProviderUsage.updateOne = async (filter, update) => {
+  ProviderUsage.updateOne = async (filter, update, options) => {
     const key = usageKey(filter.userId, filter.provider, filter.periodKey);
-    const existing = rows.get(key);
+    let existing = rows.get(key);
     const gt = filter.calls?.$gt;
+    // AP3: recordOperation's upsert on the caller's daily row. Same Mongo semantics: a missing row
+    // is created (calls 0) only when the update asks for an upsert.
+    if (!existing && options?.upsert) {
+      existing = { calls: 0 };
+      rows.set(key, existing);
+    }
     if (!existing) return { matchedCount: 0, modifiedCount: 0 };
     if (gt !== undefined && !(existing.calls > gt)) {
       return { matchedCount: 0, modifiedCount: 0 };
     }
     existing.calls += update?.$inc?.calls ?? 0;
+    for (const [field, by] of Object.entries(update?.$inc || {})) {
+      if (!field.startsWith("operations.")) continue;
+      existing.operations = existing.operations || {};
+      const name = field.slice("operations.".length);
+      existing.operations[name] = (existing.operations[name] || 0) + by;
+    }
     return { matchedCount: 1, modifiedCount: 1 };
   };
 
   return {
     peek: (userId, provider, periodKey) => rows.get(usageKey(userId, provider, periodKey))?.calls ?? 0,
+    peekOperations: (userId, provider, periodKey) =>
+      rows.get(usageKey(userId, provider, periodKey))?.operations ?? {},
+    rowCount: () => rows.size,
     findOneAndUpdateCalls,
     readCalls,
   };
@@ -476,9 +491,9 @@ function installFakeProviderUsageStore() {
 // B1/B2 — a user already at their daily cap gets a quota-shaped refusal;
 // the refused call never reaches the provider and never increments further.
 {
-  installFakeProviderUsageStore();
+  const store = installFakeProviderUsageStore();
   const userId = "b1b1b1b1b1b1b1b1b1b1b1b1";
-  const callArgs = { system: "s", prompt: "p", userId };
+  const callArgs = { system: "s", prompt: "p", userId, operation: "audit_classify" };
 
   const first = await callDeepSeek(callArgs);
   const second = await callDeepSeek(callArgs);
@@ -493,6 +508,74 @@ function installFakeProviderUsageStore() {
   check(
     "B1: the refused call never reached the provider (fetch call count did not increase)",
     fetchCallCount === countAfterTwo,
+  );
+  // AP3: the feature count follows `calls` exactly - the two allowed calls, not the refused third.
+  const operations = store.peekOperations(userId, "DEEPSEEK", dailyPeriodKey());
+  check(
+    "B5 (AP3): each allowed call counts once against its feature on the caller's daily row; the refused call does not",
+    operations.audit_classify === 2 && Object.keys(operations).length === 1,
+    JSON.stringify(operations),
+  );
+  check(
+    "B5 (AP3): counting the feature leaves the quota counter itself unchanged (2 of 2)",
+    store.peek(userId, "DEEPSEEK", dailyPeriodKey()) === 2,
+    `calls=${store.peek(userId, "DEEPSEEK", dailyPeriodKey())}`,
+  );
+}
+
+// B6 (AP3) - the operation is required like userId: a call site that names no feature, or a name
+// not on the list, fails loudly before anything is reserved or sent.
+for (const [label, operation] of [["no operation", undefined], ["an unknown operation", "free_text_review"]]) {
+  const store = installFakeProviderUsageStore();
+  const beforeFetchCount = fetchCallCount;
+  let threw = null;
+  try {
+    await callDeepSeek({ system: "s", prompt: "p", userId: "b6b6b6b6b6b6b6b6b6b6b6b6", operation });
+  } catch (error) {
+    threw = error;
+  }
+  check(
+    `B6 (AP3): a call with ${label} throws a TypeError naming the operation list`,
+    threw instanceof TypeError && /DEEPSEEK_OPERATIONS/.test(threw.message || ""),
+    threw ? threw.message : "did not throw",
+  );
+  check(
+    `B6 (AP3): with ${label}, nothing was reserved and the provider was never called`,
+    store.rowCount() === 0 && fetchCallCount === beforeFetchCount,
+  );
+}
+
+// B7 (AP3) - every call site in src names its feature. A new call site without one would throw at
+// run time (B6); this finds it before it ships.
+{
+  const { readdirSync, readFileSync: read, statSync } = await import("node:fs");
+  const { join: joinPath } = await import("node:path");
+  const { fileURLToPath: toPath } = await import("node:url");
+  const srcRoot = toPath(new URL("../src/", import.meta.url));
+  const files = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      const full = joinPath(dir, name);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (name.endsWith(".js")) files.push(full);
+    }
+  };
+  walk(srcRoot);
+  let sites = 0;
+  const missing = [];
+  for (const file of files) {
+    const text = read(file, "utf8");
+    const re = /await callDeepSeek\(\{([\s\S]*?)\n\s*\}\);/g;
+    let match;
+    while ((match = re.exec(text))) {
+      sites += 1;
+      if (!/\boperation:\s*"[a-z_]+"/.test(match[1])) missing.push(file.slice(srcRoot.length));
+    }
+  }
+  check(
+    "B7 (AP3): every callDeepSeek call site in src passes an operation name",
+    sites >= 10 && missing.length === 0,
+    `sites=${sites} missing=${missing.join(", ") || "none"}`,
   );
 }
 
@@ -527,7 +610,7 @@ function installFakeProviderUsageStore() {
 
   const freshUserId = "b4b4b4b4b4b4b4b4b4b4b4b4";
   const beforeFetchCount = fetchCallCount;
-  const result = await callDeepSeek({ system: "s", prompt: "p", userId: freshUserId });
+  const result = await callDeepSeek({ system: "s", prompt: "p", userId: freshUserId, operation: "audit_insights" });
 
   check(
     "B4: a first-ever call from a fresh user (0/2 daily, 0/3 monthly) is still refused once the global ceiling is spent",
@@ -807,7 +890,8 @@ if (process.env.MONGODB_URI) {
 
     const beforeFetchCount = fetchCallCount;
     const results = await Promise.all(
-      Array.from({ length: 20 }, () => callDeepSeek({ system: "s", prompt: "p", userId })),
+      Array.from({ length: 20 }, () =>
+        callDeepSeek({ system: "s", prompt: "p", userId, operation: "standard_guidance" })),
     );
     const succeeded = results.filter((r) => r.ok === true).length;
     const refused = results.filter((r) => r.ok === false && /quota/i.test(r.reason || "")).length;
@@ -833,6 +917,13 @@ if (process.env.MONGODB_URI) {
       "E1 (LIVE MongoDB): the stored daily counter reads exactly the cap (2), never exceeded by the race",
       finalDoc?.calls === 2,
       `stored calls=${finalDoc?.calls}`,
+    );
+    // AP3: against the real model and index, the race counts the feature exactly once - the one
+    // allowed call - on the same daily row (the seed went through reserveProviderCall alone).
+    check(
+      "E3 (AP3, LIVE MongoDB): the 20-call race counts standard_guidance exactly once on the daily row",
+      finalDoc?.operations?.standard_guidance === 1,
+      `operations=${JSON.stringify(finalDoc?.operations ?? null)}`,
     );
 
     // E2 — persistence survives a restart. There is no in-memory counter

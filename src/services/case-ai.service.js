@@ -147,6 +147,7 @@ SOURCE:\n${source.slice(0, 90000)}`,
     maxTokens: 2200,
     temperature: 0,
     userId,
+    operation: "case_extraction",
   });
   const parsed = ensureJson(result);
   const proposals = [];
@@ -208,6 +209,7 @@ CONFIRMED_FACTS:\n${stableJson(facts)}\nSOURCE_TEXT:\n${source}`,
     maxTokens: 2600,
     temperature: 0.1,
     userId,
+    operation: "case_analysis",
   });
   const parsed = ensureJson(result);
   const output = {};
@@ -333,6 +335,7 @@ CONFIRMED_FACTS:\n${stableJson(facts)}\nVERIFIED_REFERENCES:\n${referenceBlock}\
     maxTokens: 4000,
     temperature: 0.15,
     userId,
+    operation: "case_draft",
   });
   const parsed = ensureJson(result);
   const content = boundedText(parsed.content, 250000, { required: true, label: "AI draft content" });

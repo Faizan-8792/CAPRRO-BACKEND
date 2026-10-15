@@ -70,7 +70,9 @@ check(
   "enum discipline: workflows cover the eleven plan surfaces; clients are desktop/extension only",
   (() => {
     const expected = ["import", "gst_recon", "tds_health", "notice_case", "compliance_calendar",
-      "task", "digest_view", "audit_review", "export", "ocr_consent", "downloader_run"];
+      "task", "digest_view", "audit_review", "export", "ocr_consent", "downloader_run",
+      // AP1: engagements and working papers, each counted on its own.
+      "engagement", "working_paper"];
     return expected.every((w) => WORKFLOW_USAGE_WORKFLOWS.includes(w)) &&
       WORKFLOW_USAGE_CLIENTS.length === 2 &&
       WORKFLOW_USAGE_CLIENTS.includes("desktop") &&
@@ -98,6 +100,27 @@ for (const [file, expected] of Object.entries(routeFiles)) {
   check(
     `${file}: auth still answers via authRequiredWithoutUsageTracking (write-free identity preserved)`,
     file === "case.routes.js" ? source.includes("authRequiredWithoutUsageTracking") : Boolean(chainMatch),
+  );
+}
+
+// AP1 (2026-10-15): the audit and engagement routes. They authenticate with authRequired (their
+// requests do count toward lastActiveAt), so the write-free check above does not apply to them;
+// what is pinned is that each family records under its own name, and that the engagement router
+// picks exactly one of its two names per request by path.
+{
+  const audit = readFileSync(join(root, "src/routes/audit.routes.js"), "utf8");
+  check(
+    "audit.routes.js: every route counts as audit_review, mounted with authRequired",
+    /router\.use\(\s*authRequired\s*,\s*trackWorkflow\("audit_review"\)\s*\)/.test(audit),
+  );
+  const engagement = readFileSync(join(root, "src/routes/engagement.routes.js"), "utf8");
+  check(
+    "engagement.routes.js: carries trackWorkflow(\"engagement\") and trackWorkflow(\"working_paper\")",
+    engagement.includes('trackWorkflow("engagement")') && engagement.includes('trackWorkflow("working_paper")'),
+  );
+  check(
+    "engagement.routes.js: one router-level chooser decides the name by the /working-papers path",
+    /isWorkingPaperPath\(req\.path\)\s*\?\s*countWorkingPaper\s*:\s*countEngagement/.test(engagement),
   );
 }
 

@@ -899,10 +899,12 @@ const WORKFLOW_USAGE_LABELS = {
   compliance_calendar: "Compliance calendar",
   task: "Tasks",
   digest_view: "Digest view",
-  audit_review: "Audit and assurance",
+  audit_review: "Audit assistance",
   export: "Exports",
   ocr_consent: "OCR (consented)",
   downloader_run: "GST downloader runs",
+  engagement: "Engagements",
+  working_paper: "Working papers",
 };
 
 function renderClientSplit(u) {
@@ -1354,6 +1356,42 @@ function renderProviderUsageTopUsers(rows) {
     .join("");
 }
 
+// AP3: which feature made each DeepSeek call. Names match DEEPSEEK_OPERATIONS in
+// src/models/ProviderUsage.js; an unknown name is shown as sent rather than hidden.
+const DEEPSEEK_OPERATION_LABELS = {
+  audit_classify: "Audit topic classification",
+  audit_insights: "Suggested audit points",
+  audit_insights_coverage: "Suggested audit points, coverage pass",
+  reminder_draft: "Reminder draft",
+  standard_guidance: "Standard lookup",
+  working_paper_analysis: "Working-paper analysis",
+  case_extraction: "Notice extraction",
+  case_analysis: "Case analysis",
+  case_draft: "Case reply draft",
+  audit_pack_draft: "Audit pack drafts",
+  self_test: "Deep system review",
+  unattributed: "Before features were recorded",
+};
+
+function renderDeepSeekByOperation(byOperation) {
+  const month = byOperation?.thisMonth || {};
+  const today = byOperation?.today || {};
+  const names = Object.keys(month).filter((name) => (Number(month[name]) || 0) > 0 || (Number(today[name]) || 0) > 0);
+  if (!names.length) {
+    return `<div class="admin-empty-line">No AI calls this month.</div>`;
+  }
+  names.sort((a, b) => (Number(month[b]) || 0) - (Number(month[a]) || 0));
+  return names
+    .map(
+      (name) => `
+        <div class="provider-top__row">
+          <div class="provider-top__who">${escapeHtml(DEEPSEEK_OPERATION_LABELS[name] || name)}</div>
+          <div class="provider-top__calls">${superCount(Number(month[name]) || 0)} <span class="provider-figure__caption">this month · ${superCount(Number(today[name]) || 0)} today</span></div>
+        </div>`,
+    )
+    .join("");
+}
+
 async function loadProviderUsageStats() {
   const statusEl = qs("providerUsageStatus");
   const gridEl = qs("providerUsageGrid");
@@ -1386,6 +1424,9 @@ async function loadProviderUsageStats() {
                 </div>
                 <div class="provider-top__heading">Top users today</div>
                 ${renderProviderUsageTopUsers(topUsers)}
+                ${provider === "DEEPSEEK" && u.deepSeekByOperation ? `
+                <div class="provider-top__heading">Calls by feature</div>
+                ${renderDeepSeekByOperation(u.deepSeekByOperation)}` : ""}
               </div>
             </div>`;
         })
@@ -1543,6 +1584,11 @@ async function loadDashboardStats() {
         <div class="stat-value">${superCount(s.reminders.total)}</div>
         <div class="stat-sub">Scheduled in total</div>
       </div>
+      ${s.engagements ? `<div class="stat-card stat-primary">
+        <div class="stat-label">Engagements</div>
+        <div class="stat-value">${superCount(s.engagements.total)}</div>
+        <div class="stat-sub">${superCount(s.workingPapers?.total ?? 0)} working papers</div>
+      </div>` : ""}
       <div class="stat-card stat-primary">
         <div class="stat-label">Last 7 days</div>
         <div class="stat-value">${superCount(s.users.recentSignups)}</div>

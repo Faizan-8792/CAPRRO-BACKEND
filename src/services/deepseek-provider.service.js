@@ -1,4 +1,4 @@
-import ProviderUsage from "../models/ProviderUsage.js";
+import ProviderUsage, { DEEPSEEK_OPERATIONS } from "../models/ProviderUsage.js";
 
 const DEEPSEEK_URL =
   process.env.DEEPSEEK_URL || "https://api.deepseek.com/chat/completions";
@@ -209,6 +209,7 @@ async function callDeepSeek({
   model,
   maxAttemptsPerModel = 2,
   userId,
+  operation,
 }) {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) {
@@ -220,6 +221,13 @@ async function callDeepSeek({
   // optional param with a default could.
   if (!userId) {
     throw new Error("callDeepSeek requires userId for provider-usage metering");
+  }
+  // AP3: required for the same reason as userId. Without it the admin panel can say that AI was
+  // used but not which feature used it, and a feature nobody uses looks the same as one in use.
+  if (!DEEPSEEK_OPERATIONS.includes(operation)) {
+    throw new TypeError(
+      `callDeepSeek requires an operation from DEEPSEEK_OPERATIONS (got ${JSON.stringify(operation)})`,
+    );
   }
   // Quota check happens BEFORE the paid call, and the reservation it makes is
   // only released (see ProviderUsage.reserveProviderCall) if a later tier in the
@@ -235,6 +243,9 @@ async function callDeepSeek({
   if (!reservation.allowed) {
     return { ok: false, reason: reservation.reason };
   }
+  // AP3: counted exactly where `calls` is - an allowed call, attempted whether or not it succeeds.
+  // recordOperation never throws; a failure to count does not stop the call.
+  await ProviderUsage.recordOperation({ userId, provider: "DEEPSEEK", operation });
   const attemptsPerModel = Math.max(1, Number(maxAttemptsPerModel) || 1);
   const primary = model || DEEPSEEK_MODEL;
   const models = [primary];

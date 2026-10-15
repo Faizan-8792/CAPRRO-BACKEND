@@ -6,6 +6,8 @@ import Firm from "../models/Firm.js";
 import Task from "../models/Task.js";
 import Reminder from "../models/Reminder.js";
 import FirmMembership from "../models/FirmMembership.js";
+import Engagement from "../models/Engagement.js";
+import AuditWorkingPaper from "../models/AuditWorkingPaper.js";
 import WorkflowUsage from "../models/WorkflowUsage.js";
 import EmailDelivery from "../models/EmailDelivery.js";
 import EmailSuppression from "../models/EmailSuppression.js";
@@ -31,6 +33,7 @@ import { deliveryHealth } from "./reminder.controller.js";
 import AppConfig from "../models/AppConfig.js";
 import { publishPortalMap } from "../services/portal-map.service.js";
 import ProviderUsage, {
+  DEEPSEEK_OPERATIONS,
   GLOBAL_USAGE_USER_ID,
   dailyPeriodKey,
   monthlyPeriodKey,
@@ -389,12 +392,48 @@ export const getProviderUsageStats = async (req, res, next) => {
       ]),
     );
 
+    // AP3: DeepSeek calls by the feature that made them, from the same per-user DAILY rows the
+    // totals above read (so the owner's accounts are left out the same way). "This month" sums the
+    // month's daily rows. Calls made before features were recorded have no feature; they are
+    // reported as `unattributed` rather than spread across features or dropped.
+    const operationGroup = Object.fromEntries([
+      ["_id", null],
+      ...DEEPSEEK_OPERATIONS.map((name) => [name, { $sum: { $ifNull: [`$operations.${name}`, 0] } }]),
+    ]);
+    const [operationsToday, operationsMonth] = await Promise.all([
+      ProviderUsage.aggregate([
+        { $match: { ...realUserFilter, provider: "DEEPSEEK", periodKey: dayKey } },
+        { $group: operationGroup },
+      ]),
+      ProviderUsage.aggregate([
+        {
+          $match: {
+            ...realUserFilter,
+            provider: "DEEPSEEK",
+            periodKey: { $regex: `^${monthKey}-\\d{2}$` },
+          },
+        },
+        { $group: operationGroup },
+      ]),
+    ]);
+    const byOperation = (row, total) => {
+      const counts = Object.fromEntries(DEEPSEEK_OPERATIONS.map((name) => [name, row?.[name] || 0]));
+      const attributed = Object.values(counts).reduce((sum, value) => sum + value, 0);
+      return { ...counts, unattributed: Math.max(0, (total || 0) - attributed) };
+    };
+    const todayTotals = totalsByProvider(dailyTotalsRaw);
+    const monthTotals = totalsByProvider(monthlyTotalsRaw);
+
     return res.json({
       ok: true,
       usage: {
-        today: totalsByProvider(dailyTotalsRaw),
-        thisMonth: totalsByProvider(monthlyTotalsRaw),
+        today: todayTotals,
+        thisMonth: monthTotals,
         topUsersToday,
+        deepSeekByOperation: {
+          today: byOperation(operationsToday[0], todayTotals.DEEPSEEK),
+          thisMonth: byOperation(operationsMonth[0], monthTotals.DEEPSEEK),
+        },
       },
       ownAccounts: scope.note,
     });
@@ -556,6 +595,25 @@ export const getSuperDashboardStats = async (req, res, next) => {
       { $group: { _id: "$serviceType", count: { $sum: 1 } } },
     ]);
 
+    // AP1: engagements and working papers had no count anywhere in the panel. Firm-scoped like
+    // tasks, so the owner's own firms are left out the same way.
+    const notOwnFirmRecord = without("firmId", scope.firmIds);
+    const [totalEngagements, engagementTypeBreakdown, engagementStatusBreakdown, totalWorkingPapers] =
+      await Promise.all([
+        Engagement.countDocuments({ ...notOwnFirmRecord }),
+        Engagement.aggregate([
+          { $match: { ...notOwnFirmRecord } },
+          { $group: { _id: "$engagementType", count: { $sum: 1 } } },
+          { $sort: { count: -1, _id: 1 } },
+        ]),
+        Engagement.aggregate([
+          { $match: { ...notOwnFirmRecord } },
+          { $group: { _id: "$status", count: { $sum: 1 } } },
+          { $sort: { count: -1, _id: 1 } },
+        ]),
+        AuditWorkingPaper.countDocuments({ ...notOwnFirmRecord }),
+      ]);
+
     return res.json({
       ok: true,
       stats: {
@@ -589,6 +647,14 @@ export const getSuperDashboardStats = async (req, res, next) => {
         },
         reminders: {
           total: totalReminders,
+        },
+        engagements: {
+          total: totalEngagements,
+          typeBreakdown: engagementTypeBreakdown,
+          statusBreakdown: engagementStatusBreakdown,
+        },
+        workingPapers: {
+          total: totalWorkingPapers,
         },
       },
       ownAccounts: scope.note,

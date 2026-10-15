@@ -1296,6 +1296,7 @@ async function generateAuditWorkingPaperAnalysis({
       timeoutMs: 25000,
       temperature: 0.1,
       userId: actorUserId,
+      operation: "working_paper_analysis",
     });
   } catch {
     providerResult = {
