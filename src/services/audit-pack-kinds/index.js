@@ -20,6 +20,7 @@ import { clause26Kind } from "./clause26.kind.js";
 import { clause31Kind } from "./clause31.kind.js";
 import { clause34Kind } from "./clause34.kind.js";
 import { gstr9cKind } from "./gstr9c.kind.js";
+import { ledgerScanKind } from "./ledger-scan.kind.js";
 import { ratiosKind } from "./ratios.kind.js";
 import { rule11gKind } from "./rule11g.kind.js";
 
@@ -34,6 +35,7 @@ const KINDS = Object.freeze({
   [ratiosKind.kind]: ratiosKind,
   [caroKind.kind]: caroKind,
   [rule11gKind.kind]: rule11gKind,
+  [ledgerScanKind.kind]: ledgerScanKind,
 });
 
 export const GENERIC_PACK_KINDS = Object.freeze(Object.keys(KINDS));

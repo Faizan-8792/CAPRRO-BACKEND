@@ -781,6 +781,8 @@ try {
         "audit-pack-gstr9c-contract",
         # W10 AP15: the pack catalogue both clients draw their screens from - every pack declares exactly the fields its create route takes, in a closed vocabulary; seven deliberate breakages each caught; then the route, the flag and the TDS imports the sources route lists (Mongo, scratch-marked).
         "audit-pack-catalogue-contract",
+        # W10 AP31 (2026-10-17): the ledger scans - cash below zero, round-sum cash, duplicates, Benford with a too-small-population result, period-end and post-close entries, Sunday movements, unusual account pairs, suspense - engine against a hand-worked day book, nine automated breakages, then routes, worker and workbook (Mongo, scratch-marked).
+        "ledger-scan-contract",
         # W10 AP27 (2026-10-17): the Schedule III ageing schedules - receivables, payables (micro, small and medium apart) and capital work in progress - engine against a hand-worked year, the column edges to the day, thirteen automated breakages of the engine and the bill book, then routes with and without the previous year's books (Mongo, scratch-marked).
         "ageing-contract",
         # W10 AP28 (2026-10-17): the eleven Schedule III ratios - engine against two hand-worked years (all eleven, this year and last), the 25% test to the edge, what is asked for and what is read as nil, stock valuation journals however booked, twenty-eight automated breakages, then routes with typed amounts and without (Mongo, scratch-marked).
@@ -1030,6 +1032,7 @@ try {
         "clause22-contract" = "scratch-gates-clause22"
         "clause26-contract" = "scratch-gates-clause26"
         "clause34-contract" = "scratch-gates-clause34"
+        "ledger-scan-contract" = "scratch-gates-ledger-scan"
         "books-snapshot-contract" = "scratch-gates-books-snapshot"
         "audit-pack-gstr9c-contract" = "scratch-gates-audit-pack-9c"
         "audit-pack-catalogue-contract" = "scratch-gates-catalogue"
