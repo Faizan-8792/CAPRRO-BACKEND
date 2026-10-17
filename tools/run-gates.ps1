@@ -781,6 +781,8 @@ try {
         "audit-pack-catalogue-contract",
         # W10 AP27 (2026-10-17): the Schedule III ageing schedules - receivables, payables (micro, small and medium apart) and capital work in progress - engine against a hand-worked year, the column edges to the day, thirteen automated breakages of the engine and the bill book, then routes with and without the previous year's books (Mongo, scratch-marked).
         "ageing-contract",
+        # W10 AP28 (2026-10-17): the eleven Schedule III ratios - engine against two hand-worked years (all eleven, this year and last), the 25% test to the edge, what is asked for and what is read as nil, stock valuation journals however booked, twenty-eight automated breakages, then routes with typed amounts and without (Mongo, scratch-marked).
+        "ratios-contract",
         # IMPROVEMENT-PLAN-V2-2026-09-28 Part 1: email observability. Pins the single
         # transport path through services/mailer.js, the suppression gate, the
         # forward-only webhook transitions, the Svix signature scheme, and the
@@ -1024,6 +1026,7 @@ try {
         "audit-pack-gstr9c-contract" = "scratch-gates-audit-pack-9c"
         "audit-pack-catalogue-contract" = "scratch-gates-catalogue"
         "ageing-contract" = "scratch-gates-ageing"
+        "ratios-contract" = "scratch-gates-ratios"
         "email-delivery-contract" = "scratch-gates-email-delivery"
         "super-emails-controller-contract" = "scratch-gates-super-emails"
         "api-not-found-contract" = "scratch-gates-api-not-found"

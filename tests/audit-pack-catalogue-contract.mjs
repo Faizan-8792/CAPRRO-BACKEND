@@ -47,6 +47,11 @@ export function catalogueProblems(kinds, { createFieldsOf, importKinds = IMPORT_
         if (values.length < 2 || !values.includes(input.default)) problems.push(`${at}: a choice needs two options and a default among them`);
       }
       if (input.type === "GSTR9_FIGURES" && (!Array.isArray(input.rows) || input.rows.length === 0)) problems.push(`${at}: no rows`);
+      if (input.type === "AMOUNTS") {
+        const rowKeys = (input.rows || []).map((r) => r.key);
+        if (rowKeys.length === 0 || new Set(rowKeys).size !== rowKeys.length || (input.rows || []).some((r) => !r.key || !r.label)) problems.push(`${at}: an amounts input needs uniquely keyed, labelled rows`);
+        if (!Array.isArray(input.columns) || input.columns.length === 0 || input.columns.some((c) => !c.key || !c.label)) problems.push(`${at}: an amounts input needs labelled columns`);
+      }
     }
   }
   return problems;

@@ -2461,9 +2461,11 @@ if (listed.status !== 0 || listed.error) {
   // builders, no network, no secret, no I/O: src/services/audit-pack-kinds/inputs.js (what each pack asks a person for).
   // 264 -> 267 on 2026-10-17 for the Schedule III ageing (W10 AP27), all three confirmed clean by this scan before the pin moved. Pure
   // computation, no network, no secret, no I/O: audit-pack-engine/bill-book.js, audit-pack-engine/ageing.engine.js, audit-pack-kinds/ageing.kind.js.
+  // 267 -> 269 on 2026-10-17 for the Schedule III ratios (W10 AP28), both confirmed clean by this scan before the pin moved. Pure
+  // computation, no network, no secret, no I/O: audit-pack-engine/ratios.engine.js, audit-pack-kinds/ratios.kind.js.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 267 && result.status === 0,
+    files.length === 269 && result.status === 0,
     result,
   );
 }

@@ -19,6 +19,7 @@ import { clause26Kind } from "./clause26.kind.js";
 import { clause31Kind } from "./clause31.kind.js";
 import { clause34Kind } from "./clause34.kind.js";
 import { gstr9cKind } from "./gstr9c.kind.js";
+import { ratiosKind } from "./ratios.kind.js";
 
 const KINDS = Object.freeze({
   [gstr9cKind.kind]: gstr9cKind,
@@ -28,6 +29,7 @@ const KINDS = Object.freeze({
   [clause31Kind.kind]: clause31Kind,
   [clause34Kind.kind]: clause34Kind,
   [ageingKind.kind]: ageingKind,
+  [ratiosKind.kind]: ratiosKind,
 });
 
 export const GENERIC_PACK_KINDS = Object.freeze(Object.keys(KINDS));
