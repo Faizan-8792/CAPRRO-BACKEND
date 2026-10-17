@@ -38,6 +38,7 @@ import {
   summarizeClause44,
 } from "./audit-pack-engine/clause44.engine.js";
 import { looksLikePredefinedGroup } from "./books-normalization.service.js";
+import { allCreateFields, getPackKind } from "./audit-pack-kinds/index.js";
 
 export const AUDIT_PACK_JOB_KIND = "AUDIT_PACK";
 
@@ -84,7 +85,10 @@ function financialYearOf(value) {
 // ─── serialization ──────────────────────────────────────────────────────
 
 function serializeRun(run, summary = null) {
+  const generic = getPackKind(run.kind);
   return {
+    sections: generic ? generic.sections : undefined,
+    params: generic ? run.params || {} : undefined,
     id: String(run._id),
     clientId: String(run.clientId),
     kind: run.kind,
@@ -107,17 +111,20 @@ function serializeRun(run, summary = null) {
   };
 }
 
-function serializeRow(raw) {
-  const row = effectiveRow({
+function serializeRow(raw, kind = "CLAUSE44") {
+  const generic = getPackKind(kind);
+  const overlay = generic ? generic.effectiveRow : effectiveRow;
+  const row = overlay({
     section: raw.section,
     values: raw.values || {},
     state: raw.state,
     decidable: raw.decidable,
     decision: raw.decision?.state
-      ? { state: raw.decision.state, treatment: raw.decision.treatment || "", status: raw.decision.status || "" }
+      ? { state: raw.decision.state, treatment: raw.decision.treatment || "", status: raw.decision.status || "", choice: raw.decision.choice || "" }
       : null,
   });
   return {
+    ...(generic ? { lines: generic.displayLines(row), choices: generic.choicesFor(row) } : {}),
     rowKey: raw.rowKey,
     section: raw.section,
     label: raw.label,
@@ -135,6 +142,7 @@ function serializeRow(raw) {
       state: raw.decision?.state || null,
       treatment: raw.decision?.treatment || "",
       status: raw.decision?.status || "",
+      choice: raw.decision?.choice || "",
       reason: raw.decision?.reason || "",
       note: raw.decision?.note || "",
       decidedBy: raw.decision?.decidedBy ? String(raw.decision.decidedBy) : null,
@@ -153,7 +161,7 @@ function engineRowFromStored(raw) {
     state: raw.state,
     decidable: raw.decidable,
     decision: raw.decision?.state
-      ? { state: raw.decision.state, treatment: raw.decision.treatment || undefined, status: raw.decision.status || undefined }
+      ? { state: raw.decision.state, treatment: raw.decision.treatment || undefined, status: raw.decision.status || undefined, choice: raw.decision.choice || undefined }
       : null,
   };
 }
@@ -201,13 +209,37 @@ async function loadSourceBatches({ firmId, clientId, ids, kind, label }) {
 const CREATE_FIELDS = new Set([
   "kind", "clientId", "financialYear", "trialBalanceBatchId", "purchaseBatchIds", "gstr2bBatchIds", "gstr2bFrequency",
 ]);
+const BASE_CREATE_FIELDS = new Set(["kind", "clientId", "financialYear"]);
 
 export async function createAuditPackRun({ firmId, actorUserId, requestId = "", input, rolloutVersion = 0 }) {
-  assertAllowed(input, CREATE_FIELDS, "An audit pack");
+  assertAllowed(input, new Set([...CREATE_FIELDS, ...allCreateFields()]), "An audit pack");
   const kind = String(input.kind || "CLAUSE44").toUpperCase();
-  if (!AUDIT_PACK_KINDS.includes(kind)) throw httpError(400, "Only the Clause 44 pack exists so far.");
+  if (!AUDIT_PACK_KINDS.includes(kind)) throw httpError(400, "That pack does not exist.");
+  const generic = getPackKind(kind);
+  if (!generic && kind !== "CLAUSE44") throw httpError(400, "That pack is not available yet.");
+  assertAllowed(input, generic ? new Set([...BASE_CREATE_FIELDS, ...generic.createFields]) : CREATE_FIELDS, generic ? generic.label : "An audit pack");
   const client = await requireClient(firmId, input.clientId);
   const financialYear = financialYearOf(input.financialYear);
+  if (generic) {
+    const prepared = await generic.prepare({
+      firmId,
+      client,
+      financialYear,
+      input,
+      helpers: { loadSourceBatches, httpError, objectId },
+    });
+    const sourceBatches = prepared.batches
+      .map((batch) => ({ batchId: batch._id, kind: batch.kind, importGeneration: batch.activeImportGeneration, sourceHash: batch.sourceHash, period: batch.period || "" }))
+      .sort((a, b) => `${a.kind}:${a.batchId}`.localeCompare(`${b.kind}:${b.batchId}`));
+    return persistRun({
+      firmId, actorUserId, requestId, rolloutVersion, client, kind, financialYear,
+      ruleVersion: generic.ruleVersion,
+      sourceBatches,
+      fingerprintParts: { kind, financialYear, ruleVersion: generic.ruleVersion, params: prepared.params, batches: sourceBatches.map((b) => ({ ...b, batchId: String(b.batchId) })) },
+      params: prepared.params,
+      jobPayload: {},
+    });
+  }
   const frequency = String(input.gstr2bFrequency || "MONTHLY").toUpperCase();
   if (!["MONTHLY", "QUARTERLY"].includes(frequency)) throw httpError(400, "GSTR-2B frequency is MONTHLY or QUARTERLY.");
   const purchaseIds = Array.isArray(input.purchaseBatchIds) ? input.purchaseBatchIds : [];
@@ -233,16 +265,25 @@ export async function createAuditPackRun({ firmId, actorUserId, requestId = "", 
       period: batch.period || "",
     }))
     .sort((a, b) => `${a.kind}:${a.batchId}`.localeCompare(`${b.kind}:${b.batchId}`));
-  const sourceFingerprint = createHash("sha256")
-    .update(JSON.stringify(canonical({
+  return persistRun({
+    firmId, actorUserId, requestId, rolloutVersion, client, kind, financialYear,
+    ruleVersion: CLAUSE44_RULE_VERSION,
+    sourceBatches,
+    fingerprintParts: {
       kind,
       financialYear,
       frequency,
       ruleVersion: CLAUSE44_RULE_VERSION,
       batches: sourceBatches.map((b) => ({ ...b, batchId: String(b.batchId) })),
-    })))
-    .digest("hex");
+    },
+    params: {},
+    jobPayload: { frequency },
+  });
+}
 
+// One run per (firm, kind, source fingerprint): the same inputs return the run that already exists.
+async function persistRun({ firmId, actorUserId, requestId, rolloutVersion, client, kind, financialYear, ruleVersion, sourceBatches, fingerprintParts, params, jobPayload }) {
+  const sourceFingerprint = createHash("sha256").update(JSON.stringify(canonical(fingerprintParts))).digest("hex");
   const identity = { firmId, kind, sourceFingerprint, revision: 1 };
   let run = await AuditPackRun.findOne(identity);
   if (run) return { run: serializeRun(run), replayed: true };
@@ -252,7 +293,8 @@ export async function createAuditPackRun({ firmId, actorUserId, requestId = "", 
       clientId: client._id,
       financialYear,
       sourceBatches,
-      ruleVersion: CLAUSE44_RULE_VERSION,
+      ruleVersion,
+      params,
       status: "QUEUED",
       rolloutVersion,
       createdBy: actorUserId,
@@ -269,7 +311,7 @@ export async function createAuditPackRun({ firmId, actorUserId, requestId = "", 
     firmId,
     kind: AUDIT_PACK_JOB_KIND,
     idempotencyKey: `audit-pack:${run._id}:revision:1`,
-    payload: { runId: String(run._id), frequency },
+    payload: { runId: String(run._id), ...jobPayload },
     createdBy: actorUserId,
     requestId,
   });
@@ -293,6 +335,77 @@ async function readRows(Model, filter, projection) {
   return Model.find(filter).select(projection).lean();
 }
 
+async function computeClause44(run, job, assertLease) {
+  const frequency = String(job?.payload?.frequency || "MONTHLY").toUpperCase();
+  const byKind = (kind) => run.sourceBatches.filter((b) => b.kind === kind);
+  const tbBatch = byKind("TRIAL_BALANCE")[0];
+  const generationFilter = (batch) => ({ firmId: run.firmId, batchId: batch.batchId, importGeneration: batch.importGeneration });
+
+  const trialBalanceRows = tbBatch
+    ? await readRows(BooksImportRow, generationFilter(tbBatch), "_id batchId sourceRow ledgerName groupName openingMinor hasOpening debitTotalMinor creditTotalMinor hasTransactionTotals closingMinor")
+    : [];
+  await assertLease();
+  const purchaseRows = [];
+  for (const batch of byKind("GST_PURCHASE")) {
+    purchaseRows.push(...await readRows(ImportRow, generationFilter(batch), "_id batchId sourceRow supplierGstin documentDate documentType taxableValueMinor igstMinor cgstMinor sgstMinor cessMinor reverseCharge"));
+  }
+  await assertLease();
+  const gstr2bRows = [];
+  const gstr2bMonths = [];
+  for (const batch of byKind("GSTR2B")) {
+    const months = batchPeriodMonths(batch, frequency);
+    gstr2bMonths.push(...months);
+    const rows = await readRows(ImportRow, generationFilter(batch), "_id batchId sourceRow supplierGstin documentDate documentType taxableValueMinor igstMinor cgstMinor sgstMinor cessMinor");
+    // A quarterly statement lists each document once, under its quarter's last month.
+    gstr2bRows.push(...rows.map((row) => ({ ...row, period: batch.period })));
+  }
+  const sourceRowCount = trialBalanceRows.length + purchaseRows.length + gstr2bRows.length;
+  if (sourceRowCount > MAX_SOURCE_ROWS) {
+    throw httpError(413, `These imports hold ${sourceRowCount} rows; an audit pack reads at most ${MAX_SOURCE_ROWS}.`, "AUDIT_PACK_TOO_LARGE");
+  }
+
+  // AP6: every supplier this run sees has a party-master row; a person's answer is never touched.
+  const gstins = [...new Set(purchaseRows.map((r) => String(r.supplierGstin || "").toUpperCase()).filter(Boolean))];
+  if (gstins.length) {
+    await PartyMaster.bulkWrite(gstins.map((gstin) => ({
+      updateOne: {
+        filter: { firmId: run.firmId, clientId: run.clientId, gstin },
+        update: { $setOnInsert: { firmId: run.firmId, clientId: run.clientId, gstin, gstStatus: "UNKNOWN" } },
+        upsert: true,
+      },
+    })), { ordered: false });
+  }
+  const parties = await PartyMaster.find({
+    firmId: run.firmId,
+    clientId: run.clientId,
+    confirmedBy: { $ne: null },
+    gstStatus: { $in: ["REGISTERED", "COMPOSITION", "EXEMPT_SUPPLIER"] },
+  }).select("gstin gstStatus").lean();
+
+  const idOf = (row) => ({ ...row, rowId: String(row._id), batchId: String(row.batchId) });
+  return buildClause44Rows({
+    financialYear: run.financialYear,
+    trialBalance: trialBalanceRows.map((row) => idOf({ ...row, looksLikeGroupTotal: !row.groupName && looksLikePredefinedGroup(row.ledgerName) })),
+    purchases: purchaseRows.map(idOf),
+    gstr2b: gstr2bRows.map(idOf),
+    gstr2bMonths,
+    parties: parties.map((p) => ({ gstin: p.gstin, gstStatus: p.gstStatus })),
+  });
+}
+
+// A generic pack reads through this: the same 200,000-row ceiling the Clause 44 worker holds itself to.
+function countingReader() {
+  let total = 0;
+  return async (Model, filter, projection) => {
+    const rows = await readRows(Model, filter, projection);
+    total += rows.length;
+    if (total > MAX_SOURCE_ROWS) {
+      throw httpError(413, `These imports hold more than ${MAX_SOURCE_ROWS} rows; an audit pack reads at most ${MAX_SOURCE_ROWS}.`, "AUDIT_PACK_TOO_LARGE");
+    }
+    return rows;
+  };
+}
+
 export async function processAuditPackJob(job, { assertLease = async () => {} } = {}) {
   const runId = job?.payload?.runId;
   if (!mongoose.isValidObjectId(runId)) return { outcome: "INVALID_PAYLOAD" };
@@ -309,61 +422,10 @@ export async function processAuditPackJob(job, { assertLease = async () => {} } 
   if (!claimed) return { outcome: "NOT_CLAIMABLE" };
 
   try {
-    const frequency = String(job?.payload?.frequency || "MONTHLY").toUpperCase();
-    const byKind = (kind) => run.sourceBatches.filter((b) => b.kind === kind);
-    const tbBatch = byKind("TRIAL_BALANCE")[0];
-    const generationFilter = (batch) => ({ firmId: run.firmId, batchId: batch.batchId, importGeneration: batch.importGeneration });
-
-    const trialBalanceRows = tbBatch
-      ? await readRows(BooksImportRow, generationFilter(tbBatch), "_id batchId sourceRow ledgerName groupName openingMinor hasOpening debitTotalMinor creditTotalMinor hasTransactionTotals closingMinor")
-      : [];
-    await assertLease();
-    const purchaseRows = [];
-    for (const batch of byKind("GST_PURCHASE")) {
-      purchaseRows.push(...await readRows(ImportRow, generationFilter(batch), "_id batchId sourceRow supplierGstin documentDate documentType taxableValueMinor igstMinor cgstMinor sgstMinor cessMinor reverseCharge"));
-    }
-    await assertLease();
-    const gstr2bRows = [];
-    const gstr2bMonths = [];
-    for (const batch of byKind("GSTR2B")) {
-      const months = batchPeriodMonths(batch, frequency);
-      gstr2bMonths.push(...months);
-      const rows = await readRows(ImportRow, generationFilter(batch), "_id batchId sourceRow supplierGstin documentDate documentType taxableValueMinor igstMinor cgstMinor sgstMinor cessMinor");
-      // A quarterly statement lists each document once, under its quarter's last month.
-      gstr2bRows.push(...rows.map((row) => ({ ...row, period: batch.period })));
-    }
-    const sourceRowCount = trialBalanceRows.length + purchaseRows.length + gstr2bRows.length;
-    if (sourceRowCount > MAX_SOURCE_ROWS) {
-      throw httpError(413, `These imports hold ${sourceRowCount} rows; an audit pack reads at most ${MAX_SOURCE_ROWS}.`, "AUDIT_PACK_TOO_LARGE");
-    }
-
-    // AP6: every supplier this run sees has a party-master row; a person's answer is never touched.
-    const gstins = [...new Set(purchaseRows.map((r) => String(r.supplierGstin || "").toUpperCase()).filter(Boolean))];
-    if (gstins.length) {
-      await PartyMaster.bulkWrite(gstins.map((gstin) => ({
-        updateOne: {
-          filter: { firmId: run.firmId, clientId: run.clientId, gstin },
-          update: { $setOnInsert: { firmId: run.firmId, clientId: run.clientId, gstin, gstStatus: "UNKNOWN" } },
-          upsert: true,
-        },
-      })), { ordered: false });
-    }
-    const parties = await PartyMaster.find({
-      firmId: run.firmId,
-      clientId: run.clientId,
-      confirmedBy: { $ne: null },
-      gstStatus: { $in: ["REGISTERED", "COMPOSITION", "EXEMPT_SUPPLIER"] },
-    }).select("gstin gstStatus").lean();
-
-    const idOf = (row) => ({ ...row, rowId: String(row._id), batchId: String(row.batchId) });
-    const built = buildClause44Rows({
-      financialYear: run.financialYear,
-      trialBalance: trialBalanceRows.map((row) => idOf({ ...row, looksLikeGroupTotal: !row.groupName && looksLikePredefinedGroup(row.ledgerName) })),
-      purchases: purchaseRows.map(idOf),
-      gstr2b: gstr2bRows.map(idOf),
-      gstr2bMonths,
-      parties: parties.map((p) => ({ gstin: p.gstin, gstStatus: p.gstStatus })),
-    });
+    const generic = getPackKind(run.kind);
+    const built = generic
+      ? await generic.compute({ run, readRows: countingReader(), assertLease, batchPeriodMonths })
+      : await computeClause44(run, job, assertLease);
     await assertLease();
 
     const documents = built.rows.map((row, ordinal) => ({
@@ -474,7 +536,8 @@ async function activeRows(run, extraFilter = {}) {
 export async function computeAuditPackSummary(run) {
   if (run.status !== "REVIEW") return null;
   const rows = await activeRows(run);
-  return summarizeClause44(rows.map(engineRowFromStored));
+  const generic = getPackKind(run.kind);
+  return (generic ? generic.summarize : summarizeClause44)(rows.map(engineRowFromStored));
 }
 
 export async function listAuditPackRuns({ firmId, query = {} }) {
@@ -503,7 +566,8 @@ export async function listAuditPackRows({ firmId, runId, query = {} }) {
   const filter = {};
   if (query.section) {
     const section = String(query.section).toUpperCase();
-    if (!["LEDGER", "SUPPLIER", "TIEOUT"].includes(section)) throw httpError(400, "Section is LEDGER, SUPPLIER or TIEOUT.");
+    const allowed = getPackKind(run.kind)?.sections.map((s) => s.code) || ["LEDGER", "SUPPLIER", "TIEOUT"];
+    if (!allowed.includes(section)) throw httpError(400, `Section is ${allowed.join(", ")}.`);
     filter.section = section;
   }
   const limit = Math.min(ROW_PAGE_MAX, Math.max(1, Number.parseInt(query.limit, 10) || 50));
@@ -513,7 +577,7 @@ export async function listAuditPackRows({ firmId, runId, query = {} }) {
     AuditPackRow.find(base).sort({ ordinal: 1 }).skip((page - 1) * limit).limit(limit).lean(),
     AuditPackRow.countDocuments(base),
   ]);
-  return { rows: rows.map(serializeRow), pagination: { page, limit, total }, status: run.status };
+  return { rows: rows.map((row) => serializeRow(row, run.kind)), pagination: { page, limit, total }, status: run.status };
 }
 
 export async function listAuditPackSources({ firmId, query = {} }) {
@@ -526,7 +590,7 @@ export async function listAuditPackSources({ firmId, query = {} }) {
     status: "COMPLETED",
     $or: [
       { kind: "TRIAL_BALANCE", financialYear },
-      { kind: { $in: ["GST_PURCHASE", "GSTR2B"] }, period: { $in: months } },
+      { kind: { $in: ["GST_PURCHASE", "GSTR2B", "GSTR1_SUMMARY", "GSTR3B_SUMMARY"] }, period: { $in: months } },
     ],
   })
     .select("_id kind period financialYear sourceName totalRows validRows completedAt gstin")
@@ -552,7 +616,7 @@ export async function listAuditPackSources({ firmId, query = {} }) {
 
 // ─── decisions ──────────────────────────────────────────────────────────
 
-const DECISION_FIELDS = new Set(["expectedVersion", "state", "treatment", "status", "reason", "note"]);
+const DECISION_FIELDS = new Set(["expectedVersion", "state", "treatment", "status", "choice", "reason", "note"]);
 const PERSON_LEDGER_TREATMENTS = new Set(LEDGER_TREATMENTS.filter((t) => t !== "UNCLASSIFIED"));
 const PERSON_SUPPLIER_STATUSES = new Set(["REGISTERED", "COMPOSITION", "EXEMPT_SUPPLIER"]);
 
@@ -569,6 +633,7 @@ export async function decideAuditPackRow({ firmId, actorUserId, requestId = "", 
   if (!["CONFIRMED", "EXCLUDED"].includes(state)) throw httpError(400, "A decision confirms or excludes a row.");
   const treatment = input.treatment ? String(input.treatment).toUpperCase() : "";
   const status = input.status ? String(input.status).toUpperCase() : "";
+  const choice = input.choice ? String(input.choice).toUpperCase().slice(0, 60) : "";
   const reason = text(input.reason, 500);
   const note = text(input.note, 2000);
 
@@ -578,7 +643,17 @@ export async function decideAuditPackRow({ firmId, actorUserId, requestId = "", 
   if (!row) throw httpError(404, "That row is not in this pack.");
   if (!row.decidable) throw httpError(400, "This row is worked out from the others; decide those instead.", "AUDIT_PACK_DECISION_REFUSED");
 
-  if (row.section === "LEDGER") {
+  const genericKind = getPackKind(run.kind);
+  if (genericKind) {
+    if (treatment || status) throw httpError(400, "This pack takes a reason, not a treatment or a status.");
+    try {
+      genericKind.validateDecision(row, { state, choice, reason, note });
+    } catch (error) {
+      if (error instanceof RangeError) throw httpError(400, error.message, "AUDIT_PACK_DECISION_REFUSED");
+      throw error;
+    }
+  } else if (row.section === "LEDGER") {
+    if (choice) throw httpError(400, "A ledger takes a treatment.");
     if (status) throw httpError(400, "A ledger takes a treatment, not a supplier status.");
     if (treatment && !PERSON_LEDGER_TREATMENTS.has(treatment)) throw httpError(400, "That treatment is not one a ledger can take.");
     if (row.state === "PENDING_INPUT" && state === "CONFIRMED" && !treatment) {
@@ -590,6 +665,7 @@ export async function decideAuditPackRow({ firmId, actorUserId, requestId = "", 
       throw httpError(400, "This asset's additions for the year are not in the trial balance. Import it with its Debit transactions column, or exclude this ledger with a reason.", "AUDIT_PACK_DECISION_REFUSED");
     }
   } else if (row.section === "SUPPLIER") {
+    if (choice) throw httpError(400, "A supplier takes a status.");
     if (treatment) throw httpError(400, "A supplier takes a status, not a treatment.");
     if (state === "EXCLUDED") throw httpError(400, "A supplier cannot be excluded; set its status instead.", "AUDIT_PACK_DECISION_REFUSED");
     if (status && !PERSON_SUPPLIER_STATUSES.has(status)) throw httpError(400, "That status is not one a person can set.");
@@ -609,6 +685,7 @@ export async function decideAuditPackRow({ firmId, actorUserId, requestId = "", 
           state,
           treatment,
           status,
+          choice,
           reason,
           note,
           decidedBy: actorUserId,
@@ -640,9 +717,9 @@ export async function decideAuditPackRow({ firmId, actorUserId, requestId = "", 
     entityType: "AuditPackRun",
     entityId: run._id,
     requestId,
-    afterSummary: { section: row.section, state, treatment, status, version: expectedVersion + 1 },
+    afterSummary: { section: row.section, state, treatment, status, choice, version: expectedVersion + 1 },
   });
-  return serializeRow(updated);
+  return serializeRow(updated, run.kind);
 }
 
 // ─── party master (AP6) ─────────────────────────────────────────────────────

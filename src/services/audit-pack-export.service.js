@@ -17,6 +17,7 @@ import AuditPackRow from "../models/AuditPackRow.js";
 import Client from "../models/Client.js";
 import { effectiveRow, summarizeClause44 } from "./audit-pack-engine/clause44.engine.js";
 import { buildWorkbook } from "./workbook.service.js";
+import { getPackKind } from "./audit-pack-kinds/index.js";
 
 function httpError(statusCode, message, code = "") {
   const error = new Error(message);
@@ -88,7 +89,7 @@ function engineRow(raw) {
     state: raw.state,
     decidable: raw.decidable,
     decision: raw.decision?.state
-      ? { state: raw.decision.state, treatment: raw.decision.treatment || undefined, status: raw.decision.status || undefined }
+      ? { state: raw.decision.state, treatment: raw.decision.treatment || undefined, status: raw.decision.status || undefined, choice: raw.decision.choice || undefined }
       : null,
     stored: raw,
   };
@@ -104,6 +105,13 @@ export async function exportAuditPackWorkbook({ firmId, runId }) {
     Client.findOne({ _id: run.clientId, firmId }).select("name").lean(),
   ]);
   const rows = stored.map(engineRow);
+  const generic = getPackKind(run.kind);
+  if (generic) {
+    const summary = generic.summarize(rows);
+    const effectiveRows = rows.map((row) => ({ ...generic.effectiveRow(row), stored: row.stored }));
+    const built = generic.workbook({ run, clientName: client?.name || "Client", effectiveRows, summary });
+    return { bytes: buildWorkbook({ sheets: built.sheets }), fileName: built.fileName, provisional: built.provisional };
+  }
   const summary = summarizeClause44(rows);
   const effective = rows.map((row) => ({ ...effectiveRow(row), stored: row.stored }));
   const ledgers = effective.filter((r) => r.section === "LEDGER");

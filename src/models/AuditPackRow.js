@@ -7,7 +7,7 @@
 
 import mongoose from "mongoose";
 
-const AUDIT_PACK_ROW_SECTIONS = Object.freeze(["LEDGER", "SUPPLIER", "TIEOUT"]);
+const AUDIT_PACK_ROW_SECTIONS = Object.freeze(["LEDGER", "SUPPLIER", "TIEOUT", "MONTHLY", "TURNOVER", "ITC"]);
 const AUDIT_PACK_ROW_STATES = Object.freeze(["COMPUTED", "CONFIRMED", "EXCLUDED", "PENDING_INPUT"]);
 const AUDIT_PACK_DECISION_STATES = Object.freeze(["CONFIRMED", "EXCLUDED"]);
 
@@ -36,6 +36,8 @@ const DecisionSchema = new mongoose.Schema(
     state: { type: String, enum: [null, ...AUDIT_PACK_DECISION_STATES], default: null },
     treatment: { type: String, trim: true, maxlength: 40, default: "" },
     status: { type: String, trim: true, maxlength: 40, default: "" },
+    // A pack beyond Clause 44 asks for one named reason per row (why two figures differ, which category).
+    choice: { type: String, trim: true, maxlength: 60, default: "" },
     reason: { type: String, trim: true, maxlength: 500, default: "" },
     note: { type: String, trim: true, maxlength: 2000, default: "" },
     decidedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
@@ -50,7 +52,8 @@ const AuditPackRowSchema = new mongoose.Schema(
     runId: { type: mongoose.Schema.Types.ObjectId, ref: "AuditPackRun", required: true },
     generationAttempt: { type: String, required: true, trim: true, maxlength: 80 },
     ordinal: { type: Number, required: true, min: 0 },
-    section: { type: String, enum: AUDIT_PACK_ROW_SECTIONS, required: true },
+    // Each pack names its own sections (audit-pack-kinds/); the service checks them against the pack.
+    section: { type: String, required: true, trim: true, match: /^[A-Z0-9_]{1,40}$/ },
     rowKey: { type: String, required: true, trim: true, match: /^[a-f0-9]{64}$/ },
     label: { type: String, required: true, trim: true, maxlength: 300 },
     party: {

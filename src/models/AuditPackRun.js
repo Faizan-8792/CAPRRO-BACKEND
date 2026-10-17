@@ -8,7 +8,7 @@
 
 import mongoose from "mongoose";
 
-const AUDIT_PACK_KINDS = Object.freeze(["CLAUSE44"]);
+const AUDIT_PACK_KINDS = Object.freeze(["CLAUSE44", "GSTR9C", "ANNEXURE_3CD", "SCHEDULE3", "LEDGER_SCAN"]);
 const AUDIT_PACK_RUN_STATUSES = Object.freeze(["QUEUED", "PROCESSING", "REVIEW", "FAILED"]);
 
 const SourceBatchSchema = new mongoose.Schema(
@@ -31,6 +31,9 @@ const AuditPackRunSchema = new mongoose.Schema(
     sourceBatches: { type: [SourceBatchSchema], default: () => [] },
     sourceFingerprint: { type: String, required: true, trim: true, match: /^[a-f0-9]{64}$/ },
     revision: { type: Number, required: true, min: 1, default: 1 },
+    // What a pack beyond Clause 44 was asked to compute, stored with the run and part of its fingerprint
+    // (GSTR-9 figures as typed, which annexure, which snapshot). Content-free for Clause 44.
+    params: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
     ruleVersion: { type: String, required: true, trim: true, maxlength: 80 },
     status: { type: String, enum: AUDIT_PACK_RUN_STATUSES, default: "QUEUED" },
     rolloutVersion: { type: Number, required: true, min: 0, default: 0 },
