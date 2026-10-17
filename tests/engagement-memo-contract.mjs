@@ -155,6 +155,7 @@ if (!uri) {
   failed += 1;
 } else {
   process.env.NODE_ENV = "production";
+  process.env.MONGODB_URI = uri; // the app import requires it, even when this file defaulted it (the runner sets none)
   process.env.JWT_SECRET = process.env.JWT_SECRET || "scratch-only-secret-not-a-real-credential-0000";
   process.env.DEEPSEEK_API_KEY = "";
   process.env.OCR_SPACE_API_KEY = "";
@@ -348,6 +349,21 @@ if (!uri) {
     const over = await call("member", "POST", M(), { mutationKey: key("over"), kind: "MATERIALITY", inputs: baseInputs });
     assert.equal(over.status, 409);
     assert.equal(over.json.code, "ASSURANCE_LIMIT");
+  });
+
+  await check("with auditPacks off every memo route answers 404 naming the flag - the owner's one switch for the W10 surfaces", async () => {
+    await raw("appconfigs").updateOne({ _id: "singleton" }, { $set: { "featureFlags.auditPacks": false } });
+    const routes = [
+      ["GET", M()],
+      ["POST", M()],
+      ["PATCH", `${M()}/${materialityId}`],
+      ["POST", `${M()}/${materialityId}/sign`],
+    ];
+    for (const [method, path] of routes) {
+      const r = await call("owner", method, path, method === "GET" ? undefined : { mutationKey: key("off") });
+      assert.equal(r.status, 404, `${method} ${path}: ${r.status} ${JSON.stringify(r.json)}`);
+      assert.equal(r.json.featureFlag, "auditPacks");
+    }
   });
 
   server.close();

@@ -2463,7 +2463,13 @@ async function draftEngagementChase({ engagementId, firmId, input }) {
     requests = requests.filter((request) => wanted.has(String(request._id)));
   }
   const result = buildChaseDraft({ clientName: client?.name || "", requests });
-  if (!result.ok) throw httpError(409, result.message, result.code);
+  if (!result.ok) {
+    // Literal sentences, so the public-code scan sees the throw; they are buildChaseDraft's two refusals, and
+    // tests/engagement-request-list-contract.mjs pins that the route says exactly what the engine says.
+    throw result.openCount
+      ? httpError(409, "None of the open requests has a recorded request date, so no pending time can be stated. Mark them as requested here first, then draft the message.", "NO_MEASURED_REQUESTS")
+      : httpError(409, "There is nothing open on the request list to chase.", "NO_MEASURED_REQUESTS");
+  }
   return { ...result, engagementId: String(engagement._id) };
 }
 

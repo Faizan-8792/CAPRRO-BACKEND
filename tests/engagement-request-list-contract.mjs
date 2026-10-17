@@ -168,6 +168,7 @@ if (!uri) {
   failed += 1;
 } else {
   process.env.NODE_ENV = "production";
+  process.env.MONGODB_URI = uri; // the app import requires it, even when this file defaulted it (the runner sets none)
   process.env.JWT_SECRET = process.env.JWT_SECRET || "scratch-only-secret-not-a-real-credential-0000";
   process.env.DEEPSEEK_API_KEY = "";
   process.env.OCR_SPACE_API_KEY = "";
@@ -350,6 +351,7 @@ if (!uri) {
     const r = await call("POST", `/api/engagements/${engagementId}/requests/chase-draft`, {});
     assert.equal(r.status, 409, JSON.stringify(r.json));
     assert.equal(r.json.code, "NO_MEASURED_REQUESTS");
+    assert.equal(r.json.error ?? r.json.message, buildChaseDraft({ clientName: "X", requests: [{ title: "t", status: "REQUESTED", requestedAt: null }] }).message, "the route and the engine word the refusal differently");
     assert.doesNotMatch(JSON.stringify(r.json), /3 days/);
   });
 
@@ -358,6 +360,7 @@ if (!uri) {
     const r = await call("POST", `/api/engagements/${engagementId}/requests/chase-draft`, {});
     assert.equal(r.status, 409);
     assert.equal(r.json.code, "NO_MEASURED_REQUESTS");
+    assert.equal(r.json.error ?? r.json.message, buildChaseDraft({ clientName: "X", requests: [] }).message, "the route and the engine word the refusal differently");
   });
 
   await check("a received request that comes back as a gap can be asked for again", async () => {
@@ -367,6 +370,20 @@ if (!uri) {
     assert.deepEqual(r.json.added.map((a) => a.code), ["UDYAM_UNKNOWN"]);
     const open = (await eng()).clientRequests.filter((q) => q.templateKey === "pack:CLAUSE22:UDYAM_UNKNOWN:2025-26" && q.status === "REQUESTED");
     assert.equal(open.length, 1);
+  });
+
+  await check("with auditPacks off every request-list route answers 404 naming the flag - the owner's one switch for the W10 surfaces", async () => {
+    await raw("appconfigs").updateOne({ _id: "singleton" }, { $set: { "featureFlags.auditPacks": false } });
+    const routes = [
+      ["GET", `/api/engagements/${engagementId}/requests/proposals?runId=${runId}`],
+      ["POST", `/api/engagements/${engagementId}/requests/from-pack`],
+      ["POST", `/api/engagements/${engagementId}/requests/chase-draft`],
+    ];
+    for (const [method, path] of routes) {
+      const r = await call(method, path, method === "GET" ? undefined : {});
+      assert.equal(r.status, 404, `${method} ${path}: ${r.status} ${JSON.stringify(r.json)}`);
+      assert.equal(r.json.featureFlag, "auditPacks");
+    }
   });
 
   server.close();

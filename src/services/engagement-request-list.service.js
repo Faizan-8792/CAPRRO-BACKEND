@@ -113,6 +113,7 @@ export function buildChaseDraft({ clientName, requests, now = new Date() }) {
     return {
       ok: false,
       code: "NO_MEASURED_REQUESTS",
+      openCount: open.length,
       message: open.length
         ? "None of the open requests has a recorded request date, so no pending time can be stated. Mark them as requested here first, then draft the message."
         : "There is nothing open on the request list to chase.",
