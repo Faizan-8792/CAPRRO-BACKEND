@@ -128,6 +128,11 @@ export const PINNED_FIRM_SCOPED = Object.freeze([
   // (derived PURGE). A run and a row carry the deciding user's id and a party the confirming user's
   // id; purging the document removes that link with it, as it does for Task.createdBy.
   "AuditPackRun", "AuditPackRow", "AuditPackEvidenceLink", "PartyMaster",
+  // BooksSnapshot, BooksGroup, BooksLedger, BooksVoucher, GroupMapping and BooksParty added 2026-10-17 with
+  // the Tally books snapshot (W10 AP18-AP20). A client's exported books and the answers people gave about
+  // them: firm work product with no append-only guard, deleted with the firm (derived PURGE). Rows carry
+  // the creating, sealing or confirming user's id; purging the document removes the link with it.
+  "BooksSnapshot", "BooksGroup", "BooksLedger", "BooksVoucher", "GroupMapping", "BooksParty",
 ]);
 
 /**

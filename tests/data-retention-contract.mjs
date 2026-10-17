@@ -138,7 +138,10 @@ test("all 46 models are classified", () => {
   // 48 -> 53: BooksImportRow, AuditPackRun, AuditPackRow, AuditPackEvidenceLink and PartyMaster,
   // 2026-10-15, with the trial-balance import and the audit packs (W10 AP5-AP8). All RETAIN, for
   // the reason recorded beside them: the firm's tax-audit working papers, purged with the firm.
-  assert.equal(Object.keys(RETENTION_CLASSIFICATION).length, 53);
+  // 53 -> 59: BooksSnapshot, BooksGroup, BooksLedger, BooksVoucher, GroupMapping and BooksParty, 2026-10-17,
+  // with the Tally books snapshot (W10 AP18-AP20). All RETAIN: the client's exported books and the answers
+  // about them, purged with the firm.
+  assert.equal(Object.keys(RETENTION_CLASSIFICATION).length, 59);
 });
 
 test("classification matches the real src/models directory exactly", () => {
@@ -146,9 +149,9 @@ test("classification matches the real src/models directory exactly", () => {
   const modelNames = readdirSync(join(here, "..", "src", "models"))
     .filter((name) => name.endsWith(".js"))
     .map((name) => name.replace(/\.js$/, ""));
-  assert.equal(modelNames.length, 53);
+  assert.equal(modelNames.length, 59);
   const result = assertClassificationCoversModels(modelNames);
-  assert.equal(result.classified, 53);
+  assert.equal(result.classified, 59);
 });
 
 test("a new unclassified model makes the guard throw, naming it", () => {
@@ -208,14 +211,15 @@ test("classification totals match PLAN.md 33.9 (see note above: PLAN.md's own pr
   // metadata, one row per key however many runs.
   // 38 -> 39 with FilingStatusObservation (GD33): the same bounded upsert, for the filing board.
   // 39 -> 44 with the five W10 collections (the books import and the audit packs).
-  assert.equal(counts[RETENTION_CLASSES.RETAIN], 44);
+  // 44 -> 50 with the six W10 books-snapshot collections (2026-10-17).
+  assert.equal(counts[RETENTION_CLASSES.RETAIN], 50);
   assert.equal(counts[RETENTION_CLASSES.PURGE_FIELD], 1);
   assert.equal(counts[RETENTION_CLASSES.PURGE_CONDITIONAL], 1);
   // 6 -> 7 with AuthHealthEvent (PHASE 8): a real TTL index, so the class is a fact, not a hope.
   assert.equal(counts[RETENTION_CLASSES.SELF_EXPIRING], 7);
   assert.equal(
     Object.values(counts).reduce((total, value) => total + value, 0),
-    53,
+    59,
   );
 });
 

@@ -27,6 +27,7 @@ import operationsRoutes from "./routes/operations.routes.js";
 import caseRoutes from "./routes/case.routes.js";
 import engagementRoutes from "./routes/engagement.routes.js";
 import auditPackRoutes from "./routes/audit-pack.routes.js";
+import booksRoutes from "./routes/books.routes.js";
 import firmOperationsRoutes from "./routes/firm-operations.routes.js";
 import digestRoutes from "./routes/digest.routes.js";
 import portalMapRoutes from "./routes/portal-map.routes.js";
@@ -140,6 +141,19 @@ const PUBLIC_ERROR_CODES = new Set([
   "AUDIT_PACK_NOT_READY",
   "AUDIT_PACK_ROW_CHANGED",
   "PARTY_CHANGED",
+  // Books snapshots (W10 AP18). The upload client is software, but its person needs the sentence: which chunk
+  // to send next, that a snapshot is sealed, that counts differ. A malformed record names its line.
+  "BOOKS_CHUNK_INVALID",
+  "BOOKS_CHUNK_HASH_MISMATCH",
+  "BOOKS_CHUNK_CONFLICT",
+  "BOOKS_CHUNK_OUT_OF_ORDER",
+  "BOOKS_DUPLICATE_RECORD",
+  "BOOKS_SNAPSHOT_SEALED",
+  "BOOKS_SNAPSHOT_COUNT_MISMATCH",
+  "BOOKS_SNAPSHOT_DIGEST_MISMATCH",
+  "BOOKS_SNAPSHOT_EMPTY",
+  "BOOKS_SNAPSHOT_NOT_SEALED",
+  "BOOKS_SNAPSHOT_MISMATCH",
 ]);
 
 const PUBLIC_IMPORT_ERROR_MESSAGES = Object.freeze({
@@ -463,6 +477,8 @@ app.use("/api/webhooks/resend", express.json({
 }));
 app.use("/api/webhooks", webhookRoutes);
 app.use("/api/imports", express.json({ limit: "24mb" }));
+// W10 AP18: a books snapshot chunk is at most 5,000 vouchers of canonical NDJSON, a few megabytes.
+app.use("/api/books/snapshots", express.json({ limit: "12mb" }));
 app.use(express.json({ limit: "1mb" }));
 // A mail client's automatic RFC 8058 one-click unsubscribe POST sends
 // Content-Type: application/x-www-form-urlencoded with a fixed body of
@@ -632,6 +648,7 @@ app.use("/api/cases", caseRoutes);
 app.use("/api/engagements", engagementRoutes);
 // W10: audit packs (Clause 44 first). Behind the auditPacks flag; mounted before the catch-all.
 app.use("/api/audit-packs", auditPackRoutes);
+app.use("/api/books", booksRoutes);
 app.use("/api/digests", digestRoutes);
 // GD28: the GST downloader's signed portal map. Mounted before the /api
 // catch-all below, which would otherwise answer every one of its paths.

@@ -16,7 +16,12 @@
 import AuditPackEvidenceLink from "../models/AuditPackEvidenceLink.js";
 import AuditPackRow from "../models/AuditPackRow.js";
 import AuditPackRun from "../models/AuditPackRun.js";
+import BooksGroup from "../models/BooksGroup.js";
 import BooksImportRow from "../models/BooksImportRow.js";
+import BooksLedger from "../models/BooksLedger.js";
+import BooksParty from "../models/BooksParty.js";
+import BooksVoucher from "../models/BooksVoucher.js";
+import GroupMapping from "../models/GroupMapping.js";
 import PartyMaster from "../models/PartyMaster.js";
 
 const REQUIRED_AUDIT_PACK_INDEXES = Object.freeze([
@@ -50,6 +55,13 @@ const REQUIRED_AUDIT_PACK_INDEXES = Object.freeze([
     key: { firmId: 1, clientId: 1, gstin: 1 },
     unique: true,
   },
+  // W10 AP18-AP20: a record is stored once per snapshot, which is what lets a chunk upload be repeated,
+  // and a person's answer about a group or a party exists once per client.
+  { model: BooksGroup, label: "books group snapshot key", key: { firmId: 1, snapshotId: 1, recordKey: 1 }, unique: true },
+  { model: BooksLedger, label: "books ledger snapshot key", key: { firmId: 1, snapshotId: 1, recordKey: 1 }, unique: true },
+  { model: BooksVoucher, label: "books voucher snapshot key", key: { firmId: 1, snapshotId: 1, recordKey: 1 }, unique: true },
+  { model: GroupMapping, label: "group mapping client group", key: { firmId: 1, clientId: 1, groupKey: 1 }, unique: true },
+  { model: BooksParty, label: "books party client name", key: { firmId: 1, clientId: 1, nameKey: 1 }, unique: true },
 ]);
 
 function orderedEntries(key) {

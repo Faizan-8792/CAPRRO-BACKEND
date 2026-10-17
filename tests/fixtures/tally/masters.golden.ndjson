@@ -1,0 +1,7 @@
+{"t":"group","guid":"g-0002","alterId":2,"name":"Sundry Creditors","parent":"","reserved":"Sundry Creditors","warnings":[]}
+{"t":"group","guid":"g-0101","alterId":101,"name":"Raw Material Suppliers","parent":"Sundry Creditors","reserved":"","warnings":[]}
+{"t":"group","guid":"g-0003","alterId":3,"name":"Indirect Expenses","parent":"","reserved":"Indirect Expenses","warnings":[]}
+{"t":"ledger","guid":"l-0001","alterId":301,"name":"Asha Fabrics & Co","parent":"Raw Material Suppliers","openingMinor":2500000,"gstin":"27AAAAA1111A1Z1","pan":"AAAAA1111A","gstRegistrationType":"","isBillwise":true,"creditPeriodDays":45,"udyam":"UDYAM-MH-01-0000001","warnings":[]}
+{"t":"ledger","guid":"l-0002","alterId":302,"name":"Cash","parent":"Cash-in-Hand","openingMinor":-5000000,"gstin":"","pan":"","gstRegistrationType":"","isBillwise":null,"creditPeriodDays":null,"udyam":"","warnings":[]}
+{"t":"ledger","guid":"l-0003","alterId":303,"name":"Rent","parent":"Indirect Expenses","openingMinor":0,"gstin":"","pan":"","gstRegistrationType":"","isBillwise":false,"creditPeriodDays":null,"udyam":"","warnings":[]}
+{"t":"ledger","guid":"l-0004","alterId":304,"name":"Rupee Lost Ledger","parent":"Indirect Expenses","openingMinor":null,"gstin":"","pan":"","gstRegistrationType":"","isBillwise":null,"creditPeriodDays":null,"udyam":"","warnings":["AMOUNT_UNREADABLE"]}

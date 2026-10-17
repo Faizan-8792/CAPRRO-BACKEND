@@ -203,6 +203,8 @@ export async function runRouteChecks({ uri, fixture, MONTHS, rupees }) {
     await raw("appconfigs").updateOne({ _id: "singleton" }, { $set: { "featureFlags.auditPacks": false } });
     const off = await call("GET", "/api/audit-packs", A.token);
     check("with auditPacks off the routes answer 404 naming the flag", off.status === 404 && off.json?.featureFlag === "auditPacks", `status ${off.status}`);
+  } catch (error) {
+    check("the flow ran to its end without throwing", false, String(error?.stack || error).split("\n").slice(0, 3).join(" | "));
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await mongoose.connection.dropDatabase().catch(() => {});

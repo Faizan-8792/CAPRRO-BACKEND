@@ -164,6 +164,16 @@ export const RETENTION_CLASSIFICATION = Object.freeze({
   AuditPackRow: RETENTION_CLASSES.RETAIN,
   AuditPackEvidenceLink: RETENTION_CLASSES.RETAIN,
   PartyMaster: RETENTION_CLASSES.RETAIN,
+  // W10 AP18-AP20 (2026-10-17): the Tally books snapshot, its group mappings and the party master from it.
+  // RETAIN for the same reason as the packs they feed: the client's books as exported for a tax audit and
+  // every person's answer about them, kept as long as the firm keeps its records, purged with the firm.
+  // None has a TTL.
+  BooksSnapshot: RETENTION_CLASSES.RETAIN,
+  BooksGroup: RETENTION_CLASSES.RETAIN,
+  BooksLedger: RETENTION_CLASSES.RETAIN,
+  BooksVoucher: RETENTION_CLASSES.RETAIN,
+  GroupMapping: RETENTION_CLASSES.RETAIN,
+  BooksParty: RETENTION_CLASSES.RETAIN,
 });
 
 // Named so the skip is visible in the run report and in logs, not only in PLAN.md.

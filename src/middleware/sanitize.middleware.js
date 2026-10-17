@@ -68,9 +68,17 @@ export function sanitizeInputs(req, res, next) {
   const isSignedPortalMap =
     req.method === "POST" && req.path === "/api/super/gst-portal-map";
 
+  // W10 AP18: a books snapshot chunk is canonical NDJSON whose SHA-256 the client sends and the server
+  // re-computes. .trim() alone (the text ends in a newline) or tag-stripping (a narration may hold "<")
+  // would turn every honest chunk into a hash mismatch. The route validates its own body: a four-field
+  // allow-list, then every record against a strict schema (books/tally-canonical.js).
+  const isOpaqueBooksChunk =
+    req.method === "POST" && /^\/api\/books\/snapshots\/[a-f0-9]{24}\/chunks$/.test(req.path);
+
   if (
     !isOpaqueImportRoute &&
     !isSignedPortalMap &&
+    !isOpaqueBooksChunk &&
     req.body &&
     typeof req.body === "object"
   ) {

@@ -2435,9 +2435,19 @@ if (listed.status !== 0 || listed.error) {
   // returned), src/services/audit-pack.service.js, src/services/audit-pack-export.service.js and
   // src/services/audit-pack-index-readiness.service.js. HTTP glue with no secret:
   // src/controllers/audit-pack.controller.js and src/routes/audit-pack.routes.js.
+  // 234 -> 251 on 2026-10-17 for the pack registry (W10 AP13-AP15) and the Tally books snapshot (AP18-AP21), all seventeen
+  // confirmed clean by this scan before the pin moved. Pure computation, no network, no secret:
+  // src/services/audit-pack-engine/gstr9c.engine.js, src/services/audit-pack-kinds/kit.js, index.js,
+  // gstr9c.kind.js and workbook-generic.js, src/services/books/group-mapping.js and tally-canonical.js (which
+  // only hashes with SHA-256). Models with fixed vocabularies and no secret: BooksSnapshot.js, BooksGroup.js,
+  // BooksLedger.js, BooksVoucher.js, GroupMapping.js, BooksParty.js. Database work behind the same firm scoping
+  // as every other service, no network call: src/services/books-snapshot.service.js. The one file that reaches a
+  // provider: src/services/books/books-ai.service.js calls callDeepSeek (deepseek-provider.service.js, which
+  // reads the key); it reads no key itself and sends group names only. HTTP glue with no secret:
+  // src/controllers/books.controller.js and src/routes/books.routes.js.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 234 && result.status === 0,
+    files.length === 251 && result.status === 0,
     result,
   );
 }

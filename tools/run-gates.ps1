@@ -763,6 +763,8 @@ try {
         "audit-pack-route-contract",
         # W10 AP9: the shared workbook writer - exact paise, Indian grouping, no formulas (pure).
         "workbook-indian-grouping-contract",
+        # W10 AP18-AP21: the Tally books snapshot - group resolution and strict chunk validation with automated mutants, then upload, seal, group mapping, party master and snapshot diff through the real app (Mongo, scratch-marked; no AI key).
+        "books-snapshot-contract",
         # W10 AP13-AP15: the GSTR-9/9C pack - engine against a hand-worked year, seven deliberate breakages each caught, then the routes, worker and workbook (Mongo, scratch-marked).
         "audit-pack-gstr9c-contract",
         # IMPROVEMENT-PLAN-V2-2026-09-28 Part 1: email observability. Pins the single
@@ -999,6 +1001,7 @@ try {
         "engagement-season-types-contract" = "scratch-gates-season-types"
         "books-import-contract" = "scratch-gates-books-import"
         "audit-pack-route-contract" = "scratch-gates-audit-pack"
+        "books-snapshot-contract" = "scratch-gates-books-snapshot"
         "audit-pack-gstr9c-contract" = "scratch-gates-audit-pack-9c"
         "email-delivery-contract" = "scratch-gates-email-delivery"
         "super-emails-controller-contract" = "scratch-gates-super-emails"
