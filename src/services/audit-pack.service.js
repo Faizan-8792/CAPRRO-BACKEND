@@ -76,7 +76,7 @@ function financialYearOf(value) {
   try {
     financialYearMonths(text);
   } catch {
-    throw httpError(400, "Choose a financial year like 2025-26.");
+    throw httpError(400, "Choose a financial year like 2025-26.", "AUDIT_PACK_SOURCE_REFUSED");
   }
   return text;
 }
@@ -189,7 +189,7 @@ async function loadSourceBatches({ firmId, clientId, ids, kind, label }) {
   for (const batch of batches) {
     if (batch.kind !== kind) throw httpError(400, `A chosen ${label} import is a ${batch.kind} import.`);
     if (batch.status !== "COMPLETED" || !batch.activeImportGeneration) {
-      throw httpError(409, `A chosen ${label} import has not finished importing.`);
+      throw httpError(409, `A chosen ${label} import has not finished importing.`, "AUDIT_PACK_SOURCE_NOT_READY");
     }
     if (String(batch.clientId || "") !== String(clientId)) {
       throw httpError(400, `A chosen ${label} import belongs to another client.`);
@@ -215,11 +215,11 @@ export async function createAuditPackRun({ firmId, actorUserId, requestId = "", 
   if (purchaseIds.length > MAX_SOURCE_BATCHES || gstr2bIds.length > MAX_SOURCE_BATCHES) {
     throw httpError(400, `Choose at most ${MAX_SOURCE_BATCHES} imports of each kind.`);
   }
-  if (!input.trialBalanceBatchId) throw httpError(400, "Choose the client's trial balance for the year.");
+  if (!input.trialBalanceBatchId) throw httpError(400, "Choose the client's trial balance for the year.", "AUDIT_PACK_SOURCE_REFUSED");
 
   const [trialBalance] = await loadSourceBatches({ firmId, clientId: client._id, ids: [input.trialBalanceBatchId], kind: "TRIAL_BALANCE", label: "trial balance" });
   if (trialBalance.financialYear !== financialYear) {
-    throw httpError(400, `The chosen trial balance is for ${trialBalance.financialYear}, not ${financialYear}.`);
+    throw httpError(400, `The chosen trial balance is for ${trialBalance.financialYear}, not ${financialYear}.`, "AUDIT_PACK_SOURCE_REFUSED");
   }
   const purchases = await loadSourceBatches({ firmId, clientId: client._id, ids: purchaseIds, kind: "GST_PURCHASE", label: "purchase register" });
   const gstr2b = await loadSourceBatches({ firmId, clientId: client._id, ids: gstr2bIds, kind: "GSTR2B", label: "GSTR-2B" });
@@ -334,7 +334,7 @@ export async function processAuditPackJob(job, { assertLease = async () => {} } 
     }
     const sourceRowCount = trialBalanceRows.length + purchaseRows.length + gstr2bRows.length;
     if (sourceRowCount > MAX_SOURCE_ROWS) {
-      throw httpError(413, `These imports hold ${sourceRowCount} rows; an audit pack reads at most ${MAX_SOURCE_ROWS}.`);
+      throw httpError(413, `These imports hold ${sourceRowCount} rows; an audit pack reads at most ${MAX_SOURCE_ROWS}.`, "AUDIT_PACK_TOO_LARGE");
     }
 
     // AP6: every supplier this run sees has a party-master row; a person's answer is never touched.
@@ -573,26 +573,31 @@ export async function decideAuditPackRow({ firmId, actorUserId, requestId = "", 
   const note = text(input.note, 2000);
 
   const run = await requireRun(firmId, runId);
-  if (run.status !== "REVIEW") throw httpError(409, "This pack is still being computed.");
+  if (run.status !== "REVIEW") throw httpError(409, "This pack is still being computed.", "AUDIT_PACK_NOT_READY");
   const row = await AuditPackRow.findOne({ firmId, runId: run._id, generationAttempt: run.activeGenerationAttempt, rowKey }).lean();
   if (!row) throw httpError(404, "That row is not in this pack.");
-  if (!row.decidable) throw httpError(400, "This row is worked out from the others; decide those instead.");
+  if (!row.decidable) throw httpError(400, "This row is worked out from the others; decide those instead.", "AUDIT_PACK_DECISION_REFUSED");
 
   if (row.section === "LEDGER") {
     if (status) throw httpError(400, "A ledger takes a treatment, not a supplier status.");
     if (treatment && !PERSON_LEDGER_TREATMENTS.has(treatment)) throw httpError(400, "That treatment is not one a ledger can take.");
     if (row.state === "PENDING_INPUT" && state === "CONFIRMED" && !treatment) {
-      throw httpError(400, "This ledger needs a treatment before it can be confirmed.");
+      throw httpError(400, "This ledger needs a treatment before it can be confirmed.", "AUDIT_PACK_DECISION_REFUSED");
+    }
+    // A fixed asset counts the year's additions, and only the books can give them.
+    if (state === "CONFIRMED" && (treatment || row.values?.treatment) === "CAPITAL_ADDITIONS"
+      && !Number.isSafeInteger(row.values?.additionsMinor)) {
+      throw httpError(400, "This asset's additions for the year are not in the trial balance. Import it with its Debit transactions column, or exclude this ledger with a reason.", "AUDIT_PACK_DECISION_REFUSED");
     }
   } else if (row.section === "SUPPLIER") {
     if (treatment) throw httpError(400, "A supplier takes a status, not a treatment.");
-    if (state === "EXCLUDED") throw httpError(400, "A supplier cannot be excluded; set its status instead.");
+    if (state === "EXCLUDED") throw httpError(400, "A supplier cannot be excluded; set its status instead.", "AUDIT_PACK_DECISION_REFUSED");
     if (status && !PERSON_SUPPLIER_STATUSES.has(status)) throw httpError(400, "That status is not one a person can set.");
     if (row.state === "PENDING_INPUT" && !status && row.values?.status === "NOT_IN_2B") {
-      throw httpError(400, "Check this supplier on the GST portal and set its status before confirming.");
+      throw httpError(400, "Check this supplier on the GST portal and set its status before confirming.", "AUDIT_PACK_DECISION_REFUSED");
     }
   }
-  if (state === "EXCLUDED" && !reason) throw httpError(400, "Say why this row is excluded.");
+  if (state === "EXCLUDED" && !reason) throw httpError(400, "Say why this row is excluded.", "AUDIT_PACK_DECISION_REFUSED");
 
   const decidedAt = new Date();
   const updated = await AuditPackRow.findOneAndUpdate(

@@ -53,6 +53,22 @@ const COUNTED_TREATMENTS = new Set([
   "REVENUE_EXPENDITURE", "CAPITAL_ADDITIONS", "COL3_EXEMPT", "COL4_COMPOSITION", "COL7_UNREGISTERED",
 ]);
 
+/**
+ * The figure a ledger carries under a treatment. A person chooses the treatment; the amount always
+ * comes from the books: the closing balance for expenditure (and for an excluded ledger, shown but
+ * never counted), the year's debit transactions for a fixed asset's additions, nothing for a ledger
+ * outside the clause. null: the books do not give it (additions without a Debit transactions column).
+ */
+export function ledgerAmountFor(treatment, values = {}) {
+  if (treatment === "CAPITAL_ADDITIONS") {
+    return Number.isSafeInteger(values.additionsMinor) ? values.additionsMinor : null;
+  }
+  if (COUNTED_TREATMENTS.has(treatment) || treatment === "EXCLUDED") {
+    return Number.isSafeInteger(values.closingMinor) ? values.closingMinor : null;
+  }
+  return 0;
+}
+
 // ─── money ──────────────────────────────────────────────────────────────
 
 function sum(values) {
@@ -288,7 +304,7 @@ export function buildClause44Rows({ financialYear, trialBalance = [], purchases 
     const ruleHits = [...classified.ruleHits];
     let state = classified.state;
     if (duplicates.length) {
-      ruleHits.push(hit("DUPLICATE_LEDGER", `This ledger appears ${duplicates.length + 1} times in the trial balance; only one can be counted.`));
+      ruleHits.push(hit("DUPLICATE_LEDGER", `This ledger appears ${duplicates.length + 1} times in the trial balance; only one can be counted. Confirming it counts the first, on row ${source.sourceRow}; exclude it if that is not the right one.`));
       state = "PENDING_INPUT";
     }
     rows.push(makeRow({
@@ -300,6 +316,8 @@ export function buildClause44Rows({ financialYear, trialBalance = [], purchases 
         treatment: classified.treatment,
         amountMinor: classified.amountMinor,
         closingMinor: ledger.closingMinor || 0,
+        // The year's additions, when the export has its Debit transactions column; null when not.
+        additionsMinor: ledger.hasTransactionTotals ? ledger.debitTotalMinor || 0 : null,
         exclusion: classified.exclusion || "",
       },
       ruleHits,
@@ -449,6 +467,10 @@ export function effectiveRow(row) {
   const decision = row.decision || null;
   const values = { ...row.values };
   if (decision?.treatment && row.section === "LEDGER") values.treatment = decision.treatment;
+  // Once a person has decided a ledger, its amount is the books' figure for the treatment in force:
+  // an unclassified ledger confirmed as expenditure counts its closing balance, not the nil the
+  // engine held while it waited for an answer.
+  if (decision && row.section === "LEDGER") values.amountMinor = ledgerAmountFor(values.treatment, values);
   if (decision?.status && row.section === "SUPPLIER") values.status = decision.status;
   const state = decision?.state || row.state;
   return { ...row, values, state };
@@ -483,10 +505,14 @@ export function summarizeClause44(rows) {
   const col7 = col2 - col6;
 
   const reasons = [];
-  const undecided = effective.filter((r) => r.decidable && !["CONFIRMED", "EXCLUDED"].includes(r.state)).length;
+  // A ledger confirmed without a treatment is still unclassified: it is not decided.
+  const undecided = effective.filter((r) => r.decidable && (!["CONFIRMED", "EXCLUDED"].includes(r.state)
+    || (r.section === "LEDGER" && r.state === "CONFIRMED" && r.values.treatment === "UNCLASSIFIED"))).length;
   if (undecided) reasons.push({ code: "ROWS_NOT_DECIDED", count: undecided });
   const pending = effective.filter((r) => r.state === "PENDING_INPUT").length;
   if (pending) reasons.push({ code: "ROWS_PENDING_INPUT", count: pending });
+  const amountUnknown = counted.filter((r) => !Number.isSafeInteger(r.values.amountMinor)).length;
+  if (amountUnknown) reasons.push({ code: "LEDGER_AMOUNT_UNKNOWN", count: amountUnknown });
   const unresolvedSuppliers = suppliers.filter((r) => r.values.status === "NOT_IN_2B" && r.state !== "EXCLUDED").length;
   if (unresolvedSuppliers) reasons.push({ code: "SUPPLIER_STATUS_UNKNOWN", count: unresolvedSuppliers });
   const missingMonths = rows.find((r) => r.section === "TIEOUT" && r.values.monthsMissing)?.values.monthsMissing || [];

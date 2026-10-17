@@ -128,6 +128,18 @@ const PUBLIC_ERROR_CODES = new Set([
   // thing worth telling them.
   "IMPORT_DATE_ORDER_CONFLICTING",
   "IMPORT_DATE_ORDER_UNSUPPORTED",
+  // Audit packs (W10). Each refusal says what the CA can do next - set a supplier's status, give a
+  // treatment, import the asset's debit transactions, wait for an import or the computation to
+  // finish. Without a public code production replaced all of them with the generic form message,
+  // although there is no form field to correct. Refusals only a broken client can cause (an unknown
+  // section, a malformed row key, a missing expectedVersion) stay generic on purpose.
+  "AUDIT_PACK_DECISION_REFUSED",
+  "AUDIT_PACK_SOURCE_REFUSED",
+  "AUDIT_PACK_SOURCE_NOT_READY",
+  "AUDIT_PACK_TOO_LARGE",
+  "AUDIT_PACK_NOT_READY",
+  "AUDIT_PACK_ROW_CHANGED",
+  "PARTY_CHANGED",
 ]);
 
 const PUBLIC_IMPORT_ERROR_MESSAGES = Object.freeze({

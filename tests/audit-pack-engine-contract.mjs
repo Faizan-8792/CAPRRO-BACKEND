@@ -18,6 +18,7 @@ import {
   buildClause44Rows,
   classifyLedger,
   financialYearMonths,
+  ledgerAmountFor,
   summarizeClause44,
 } from "../src/services/audit-pack-engine/clause44.engine.js";
 
@@ -236,6 +237,62 @@ check("decided: a person's treatment for a ledger moves its amount, never the am
   const summary = summarizeClause44(decided);
   assert.equal(summary.columns.col3, rupees(250000)); // 1,00,000 + 1,50,000 interest
   assert.equal(summary.columns.col2, rupees(6750000)); // unchanged: the decision cannot set an amount
+});
+check("every amount the engine computes is the books' figure for its treatment", () => {
+  // One rule for the amount, whether the engine or a person chose the treatment.
+  const computed = monthly.rows.filter((r) => r.section === "LEDGER" && r.state === "COMPUTED");
+  assert.ok(computed.length >= 8, `${computed.length} computed ledgers`);
+  for (const row of computed) assert.equal(ledgerAmountFor(row.values.treatment, row.values), row.values.amountMinor, row.label);
+});
+const allConfirmed = (rows) => rows.map((row) => {
+  if (!row.decidable) return row;
+  const decision = { state: "CONFIRMED" };
+  if (row.section === "SUPPLIER" && row.party?.gstin === S4) decision.status = "COMPOSITION";
+  return { ...row, decision };
+});
+check("decided: an unclassified ledger confirmed as expenditure counts its closing balance, not the nil it waited with", () => {
+  const fixture = monthlyFixture();
+  fixture.trialBalance.push(tb("Kappa Ledger", "Zeta Heads", 45000));
+  const built = buildClause44Rows(fixture);
+  const kappa = built.rows.find((r) => r.section === "LEDGER" && r.label === "Kappa Ledger");
+  assert.deepEqual([kappa.state, kappa.values.treatment, kappa.values.amountMinor], ["PENDING_INPUT", "UNCLASSIFIED", 0]);
+  const decided = allConfirmed(built.rows).map((r) => (r.rowKey === kappa.rowKey ? { ...r, decision: { state: "CONFIRMED", treatment: "REVENUE_EXPENDITURE" } } : r));
+  const summary = summarizeClause44(decided);
+  assert.equal(summary.provisional, false, JSON.stringify(summary.reasons));
+  assert.equal(summary.columns.col2, rupees(6750000 + 45000));
+});
+check("decided: a ledger confirmed while still unclassified is not decided", () => {
+  const fixture = monthlyFixture();
+  fixture.trialBalance.push(tb("Kappa Ledger", "Zeta Heads", 45000));
+  const summary = summarizeClause44(allConfirmed(buildClause44Rows(fixture).rows));
+  assert.equal(summary.provisional, true);
+  assert.deepEqual(summary.reasons, [{ code: "ROWS_NOT_DECIDED", count: 1 }]);
+});
+check("decided: a fixed asset whose additions the export does not give stays provisional until excluded", () => {
+  const fixture = monthlyFixture();
+  fixture.trialBalance.push(tb("Office Equipment", "Fixed Assets", 300000));
+  const built = buildClause44Rows(fixture);
+  const asset = built.rows.find((r) => r.section === "LEDGER" && r.label === "Office Equipment");
+  assert.deepEqual([asset.state, asset.values.treatment, asset.values.additionsMinor], ["PENDING_INPUT", "CAPITAL_ADDITIONS", null]);
+  const confirmed = summarizeClause44(allConfirmed(built.rows));
+  assert.equal(confirmed.provisional, true);
+  assert.deepEqual(confirmed.reasons, [{ code: "LEDGER_AMOUNT_UNKNOWN", count: 1 }]);
+  const excluded = allConfirmed(built.rows).map((r) => (r.rowKey === asset.rowKey ? { ...r, decision: { state: "EXCLUDED", reason: "No additions this year" } } : r));
+  const summary = summarizeClause44(excluded);
+  assert.equal(summary.provisional, false, JSON.stringify(summary.reasons));
+  assert.equal(summary.columns.col2, rupees(6750000));
+});
+check("decided: a ledger the rules excluded that a person treats as expenditure counts its closing balance", () => {
+  const decided = allConfirmed(monthly.rows).map((r) => (r.section === "LEDGER" && r.label === "Depreciation"
+    ? { ...r, decision: { state: "CONFIRMED", treatment: "REVENUE_EXPENDITURE" } } : r));
+  assert.equal(summarizeClause44(decided).columns.col2, rupees(6750000 + 300000));
+});
+check("a duplicated ledger names the row that confirming would count", () => {
+  const fixture = monthlyFixture();
+  fixture.trialBalance.push(tb("Rent", "Indirect Expenses", 50000));
+  const rent = buildClause44Rows(fixture).rows.find((r) => r.section === "LEDGER" && r.label === "Rent");
+  assert.equal(rent.state, "PENDING_INPUT");
+  assert.match(rent.ruleHits.find((h) => h.rule === "DUPLICATE_LEDGER").detail, /counts the first, on row 4;/);
 });
 
 // ─── a month of GSTR-2B missing ───────────────────────────────────────────

@@ -18,9 +18,10 @@ import Client from "../models/Client.js";
 import { effectiveRow, summarizeClause44 } from "./audit-pack-engine/clause44.engine.js";
 import { buildWorkbook } from "./workbook.service.js";
 
-function httpError(statusCode, message) {
+function httpError(statusCode, message, code = "") {
   const error = new Error(message);
   error.statusCode = statusCode;
+  if (code) error.code = code;
   return error;
 }
 
@@ -49,6 +50,7 @@ const STATE_WORDS = Object.freeze({
 const REASON_WORDS = Object.freeze({
   ROWS_NOT_DECIDED: (r) => `${r.count} row(s) not yet confirmed or excluded by a person`,
   ROWS_PENDING_INPUT: (r) => `${r.count} row(s) need a person's answer`,
+  LEDGER_AMOUNT_UNKNOWN: (r) => `${r.count} ledger(s) whose amount the trial balance does not give`,
   SUPPLIER_STATUS_UNKNOWN: (r) => `${r.count} supplier(s) not in GSTR-2B whose status nobody has set`,
   GSTR2B_MONTHS_MISSING: (r) => `GSTR-2B not loaded for ${r.months.join(", ")}`,
   REGISTERED_EXCEEDS_TOTAL: () => "Payments to registered suppliers exceed the year's expenditure in the trial balance",
@@ -96,7 +98,7 @@ export async function exportAuditPackWorkbook({ firmId, runId }) {
   if (!mongoose.isValidObjectId(runId)) throw httpError(400, "Pack is not a valid id");
   const run = await AuditPackRun.findOne({ _id: runId, firmId }).lean();
   if (!run) throw httpError(404, "That audit pack is not in this firm.");
-  if (run.status !== "REVIEW") throw httpError(409, "This pack is still being computed.");
+  if (run.status !== "REVIEW") throw httpError(409, "This pack is still being computed.", "AUDIT_PACK_NOT_READY");
   const [stored, client] = await Promise.all([
     AuditPackRow.find({ firmId, runId: run._id, generationAttempt: run.activeGenerationAttempt }).sort({ ordinal: 1 }).lean(),
     Client.findOne({ _id: run.clientId, firmId }).select("name").lean(),
