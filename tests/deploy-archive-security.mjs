@@ -2465,9 +2465,11 @@ if (listed.status !== 0 || listed.error) {
   // computation, no network, no secret, no I/O: audit-pack-engine/ratios.engine.js, audit-pack-kinds/ratios.kind.js.
   // 269 -> 270 on 2026-10-17 for AI-drafted wording on a pack row (W10 AP16/AP28), confirmed clean by this scan before the pin moved. Pure
   // computation, no network, no secret, no I/O: audit-pack-kinds/draft.js (the call itself is in audit-pack.service.js, already pinned above).
+  // 270 -> 274 on 2026-10-17 for CARO 2020 and the Rule 11(g) evidence sheet (W10 AP29, AP30), all four confirmed clean by this scan before the pin moved.
+  // Pure computation, no network, no secret, no I/O: audit-pack-engine/caro.engine.js, audit-pack-kinds/caro.kind.js, audit-pack-engine/rule11g.engine.js, audit-pack-kinds/rule11g.kind.js.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 270 && result.status === 0,
+    files.length === 274 && result.status === 0,
     result,
   );
 }

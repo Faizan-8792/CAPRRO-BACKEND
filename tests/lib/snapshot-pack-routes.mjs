@@ -23,6 +23,7 @@ export async function runSnapshotPackFlow({
   groups = [],
   body = {},
   priorSnapshot = null,
+  earlierSnapshot = null,
   expect = async () => [],
   decide = null,
   expectedWorkbookSheets = null,
@@ -69,7 +70,7 @@ export async function runSnapshotPackFlow({
   await raw("clients").insertOne({ _id: clientId, firmId: A.firmId, name: `${label} Client`, isActive: true, createdAt: now, updatedAt: now });
   await raw("appconfigs").insertOne({ _id: "singleton", featureFlags: { auditPacks: true }, createdAt: now, updatedAt: now });
 
-  async function writeSnapshot({ ledgerDocs, voucherDocs, groupDocs, fy, tag }) {
+  async function writeSnapshot({ ledgerDocs, voucherDocs, groupDocs, fy, tag, createdAt = now }) {
     const snapshotId = oid();
     const contentHash = createHash("sha256").update(`${tag}:${snapshotId}`).digest("hex");
     const alterIds = [...ledgerDocs, ...voucherDocs].map((d) => d.alterId).filter((n) => Number.isSafeInteger(n));
@@ -79,7 +80,7 @@ export async function runSnapshotPackFlow({
       counts: { groups: groupDocs.length, ledgers: ledgerDocs.length, vouchers: voucherDocs.length },
       alterId: { min: alterIds.length ? Math.min(...alterIds) : null, max: alterIds.length ? Math.max(...alterIds) : null },
       voucherDates: { min: null, max: null }, warnings: { recordsWithWarnings: 0, amountsUnreadable: 0, datesUnreadable: 0 },
-      contentHash, createdBy: A.ownerId, sealedBy: A.ownerId, sealedAt: now, createdAt: now, updatedAt: now,
+      contentHash, createdBy: A.ownerId, sealedBy: A.ownerId, sealedAt: createdAt, createdAt, updatedAt: createdAt,
     });
     let n = 0;
     if (groupDocs.length) {
@@ -114,6 +115,11 @@ export async function runSnapshotPackFlow({
     ? await writeSnapshot({ ledgerDocs: priorSnapshot.ledgers, voucherDocs: priorSnapshot.vouchers || [], groupDocs: priorSnapshot.groups || [], fy: priorSnapshot.financialYear, tag: "prior" })
     : null;
 
+  // An earlier export of the SAME year, taken a week before the main one (Rule 11(g) compares the two).
+  const earlierSnapshotId = earlierSnapshot
+    ? await writeSnapshot({ ledgerDocs: earlierSnapshot.ledgers, voucherDocs: earlierSnapshot.vouchers || [], groupDocs: earlierSnapshot.groups || [], fy: financialYear, tag: "earlier", createdAt: new Date(now.getTime() - 7 * 86_400_000) })
+    : null;
+
   // A pack may read things beside the snapshot (a person's answers); the caller writes them here.
   if (beforeCreate) await beforeCreate({ raw, A, clientId, oid, now, snapshotId });
 
@@ -133,7 +139,7 @@ export async function runSnapshotPackFlow({
   const work = () => runAutomationWorkerBatch({ workerId: "snapshot-pack-contract", maxJobs: 5 });
 
   try {
-    const createBody = { kind, clientId: String(clientId), financialYear, snapshotId, ...(priorSnapshotId ? { priorSnapshotId } : {}), ...body };
+    const createBody = { kind, clientId: String(clientId), financialYear, snapshotId, ...(priorSnapshotId ? { priorSnapshotId } : {}), ...(earlierSnapshotId ? { earlierSnapshotId } : {}), ...body };
     const created = await call("POST", "/api/audit-packs", A.token, createBody);
     const runId = created.json?.run?.id;
     check(`${kind}: create answers 202 with a QUEUED run`, created.status === 202 && created.json?.run?.status === "QUEUED" && created.json?.run?.kind === kind, `status ${created.status} ${JSON.stringify(created.json)?.slice(0, 260)}`);
@@ -150,7 +156,7 @@ export async function runSnapshotPackFlow({
       const page = await call("GET", `/api/audit-packs/${runId}/rows?section=${section.code}&limit=100`, A.token);
       rows[section.code] = page.json?.rows || [];
     }
-    const ctx = { call, A, B, run, runId, rows, section: (code) => rows[code] || [], raw, snapshotId, priorSnapshotId, clientId, readWorkbookParts, mongoose, work, mock };
+    const ctx = { call, A, B, run, runId, rows, section: (code) => rows[code] || [], raw, snapshotId, priorSnapshotId, earlierSnapshotId, clientId, readWorkbookParts, mongoose, work, mock };
     checks.push(...(await expect(ctx)).map((c) => ({ ...c, name: c.name.startsWith("route:") ? c.name : `route: ${c.name}` })));
 
     // Firm isolation and the snapshot's own boundaries.

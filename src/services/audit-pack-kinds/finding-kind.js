@@ -62,6 +62,7 @@ async function loadSealed({ firmId, client, financialYear, snapshotId, label, he
  * @param {string[]} [def.extraCreateFields]
  * @param {object[]} [def.extraInputs]      one inputs.js descriptor per extraCreateFields entry, in the same order
  * @param {boolean} [def.needsPrior]       the pack also reads the prior year's snapshot (priorSnapshotId), required
+ * @param {{field:string,label:string,help:string}} [def.earlierSnapshot]   the pack also compares an earlier export of the SAME year (taken before the one chosen), required
  * @param {boolean} [def.optionalPrior]    the pack reads the prior year's snapshot when one is given, and says what it cannot know without it
  * @param {(input:object, helpers:object) => object} [def.prepareParams]   checks the pack's own request fields
  * @param {(ctx:{financialYear:string,masters:object,vouchers:()=>AsyncIterable,params:object,snapshot:object,prior:object|null}) => Promise<{rows:object[],monthsLoaded?:string[],monthsMissing?:string[]}>} def.build
@@ -114,7 +115,7 @@ export function defineFindingKind(def) {
     label: def.label,
     ruleVersion: def.ruleVersion,
     sections: def.sections,
-    createFields: ["snapshotId", ...(def.needsPrior || def.optionalPrior ? ["priorSnapshotId"] : []), ...(def.extraCreateFields || [])],
+    createFields: ["snapshotId", ...(def.needsPrior || def.optionalPrior ? ["priorSnapshotId"] : []), ...(def.earlierSnapshot ? [def.earlierSnapshot.field] : []), ...(def.extraCreateFields || [])],
     inputs: Object.freeze([
       booksSnapshotInput("snapshotId", "The year's books", "A sealed snapshot of this client's Tally export for this financial year."),
       ...(def.needsPrior
@@ -122,6 +123,7 @@ export function defineFindingKind(def) {
         : def.optionalPrior
           ? [Object.freeze({ ...booksSnapshotInput("priorSnapshotId", "The prior year's books", "Optional. A sealed snapshot of the year before. Without it, balances brought forward cannot be traced to the bills behind them, and the pack says so."), required: false })]
           : []),
+      ...(def.earlierSnapshot ? [booksSnapshotInput(def.earlierSnapshot.field, def.earlierSnapshot.label, def.earlierSnapshot.help)] : []),
       ...(def.extraInputs || []),
     ]),
     reasonWords,
@@ -143,8 +145,17 @@ export function defineFindingKind(def) {
         batches.push(snapshotBatch(prior, "prior"));
         priorId = String(prior._id);
       }
+      let earlierId = null;
+      if (def.earlierSnapshot) {
+        const earlier = await loadSealed({ firmId, client, financialYear, snapshotId: input[def.earlierSnapshot.field], label: "earlier", helpers });
+        if (String(earlier._id) === String(snapshot._id)) throw helpers.httpError(400, "The earlier export must be a different export.", "AUDIT_PACK_SOURCE_REFUSED");
+        if (earlier.financialYear !== financialYear) throw helpers.httpError(400, `The earlier export is for ${earlier.financialYear}, not ${financialYear}.`, "AUDIT_PACK_SOURCE_REFUSED");
+        if (new Date(earlier.createdAt) >= new Date(snapshot.createdAt)) throw helpers.httpError(400, "The earlier export must have been taken before the one chosen above.", "AUDIT_PACK_SOURCE_REFUSED");
+        batches.push(snapshotBatch(earlier, "earlier"));
+        earlierId = String(earlier._id);
+      }
       const params = def.prepareParams ? def.prepareParams(input, helpers) : {};
-      return { batches, params: { ...params, snapshotId: String(snapshot._id), ...(priorId ? { priorSnapshotId: priorId } : {}) } };
+      return { batches, params: { ...params, snapshotId: String(snapshot._id), ...(priorId ? { priorSnapshotId: priorId } : {}), ...(earlierId ? { earlierSnapshotId: earlierId } : {}) } };
     },
 
     async compute({ run, assertLease }) {
@@ -170,6 +181,7 @@ export function defineFindingKind(def) {
     effectiveRow,
     summarize,
     draftSpec: def.draftSpec,
+    readMe: def.readMe || [],
 
     validateDecision(row, { state, choice, reason, note }) {
       if (state === "EXCLUDED") {

@@ -274,6 +274,10 @@ export function createMeasure({ financialYear, ledgers }) {
         financialYear,
         netSales,
         netProfit,
+        totalIncome: income,
+        debtOpening: open(GROUPS.DEBT),
+        capitalClosing: close(["CAPITAL_ACCOUNT"]),
+        reservesClosing: close(["RESERVES_SURPLUS"]),
         purchases: operatingPurchases,
         directExpenses: operatingDirect,
         stockAdditions,
@@ -464,6 +468,7 @@ const SPECS = Object.freeze([
 ]);
 
 export const RATIO_CODES = Object.freeze(SPECS.map((s) => s.code));
+export const SPECS_BY_CODE = Object.freeze(Object.fromEntries(SPECS.map((s) => [s.code, s])));
 
 /** Works one ratio for one year. status: OK | MISSING | NOT_APPLICABLE. */
 export function evaluateRatio(spec, measure, typed, columnKey) {

@@ -785,6 +785,10 @@ try {
         "ratios-contract",
         # W10 AP16 + AP28 (2026-10-17): AI-drafted wording on a pack row - what is asked and what is accepted back (pure, nine automated breakages), then the route against a stand-in provider: a reason drafted for each ratio over the 25% line, stored labelled DRAFT FOR REVIEW, changing nothing the pack computed, adopted word for word and recorded as drafted, and the pack completing with the key blank (Mongo, scratch-marked).
         "audit-pack-draft-contract",
+        # W10 AP29 (2026-10-17): the data-driven clauses of CARO 2020 - applicability to the paisa on every threshold, first-in-first-out ageing of statutory dues to the day, borrowings, internal audit thresholds, cash losses, the going-concern indicators with the opinion left to a person, twenty-seven automated breakages, then routes with a drafted narrative that cannot choose (Mongo, scratch-marked).
+        "caro-contract",
+        # W10 AP30 (2026-10-17): the Rule 11(g) evidence sheet - the two-export comparison carried into rows, the limits named, a WORDING CONTRACT that the sheet never says the audit trail was verified, eleven automated breakages, then routes and the exported workbook scanned the same way (Mongo, scratch-marked).
+        "rule11g-contract",
         # IMPROVEMENT-PLAN-V2-2026-09-28 Part 1: email observability. Pins the single
         # transport path through services/mailer.js, the suppression gate, the
         # forward-only webhook transitions, the Svix signature scheme, and the
@@ -1030,6 +1034,8 @@ try {
         "ageing-contract" = "scratch-gates-ageing"
         "ratios-contract" = "scratch-gates-ratios"
         "audit-pack-draft-contract" = "scratch-gates-draft"
+        "caro-contract" = "scratch-gates-caro"
+        "rule11g-contract" = "scratch-gates-rule11g"
         "email-delivery-contract" = "scratch-gates-email-delivery"
         "super-emails-controller-contract" = "scratch-gates-super-emails"
         "api-not-found-contract" = "scratch-gates-api-not-found"
