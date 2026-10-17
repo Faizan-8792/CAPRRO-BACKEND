@@ -2448,9 +2448,12 @@ if (listed.status !== 0 || listed.error) {
   // 251 -> 257 on 2026-10-17 for the snapshot-pack kinds (W10 AP22 and AP25), all six confirmed clean by this scan before the pin moved. Pure computation, no network, no secret, no I/O:
   // src/services/audit-pack-kinds/finding-kind.js, clause21d.kind.js and clause31.kind.js, and src/services/audit-pack-engine/voucher-kit.js,
   // clause21d.engine.js and clause31.engine.js. The books they read arrive through books-snapshot.service.js, already pinned above.
+  // 257 -> 259 on 2026-10-17 for clause 22 / section 43B(h) (W10 AP23), both confirmed clean by this scan before the pin moved. Pure
+  // computation, no network, no secret, no I/O: src/services/audit-pack-engine/clause22.engine.js and src/services/audit-pack-kinds/clause22.kind.js.
+  // The party master and day book it reads arrive through BooksParty and books-snapshot.service.js, already pinned above.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 257 && result.status === 0,
+    files.length === 259 && result.status === 0,
     result,
   );
 }

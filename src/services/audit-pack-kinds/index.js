@@ -13,12 +13,14 @@
 // A descriptor computes nothing itself: the arithmetic lives in an engine under audit-pack-engine/.
 
 import { clause21dKind } from "./clause21d.kind.js";
+import { clause22Kind } from "./clause22.kind.js";
 import { clause31Kind } from "./clause31.kind.js";
 import { gstr9cKind } from "./gstr9c.kind.js";
 
 const KINDS = Object.freeze({
   [gstr9cKind.kind]: gstr9cKind,
   [clause21dKind.kind]: clause21dKind,
+  [clause22Kind.kind]: clause22Kind,
   [clause31Kind.kind]: clause31Kind,
 });
 
