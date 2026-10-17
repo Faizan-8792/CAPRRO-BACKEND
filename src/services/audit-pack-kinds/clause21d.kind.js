@@ -6,6 +6,7 @@
 
 import { CHOICES, CLAUSE21D_RULE_VERSION, buildClause21dRows, formatRupees } from "../audit-pack-engine/clause21d.engine.js";
 import { defineFindingKind } from "./finding-kind.js";
+import { nameListInput } from "./inputs.js";
 
 export const clause21dKind = defineFindingKind({
   kind: "CLAUSE21D",
@@ -16,6 +17,9 @@ export const clause21dKind = defineFindingKind({
     { code: "INPUT_GAPS", label: "What could not be checked" },
   ],
   extraCreateFields: ["transporterLedgers"],
+  extraInputs: [
+    nameListInput("transporterLedgers", "Ledgers of goods transport operators", "Optional. One ledger name per line, exactly as in Tally. Cash paid to a transport operator has a higher limit; a ledger not named here is held to the ordinary limit."),
+  ],
 
   prepareParams(input, { httpError }) {
     const list = input.transporterLedgers ?? [];

@@ -35,6 +35,21 @@ export function getPackKind(kind) {
   return Object.prototype.hasOwnProperty.call(KINDS, kind) ? KINDS[kind] : null;
 }
 
+/**
+ * What a client needs to offer every generic pack without carrying a copy of it: the label, the sections the
+ * rows fall into, and the inputs the create request takes (see inputs.js for the vocabulary). Clause 44 is not
+ * here: it predates the registry and both clients still have their own screen for it.
+ */
+export function describeKinds() {
+  return Object.values(KINDS).map((k) => ({
+    kind: k.kind,
+    label: k.label,
+    ruleVersion: k.ruleVersion,
+    sections: k.sections.map((s) => ({ code: s.code, label: s.label })),
+    inputs: k.inputs,
+  }));
+}
+
 /** Every field any pack's create request may carry; the pack's own list narrows it. */
 export function allCreateFields() {
   return new Set(Object.values(KINDS).flatMap((k) => k.createFields));

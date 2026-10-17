@@ -7,6 +7,7 @@
 import BooksParty from "../../models/BooksParty.js";
 import { CHOICES, CLAUSE22_RULE_VERSION, buildClause22Rows } from "../audit-pack-engine/clause22.engine.js";
 import { defineFindingKind } from "./finding-kind.js";
+import { bankRatesInput } from "./inputs.js";
 
 const DUE_BASIS = Object.freeze({
   AGREED: "agreed credit period",
@@ -24,6 +25,9 @@ export const clause22Kind = defineFindingKind({
     { code: "INPUT_GAPS", label: "What could not be checked" },
   ],
   extraCreateFields: ["bankRates"],
+  extraInputs: [
+    bankRatesInput("bankRates", "Bank rate for the interest", "Optional. The bank rate in force for each financial year the interest runs through, as a percentage. Without it the interest is shown as unknown, not as nil."),
+  ],
 
   prepareParams(input, { httpError }) {
     const rates = input.bankRates ?? {};

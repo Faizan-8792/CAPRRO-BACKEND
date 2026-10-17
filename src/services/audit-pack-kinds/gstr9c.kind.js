@@ -21,7 +21,83 @@ import {
   validateGstr9cDecision,
 } from "../audit-pack-engine/gstr9c.engine.js";
 import { RESIDUAL_CHOICES, SHARED_REASON_WORDS, financialYearMonths } from "./kit.js";
+import { choiceInput, gstr9FiguresInput, importBatchInput, importBatchesInput } from "./inputs.js";
 import { assemblePackWorkbook, packFileName, words, ruleText } from "./workbook-generic.js";
+
+// The GSTR-9 rows a person may type, named as the return names them (shortened). `primary` marks the rows the
+// comparisons read; the others are the neighbours a person naturally copies in. The codes are the engine's own
+// GSTR9_FIGURE_CODES - audit-pack-catalogue-contract fails if the two lists drift.
+const GSTR9_ROW_LABELS = Object.freeze({
+  "4A": "Outward supplies to unregistered persons (B2C)",
+  "4B": "Outward supplies to registered persons (B2B)",
+  "4C": "Zero rated supplies (export) on payment of tax",
+  "4D": "Supplies to SEZs on payment of tax",
+  "4E": "Deemed exports",
+  "4F": "Advances on which tax is paid, invoice not yet issued",
+  "4G": "Inward supplies liable to reverse charge",
+  "4H": "Sub-total (A to G)",
+  "4I": "Credit notes issued",
+  "4J": "Debit notes issued",
+  "4K": "Supplies declared through amendments",
+  "4L": "Supplies reduced through amendments",
+  "4M": "Sub-total (I to L)",
+  "4N": "Supplies and advances on which tax is paid (H + M)",
+  "5A": "Zero rated supplies (export) without payment of tax",
+  "5B": "Supplies to SEZs without payment of tax",
+  "5C": "Supplies on which tax is paid by the recipient on reverse charge",
+  "5D": "Exempted supplies",
+  "5E": "Nil rated supplies",
+  "5F": "Non-GST supplies",
+  "5G": "Sub-total (A to F)",
+  "5H": "Credit notes issued",
+  "5I": "Debit notes issued",
+  "5J": "Supplies declared through amendments",
+  "5K": "Supplies reduced through amendments",
+  "5L": "Sub-total (H to K)",
+  "5M": "Turnover on which tax is not to be paid (G + L)",
+  "5N": "Total turnover including advances (4N + 5M less 4G)",
+  "6A": "Total input tax credit availed through GSTR-3B (its table 4A)",
+  "6B": "Inward supplies other than imports and reverse charge: inputs, capital goods, input services",
+  "6C": "Reverse charge supplies from unregistered persons, credit availed",
+  "6D": "Reverse charge supplies from registered persons, credit availed",
+  "6E": "Import of goods (including from SEZs)",
+  "6F": "Import of services",
+  "6G": "Credit received from an input service distributor",
+  "6H": "Credit reclaimed under the Act",
+  "6I": "Sub-total (B to H)",
+  "6J": "Difference (I less A)",
+  "6K": "Transition credit through TRAN-I",
+  "6L": "Transition credit through TRAN-II",
+  "6M": "Any other credit availed but not specified above",
+  "6N": "Sub-total (K to M)",
+  "6O": "Total input tax credit availed (I + N)",
+  "7A": "Reversed as per rule 37",
+  "7B": "Reversed as per rule 39",
+  "7C": "Reversed as per rule 42",
+  "7D": "Reversed as per rule 43",
+  "7E": "Reversed as per section 17(5)",
+  "7F": "Reversal of TRAN-I credit",
+  "7G": "Reversal of TRAN-II credit",
+  "7H": "Other reversals",
+  "7I": "Total credit reversed (A to H)",
+  "7J": "Net credit available for utilisation (6O less 7I)",
+  "8A": "Credit as per GSTR-2A / 2B",
+  "8B": "Credit as per rows 6B and 6H",
+  "8C": "Credit on the previous year's supplies availed in the first months of this year",
+  "8D": "Difference (A less B + C)",
+  "8E": "Credit available but not availed",
+  "8F": "Credit available but ineligible",
+  "8G": "IGST paid on import of goods",
+  "8H": "IGST credit availed on import of goods (6E)",
+  "8I": "Difference (G less H)",
+  "8J": "Credit available but not availed on import of goods",
+  "8K": "Total credit to lapse in the current year (E + F + J)",
+});
+const GSTR9_PRIMARY = new Set(["4G", "4N", "5A", "5B", "5C", "5N", "6A", "7I", "8A", "8C"]);
+
+export const GSTR9_ROWS = Object.freeze(
+  Object.entries(GSTR9_ROW_LABELS).map(([code, label]) => Object.freeze({ code, label, primary: GSTR9_PRIMARY.has(code) })),
+);
 
 const SECTIONS = Object.freeze([
   { code: "MONTHLY", label: "Month by month" },
@@ -60,6 +136,14 @@ export const gstr9cKind = Object.freeze({
   ruleVersion: GSTR9C_RULE_VERSION,
   sections: SECTIONS,
   createFields: ["gstr1BatchIds", "gstr3bBatchIds", "gstr2bBatchIds", "trialBalanceBatchId", "gstr2bFrequency", "gstr9"],
+  inputs: Object.freeze([
+    importBatchesInput("gstr1BatchIds", "GSTR1_SUMMARY", "GSTR-1 for each month of the year", { required: true, help: "One import per month. A month with none is named in the pack, not read as nil." }),
+    importBatchesInput("gstr3bBatchIds", "GSTR3B_SUMMARY", "GSTR-3B for each month of the year", { required: true, help: "One import per month." }),
+    importBatchesInput("gstr2bBatchIds", "GSTR2B", "GSTR-2B for the year", { required: true, help: "Monthly files, or one per quarter for a quarterly filer." }),
+    importBatchInput("trialBalanceBatchId", "TRIAL_BALANCE", "Trial balance for the year", { help: "Optional. Without it the turnover and the input tax credit in the books are not shown." }),
+    choiceInput("gstr2bFrequency", "The client files GSTR-3B", [["MONTHLY", "Monthly"], ["QUARTERLY", "Quarterly (QRMP)"]], "MONTHLY"),
+    gstr9FiguresInput("gstr9", "GSTR-9 figures as filed", GSTR9_ROWS, "Type the rows from the GSTR-9 you filed. Row 4N is required; a row you leave out is read as not entered, never as nil."),
+  ]),
   reasonWords: REASON_WORDS,
 
   /** Reads and checks the request. Returns the source batches and the parameters stored with the run. */

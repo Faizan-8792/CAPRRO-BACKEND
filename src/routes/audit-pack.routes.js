@@ -10,6 +10,7 @@ import {
   decideRow,
   exportRun,
   listClientParties,
+  listKinds,
   listRows,
   listRuns,
   listSources,
@@ -36,6 +37,7 @@ router.use(
 );
 
 // Fixed paths before /:id so "sources" and "parties" are never read as a pack id.
+router.get("/kinds", listKinds);
 router.get("/sources", listSources);
 router.get("/parties", listClientParties);
 router.patch("/parties/:partyId", updateParty);

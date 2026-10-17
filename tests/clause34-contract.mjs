@@ -147,6 +147,15 @@ async function runChecks(engine) {
     const none = await build([], [], []);
     eq(none.rows.some((r) => r.ruleHits[0]?.rule === "NO_TDS_ROWS"), true);
   });
+  await check("a quarter with deductions and no challan is an input gap, never tax read as wholly undeposited", async () => {
+    const noQ2 = await build(deductions(), challans().filter((c) => c.quarter !== "Q2"), statements());
+    eq(noQ2.rows.filter((r) => r.section === "DEPOSIT_TIMING").map((r) => r.values.quarter), ["Q1"], "Q2 has no deposit finding");
+    const gap = noQ2.rows.find((r) => r.ruleHits[0]?.rule === "NO_CHALLAN_ROWS");
+    eq([gap.values.quarter, gap.state, gap.decidable, gap.values.amountMinor], ["Q2", "PENDING_INPUT", false, null]);
+    // A challan that exists but has no readable date is the same gap: nothing can be matched to it.
+    const unreadable = await build(deductions(), challans().map((c) => (c.quarter === "Q2" ? { ...c, challanDate: "" } : c)), statements());
+    eq(unreadable.rows.some((r) => r.ruleHits[0]?.rule === "NO_CHALLAN_ROWS" && r.values.quarter === "Q2"), true, "unreadable challan");
+  });
   await check("every deposit row offers the quarterly-depositor answer; every statement row the in-time answer", () => {
     eq(deposit("Q1").values.choices.map((c) => c.value), ["REPORT", "QUARTERLY_DEPOSITOR", "REGULARISED", "OTHER_EXPLAINED"]);
     eq(statement("Q1").values.choices.map((c) => c.value), ["REPORT", "FILED_IN_TIME", "FEE_KNOWN_ELSEWHERE", "OTHER_EXPLAINED"]);
@@ -165,6 +174,7 @@ const MUTANTS = [
   { name: "March tax is due on 7 April, not 30 April", from: 'if (m === 3) return `${y}-04-30`;', to: 'if (m === 3) return `${y}-04-07`;' },
   { name: "the fee is Rs 100 a day", from: "export const FEE_PER_DAY_MINOR = 20_000;", to: "export const FEE_PER_DAY_MINOR = 10_000;" },
   { name: "the fee is not capped at the quarter's tax", from: "const feeMinor = Math.min(uncapped, quarterTaxMinor);", to: "const feeMinor = uncapped;" },
+  { name: "a quarter with no challan is read as wholly undeposited", from: "const depositsKnown = purse.length > 0;", to: "const depositsKnown = true;" },
   { name: "the Q1 statement due date is read as 31 August", from: 'if (quarter === "Q1") return `${startYear}-${QUARTER_STATEMENT_DUE.Q1}`;', to: 'if (quarter === "Q1") return `${startYear}-08-31`;' },
 ];
 
@@ -254,6 +264,8 @@ async function runRouteChecks(uri) {
     const shown = await call("GET", `/api/audit-packs/${runId}`, token);
     const run = shown.json?.run;
     check("published to REVIEW naming its sections", run?.status === "REVIEW" && run?.sections?.map((s) => s.code).join(",") === "DEPOSIT_TIMING,STATEMENT_TIMING,INPUT_GAPS", JSON.stringify(run)?.slice(0, 300));
+    const reasons = run?.summary?.reasons || [];
+    check("a generic pack's summary carries each reason as a sentence from its own table, so a client carries no words of its own", reasons.length >= 1 && reasons.every((r) => typeof r.text === "string" && r.text.length > 0) && reasons.some((r) => r.code === "ROWS_NOT_DECIDED" && /not yet confirmed or excluded/.test(r.text)), JSON.stringify(reasons));
     const deposits = (await call("GET", `/api/audit-packs/${runId}/rows?section=DEPOSIT_TIMING&limit=100`, token)).json?.rows || [];
     const statementRows = (await call("GET", `/api/audit-packs/${runId}/rows?section=STATEMENT_TIMING&limit=100`, token)).json?.rows || [];
     check("two deposit rows and three statement rows are read by section, Q4 absent", deposits.length === 2 && statementRows.length === 3 && !deposits.some((r) => r.values.quarter === "Q4"), `${deposits.length}/${statementRows.length}`);

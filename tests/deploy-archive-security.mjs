@@ -2457,9 +2457,11 @@ if (listed.status !== 0 || listed.error) {
   // 261 -> 263 on 2026-10-17 for clause 34 / TDS deposit and statement timing (W10 AP26), both confirmed clean by this scan before the pin moved.
   // Pure computation, no network, no secret, no I/O: src/services/audit-pack-engine/clause34.engine.js and
   // src/services/audit-pack-kinds/clause34.kind.js. The TDS rows it reads arrive through TdsImportRow, already pinned above.
+  // 263 -> 264 on 2026-10-17 for the pack catalogue (W10 AP15), confirmed clean by this scan before the pin moved. Pure data and
+  // builders, no network, no secret, no I/O: src/services/audit-pack-kinds/inputs.js (what each pack asks a person for).
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 263 && result.status === 0,
+    files.length === 264 && result.status === 0,
     result,
   );
 }

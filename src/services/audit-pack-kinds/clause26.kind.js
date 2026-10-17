@@ -6,6 +6,7 @@
 
 import { CHOICES, CLAUSE26_RULE_VERSION, buildClause26Rows } from "../audit-pack-engine/clause26.engine.js";
 import { defineFindingKind } from "./finding-kind.js";
+import { dateDayInput, paymentsListInput } from "./inputs.js";
 
 const NATURE = Object.freeze({
   PROVIDENT_FUND: "Provident fund",
@@ -27,6 +28,10 @@ export const clause26Kind = defineFindingKind({
     { code: "INPUT_GAPS", label: "What could not be checked" },
   ],
   extraCreateFields: ["nextYearPayments", "returnDueDay"],
+  extraInputs: [
+    paymentsListInput("nextYearPayments", "Payments made after the year end", "Optional. Payments from 1 April to the return due date, one per line. Without them a due at the year end is shown as not checked, never as unpaid."),
+    dateDayInput("returnDueDay", "Due date of the return of income", "Needed when payments are listed: the date the return is due under section 139(1)."),
+  ],
 
   prepareParams(input, { httpError }) {
     const day = input.returnDueDay ?? null;

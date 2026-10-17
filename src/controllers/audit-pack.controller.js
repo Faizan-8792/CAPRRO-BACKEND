@@ -15,6 +15,7 @@ import {
   setPartyStatus,
 } from "../services/audit-pack.service.js";
 import { exportAuditPackWorkbook } from "../services/audit-pack-export.service.js";
+import { describeKinds } from "../services/audit-pack-kinds/index.js";
 
 function context(req) {
   return { firmId: req.user.firmId, actorUserId: req.user.id, requestId: req.id || "" };
@@ -66,6 +67,14 @@ export async function decideRow(req, res, next) {
       input: req.body || {},
     });
     return res.json({ ok: true, row });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export function listKinds(req, res, next) {
+  try {
+    return res.json({ ok: true, kinds: describeKinds() });
   } catch (error) {
     return next(error);
   }

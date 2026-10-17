@@ -8,6 +8,7 @@
 import TdsImportRow from "../../models/TdsImportRow.js";
 import { CLAUSE34_RULE_VERSION, buildClause34Rows } from "../audit-pack-engine/clause34.engine.js";
 import { SHARED_REASON_WORDS, STATE_WORDS } from "./kit.js";
+import { importBatchesInput } from "./inputs.js";
 import { assemblePackWorkbook, isDecided, packFileName, ruleText, words } from "./workbook-generic.js";
 
 const SECTIONS = Object.freeze([
@@ -71,6 +72,11 @@ export const clause34Kind = Object.freeze({
   ruleVersion: CLAUSE34_RULE_VERSION,
   sections: SECTIONS,
   createFields: ["deductionBatchIds", "challanBatchIds", "statementBatchIds"],
+  inputs: Object.freeze([
+    importBatchesInput("deductionBatchIds", "TDS_DEDUCTIONS", "TDS deduction register, each quarter", { help: "Needed with, or instead of, the statements." }),
+    importBatchesInput("challanBatchIds", "TDS_CHALLANS", "TDS challans, each quarter", { help: "A deposit is read only from a challan. A quarter with deductions and no challans is named as an input gap, not read as undeposited." }),
+    importBatchesInput("statementBatchIds", "TDS_STATEMENTS", "TDS quarterly statements", { help: "Needed with, or instead of, the deduction register." }),
+  ]),
   reasonWords: { ...SHARED_REASON_WORDS },
 
   async prepare({ firmId, client, financialYear, input, helpers }) {

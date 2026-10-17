@@ -20,6 +20,7 @@
 import BooksSnapshot from "../../models/BooksSnapshot.js";
 import { readSnapshotMasters, streamVouchers } from "../books-snapshot.service.js";
 import { SHARED_REASON_WORDS, STATE_WORDS, choice, sumMinor } from "./kit.js";
+import { booksSnapshotInput } from "./inputs.js";
 import { assemblePackWorkbook, isDecided, packFileName, ruleText, words } from "./workbook-generic.js";
 
 export const SNAPSHOT_SOURCE_KIND = "BOOKS_SNAPSHOT";
@@ -53,6 +54,7 @@ async function loadSealed({ firmId, client, financialYear, snapshotId, label, he
  * @param {string} def.ruleVersion
  * @param {{code:string,label:string}[]} def.sections
  * @param {string[]} [def.extraCreateFields]
+ * @param {object[]} [def.extraInputs]      one inputs.js descriptor per extraCreateFields entry, in the same order
  * @param {boolean} [def.needsPrior]       the pack also reads the prior year's snapshot (priorSnapshotId)
  * @param {(input:object, helpers:object) => object} [def.prepareParams]   checks the pack's own request fields
  * @param {(ctx:{financialYear:string,masters:object,vouchers:()=>AsyncIterable,params:object,snapshot:object,prior:object|null}) => Promise<{rows:object[],monthsLoaded?:string[],monthsMissing?:string[]}>} def.build
@@ -105,6 +107,11 @@ export function defineFindingKind(def) {
     ruleVersion: def.ruleVersion,
     sections: def.sections,
     createFields: ["snapshotId", ...(def.needsPrior ? ["priorSnapshotId"] : []), ...(def.extraCreateFields || [])],
+    inputs: Object.freeze([
+      booksSnapshotInput("snapshotId", "The year's books", "A sealed snapshot of this client's Tally export for this financial year."),
+      ...(def.needsPrior ? [booksSnapshotInput("priorSnapshotId", "The prior year's books", "A sealed snapshot for the year before; it must be a different export.")] : []),
+      ...(def.extraInputs || []),
+    ]),
     reasonWords,
 
     async prepare({ firmId, client, financialYear, input, helpers }) {

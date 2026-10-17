@@ -39,6 +39,7 @@ import {
 } from "./audit-pack-engine/clause44.engine.js";
 import { looksLikePredefinedGroup } from "./books-normalization.service.js";
 import { allCreateFields, getPackKind } from "./audit-pack-kinds/index.js";
+import { reasonSentence } from "./audit-pack-kinds/workbook-generic.js";
 
 export const AUDIT_PACK_JOB_KIND = "AUDIT_PACK";
 
@@ -537,7 +538,12 @@ export async function computeAuditPackSummary(run) {
   if (run.status !== "REVIEW") return null;
   const rows = await activeRows(run);
   const generic = getPackKind(run.kind);
-  return (generic ? generic.summarize : summarizeClause44)(rows.map(engineRowFromStored));
+  const summary = (generic ? generic.summarize : summarizeClause44)(rows.map(engineRowFromStored));
+  if (!generic) return summary;
+  // The sentence for each reason comes from the pack's own table, the one its workbook uses, so a client shows the
+  // words the server chose and carries none of its own for a pack it has not met. A code the table lacks keeps
+  // its code as the text (reasonSentence's rule), never a guess.
+  return { ...summary, reasons: (summary.reasons || []).map((reason) => ({ ...reason, text: reasonSentence(reason, generic.reasonWords || {}) })) };
 }
 
 export async function listAuditPackRuns({ firmId, query = {} }) {
@@ -591,10 +597,12 @@ export async function listAuditPackSources({ firmId, query = {} }) {
     $or: [
       { kind: "TRIAL_BALANCE", financialYear },
       { kind: { $in: ["GST_PURCHASE", "GSTR2B", "GSTR1_SUMMARY", "GSTR3B_SUMMARY"] }, period: { $in: months } },
+      // The TDS registers carry a financial year and a quarter instead of a month (clause 34).
+      { kind: { $in: ["TDS_DEDUCTIONS", "TDS_CHALLANS", "TDS_STATEMENTS"] }, financialYear },
     ],
   })
-    .select("_id kind period financialYear sourceName totalRows validRows completedAt gstin")
-    .sort({ kind: 1, period: 1, completedAt: -1 })
+    .select("_id kind period financialYear quarter statementType sourceName totalRows validRows completedAt gstin")
+    .sort({ kind: 1, period: 1, quarter: 1, completedAt: -1 })
     .limit(200)
     .lean();
   return {
@@ -605,6 +613,8 @@ export async function listAuditPackSources({ firmId, query = {} }) {
       kind: b.kind,
       period: b.period || "",
       financialYear: b.financialYear || "",
+      quarter: b.quarter || "",
+      statementType: b.statementType || "",
       gstin: b.gstin || "",
       sourceName: b.sourceName || "",
       rows: b.validRows ?? b.totalRows ?? 0,

@@ -105,6 +105,7 @@ export function buildClause34Rows({ financialYear, deductions, challans, stateme
 
   const rows = [];
   const gaps = [];
+  const challanGaps = [];
 
   const byQuarter = (list) => {
     const map = new Map(QUARTER_ORDER.map((q) => [q, []]));
@@ -131,6 +132,11 @@ export function buildClause34Rows({ financialYear, deductions, challans, stateme
       const purse = [...qChallans]
         .filter((c) => /^\d{4}-\d{2}-\d{2}$/.test(String(c.challanDate || "")) && Number.isSafeInteger(c.depositedMinor))
         .sort((a, b) => a.challanDate.localeCompare(b.challanDate) || String(a.rowId ?? "").localeCompare(String(b.rowId ?? "")));
+      // Tax is read as deposited only against a challan. With no challan that can be read the deposit is
+      // UNKNOWN, and the quarter is named as an input gap rather than reported as wholly undeposited (a missing
+      // input is never read as "not paid"; the same rule clause 26 keeps for payments after the year end).
+      const depositsKnown = purse.length > 0;
+      if (!depositsKnown && ordered.length > 0) challanGaps.push({ quarter, challanRows: qChallans.length });
       // A challan settles the quarter's deductions in deduction order; the books do not say which deduction
       // a challan pays for, so this order is stated on the row.
       let purseIndex = 0;
@@ -166,7 +172,7 @@ export function buildClause34Rows({ financialYear, deductions, challans, stateme
         }
       }
 
-      if (lateDepositedMinor > 0 || undepositedMinor > 0) {
+      if (depositsKnown && (lateDepositedMinor > 0 || undepositedMinor > 0)) {
         const interestMinor = lateDepositInterestMinor + runningInterestMinor;
         rows.push(makeRow({
           section: "DEPOSIT_TIMING",
@@ -298,6 +304,17 @@ export function buildClause34Rows({ financialYear, deductions, challans, stateme
       label: "No TDS rows were imported",
       values: { amountMinor: null },
       ruleHits: [hit("NO_TDS_ROWS", "No deduction, challan or statement row was imported for this year, so clause 34 could not be checked. Import the TDS registers, or confirm the client deducted nothing.")],
+      state: "PENDING_INPUT",
+      derived: true,
+    }));
+  }
+  for (const gap of challanGaps) {
+    rows.push(makeRow({
+      section: "INPUT_GAPS",
+      identity: `gap:no-challan|${gap.quarter}`,
+      label: `${gap.quarter}: no challan with a readable date and amount was imported`,
+      values: { amountMinor: null, quarter: gap.quarter, challanRows: gap.challanRows },
+      ruleHits: [hit("NO_CHALLAN_ROWS", `Tax was deducted in ${gap.quarter} but no challan with a readable date and amount was imported, so what was deposited, and the section 201(1A)(ii) interest, could not be worked out. Import the challans, or confirm none was paid.`)],
       state: "PENDING_INPUT",
       derived: true,
     }));
