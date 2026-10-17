@@ -7,6 +7,8 @@ import AuditWorkingPaperAnalysis, {
   PROVIDER_ADMISSION_VERSION,
 } from "../models/AuditWorkingPaperAnalysis.js";
 import AuditWorkingPaperRow from "../models/AuditWorkingPaperRow.js";
+import AuditPackRow from "../models/AuditPackRow.js";
+import AuditPackRun from "../models/AuditPackRun.js";
 import Engagement from "../models/Engagement.js";
 import EngagementFinding from "../models/EngagementFinding.js";
 import { recordActivity } from "./activity.service.js";
@@ -25,7 +27,8 @@ import {
   callDeepSeek,
   parseJsonObject,
 } from "./deepseek-provider.service.js";
-import { rupeesFromPaise } from "../utils/rupees.js";
+import { getPackKind } from "./audit-pack-kinds/index.js";
+import { rupeesFromPaise, rupeesText } from "../utils/rupees.js";
 
 const WORKING_PAPER_FLAGS = Object.freeze([
   "assuranceEngagements",
@@ -59,7 +62,20 @@ const ROW_CREATE_FIELDS = new Set([
   "sourceReference",
   "assertionTags",
   "note",
+  "packRow",
 ]);
+// W10 AP36: a pack-sourced working-paper row moves the pack's own checklist item forward, and only from
+// OPEN to IN_PROGRESS - never to COMPLETE, which stays a person's act on the engagement itself. The keys
+// are the engagement templates' real ones (TAX_AUDIT's clause items, the GST annual return's differences).
+const PACK_KIND_CHECKLIST_TEMPLATE_KEYS = Object.freeze({
+  CLAUSE44: "clause_44",
+  CLAUSE21D: "clause_21",
+  CLAUSE22: "clause_22_43bh",
+  CLAUSE26: "clause_26",
+  CLAUSE31: "clause_31",
+  CLAUSE34: "clause_34",
+  GSTR9C: "differences",
+});
 const ANALYSIS_CREATE_FIELDS = new Set([
   "mutationKey",
   "expectedRevision",
@@ -761,6 +777,107 @@ async function getAuditWorkingPaperDetail({ workingPaperId, firmId, query = {} }
   };
 }
 
+// ─── W10 AP36: a confirmed pack row landing as a working-paper row ──────────
+
+/**
+ * Resolves and polices the optional packRow source of a working-paper row. Only a row a person has
+ * CONFIRMED in a pack of the same firm and client may land; everything else is refused before any
+ * write. The refusal for a row that exists but is not confirmed is 409 AUDIT_PACK_ROW_NOT_CONFIRMED,
+ * always that status, so a client can tell it from a not-found.
+ */
+async function resolvePackRowSource({ firmId, packRow, paper, session }) {
+  if (packRow === undefined || packRow === null) return null;
+  if (typeof packRow !== "object" || Array.isArray(packRow)) {
+    throw httpError(400, "packRow names the pack run and the row: { runId, rowKey }.");
+  }
+  const runId = String(packRow.runId || "").trim();
+  const rowKey = String(packRow.rowKey || "").trim();
+  if (!/^[a-f\d]{24}$/i.test(runId)) throw httpError(400, "packRow.runId must be the pack run's id.");
+  if (!rowKey) throw httpError(400, "packRow.rowKey must be the pack row's key.");
+  const run = await AuditPackRun.findOne({ _id: objectId(runId, "packRow.runId"), firmId }).session(session).lean();
+  if (!run) throw httpError(404, "That pack run is not in this firm.");
+  if (String(run.clientId) !== String(paper.clientId)) {
+    throw httpError(409, "That pack run belongs to another client than this working paper.", "AUDIT_PACK_ROW_NOT_CONFIRMED");
+  }
+  const row = await AuditPackRow.findOne({ firmId, runId: run._id, rowKey }).session(session).lean();
+  if (!row || String(row.generationAttempt) !== String(run.activeGenerationAttempt)) {
+    // Only the run's active generation may land; an older attempt's row is not the row the person saw.
+    throw httpError(404, "That pack row is not in this run.");
+  }
+  const decision = row.decision || {};
+  if (decision.state !== "CONFIRMED" || !row.decidable) {
+    throw httpError(409, "Only a pack row you have confirmed can land in a working paper. Decide the row in the pack first.", "AUDIT_PACK_ROW_NOT_CONFIRMED");
+  }
+  return { run, row, decision };
+}
+
+/**
+ * The working-paper fields a confirmed pack row fills: the pack and the row name what was tested, the
+ * observed lines and rules are what was seen, the amount is the row's own figure, and the person who
+ * confirmed it and when stand in the note as the preparer and the date. Nothing here asserts a
+ * conclusion - the words are the pack's own, and the decision is the person's.
+ */
+function packRowDerivedFields({ run, row, decision }, input) {
+  const kind = getPackKind(run.kind);
+  const packLabel = kind?.label || run.kind;
+  const lines = (row.values?.lines || [])
+    .map((line) => {
+      const value = line.kind === "money" && Number.isSafeInteger(line.value) ? rupeesText(line.value) : line.value;
+      return `${line.label}: ${value === null || value === undefined || value === "" ? "-" : value}`;
+    })
+    .join("\n");
+  const rules = (row.ruleHits || []).map((h) => h.detail).filter(Boolean).join(" ");
+  const choiceWords = kind?.choiceWords || {};
+  const answer = choiceWords[decision.choice] || decision.choice || "";
+  const confirmedParts = [`Confirmed by user ${decision.decidedBy} on ${decision.decidedAt ? new Date(decision.decidedAt).toISOString() : "an unrecorded time"}.`];
+  if (answer) confirmedParts.push(`Answer: ${answer}.`);
+  if (decision.reason) confirmedParts.push(`Reason: ${decision.reason}.`);
+  if (decision.note) confirmedParts.push(`Note: ${decision.note}.`);
+  if (rules) confirmedParts.push(`How it was read: ${rules}`);
+  const derived = {
+    rowKey: `PACK-${run.kind}-${row.rowKey}`,
+    description: `${packLabel} (${run.financialYear}): ${row.label}`.slice(0, 2000),
+    observedValue: lines.slice(0, 4000),
+    sourceReference: `CA PRO pack ${run.kind} (${run.ruleVersion}) run ${run._id} row ${row.rowKey}`.slice(0, 2000),
+    note: confirmedParts.join(" ").slice(0, 5000),
+  };
+  if (Number.isSafeInteger(row.values?.amountMinor)) derived.currentAmountMinor = row.values.amountMinor;
+  for (const key of Object.keys(derived)) {
+    if (input[key] !== undefined) throw httpError(400, `${key} is filled from the pack row; do not send it beside packRow.`);
+  }
+  return derived;
+}
+
+/** Moves the pack's own checklist item from OPEN to IN_PROGRESS - never to COMPLETE. */
+async function advancePackChecklistItems({ engagement, actorUserId, session, templateKey, evidenceReference }) {
+  await Engagement.updateOne(
+    { _id: engagement._id, __v: engagement.__v },
+    [
+      { $set: {
+        updatedAt: new Date(),
+        updatedBy: actorUserId,
+        checklist: {
+          $map: {
+            input: "$checklist",
+            as: "item",
+            in: {
+              $cond: [
+                { $and: [
+                  { $eq: ["$$item.templateKey", templateKey] },
+                  { $eq: ["$$item.status", "OPEN"] },
+                ] },
+                { $mergeObjects: ["$$item", { status: "IN_PROGRESS", evidenceReference: { $cond: [{ $gt: [{ $strLenCP: { $ifNull: ["$$item.evidenceReference", ""] } }, 0] }, "$$item.evidenceReference", evidenceReference] } }] },
+                "$$item",
+              ],
+            },
+          },
+        },
+      } },
+    ],
+    { session },
+  );
+}
+
 async function createAuditWorkingPaperRow({
   workingPaperId,
   firmId,
@@ -772,7 +889,10 @@ async function createAuditWorkingPaperRow({
   assertAllowedFields(input, ROW_CREATE_FIELDS, "Audit source-row creation");
   const mutation = operationMutation(input, "audit-working-paper-row-create");
   const expectedRevision = positiveInteger(input.expectedRevision, "expectedRevision");
-  const rowPayload = workingPaperRowPayload(input);
+  // With packRow the pack fills rowKey, description and sourceReference; validating the bare input here
+  // would demand fields the person never sends.
+  let rowPayload = input.packRow === undefined || input.packRow === null ? workingPaperRowPayload(input) : null;
+  let packSource = null;
   const paperId = objectId(workingPaperId, "workingPaperId");
   const recordRowActivity = (row, paper, session) =>
     ensureWorkingPaperActivity({
@@ -813,6 +933,13 @@ async function createAuditWorkingPaperRow({
       assertPaperRevision(paper, expectedRevision);
       const engagement = await findEngagement(paper.engagementId, firmId, session);
       assertEngagementWritable(engagement);
+      // W10 AP36: a pack row, once a person has confirmed it, may land here as the working-paper row.
+      // The row's label, amount, lines, rule and the decision's preparer and date fill the fields; an
+      // unconfirmed, excluded or foreign row is refused before anything is written.
+      packSource = await resolvePackRowSource({ firmId, packRow: input.packRow, paper, session });
+      if (packSource) {
+        rowPayload = workingPaperRowPayload({ ...input, ...packRowDerivedFields(packSource, input) });
+      }
       const duplicateKey = await AuditWorkingPaperRow.findOne({
         firmId,
         workingPaperId: paper._id,
@@ -846,7 +973,16 @@ async function createAuditWorkingPaperRow({
         { session }
       );
       await savePaperContentChange(paper, actorUserId, session);
-      await touchEngagementContent({ engagement, actorUserId, session });
+      const touchedEngagement = await touchEngagementContent({ engagement, actorUserId, session });
+      if (packSource && PACK_KIND_CHECKLIST_TEMPLATE_KEYS[packSource.run.kind]) {
+        await advancePackChecklistItems({
+          engagement: touchedEngagement,
+          actorUserId,
+          session,
+          templateKey: PACK_KIND_CHECKLIST_TEMPLATE_KEYS[packSource.run.kind],
+          evidenceReference: `Pack ${packSource.run.kind} row ${packSource.row.rowKey}`,
+        });
+      }
       await recordRowActivity(row, paper, session);
       return { row, paper };
     });

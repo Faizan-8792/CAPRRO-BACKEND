@@ -140,6 +140,9 @@ const PUBLIC_ERROR_CODES = new Set([
   "AUDIT_PACK_TOO_LARGE",
   "AUDIT_PACK_NOT_READY",
   "AUDIT_PACK_ROW_CHANGED",
+  // W10 AP36: landing a pack row in a working paper is refused until the person confirms the row, and
+  // only for the working paper's own client. Always 409.
+  "AUDIT_PACK_ROW_NOT_CONFIRMED",
   "PARTY_CHANGED",
   // Books snapshots (W10 AP18). The upload client is software, but its person needs the sentence: which chunk
   // to send next, that a snapshot is sealed, that counts differ. A malformed record names its line.

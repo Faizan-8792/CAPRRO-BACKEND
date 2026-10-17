@@ -995,7 +995,10 @@ try {
         "owner-only-controls-e2e",
         # Handing a shared firm to another member: one transaction, owner-only, every refusal
         # leaving nothing changed (R27).
-        "ownership-transfer-e2e"
+        "ownership-transfer-e2e",
+        # W10 AP36 (2026-10-17): a confirmed pack row lands as a working-paper row through the real
+        # create routes; unconfirmed, excluded, foreign and cross-client rows are refused. Transactions.
+        "pack-working-paper-contract"
     )
     # Suites that hold EXTRA assertions behind "if (process.env.MONGODB_URI)". This runner never
     # set that variable, so those assertions had never run in a single gate execution. Measured
