@@ -2451,9 +2451,12 @@ if (listed.status !== 0 || listed.error) {
   // 257 -> 259 on 2026-10-17 for clause 22 / section 43B(h) (W10 AP23), both confirmed clean by this scan before the pin moved. Pure
   // computation, no network, no secret, no I/O: src/services/audit-pack-engine/clause22.engine.js and src/services/audit-pack-kinds/clause22.kind.js.
   // The party master and day book it reads arrive through BooksParty and books-snapshot.service.js, already pinned above.
+  // 259 -> 261 on 2026-10-17 for clause 26 / section 43B and clause 20(b) (W10 AP24), both confirmed clean by this scan before the pin moved.
+  // Pure computation, no network, no secret, no I/O: src/services/audit-pack-engine/clause26.engine.js and
+  // src/services/audit-pack-kinds/clause26.kind.js. The day book it reads arrives through books-snapshot.service.js, already pinned above.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 259 && result.status === 0,
+    files.length === 261 && result.status === 0,
     result,
   );
 }

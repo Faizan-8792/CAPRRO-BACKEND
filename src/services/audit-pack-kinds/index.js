@@ -14,6 +14,7 @@
 
 import { clause21dKind } from "./clause21d.kind.js";
 import { clause22Kind } from "./clause22.kind.js";
+import { clause26Kind } from "./clause26.kind.js";
 import { clause31Kind } from "./clause31.kind.js";
 import { gstr9cKind } from "./gstr9c.kind.js";
 
@@ -21,6 +22,7 @@ const KINDS = Object.freeze({
   [gstr9cKind.kind]: gstr9cKind,
   [clause21dKind.kind]: clause21dKind,
   [clause22Kind.kind]: clause22Kind,
+  [clause26Kind.kind]: clause26Kind,
   [clause31Kind.kind]: clause31Kind,
 });
 
