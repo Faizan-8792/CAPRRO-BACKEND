@@ -20,6 +20,7 @@ import {
   summarizeGstr9c,
   validateGstr9cDecision,
 } from "../audit-pack-engine/gstr9c.engine.js";
+import { formatRupees } from "../audit-pack-engine/clause21d.engine.js";
 import { RESIDUAL_CHOICES, SHARED_REASON_WORDS, financialYearMonths } from "./kit.js";
 import { choiceInput, gstr9FiguresInput, importBatchInput, importBatchesInput } from "./inputs.js";
 import { assemblePackWorkbook, packFileName, words, ruleText } from "./workbook-generic.js";
@@ -236,6 +237,29 @@ export const gstr9cKind = Object.freeze({
     if (v.differenceMinor != null) lines.push({ label: "Reading", value: v.withinRounding ? "Agrees within rounding" : "Differs by more than rounding: say why", kind: "text" });
     if (v.monthsMissing?.length) lines.push({ label: "Not loaded", value: v.monthsMissing.join(", "), kind: "text" });
     return lines;
+  },
+
+  /**
+   * W10 AP16: a proposed category and a draft reason for a residual (a difference beyond rounding between two
+   * figures). The model sees the two figures, their labels and the difference; it may propose a category from the
+   * closed list (never "not explained", which is a person's call) or none. Words only: see draft.js.
+   */
+  draftSpec(row) {
+    const v = row.values || {};
+    if (!row.decidable || v.leftLabel === undefined || !Number.isSafeInteger(v.differenceMinor) || v.withinRounding) return null;
+    const money = (minor) => (Number.isSafeInteger(minor) ? formatRupees(minor) : "not available");
+    return {
+      purpose: "RESIDUAL_REASON",
+      instruction: "Two figures in a GST reconciliation differ by more than rounding. Propose the category that most likely explains the difference, if the facts support one, and write a short reason a chartered accountant can check.",
+      facts: [
+        { label: "Check", value: row.label },
+        { label: v.leftLabel, value: money(v.leftMinor) },
+        { label: v.rightLabel, value: money(v.rightMinor) },
+        { label: "Difference", value: money(v.differenceMinor) },
+        ...(v.monthsMissing?.length ? [{ label: "Months not loaded", value: v.monthsMissing.join(", ") }] : []),
+      ],
+      choices: RESIDUAL_CHOICES.filter(([code]) => code !== "UNEXPLAINED").map(([code, label]) => ({ code, label })),
+    };
   },
 
   /** What a person may choose on a row, or null when the row takes no choice. */

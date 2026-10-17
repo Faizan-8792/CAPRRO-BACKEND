@@ -27,6 +27,7 @@ import Client from "../models/Client.js";
 import ImportBatch from "../models/ImportBatch.js";
 import ImportRow from "../models/ImportRow.js";
 import PartyMaster, { PARTY_GST_STATUSES } from "../models/PartyMaster.js";
+import { callDeepSeek, parseJsonObject } from "./deepseek-provider.service.js";
 import { enqueueJob } from "./automation-job.service.js";
 import { safeRecordActivity } from "./activity.service.js";
 import {
@@ -38,6 +39,7 @@ import {
   summarizeClause44,
 } from "./audit-pack-engine/clause44.engine.js";
 import { looksLikePredefinedGroup } from "./books-normalization.service.js";
+import { DRAFT_SYSTEM, buildDraftPrompt, noteSourceFor, readDraftAnswer, shapeDraft, validateSpec } from "./audit-pack-kinds/draft.js";
 import { allCreateFields, getPackKind } from "./audit-pack-kinds/index.js";
 import { reasonSentence } from "./audit-pack-kinds/workbook-generic.js";
 
@@ -138,6 +140,9 @@ function serializeRow(raw, kind = "CLAUSE44") {
     decidable: Boolean(raw.decidable),
     sourceRows: (raw.sourceRows || []).map((s) => ({ kind: s.kind, batchId: s.batchId, rowId: s.rowId, sourceRow: s.sourceRow })),
     sourceEvidenceCount: raw.sourceEvidenceCount || 0,
+    // A row a kind can draft a reason for, and the draft if one was asked for. Words only: nothing above reads it.
+    draftable: Boolean(generic?.draftSpec && validateSpec(generic.draftSpec({ section: raw.section, rowKey: raw.rowKey, label: raw.label, values: raw.values || {}, state: raw.state, decidable: raw.decidable }))),
+    draft: shapeDraft(raw.draft),
     decision: {
       version: raw.decision?.version || 0,
       state: raw.decision?.state || null,
@@ -146,6 +151,7 @@ function serializeRow(raw, kind = "CLAUSE44") {
       choice: raw.decision?.choice || "",
       reason: raw.decision?.reason || "",
       note: raw.decision?.note || "",
+      noteSource: raw.decision?.noteSource || "",
       decidedBy: raw.decision?.decidedBy ? String(raw.decision.decidedBy) : null,
       decidedAt: raw.decision?.decidedAt || null,
     },
@@ -698,6 +704,7 @@ export async function decideAuditPackRow({ firmId, actorUserId, requestId = "", 
           choice,
           reason,
           note,
+          noteSource: noteSourceFor(note, row.draft),
           decidedBy: actorUserId,
           decidedAt,
         },
@@ -730,6 +737,63 @@ export async function decideAuditPackRow({ firmId, actorUserId, requestId = "", 
     afterSummary: { section: row.section, state, treatment, status, choice, version: expectedVersion + 1 },
   });
   return serializeRow(updated, run.kind);
+}
+
+// ─── drafted reasons (AP16, AP28) ───────────────────────────────────────────
+
+/**
+ * Asks for words a person can adopt as the reason on a row, from the facts the pack quotes for it. Nothing about the
+ * pack changes: no amount, state or decision is touched, and with the AI switched off (no key, a refused quota) the
+ * answer is "not available" and the pack carries on. The draft is stored beside the row, labelled DRAFT FOR REVIEW.
+ */
+export async function draftAuditPackRow({ firmId, actorUserId, requestId = "", runId, rowKey, input = {} }) {
+  assertAllowed(input, new Set(), "A draft request");
+  if (!/^[a-f0-9]{64}$/.test(String(rowKey || ""))) throw httpError(400, "Row key is not valid.");
+  const run = await requireRun(firmId, runId);
+  if (run.status !== "REVIEW") throw httpError(409, "This pack is still being computed.", "AUDIT_PACK_NOT_READY");
+  const row = await AuditPackRow.findOne({ firmId, runId: run._id, generationAttempt: run.activeGenerationAttempt, rowKey }).lean();
+  if (!row) throw httpError(404, "That row is not in this pack.");
+  const kind = getPackKind(run.kind);
+  const spec = kind?.draftSpec ? kind.draftSpec({ section: row.section, rowKey: row.rowKey, label: row.label, values: row.values || {}, state: row.state, decidable: row.decidable }) : null;
+  if (!validateSpec(spec)) throw httpError(400, "A draft is not offered for this row.", "AUDIT_PACK_DRAFT_NOT_OFFERED");
+
+  let result;
+  try {
+    result = await callDeepSeek({
+      system: DRAFT_SYSTEM,
+      prompt: buildDraftPrompt(spec),
+      jsonResponse: Boolean(spec.choices?.length),
+      maxTokens: 500,
+      timeoutMs: 25000,
+      temperature: 0.2,
+      maxAttemptsPerModel: 1,
+      userId: actorUserId,
+      operation: "audit_pack_draft",
+    });
+  } catch {
+    result = { ok: false };
+  }
+  const answer = result.ok ? readDraftAnswer(result.content, spec, parseJsonObject) : null;
+  if (!answer) {
+    return { available: false, row: serializeRow(row, run.kind), note: "A draft is not available right now. Write the reason yourself." };
+  }
+  const draftedAt = new Date();
+  const updated = await AuditPackRow.findOneAndUpdate(
+    { _id: row._id, firmId },
+    { $set: { draft: { text: answer.text, status: "AI_DRAFT", purpose: spec.purpose, proposedChoice: answer.proposedChoice, quoted: spec.facts.map((f) => ({ label: f.label.slice(0, 200), value: f.value.slice(0, 400) })), draftedBy: actorUserId, draftedAt } } },
+    { new: true },
+  ).lean();
+  await safeRecordActivity({
+    firmId,
+    actorUserId,
+    source: "USER",
+    action: "AUDIT_PACK_ROW_DRAFTED",
+    entityType: "AuditPackRun",
+    entityId: run._id,
+    requestId,
+    afterSummary: { section: row.section, purpose: spec.purpose },
+  });
+  return { available: true, row: serializeRow(updated, run.kind), note: "Drafted by AI from the figures quoted. Check it before you use it." };
 }
 
 // ─── party master (AP6) ─────────────────────────────────────────────────────

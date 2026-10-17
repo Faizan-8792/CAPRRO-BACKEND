@@ -70,7 +70,7 @@ export function assemblePackWorkbook({ run, packLabel, clientName, summary, reas
 
   const decisionsSheet = {
     name: "Decisions",
-    headers: ["Section", "Row", "Decision", "Reason chosen", "Why excluded", "Note", "Decided at"],
+    headers: ["Section", "Row", "Decision", "Reason chosen", "Why excluded", "Note", "Note written by", "Decided at"],
     rows: effectiveRows.filter((r) => r.stored?.decision?.state).map((r) => [
       r.section,
       r.label,
@@ -78,9 +78,10 @@ export function assemblePackWorkbook({ run, packLabel, clientName, summary, reas
       words(choiceWords, r.stored.decision.choice || r.stored.decision.treatment || ""),
       r.stored.decision.reason || "",
       { text: r.stored.decision.note || "", wrap: true },
+      r.stored.decision.note ? (r.stored.decision.noteSource === "AI_DRAFT" ? "Drafted by AI, adopted as drafted" : "The person who decided") : "",
       r.stored.decision.decidedAt ? new Date(r.stored.decision.decidedAt).toISOString().slice(0, 10) : "",
     ]),
-    widths: [14, 48, 28, 38, 40, 60, 14],
+    widths: [14, 48, 28, 38, 40, 60, 30, 14],
   };
 
   return [

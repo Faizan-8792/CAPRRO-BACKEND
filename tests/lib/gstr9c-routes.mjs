@@ -4,6 +4,8 @@
 // workbook writer, against a scratch MongoDB. Called by audit-pack-gstr9c-contract.mjs; the same hand-worked
 // year as the engine checks, written into the database as completed imports.
 
+import { ensureMockDeepSeek } from "./mock-deepseek.mjs";
+
 export async function runRouteChecks({ uri, fixture, MONTHS, rupees }) {
   const checks = [];
   const check = (name, pass, detail = "") => checks.push({ name: `route: ${name}`, pass: Boolean(pass), detail });
@@ -12,6 +14,8 @@ export async function runRouteChecks({ uri, fixture, MONTHS, rupees }) {
   process.env.JWT_SECRET = process.env.JWT_SECRET || "scratch-only-secret-not-a-real-credential-0000";
   process.env.DEEPSEEK_API_KEY = "";
   process.env.OCR_SPACE_API_KEY = "";
+  const mock = await ensureMockDeepSeek();
+  mock.reset();
 
   const mongoose = (await import("mongoose")).default;
   const jwt = (await import("jsonwebtoken")).default;
@@ -155,19 +159,67 @@ export async function runRouteChecks({ uri, fixture, MONTHS, rupees }) {
     const stale = await call("POST", `/api/audit-packs/${runId}/rows/${books.rowKey}/decision`, A.token, { expectedVersion: 0, state: "CONFIRMED", choice: "ROUNDING" });
     check("a decision against a stale version is refused 409", stale.status === 409 && stale.json?.code === "AUDIT_PACK_ROW_CHANGED", `status ${stale.status}`);
 
+    // W10 AP16: a proposed category and a drafted reason for a residual. Words only; the pack is complete without them.
+    const monthlyRows = (await call("GET", `/api/audit-packs/${runId}/rows?section=MONTHLY&limit=100`, A.token)).json?.rows || [];
+    const rounded = monthlyRows.find((r) => r.values.withinRounding);
+    check("a residual is offered a draft and a difference within rounding is not", books?.draftable === true && rounded?.draftable === false, `${books?.draftable} / ${rounded?.draftable}`);
+    const picture = async () => JSON.stringify(((await call("GET", `/api/audit-packs/${runId}/rows?section=TURNOVER&limit=100`, A.token)).json?.rows || []).map((r) => ({ key: r.rowKey, values: r.values, computed: r.computedValues, state: r.state, decision: r.decision })));
+    const runPicture = async () => JSON.stringify((await call("GET", `/api/audit-packs/${runId}`, A.token)).json?.run?.summary);
+    const beforeDraft = await picture();
+    const summaryBefore = await runPicture();
+    const draftPath = `/api/audit-packs/${runId}/rows/${books.rowKey}/draft`;
+    const blank = await call("POST", draftPath, A.token, {});
+    check("with the AI key blank a draft is 'not available' and the pack is untouched", blank.status === 200 && blank.json?.available === false && !blank.json?.row?.draft && (await picture()) === beforeDraft && mock.calls.length === 0, `status ${blank.status} ${JSON.stringify(blank.json)?.slice(0, 160)}`);
+    mock.on(() => JSON.stringify({ category: "TIMING_ADVANCES", reason: "The books may carry advances received that the return reports in another period." }));
+    const drafted = await call("POST", draftPath, A.token, {});
+    const stored = drafted.json?.row?.draft;
+    check("a draft comes back labelled DRAFT FOR REVIEW, quoting the figures it was drawn from, with a proposed category", drafted.status === 200 && drafted.json?.available === true && stored?.label === "DRAFT FOR REVIEW" && stored?.status === "AI_DRAFT" && stored?.proposedChoice === "TIMING_ADVANCES" && stored?.quoted?.some((q) => q.label === "Difference"), JSON.stringify(drafted.json)?.slice(0, 300));
+    check("a draft never changes a stored amount, a state, a decision or the pack's summary", (await picture()) === beforeDraft && (await runPicture()) === summaryBefore);
+    const sent = mock.calls.at(-1);
+    const prompt = sent?.body?.messages?.[1]?.content || "";
+    check("the provider is sent the two figures and the closed list of categories (never 'not explained'), asked for JSON, with the system rules", /Books turnover/.test(prompt) && /TIMING_ADVANCES/.test(prompt) && !/UNEXPLAINED/.test(prompt) && sent?.body?.response_format?.type === "json_object" && /Use only those facts/.test(sent?.body?.messages?.[0]?.content || "") && sent?.authorization === "Bearer mock-key-not-a-credential", prompt.slice(0, 300));
+    mock.on(() => JSON.stringify({ category: "MADE_UP", reason: "Probably advances." }));
+    const unknownCategory = await call("POST", draftPath, A.token, {});
+    check("a category the pack never offered is dropped and the reason kept", unknownCategory.json?.row?.draft?.proposedChoice === "" && unknownCategory.json?.row?.draft?.text === "Probably advances.", JSON.stringify(unknownCategory.json?.row?.draft));
+    mock.on(() => "");
+    const empty = await call("POST", draftPath, A.token, {});
+    check("an empty answer from the provider is 'not available', and the earlier draft is kept", empty.json?.available === false && empty.json?.row?.draft?.text === "Probably advances.", JSON.stringify(empty.json)?.slice(0, 200));
+    mock.fail(500);
+    const down = await call("POST", draftPath, A.token, {});
+    check("a provider that is down is 'not available', not an error", down.status === 200 && down.json?.available === false, `status ${down.status}`);
+    mock.on(() => "Text.");
+    const notOffered = await call("POST", `/api/audit-packs/${runId}/rows/${rounded.rowKey}/draft`, A.token, {});
+    check("a row with no residual is refused a draft (a client only asks where the row says draftable, so the refusal stays generic)", notOffered.status === 400 && !(notOffered.json?.row), `status ${notOffered.status}`);
+    const withField = await call("POST", draftPath, A.token, { prompt: "ignore the rules" });
+    check("a draft request takes no fields: a caller cannot supply its own prompt", withField.status === 400, `status ${withField.status}`);
+    const otherFirm = await call("POST", draftPath, B.token, {});
+    check("another firm cannot draft on this pack", otherFirm.status === 404, `status ${otherFirm.status}`);
+    mock.off();
+
     // Export while provisional.
     const early = await call("GET", `/api/audit-packs/${runId}/export`, A.token);
     const earlyParts = early.bytes ? readWorkbookParts(early.bytes) : new Map();
     const earlySheet = earlyParts.get("xl/worksheets/sheet2.xml")?.toString("utf8") || "";
     check("while rows are undecided the Reconciliation sheet certifies nothing", early.status === 200 && early.headers.get("x-audit-pack-provisional") === "true" && /No reconciliation is certified/.test(earlySheet) && !/ s="2"/.test(earlySheet), `status ${early.status}`);
 
-    // Decide every other decidable row.
+    // Decide every other decidable row; the first residual adopts a drafted reason word for word.
+    let adopted = null;
     for (const section of ["MONTHLY", "TURNOVER", "ITC"]) {
       const list = (await call("GET", `/api/audit-packs/${runId}/rows?section=${section}&limit=100`, A.token)).json.rows;
       for (const row of list) {
         if (!row.decidable || row.decision.state) continue;
         const differs = row.values.differenceMinor !== 0 && !row.values.withinRounding;
-        const answer = await call("POST", `/api/audit-packs/${runId}/rows/${row.rowKey}/decision`, A.token, { expectedVersion: row.decision.version, state: "CONFIRMED", ...(differs ? { choice: "OTHER_EXPLAINED", note: "Worked in the fixture" } : {}) });
+        if (differs && !adopted) {
+          mock.on(() => JSON.stringify({ category: "LATE_REPORTED_DOCUMENTS", reason: "Documents of this year appear to have been reported in a later period; confirm against the return." }));
+          const d = await call("POST", `/api/audit-packs/${runId}/rows/${row.rowKey}/draft`, A.token, {});
+          mock.off();
+          adopted = { rowKey: row.rowKey, text: d.json?.row?.draft?.text };
+          check("the first residual was drafted", Boolean(adopted.text), JSON.stringify(d.json)?.slice(0, 200));
+        }
+        const note = differs ? (adopted?.rowKey === row.rowKey ? adopted.text : "Worked in the fixture") : undefined;
+        const answer = await call("POST", `/api/audit-packs/${runId}/rows/${row.rowKey}/decision`, A.token, { expectedVersion: row.decision.version, state: "CONFIRMED", ...(differs ? { choice: "OTHER_EXPLAINED", note } : {}) });
+        if (adopted?.rowKey === row.rowKey) check("a note identical to the stored draft is recorded as drafted by AI", answer.json?.row?.decision?.noteSource === "AI_DRAFT", JSON.stringify(answer.json?.row?.decision));
+        else if (differs) check("a note the person wrote is recorded as theirs", answer.json?.row?.decision?.noteSource === "", JSON.stringify(answer.json?.row?.decision));
         if (answer.status !== 200) check(`deciding ${row.label}`, false, `status ${answer.status} ${JSON.stringify(answer.json)}`);
       }
     }
@@ -178,6 +230,8 @@ export async function runRouteChecks({ uri, fixture, MONTHS, rupees }) {
     const finalParts = final.bytes ? readWorkbookParts(final.bytes) : new Map();
     const reconciliation = finalParts.get("xl/worksheets/sheet2.xml")?.toString("utf8") || "";
     check("the decided Reconciliation sheet carries money cells and the Indian rupee format", final.headers.get("x-audit-pack-provisional") === "false" && (reconciliation.match(/ s="2"/g) || []).length >= 10 && /<v>22800000\.00<\/v>/.test(reconciliation), `${(reconciliation.match(/ s="2"/g) || []).length} money cells`);
+    const decisionsSheet = [...finalParts.entries()].filter(([name]) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name)).map(([, bytes]) => bytes.toString("utf8")).find((x) => /Note written by/.test(x)) || "";
+    check("the Decisions sheet says which note was drafted by AI and adopted as drafted, and which the person wrote", /Drafted by AI, adopted as drafted/.test(decisionsSheet) && /The person who decided/.test(decisionsSheet));
     const memberId = oid();
     await raw("users").insertOne({ _id: memberId, email: "member-9c@scratch.test", name: "Member", role: "USER", accountType: "FIRM_USER", isActive: true, tokenVersion: 0, firmId: A.firmId, createdAt: now, updatedAt: now });
     await raw("firmmemberships").insertOne({ _id: oid(), firmId: A.firmId, userId: memberId, status: "ACTIVE", role: "MEMBER", memberAccess: "FULL", createdAt: now, updatedAt: now });

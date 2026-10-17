@@ -12,8 +12,10 @@ import {
   RATIOS_RULE_VERSION,
   buildRatioRows,
   createMeasure,
+  formatChange,
   formatRatio,
 } from "../audit-pack-engine/ratios.engine.js";
+import { formatRupees } from "../audit-pack-engine/clause21d.engine.js";
 import { defineFindingKind, previousFinancialYear } from "./finding-kind.js";
 import { amountsInput, readAmounts } from "./inputs.js";
 
@@ -69,6 +71,32 @@ export const ratiosKind = defineFindingKind({
       prior: before,
       amounts: params.amounts || {},
     });
+  },
+
+  /**
+   * Schedule III asks for the reason when a ratio changes by more than 25%. The model is shown the figures that
+   * moved and nothing else; it describes what moved and leaves the business cause to management.
+   */
+  draftSpec(row) {
+    const v = row.values || {};
+    if (row.section !== "RATIOS" || v.changeOver25 !== true) return null;
+    const money = (minor) => (Number.isSafeInteger(minor) ? formatRupees(minor) : "not available");
+    const name = row.label.replace(/^\([a-k]\)\s*/, "");
+    return {
+      purpose: "RATIO_CHANGE_REASON",
+      instruction: `Write the reason Schedule III asks for when a ratio changes by more than 25%: say what moved the ${name.toLowerCase()} between the previous year and this year, using only the figures below, and name the figure that moved most.`,
+      facts: [
+        { label: "Ratio", value: name },
+        { label: "Formula", value: v.formula },
+        { label: "This year", value: formatRatio(v.valueBp, v.unit) },
+        { label: "Previous year", value: formatRatio(v.priorValueBp, v.unit) },
+        { label: "Change", value: formatChange(v.changeBp) },
+        { label: `${v.numeratorLabel}, this year`, value: money(v.numeratorMinor) },
+        { label: `${v.numeratorLabel}, previous year`, value: money(v.priorNumeratorMinor) },
+        { label: `${v.denominatorLabel}, this year`, value: money(v.denominatorMinor) },
+        { label: `${v.denominatorLabel}, previous year`, value: money(v.priorDenominatorMinor) },
+      ],
+    };
   },
 
   reportChoices: [CHOICES.REPORT.value, CHOICES.REPORT_EXPLAINED.value, CHOICES.NOT_APPLICABLE.value],

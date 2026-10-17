@@ -7,6 +7,7 @@
 import {
   createAuditPackRun,
   decideAuditPackRow,
+  draftAuditPackRow,
   getAuditPackRun,
   listAuditPackRows,
   listAuditPackRuns,
@@ -67,6 +68,20 @@ export async function decideRow(req, res, next) {
       input: req.body || {},
     });
     return res.json({ ok: true, row });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function draftRow(req, res, next) {
+  try {
+    const result = await draftAuditPackRow({
+      ...context(req),
+      runId: req.params.id,
+      rowKey: req.params.rowKey,
+      input: req.body || {},
+    });
+    return res.json({ ok: true, ...result });
   } catch (error) {
     return next(error);
   }

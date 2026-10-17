@@ -8,9 +8,10 @@
 //   const checks = await runSnapshotPackFlow({ uri, label, kind, financialYear, ledgers, vouchers, body, expect });
 //
 // `body` is merged into the create request (snapshotId is supplied). `expect(ctx)` returns more checks over the
-// computed pack; ctx = { call, A, B, run, runId, rows, section(code), raw, snapshotId, clientId }.
+// computed pack; `after(ctx)` does the same once the harness has decided every row and exported; ctx = { call, A, B, run, runId, rows, section(code), raw, snapshotId, clientId }.
 
 import { createHash } from "node:crypto";
+import { ensureMockDeepSeek } from "./mock-deepseek.mjs";
 
 export async function runSnapshotPackFlow({
   uri,
@@ -26,6 +27,7 @@ export async function runSnapshotPackFlow({
   decide = null,
   expectedWorkbookSheets = null,
   beforeCreate = null,
+  after = null,
 }) {
   const checks = [];
   const check = (name, pass, detail = "") => checks.push({ name: `route: ${name}`, pass: Boolean(pass), detail });
@@ -34,6 +36,9 @@ export async function runSnapshotPackFlow({
   process.env.JWT_SECRET = process.env.JWT_SECRET || "scratch-only-secret-not-a-real-credential-0000";
   process.env.DEEPSEEK_API_KEY = "";
   process.env.OCR_SPACE_API_KEY = "";
+  // The AI provider is a loopback stand-in with its key blank; a contract that drafts switches it on (ctx.mock.on).
+  const mock = await ensureMockDeepSeek();
+  mock.reset();
 
   const mongoose = (await import("mongoose")).default;
   const jwt = (await import("jsonwebtoken")).default;
@@ -145,7 +150,7 @@ export async function runSnapshotPackFlow({
       const page = await call("GET", `/api/audit-packs/${runId}/rows?section=${section.code}&limit=100`, A.token);
       rows[section.code] = page.json?.rows || [];
     }
-    const ctx = { call, A, B, run, runId, rows, section: (code) => rows[code] || [], raw, snapshotId, priorSnapshotId, clientId, readWorkbookParts, mongoose, work };
+    const ctx = { call, A, B, run, runId, rows, section: (code) => rows[code] || [], raw, snapshotId, priorSnapshotId, clientId, readWorkbookParts, mongoose, work, mock };
     checks.push(...(await expect(ctx)).map((c) => ({ ...c, name: c.name.startsWith("route:") ? c.name : `route: ${c.name}` })));
 
     // Firm isolation and the snapshot's own boundaries.
@@ -186,6 +191,7 @@ export async function runSnapshotPackFlow({
     const sheetNames = [...(finalParts.get("xl/workbook.xml")?.toString("utf8") || "").matchAll(/<sheet name="([^"]+)"/g)].map((m) => m[1]);
     check(`${kind}: the workbook has Read me, For filing, All findings, Pending and Decisions`, ["Read me", "For filing", "All findings", "Pending", "Decisions"].every((n) => sheetNames.includes(n)), sheetNames.join(","));
     if (expectedWorkbookSheets) check(`${kind}: the pack's own sheets are present`, expectedWorkbookSheets.every((n) => sheetNames.includes(n)), sheetNames.join(","));
+    if (after) checks.push(...(await after({ ...ctx, rows: undefined })).map((c) => ({ ...c, name: c.name.startsWith("route:") ? c.name : `route: ${c.name}` })));
     const memberId = oid();
     await raw("users").insertOne({ _id: memberId, email: `member-${kind}@scratch.test`, name: "Member", role: "USER", accountType: "FIRM_USER", isActive: true, tokenVersion: 0, firmId: A.firmId, createdAt: now, updatedAt: now });
     await raw("firmmemberships").insertOne({ _id: oid(), firmId: A.firmId, userId: memberId, status: "ACTIVE", role: "MEMBER", memberAccess: "FULL", createdAt: now, updatedAt: now });

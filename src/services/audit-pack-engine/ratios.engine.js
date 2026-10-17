@@ -155,7 +155,7 @@ export function formatRatio(valueBp, unit) {
   return `${twoDecimals(Number(roundDiv(BigInt(valueBp), 100n)))} times`;
 }
 
-const formatChange = (changeBp) => `${changeBp > 0 ? "+" : ""}${twoDecimals(changeBp)}%`;
+export const formatChange = (changeBp) => `${changeBp > 0 ? "+" : ""}${twoDecimals(changeBp)}%`;
 
 function share(total, part, whole) {
   if (whole === 0 || part === 0) return 0;

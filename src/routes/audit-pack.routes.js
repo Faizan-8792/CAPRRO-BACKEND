@@ -8,6 +8,7 @@ import { Router } from "express";
 import {
   createRun,
   decideRow,
+  draftRow,
   exportRun,
   listClientParties,
   listKinds,
@@ -45,6 +46,7 @@ router.post("/", createRun);
 router.get("/", listRuns);
 router.get("/:id/rows", listRows);
 router.post("/:id/rows/:rowKey/decision", decideRow);
+router.post("/:id/rows/:rowKey/draft", draftRow);
 router.get("/:id/export", requireFirmAdmin, exportRun);
 router.get("/:id", showRun);
 

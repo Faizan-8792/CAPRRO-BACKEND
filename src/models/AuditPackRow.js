@@ -40,8 +40,25 @@ const DecisionSchema = new mongoose.Schema(
     choice: { type: String, trim: true, maxlength: 60, default: "" },
     reason: { type: String, trim: true, maxlength: 500, default: "" },
     note: { type: String, trim: true, maxlength: 2000, default: "" },
+    // "AI_DRAFT" when the note is the row's stored draft word for word; the person's own words are "".
+    noteSource: { type: String, enum: ["", "AI_DRAFT"], default: "" },
     decidedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     decidedAt: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
+// W10 AP16/AP28: wording an AI drafted for this row, for a person to read and adopt. It is never part of the row's
+// values and never moves a state or an amount; see audit-pack-kinds/draft.js.
+const DraftSchema = new mongoose.Schema(
+  {
+    text: { type: String, trim: true, maxlength: 1500, required: true },
+    status: { type: String, enum: ["AI_DRAFT"], default: "AI_DRAFT" },
+    purpose: { type: String, trim: true, maxlength: 40, default: "" },
+    proposedChoice: { type: String, trim: true, maxlength: 60, default: "" },
+    quoted: { type: [new mongoose.Schema({ label: { type: String, maxlength: 200 }, value: { type: String, maxlength: 400 } }, { _id: false })], default: () => [] },
+    draftedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    draftedAt: { type: Date, default: null },
   },
   { _id: false },
 );
@@ -69,6 +86,7 @@ const AuditPackRowSchema = new mongoose.Schema(
     sourceEvidenceCount: { type: Number, min: 0, default: 0 },
     sourceEvidenceHash: { type: String, trim: true, match: /^[a-f0-9]{64}$/ },
     decision: { type: DecisionSchema, default: () => ({}) },
+    draft: { type: DraftSchema, default: null },
   },
   { timestamps: true },
 );

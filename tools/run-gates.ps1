@@ -783,6 +783,8 @@ try {
         "ageing-contract",
         # W10 AP28 (2026-10-17): the eleven Schedule III ratios - engine against two hand-worked years (all eleven, this year and last), the 25% test to the edge, what is asked for and what is read as nil, stock valuation journals however booked, twenty-eight automated breakages, then routes with typed amounts and without (Mongo, scratch-marked).
         "ratios-contract",
+        # W10 AP16 + AP28 (2026-10-17): AI-drafted wording on a pack row - what is asked and what is accepted back (pure, nine automated breakages), then the route against a stand-in provider: a reason drafted for each ratio over the 25% line, stored labelled DRAFT FOR REVIEW, changing nothing the pack computed, adopted word for word and recorded as drafted, and the pack completing with the key blank (Mongo, scratch-marked).
+        "audit-pack-draft-contract",
         # IMPROVEMENT-PLAN-V2-2026-09-28 Part 1: email observability. Pins the single
         # transport path through services/mailer.js, the suppression gate, the
         # forward-only webhook transitions, the Svix signature scheme, and the
@@ -1027,6 +1029,7 @@ try {
         "audit-pack-catalogue-contract" = "scratch-gates-catalogue"
         "ageing-contract" = "scratch-gates-ageing"
         "ratios-contract" = "scratch-gates-ratios"
+        "audit-pack-draft-contract" = "scratch-gates-draft"
         "email-delivery-contract" = "scratch-gates-email-delivery"
         "super-emails-controller-contract" = "scratch-gates-super-emails"
         "api-not-found-contract" = "scratch-gates-api-not-found"

@@ -71,6 +71,7 @@ async function loadSealed({ firmId, client, financialYear, snapshotId, label, he
  * @param {object} [def.reasonWords]
  * @param {string[][]} [def.readMe]        [[item, detail]] pack-specific explanations
  * @param {string} def.filePrefix
+ * @param {(row:object) => (object|null)} [def.draftSpec]   words an AI may draft for a row (see draft.js); null for rows that take none
  */
 export function defineFindingKind(def) {
   const reasonWords = { ...SHARED_REASON_WORDS, ...(def.reasonWords || {}) };
@@ -168,6 +169,7 @@ export function defineFindingKind(def) {
 
     effectiveRow,
     summarize,
+    draftSpec: def.draftSpec,
 
     validateDecision(row, { state, choice, reason, note }) {
       if (state === "EXCLUDED") {
