@@ -2454,9 +2454,12 @@ if (listed.status !== 0 || listed.error) {
   // 259 -> 261 on 2026-10-17 for clause 26 / section 43B and clause 20(b) (W10 AP24), both confirmed clean by this scan before the pin moved.
   // Pure computation, no network, no secret, no I/O: src/services/audit-pack-engine/clause26.engine.js and
   // src/services/audit-pack-kinds/clause26.kind.js. The day book it reads arrives through books-snapshot.service.js, already pinned above.
+  // 261 -> 263 on 2026-10-17 for clause 34 / TDS deposit and statement timing (W10 AP26), both confirmed clean by this scan before the pin moved.
+  // Pure computation, no network, no secret, no I/O: src/services/audit-pack-engine/clause34.engine.js and
+  // src/services/audit-pack-kinds/clause34.kind.js. The TDS rows it reads arrive through TdsImportRow, already pinned above.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 261 && result.status === 0,
+    files.length === 263 && result.status === 0,
     result,
   );
 }

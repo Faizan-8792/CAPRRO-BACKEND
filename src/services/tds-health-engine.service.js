@@ -7,10 +7,10 @@ const HEALTH_SOURCE_REFERENCE =
   "Arithmetic comparison of normalized user-imported minor-unit amounts. No statutory rate, threshold, interest, fee, liability, or due-date rule is applied.";
 
 const CHECK_META = Object.freeze({
-  RETURN_NOT_FILED: ["STATEMENT", "ERROR", "Quarterly statement is not recorded as filed", "Confirm filing status and create a filing or correction task."],
+  RETURN_NOT_FILED: ["STATEMENT", "ERROR", "Quarterly statement is not recorded as filed", "Confirm filing status and create a filing or correction task. The clause 34 pack computes the section 234E fee for a late statement."],
   RETURN_DUE_SOON: ["STATEMENT", "WARNING", "Statement deadline is approaching", "Confirm the reviewed deadline rule and assign filing work."],
-  DEPOSIT_MISSING: ["DEPOSIT", "ERROR", "No mapped ITNS 281 deposit found", "Review ITNS 281 evidence and map or create deposit follow-up."],
-  SHORT_DEPOSIT_ESTIMATE: ["DEPOSIT", "ERROR", "Potential short deposit", "Review mapped deductions and ITNS 281 challans; professional confirmation is required."],
+  DEPOSIT_MISSING: ["DEPOSIT", "ERROR", "No mapped ITNS 281 deposit found", "Review ITNS 281 evidence and map or create deposit follow-up. The clause 34 pack computes the clause 34(a) amount and the section 201(1A)(ii) interest."],
+  SHORT_DEPOSIT_ESTIMATE: ["DEPOSIT", "ERROR", "Potential short deposit", "Review mapped deductions and ITNS 281 challans; professional confirmation is required. The clause 34 pack works out the timing and the interest."],
   EXCESS_DEPOSIT_REVIEW: ["DEPOSIT", "WARNING", "Potential excess deposit", "Review challan mapping, section allocation, and carry-forward treatment."],
   CHALLAN_UNMAPPED: ["DEPOSIT", "WARNING", "ITNS 281 challan is not mapped", "Map the challan to a reviewed section or quarter."],
   DEDUCTION_NOT_REPORTED: ["STATEMENT", "ERROR", "Imported deduction is not fully reported", "Review statement rows and prepare correction work if required."],

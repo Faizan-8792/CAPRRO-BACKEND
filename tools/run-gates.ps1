@@ -771,6 +771,8 @@ try {
         "clause22-contract",
         # W10 AP24 (2026-10-17): clause 26 / section 43B(a)-(d) and clause 20(b), statutory dues payable at the year end with the PF and ESI month-wise story - engine against a hand-worked day book, seven automated breakages, then routes, worker and workbook (Mongo, scratch-marked).
         "clause26-contract",
+        # W10 AP26 (2026-10-17): clause 34, TDS not deposited in time with the 201(1A)(ii) interest and the 234E fee for a late statement - engine against a hand-worked year over imported TDS rows, seven automated breakages, then routes, worker and workbook (Mongo, scratch-marked).
+        "clause34-contract",
         # W10 AP18-AP21: the Tally books snapshot - group resolution and strict chunk validation with automated mutants, then upload, seal, group mapping, party master and snapshot diff through the real app (Mongo, scratch-marked; no AI key).
         "books-snapshot-contract",
         # W10 AP13-AP15: the GSTR-9/9C pack - engine against a hand-worked year, seven deliberate breakages each caught, then the routes, worker and workbook (Mongo, scratch-marked).
@@ -1013,6 +1015,7 @@ try {
         "clause21d-contract" = "scratch-gates-clause21d"
         "clause22-contract" = "scratch-gates-clause22"
         "clause26-contract" = "scratch-gates-clause26"
+        "clause34-contract" = "scratch-gates-clause34"
         "books-snapshot-contract" = "scratch-gates-books-snapshot"
         "audit-pack-gstr9c-contract" = "scratch-gates-audit-pack-9c"
         "email-delivery-contract" = "scratch-gates-email-delivery"
