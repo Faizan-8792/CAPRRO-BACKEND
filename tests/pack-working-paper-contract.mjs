@@ -22,6 +22,7 @@ import assert from "node:assert/strict";
 
 const DEFAULT_URI = "mongodb://127.0.0.1:27118/scratch-gates-pack-wp?replicaSet=rs0";
 const uri = process.env.MONGODB_URI || DEFAULT_URI;
+process.env.MONGODB_URI = uri; // the app import requires it, even when we defaulted it
 const dbName = (uri.split("/").pop() || "").split("?")[0];
 const host = (uri.split("//")[1] || "").split("/")[0];
 if (!/scratch/i.test(dbName) || !/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) {
