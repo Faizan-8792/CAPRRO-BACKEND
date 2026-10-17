@@ -1,4 +1,5 @@
 import Engagement from "../models/Engagement.js";
+import EngagementAssurance from "../models/EngagementAssurance.js";
 import EngagementFinding from "../models/EngagementFinding.js";
 
 const REQUIRED_ENGAGEMENT_INDEXES = Object.freeze([
@@ -38,6 +39,12 @@ const REQUIRED_ENGAGEMENT_INDEXES = Object.freeze([
     model: EngagementFinding,
     label: "Engagement finding status/risk lookup",
     key: { firmId: 1, engagementId: 1, status: 1, risk: 1, updatedAt: -1, _id: -1 },
+  },
+  {
+    model: EngagementAssurance,
+    label: "Engagement assurance record (one per engagement)",
+    key: { firmId: 1, engagementId: 1 },
+    unique: true,
   },
 ]);
 

@@ -258,6 +258,54 @@
           <ul class="control-changes" id="controlChangesList"></ul>
         </section>
 
+        <!-- W10 AP40: the statutory calendar. The statutory date and a notified extension are separate
+             columns, both days (no time zone), and nothing is pre-filled: a date is published from its
+             notification. Publishing replaces the whole calendar, after every row is checked. -->
+        <section class="card p-3 super-admin-card admin-danger-zone" id="deadlineCard" aria-labelledby="deadlineTitle">
+          <fieldset id="deadlineSet" class="super-loading-set" disabled aria-busy="true">
+          <div class="admin-danger-zone__head">
+            <h2 class="admin-section-title" id="deadlineTitle">Deadline catalogue</h2>
+            <span class="admin-danger-zone__tag">Every firm and every user</span>
+          </div>
+          <p class="admin-section-lede">
+            The due dates the apps show beside an engagement. Each row is one form for one client type and one financial year, with its statutory date and, in its own column, any extension the government notified and the notification that granted it. Dates are plain days: no time zone can move them. Nothing is filled in for you &mdash; publish a date only from its notification. Publishing replaces the whole calendar.
+          </p>
+          <div id="deadlineVersion" class="admin-hint">Reading the calendar&hellip;</div>
+          <div class="table-responsive">
+            <table class="table table-sm mb-0" id="deadlineTable">
+              <thead>
+                <tr>
+                  <th scope="col">Form</th>
+                  <th scope="col">What it is</th>
+                  <th scope="col">Client type</th>
+                  <th scope="col">Year</th>
+                  <th scope="col">Statutory date</th>
+                  <th scope="col">Extended to</th>
+                  <th scope="col">Notification</th>
+                  <th scope="col"><span class="visually-hidden">Remove</span></th>
+                </tr>
+              </thead>
+              <tbody id="deadlineRows"></tbody>
+            </table>
+          </div>
+          <datalist id="deadlineForms">
+            <option value="ITR"></option>
+            <option value="TAR"></option>
+            <option value="AGM"></option>
+            <option value="AOC-4"></option>
+            <option value="MGT-7"></option>
+            <option value="GSTR-9"></option>
+            <option value="GSTR-9C"></option>
+            <option value="TDS STATEMENT"></option>
+          </datalist>
+          <div class="admin-card-actions">
+            <button class="btn btn-sm btn-outline-secondary" id="deadlineAddBtn" type="button">Add a date</button>
+            <button class="btn btn-sm btn-primary" id="deadlinePublishBtn" type="button">Publish the calendar</button>
+          </div>
+          <div id="deadlineStatus" class="admin-status" role="status" aria-live="polite"></div>
+          </fieldset>
+        </section>
+
         <section class="card p-3 super-admin-card" aria-labelledby="welcomeTitle">
           <fieldset id="welcomeSet" class="super-loading-set" disabled aria-busy="true">
           <h2 class="admin-section-title" id="welcomeTitle">Welcome announcement</h2>

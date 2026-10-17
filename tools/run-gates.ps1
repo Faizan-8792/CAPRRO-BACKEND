@@ -765,6 +765,10 @@ try {
         "workbook-indian-grouping-contract",
         # W10 AP26 (2026-10-17): every registered pack's filing sheet carries CONFIRMED rows only, and certifies nothing while provisional (pure).
         "pack-filing-sheet-contract",
+        # W10 AP33 (2026-10-17): the Standards on Auditing index - every standard the backend names resolves, the two client copies match the table, the parser reads what the server emits (pure).
+        "sa-index-contract",
+        # W10 AP40 (2026-10-17): the deadline catalogue - UTC days under five time zones, the whole-catalogue publish by the super admin with a reason, the version fence and the control-change record (Mongo, scratch-marked).
+        "deadline-catalogue-contract",
         # W10 AP25 (2026-10-17): clause 31 loans and 269ST receipts from a sealed day book.
         "clause31-contract",
         # W10 AP22: Form 3CD clause 21(d), cash payments over the section 40A(3) limit - engine against a hand-worked day book, seven automated breakages, then routes, worker and workbook (Mongo, scratch-marked).
@@ -998,7 +1002,13 @@ try {
         "ownership-transfer-e2e",
         # W10 AP36 (2026-10-17): a confirmed pack row lands as a working-paper row through the real
         # create routes; unconfirmed, excluded, foreign and cross-client rows are refused. Transactions.
-        "pack-working-paper-contract"
+        "pack-working-paper-contract",
+        # W10 AP41 (2026-10-17): the measured request list and the chase draft - a request carries when it was asked for; a draft with nothing measured is refused. Transactions.
+        "engagement-request-list-contract",
+        # W10 AP38 (2026-10-17): independence confirmations, the report date and the 60-day assembly timer in UTC days, the log after assembly, time. Transactions.
+        "engagement-assurance-contract",
+        # W10 AP37 (2026-10-17): drafted materiality, sampling and significant-matters memos - the wording contract, the reviewer's signature and its hash. Transactions.
+        "engagement-memo-contract"
     )
     # Suites that hold EXTRA assertions behind "if (process.env.MONGODB_URI)". This runner never
     # set that variable, so those assertions had never run in a single gate execution. Measured
@@ -1030,6 +1040,7 @@ try {
         "engagement-season-types-contract" = "scratch-gates-season-types"
         "books-import-contract" = "scratch-gates-books-import"
         "audit-pack-route-contract" = "scratch-gates-audit-pack"
+        "deadline-catalogue-contract" = "scratch-gates-deadline-catalogue"
         "clause31-contract" = "scratch-gates-clause31"
         "clause21d-contract" = "scratch-gates-clause21d"
         "clause22-contract" = "scratch-gates-clause22"

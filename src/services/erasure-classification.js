@@ -133,6 +133,11 @@ export const PINNED_FIRM_SCOPED = Object.freeze([
   // them: firm work product with no append-only guard, deleted with the firm (derived PURGE). Rows carry
   // the creating, sealing or confirming user's id; purging the document removes the link with it.
   "BooksSnapshot", "BooksGroup", "BooksLedger", "BooksVoucher", "GroupMapping", "BooksParty",
+  // EngagementAssurance added 2026-10-17 (W10 AP38): independence confirmations, the assembly record and
+  // time entries of an engagement. Firm work product with no append-only guard (its lists are append-only
+  // by the service, not by a schema hook), deleted with the firm (derived PURGE). Entries carry user ids;
+  // purging the document removes the link with it.
+  "EngagementAssurance",
 ]);
 
 /**

@@ -174,6 +174,11 @@ export const RETENTION_CLASSIFICATION = Object.freeze({
   BooksVoucher: RETENTION_CLASSES.RETAIN,
   GroupMapping: RETENTION_CLASSES.RETAIN,
   BooksParty: RETENTION_CLASSES.RETAIN,
+  // W10 AP38 (2026-10-17): who confirmed independence, the report date and assembly timer, the log of
+  // changes after assembly and the time worked, one document per engagement. RETAIN for the reason the
+  // engagement itself is: the firm's audit file, kept as long as the firm keeps its records and purged
+  // with the firm. No TTL.
+  EngagementAssurance: RETENTION_CLASSES.RETAIN,
 });
 
 // Named so the skip is visible in the run report and in logs, not only in PLAN.md.

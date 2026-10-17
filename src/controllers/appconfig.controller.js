@@ -2,6 +2,11 @@
 import { randomUUID } from "node:crypto";
 import AppConfig, { CONTROL_CHANGE_LIMIT, CONTROL_REASON_MAX, DEFAULT_FEATURE_FLAGS } from "../models/AppConfig.js";
 import { validateDesktopReleasePatch } from "../services/desktop-release.service.js";
+import {
+  DEADLINE_REASON_MIN,
+  publishableCatalogue,
+  validateCatalogueEntries,
+} from "../services/deadline-catalogue.service.js";
 import { assertCaseIndexesReady } from "../services/case-index-readiness.service.js";
 import { assertEngagementIndexesReady } from "../services/engagement-index-readiness.service.js";
 import { describeRetentionPolicy } from "../services/data-retention.service.js";
@@ -100,6 +105,10 @@ export const getAppConfig = async (req, res, next) => {
         // public and already fetched by both, so neither needs a new call.
         // Existing consumers read named keys, so an extra key is inert for them.
         dataRetention: describeRetentionPolicy(),
+        // W10 AP40, additive like the keys above: the statutory calendar the owner publishes from the
+        // admin panel, or null while none has been. Dates are UTC days written YYYY-MM-DD; the
+        // statutory date and any notified extension are separate fields.
+        deadlineCatalogue: publishableCatalogue(cfg.deadlineCatalogue),
         updatedAt: cfg.updatedAt,
       },
     });
@@ -325,6 +334,82 @@ export const updateMaintenance = async (req, res, next) => {
       maintenanceMode: fresh.maintenanceMode,
       maintenanceMessage: fresh.maintenanceMessage,
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// Super-only (W10 AP40): publish the deadline catalogue. The whole catalogue is replaced in one
+// write after every entry is checked - a half-published statutory calendar is worse than the old
+// one. A reason is required (a date changing is something a firm will ask about), the write is fenced
+// on the version the panel read (`expectedVersion`) so two publishers cannot overwrite each other, and
+// the change lands in the same control-change history as the other platform switches.
+export const publishDeadlineCatalogue = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    const deadlineReason = readControlReason(req.body);
+    if (!deadlineReason.ok) {
+      return res.status(400).json({ ok: false, error: deadlineReason.error });
+    }
+    if (deadlineReason.reason.length < DEADLINE_REASON_MIN) {
+      return res.status(400).json({ ok: false, error: "Say why the calendar is changing (a notification number or a short reason)." });
+    }
+    const checked = validateCatalogueEntries(req.body?.entries);
+    if (!checked.ok) {
+      return res.status(400).json({
+        ok: false,
+        error: "The catalogue was not published: fix the entries listed and publish again.",
+        errors: checked.errors,
+      });
+    }
+
+    const current = await AppConfig.findById("singleton").select("deadlineCatalogue.version").lean();
+    const currentVersion = Number.isSafeInteger(current?.deadlineCatalogue?.version) ? current.deadlineCatalogue.version : 0;
+    const expectedVersion = req.body?.expectedVersion;
+    if (expectedVersion !== undefined && expectedVersion !== currentVersion) {
+      return res.status(409).json({
+        ok: false,
+        code: "DEADLINE_CATALOGUE_CHANGED",
+        error: "The catalogue was published by someone else since you opened it. Reload it and apply your change again.",
+        currentVersion,
+      });
+    }
+
+    // The singleton must exist for a fenced update; creating it empty is harmless (every default is off).
+    await AppConfig.updateOne({ _id: "singleton" }, { $setOnInsert: { _id: "singleton" } }, { upsert: true });
+    const fence = currentVersion === 0
+      ? { $or: [{ "deadlineCatalogue.version": { $exists: false } }, { "deadlineCatalogue.version": 0 }] }
+      : { "deadlineCatalogue.version": currentVersion };
+    const written = await AppConfig.findOneAndUpdate(
+      { _id: "singleton", ...fence },
+      {
+        $set: {
+          deadlineCatalogue: {
+            version: currentVersion + 1,
+            publishedAt: new Date(),
+            publishedBy: req.user.id,
+            entries: checked.entries,
+          },
+          updatedBy: req.user.id,
+        },
+        $push: controlChangePush(
+          req,
+          "deadlineCatalogue",
+          `Published the deadline catalogue, version ${currentVersion + 1}, ${checked.entries.length} ${checked.entries.length === 1 ? "entry" : "entries"}`,
+          deadlineReason.reason,
+        ),
+      },
+      { new: true },
+    ).lean();
+    if (!written) {
+      return res.status(409).json({
+        ok: false,
+        code: "DEADLINE_CATALOGUE_CHANGED",
+        error: "The catalogue was published by someone else while you were publishing. Reload it and apply your change again.",
+      });
+    }
+    AppConfig.invalidateCache();
+    return res.json({ ok: true, deadlineCatalogue: publishableCatalogue(written.deadlineCatalogue) });
   } catch (err) {
     next(err);
   }

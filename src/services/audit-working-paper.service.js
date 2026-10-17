@@ -799,11 +799,14 @@ async function resolvePackRowSource({ firmId, packRow, paper, session }) {
   if (String(run.clientId) !== String(paper.clientId)) {
     throw httpError(409, "That pack run belongs to another client than this working paper.", "AUDIT_PACK_ROW_NOT_CONFIRMED");
   }
-  const row = await AuditPackRow.findOne({ firmId, runId: run._id, rowKey }).session(session).lean();
-  if (!row || String(row.generationAttempt) !== String(run.activeGenerationAttempt)) {
-    // Only the run's active generation may land; an older attempt's row is not the row the person saw.
-    throw httpError(404, "That pack row is not in this run.");
-  }
+  // Only the run's active generation may land; an older attempt's row is not the row the person saw. The
+  // generation is part of the lookup, as everywhere else the pack's rows are read: a run that was processed
+  // again keeps the same row keys, and a lookup without it could meet the older attempt's row first and
+  // refuse a row that is current.
+  const row = await AuditPackRow.findOne({ firmId, runId: run._id, generationAttempt: run.activeGenerationAttempt, rowKey })
+    .session(session)
+    .lean();
+  if (!row) throw httpError(404, "That pack row is not in this run.");
   const decision = row.decision || {};
   if (decision.state !== "CONFIRMED" || !row.decidable) {
     throw httpError(409, "Only a pack row you have confirmed can land in a working paper. Decide the row in the pack first.", "AUDIT_PACK_ROW_NOT_CONFIRMED");

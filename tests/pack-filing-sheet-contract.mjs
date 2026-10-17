@@ -7,7 +7,7 @@
 // Pure: the kinds' workbook() is called with fabricated runs and rows; no database.
 // Run: node tests/pack-filing-sheet-contract.mjs
 
-import { getPackKind } from "../src/services/audit-pack-kinds/index.js";
+import { GENERIC_PACK_KINDS, getPackKind } from "../src/services/audit-pack-kinds/index.js";
 
 const RUN = {
   financialYear: "2025-26",
@@ -112,6 +112,33 @@ async function main() {
         return;
       }
       if (body.includes("1500000") || body.includes("100000")) throw new Error(`a confirmed-but-not-reported answer (${answer}) reached the filing sheet:\n${body}`);
+    });
+  }
+
+  // The pack's headline "amount to report" is the same rule as the filing sheet, in a second place
+  // (summarize()). Added 2026-10-17 after a deliberate weakening of that filter survived this whole file and
+  // most kind suites: the sheet was pinned, the number people quote from the summary was not.
+  for (const kind of GENERIC_PACK_KINDS) {
+    const def = getPackKind(kind);
+    if (typeof def?.summarize !== "function") continue;
+    const probe = def.summarize([]);
+    if (typeof probe?.totals?.reportableMinor !== "number") continue; // a pack whose summary is not a reportable total (it files differently)
+    const mk = (n, over) => ({ rowKey: String(n).padStart(64, "0"), section: (def.sections[0] || {}).code, label: `row ${n}`, decidable: true, state: "COMPUTED", values: { amountMinor: n }, decision: { version: 0 }, ...over });
+    await check(`${kind}: the summary's reportable total counts only CONFIRMED rows with a report answer`, async () => {
+      // The answer that reports, asked of the pack (the ageing, CARO and Rule 11(g) packs name their own).
+      // A pack that builds its own summary (CLAUSE34) does not expose the list and reports with REPORT.
+      const report = def.reportChoices?.[0] ?? "REPORT";
+      const rows = [
+        mk(700, { state: "CONFIRMED", decision: { state: "CONFIRMED", choice: report } }),
+        mk(800, { state: "CONFIRMED", decision: { state: "CONFIRMED", choice: "NOT_A_REPORT_ANSWER" } }),
+        mk(900),
+        mk(1100, { state: "EXCLUDED", decision: { state: "EXCLUDED", reason: "Not a due" } }),
+        mk(1300, { decidable: false, state: "PENDING_INPUT" }),
+        mk(1500, { state: "COMPUTED", decision: { choice: report } }),
+      ];
+      const { totals } = def.summarize(rows);
+      if (totals.reportableMinor !== 700) throw new Error(`reportableMinor is ${totals.reportableMinor}, expected 700 (only the confirmed report row)`);
+      if (totals.reportableCount !== 1) throw new Error(`reportableCount is ${totals.reportableCount}, expected 1`);
     });
   }
 

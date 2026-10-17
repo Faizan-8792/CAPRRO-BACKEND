@@ -373,6 +373,7 @@ function reportAppConfigUnread() {
   setControlsCardReady("maintenanceSet", false);
   setControlsCardReady("welcomeSet", false);
   setControlsCardReady("featureFlagsSet", false);
+  setControlsCardReady("deadlineSet", false);
 }
 
 async function loadAppConfigSection() {
@@ -398,6 +399,9 @@ async function loadAppConfigSection() {
     if (qs("welcomeBodyInput")) qs("welcomeBodyInput").value = wa.body || "";
     if (qs("welcomeEnabled")) qs("welcomeEnabled").checked = wa.enabled !== false;
     setControlsCardReady("welcomeSet", true);
+
+    renderDeadlineCatalogue(c.deadlineCatalogue);
+    setControlsCardReady("deadlineSet", true);
 
     // An empty or absent map is a LOAD FAILURE, not "all flags are off". An unauthenticated or
     // expired-session GET returns exactly that, and treating it as real state is what allowed a
@@ -461,6 +465,123 @@ function renderDesktopReleaseLive(d) {
   } else {
     el.textContent = "Nothing announced yet.";
   }
+}
+
+// ─── Deadline catalogue (W10 AP40) ──────────────────────────────────
+// The statutory calendar, edited as rows and published whole. A day is read from and written to a
+// date input as the text "YYYY-MM-DD" and never goes through a Date object, so no time zone on this
+// computer can move it. `lastDeadlineVersion` is the version this panel read: the server refuses a
+// publish made from an older copy, so two people cannot overwrite each other.
+const DEADLINE_CLIENT_TYPES = [
+  "ALL", "INDIVIDUAL", "HUF", "PROPRIETORSHIP", "PARTNERSHIP", "LLP",
+  "PRIVATE_LIMITED", "PUBLIC_LIMITED", "TRUST", "SOCIETY", "AOP_BOI", "OTHER",
+];
+let lastDeadlineVersion = 0;
+
+function deadlineRowHtml(entry = {}) {
+  const value = (field) => escapeHtml(entry[field] || "");
+  const options = DEADLINE_CLIENT_TYPES
+    .map((type) => `<option value="${type}"${(entry.clientType || "ALL") === type ? " selected" : ""}>${escapeHtml(superEnumLabel(type))}</option>`)
+    .join("");
+  return `
+    <tr class="deadline-row">
+      <td><input class="form-control form-control-sm" data-field="formKey" list="deadlineForms" maxlength="40" value="${value("formKey")}" aria-label="Form" /></td>
+      <td><input class="form-control form-control-sm" data-field="label" maxlength="120" value="${value("label")}" aria-label="What the date is for" /></td>
+      <td><select class="form-select form-select-sm" data-field="clientType" aria-label="Client type">${options}</select></td>
+      <td><input class="form-control form-control-sm" data-field="financialYear" maxlength="7" placeholder="2025-26" value="${value("financialYear")}" aria-label="Financial year" /></td>
+      <td><input class="form-control form-control-sm" type="date" data-field="statutoryDate" value="${value("statutoryDate")}" aria-label="Statutory date" /></td>
+      <td><input class="form-control form-control-sm" type="date" data-field="extendedDate" value="${value("extendedDate")}" aria-label="Extended to (leave empty if not extended)" /></td>
+      <td><input class="form-control form-control-sm" data-field="extensionReference" maxlength="300" placeholder="Circular or notification" value="${value("extensionReference")}" aria-label="Notification that granted the extension" /></td>
+      <td><button class="btn btn-sm btn-outline-secondary" type="button" data-action="remove">Remove</button></td>
+    </tr>`;
+}
+
+function renderDeadlineCatalogue(catalogue) {
+  const body = qs("deadlineRows");
+  if (!body) return;
+  const entries = Array.isArray(catalogue?.entries) ? catalogue.entries : [];
+  lastDeadlineVersion = Number.isSafeInteger(catalogue?.version) ? catalogue.version : 0;
+  body.innerHTML = entries.map((entry) => deadlineRowHtml(entry)).join("");
+  const note = qs("deadlineVersion");
+  if (note) {
+    note.textContent = catalogue
+      ? `Published version ${catalogue.version}${catalogue.publishedAt ? ` on ${new Date(catalogue.publishedAt).toLocaleDateString("en-IN", { dateStyle: "medium" })}` : ""}: ${entries.length} ${entries.length === 1 ? "date" : "dates"}.`
+      : "No calendar has been published yet, so the apps show no due dates. Add a row for each date you have a notification for.";
+  }
+}
+
+function readDeadlineRows() {
+  return [...document.querySelectorAll("#deadlineRows .deadline-row")].map((row) => {
+    const get = (field) => row.querySelector(`[data-field="${field}"]`)?.value?.trim() || "";
+    return {
+      formKey: get("formKey"),
+      label: get("label"),
+      clientType: get("clientType") || "ALL",
+      financialYear: get("financialYear"),
+      statutoryDate: get("statutoryDate"),
+      extendedDate: get("extendedDate") || null,
+      extensionReference: get("extensionReference"),
+    };
+  });
+}
+
+function bindDeadlineHandlers() {
+  const body = qs("deadlineRows");
+  const addBtn = qs("deadlineAddBtn");
+  const publishBtn = qs("deadlinePublishBtn");
+  const status = qs("deadlineStatus");
+  if (!body || !addBtn || !publishBtn) return;
+
+  addBtn.addEventListener("click", () => {
+    body.insertAdjacentHTML("beforeend", deadlineRowHtml());
+    body.lastElementChild?.querySelector('[data-field="formKey"]')?.focus();
+  });
+  body.addEventListener("click", (event) => {
+    const remove = event.target.closest?.('[data-action="remove"]');
+    if (remove) remove.closest("tr")?.remove();
+  });
+
+  publishBtn.addEventListener("click", async () => {
+    const entries = readDeadlineRows();
+    const scope = superScope();
+    const reason = await superAskText({
+      title: entries.length ? `Publish ${entries.length} ${entries.length === 1 ? "date" : "dates"}?` : "Publish an empty calendar?",
+      body: `This replaces the whole calendar for every firm and every user (${scope.label.toLowerCase()}, ${scope.host}).${entries.length ? "" : " The apps will then show no due dates."}`,
+      label: "Reason (recorded with the change)",
+      placeholder: "For example: Circular 12/2026 extends the ITR date",
+      required: true,
+      maxLength: 300,
+      requireText: scope.word,
+      confirmLabel: "Publish the calendar",
+      cancelLabel: "Keep the current calendar",
+      tone: "warning",
+    });
+    if (reason === null) return;
+
+    publishBtn.disabled = true;
+    publishBtn.textContent = "Publishing...";
+    try {
+      const r = await api("/app-config/deadline-catalogue", {
+        method: "PATCH",
+        body: { entries, reason, expectedVersion: lastDeadlineVersion },
+      });
+      renderDeadlineCatalogue(r.deadlineCatalogue);
+      superStatus(status, `Published version ${r.deadlineCatalogue?.version}.`, "success");
+      loadControlChanges();
+    } catch (err) {
+      const problems = Array.isArray(err.data?.errors) ? err.data.errors : [];
+      if (problems.length) {
+        superStatus(status, `${err.message} ${problems.map((p) => (p.entry ? `Row ${p.entry}: ${p.message}` : p.message)).join(" ")}`, "critical");
+      } else if (err.status === 403) {
+        superStatus(status, "Only the super-admin account may publish the calendar.", "critical");
+      } else {
+        superStatus(status, err.message || "The calendar could not be published. Try again.", "critical");
+      }
+    } finally {
+      publishBtn.disabled = false;
+      publishBtn.textContent = "Publish the calendar";
+    }
+  });
 }
 
 function bindAppConfigHandlers() {
@@ -2937,6 +3058,7 @@ async function initSuperPage() {
     superRenderScope();
 
     bindAppConfigHandlers();
+    bindDeadlineHandlers();
     bindUserDirectoryControls();
     bindTermsAcceptanceControls();
     bindEmailsPageControls();

@@ -13,6 +13,7 @@ import {
   notifyDesktopRelease,
   getDesktopReleaseDraft,
   getControlChanges,
+  publishDeadlineCatalogue,
 } from "../controllers/appconfig.controller.js";
 
 const router = Router();
@@ -35,6 +36,8 @@ router.patch("/features", authRequired, superLimiter, updateFeatureFlags);
 router.patch("/maintenance", authRequired, superLimiter, updateMaintenance);
 // DS24: who moved maintenance mode or a feature flag, what was set and the reason given.
 router.get("/control-changes", authRequired, superLimiter, getControlChanges);
+// W10 AP40: the owner publishes the statutory calendar; clients read it from the public config above.
+router.patch("/deadline-catalogue", authRequired, superLimiter, publishDeadlineCatalogue);
 router.patch("/welcome", authRequired, superLimiter, updateWelcomeAnnouncement);
 router.get("/desktop-release", authRequired, superLimiter, getDesktopReleaseDraft);
 router.patch("/desktop-release", authRequired, superLimiter, updateDesktopRelease);

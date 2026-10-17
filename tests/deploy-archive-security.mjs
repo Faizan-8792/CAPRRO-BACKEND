@@ -2470,9 +2470,13 @@ if (listed.status !== 0 || listed.error) {
   // 274 -> 276 on 2026-10-17 for the ledger scans (W10 AP31), both confirmed clean by this scan before the pin moved. Pure computation, no
   // network, no secret, no I/O: src/services/audit-pack-engine/ledger-scan.engine.js and src/services/audit-pack-kinds/ledger-scan.kind.js.
   // The day book it reads arrives through books-snapshot.service.js, already pinned above.
+  // 276 -> 282 on 2026-10-17 for the Standards on Auditing index, the deadline catalogue, the measured request list, the assurance record and
+  // the drafted memos (W10 AP33, AP37, AP38, AP40, AP41), all six confirmed clean by this scan before the pin moved. Pure computation and
+  // database reads through the app's own models: src/data/sa-index.js, src/models/EngagementAssurance.js and the services deadline-catalogue,
+  // engagement-request-list, engagement-assurance and engagement-memo. None calls the network or reads a secret.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 276 && result.status === 0,
+    files.length === 282 && result.status === 0,
     result,
   );
 }

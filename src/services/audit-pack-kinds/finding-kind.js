@@ -127,6 +127,9 @@ export function defineFindingKind(def) {
       ...(def.extraInputs || []),
     ]),
     reasonWords,
+    // The answers that put a row's amount into the filing sheet and the summary's reportable total. Exposed
+    // so a test (and any future caller) asks the pack instead of assuming the word REPORT.
+    reportChoices: Object.freeze([...def.reportChoices]),
 
     async prepare({ firmId, client, financialYear, input, helpers }) {
       const snapshot = await loadSealed({ firmId, client, financialYear, snapshotId: input.snapshotId, label: "books", helpers });

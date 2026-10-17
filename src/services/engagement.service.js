@@ -7,6 +7,8 @@ import {
 } from "../config/engagement-templates.js";
 import ActivityEvent from "../models/ActivityEvent.js";
 import AppConfig from "../models/AppConfig.js";
+import AuditPackRow from "../models/AuditPackRow.js";
+import AuditPackRun from "../models/AuditPackRun.js";
 import CaseMatter from "../models/CaseMatter.js";
 import Client from "../models/Client.js";
 import Engagement from "../models/Engagement.js";
@@ -20,6 +22,13 @@ import Task from "../models/Task.js";
 import TaxWorkSession from "../models/TaxWorkSession.js";
 import User from "../models/User.js";
 import { recordActivity } from "./activity.service.js";
+import {
+  PACK_REQUEST_CATEGORY,
+  PACK_REQUEST_LIMIT,
+  buildChaseDraft,
+  packRequestKey,
+  proposalsFromGapRows,
+} from "./engagement-request-list.service.js";
 import {
   assertMutationRequestHash,
   boundedStringArray,
@@ -2313,7 +2322,155 @@ async function buildEngagementExport({ engagementId, firmId }) {
   }
 }
 
+// ── W10 AP41: the measured request list ──────────────────────────────────────────────────────────
+//
+// A pack's gaps that only the client can close become requests on the engagement's own list, each with
+// the moment it was asked for, so "pending for N days" is measured. Nothing is added unasked: the person
+// reads the proposals (getPackRequestProposals) and chooses which codes to add (addPackClientRequests).
+
+const PACK_REQUEST_FIELDS = new Set(["mutationKey", "expectedRevision", "runId", "codes"]);
+const CLOSED_REQUEST_STATUSES = new Set(["WAIVED", "RECEIVED"]);
+
+async function loadPackGapProposals({ engagement, firmId, runId }) {
+  const run = await AuditPackRun.findOne({ _id: objectId(runId, "runId"), firmId }).lean();
+  if (!run) throw httpError(404, "That pack run is not in this firm.");
+  if (String(run.clientId) !== String(engagement.clientId)) {
+    throw httpError(409, "That pack run belongs to another client than this engagement.", "ENGAGEMENT_PACK_CLIENT_MISMATCH");
+  }
+  const rows = run.activeGenerationAttempt
+    ? await AuditPackRow.find({
+        firmId,
+        runId: run._id,
+        generationAttempt: run.activeGenerationAttempt,
+        state: "PENDING_INPUT",
+      })
+        .select("label ruleHits")
+        .limit(5000)
+        .lean()
+    : [];
+  const proposals = proposalsFromGapRows(run.kind, rows).map((proposal) => {
+    const templateKey = packRequestKey(run.kind, proposal.code, run.financialYear);
+    const open = engagement.clientRequests.find(
+      (request) => request.templateKey === templateKey && !CLOSED_REQUEST_STATUSES.has(request.status)
+    );
+    return { ...proposal, templateKey, financialYear: run.financialYear, alreadyRequested: Boolean(open) };
+  });
+  return { run, proposals };
+}
+
+async function getPackRequestProposals({ engagementId, firmId, runId }) {
+  const engagement = await findFirmEngagement(engagementId, firmId);
+  const { run, proposals } = await loadPackGapProposals({ engagement, firmId, runId });
+  return {
+    engagementId: String(engagement._id),
+    runId: String(run._id),
+    kind: run.kind,
+    financialYear: run.financialYear,
+    proposals,
+  };
+}
+
+async function addPackClientRequests({ engagementId, firmId, actorUserId, input, requestId, publication }) {
+  assertPlainObject(input, "Pack request list");
+  assertAllowedFields(input, PACK_REQUEST_FIELDS, "Pack request list");
+  const mutation = engagementMutation(input, "engagement-pack-requests");
+  let engagement = await findFirmEngagement(engagementId, firmId);
+  const replay = mutationReceipt(engagement, mutation);
+  if (replay) {
+    await ensureActivity({
+      firmId,
+      actorUserId,
+      action: "ENGAGEMENT_UPDATED",
+      entityType: "Engagement",
+      entityId: engagement._id,
+      mutation,
+      publication,
+      afterSummary: { status: engagement.status, revision: engagement.revision },
+      requestId,
+    });
+    return { engagement, added: [], skipped: [], replayed: true };
+  }
+  assertRevision(engagement, parseExpectedRevision(input.expectedRevision), "Engagement");
+  if (engagement.status === "ARCHIVED" || engagement.status === "COMPLETE") {
+    throw httpError(409, "Complete and archived engagements are read-only", "ENGAGEMENT_COMPLETE_READ_ONLY");
+  }
+  const codes = Array.isArray(input.codes) ? [...new Set(input.codes.map((code) => String(code)))] : [];
+  if (codes.length === 0 || codes.length > 30) {
+    throw httpError(400, "Choose between 1 and 30 of the pack's open items to add to the request list.");
+  }
+
+  const { run, proposals } = await loadPackGapProposals({ engagement, firmId, runId: input.runId });
+  const byCode = new Map(proposals.map((proposal) => [proposal.code, proposal]));
+  const requestedAt = new Date();
+  const added = [];
+  const skipped = [];
+  for (const code of codes) {
+    const proposal = byCode.get(code);
+    if (!proposal) throw httpError(400, `The pack has no open item for the client named ${code}.`);
+    if (proposal.alreadyRequested) {
+      skipped.push({ code, reason: "ALREADY_ON_THE_LIST" });
+      continue;
+    }
+    engagement.clientRequests.push({
+      templateKey: proposal.templateKey,
+      title: proposal.title,
+      category: PACK_REQUEST_CATEGORY,
+      required: true,
+      status: "REQUESTED",
+      requestedAt,
+      note: proposal.detail,
+    });
+    added.push({ code, title: proposal.title, requestedAt });
+  }
+  if (added.length === 0) return { engagement, added, skipped, replayed: false };
+  if (engagement.clientRequests.length > PACK_REQUEST_LIMIT) {
+    throw httpError(409, "The request list is full; resolve or waive some requests first.", "ENGAGEMENT_REQUEST_LIST_FULL");
+  }
+
+  const beforeSummary = { status: engagement.status, stage: engagement.stage, revision: engagement.revision };
+  clearFinalReview(engagement);
+  engagement.contentRevision += 1;
+  engagement.updatedBy = actorUserId;
+  appendMutationReceipt(engagement, mutation);
+  engagement.revision += 1;
+  engagement = await saveWithConflict(engagement, publication, "Engagement", { mutation });
+  await ensureActivity({
+    firmId,
+    actorUserId,
+    action: "ENGAGEMENT_UPDATED",
+    entityType: "Engagement",
+    entityId: engagement._id,
+    mutation,
+    publication,
+    beforeSummary,
+    afterSummary: { status: engagement.status, stage: engagement.stage, revision: engagement.revision },
+    requestId,
+    metadata: { professionalConclusionGenerated: false, packRequestsAdded: added.length, packKind: run.kind },
+  });
+  return { engagement, added, skipped, replayed: false };
+}
+
+/** The chase draft from the engagement's real request list. Read-only; refuses when nothing is measured. */
+async function draftEngagementChase({ engagementId, firmId, input }) {
+  const engagement = await findFirmEngagement(engagementId, firmId);
+  const client = await Client.findOne({ _id: engagement.clientId, firmId }).select("name").lean();
+  let requests = engagement.clientRequests;
+  if (input?.requestIds !== undefined) {
+    if (!Array.isArray(input.requestIds) || input.requestIds.length === 0 || input.requestIds.length > 200) {
+      throw httpError(400, "requestIds must name between 1 and 200 requests on the list.");
+    }
+    const wanted = new Set(input.requestIds.map(String));
+    requests = requests.filter((request) => wanted.has(String(request._id)));
+  }
+  const result = buildChaseDraft({ clientName: client?.name || "", requests });
+  if (!result.ok) throw httpError(409, result.message, result.code);
+  return { ...result, engagementId: String(engagement._id) };
+}
+
 export {
+  addPackClientRequests,
+  draftEngagementChase,
+  getPackRequestProposals,
   beginEngagementPublicationWrite,
   buildEngagementExport,
   closureReadiness,

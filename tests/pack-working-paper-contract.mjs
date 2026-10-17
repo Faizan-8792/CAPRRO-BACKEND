@@ -133,7 +133,7 @@ if (!/scratch/i.test(dbName) || !/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host))
   const computedKey = "b".repeat(64);
   const excludedKey = "c".repeat(64);
   const packRow = (key, label, state, decision) => ({
-    _id: oid(), firmId, runId, generationAttempt: 1, ordinal: 1, rowKey: key, section: "MSME_LATE",
+    _id: oid(), firmId, runId, generationAttempt: "1", ordinal: 1, rowKey: key, section: "MSME_LATE",
     label, party: null, decidable: true, state,
     values: {
       amountMinor: 12_500_000,
@@ -151,7 +151,7 @@ if (!/scratch/i.test(dbName) || !/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host))
   });
   await raw("auditpackruns").insertOne({
     _id: runId, firmId, clientId, kind: "CLAUSE22", financialYear: "2025-26", status: "REVIEW",
-    activeGenerationAttempt: 1, generationAttempt: 1, ruleVersion: "clause22-v1", rowCount: 3,
+    activeGenerationAttempt: "1", generationAttempt: "1", ruleVersion: "clause22-v1", rowCount: 3,
     sourceBatches: [], sourceFingerprint: "fp-pack-wp", summary: { provisional: false, reasons: [], totals: {}, counts: {} },
     createdAt: now, updatedAt: now,
   });
@@ -161,10 +161,10 @@ if (!/scratch/i.test(dbName) || !/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host))
     packRow(excludedKey, "Sharma: bill SHARMA-13", "EXCLUDED", { version: 1, state: "EXCLUDED", reason: "Not a due.", decidedBy: ownerId, decidedAt: now }),
   ]);
   const foreignRunId = oid();
-  await raw("auditpackruns").insertOne({ _id: foreignRunId, firmId: otherFirmId, clientId: otherClientId, kind: "CLAUSE22", financialYear: "2025-26", status: "REVIEW", activeGenerationAttempt: 1, generationAttempt: 1, ruleVersion: "clause22-v1", rowCount: 1, sourceBatches: [], sourceFingerprint: "fp-other", summary: { provisional: false, reasons: [], totals: {}, counts: {} }, createdAt: now, updatedAt: now });
+  await raw("auditpackruns").insertOne({ _id: foreignRunId, firmId: otherFirmId, clientId: otherClientId, kind: "CLAUSE22", financialYear: "2025-26", status: "REVIEW", activeGenerationAttempt: "1", generationAttempt: "1", ruleVersion: "clause22-v1", rowCount: 1, sourceBatches: [], sourceFingerprint: "fp-other", summary: { provisional: false, reasons: [], totals: {}, counts: {} }, createdAt: now, updatedAt: now });
   await raw("auditpackrows").insertMany([packRow(confirmedKey, "Other firm's row", "CONFIRMED", { version: 1, state: "CONFIRMED", choice: "REPORT", decidedBy: otherOwnerId, decidedAt: now })].map((r) => ({ ...r, _id: oid(), firmId: otherFirmId, runId: foreignRunId })));
   const otherClientRunId = oid();
-  await raw("auditpackruns").insertOne({ _id: otherClientRunId, firmId, clientId: otherClientId, kind: "CLAUSE22", financialYear: "2025-26", status: "REVIEW", activeGenerationAttempt: 1, generationAttempt: 1, ruleVersion: "clause22-v1", rowCount: 1, sourceBatches: [], sourceFingerprint: "fp-other-client", summary: { provisional: false, reasons: [], totals: {}, counts: {} }, createdAt: now, updatedAt: now });
+  await raw("auditpackruns").insertOne({ _id: otherClientRunId, firmId, clientId: otherClientId, kind: "CLAUSE22", financialYear: "2025-26", status: "REVIEW", activeGenerationAttempt: "1", generationAttempt: "1", ruleVersion: "clause22-v1", rowCount: 1, sourceBatches: [], sourceFingerprint: "fp-other-client", summary: { provisional: false, reasons: [], totals: {}, counts: {} }, createdAt: now, updatedAt: now });
   await raw("auditpackrows").insertMany([packRow(confirmedKey, "Other client's row", "CONFIRMED", { version: 1, state: "CONFIRMED", choice: "REPORT", decidedBy: ownerId, decidedAt: now })].map((r) => ({ ...r, _id: oid(), runId: otherClientRunId })));
 
   const addRow = (body) => call("POST", `/api/engagements/working-papers/${paperId}/rows`, body);
@@ -263,6 +263,36 @@ if (!/scratch/i.test(dbName) || !/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host))
   await check("exactly two working-paper rows exist across everything: one pack, one plain", async () => {
     const count = await wpRowCount();
     assert.equal(count, 2, `the paper holds ${count} row(s): the confirmed pack row and the plain one`);
+  });
+
+  // 2026-10-17: the generation guard. A run processed again keeps its row keys; only the active attempt's
+  // rows are the rows the person saw. (A mutation that dropped this guard survived the suite until now.)
+  const mkGenerationRun = async (id) => raw("auditpackruns").insertOne({ _id: id, firmId, clientId, kind: "CLAUSE22", financialYear: "2025-26", status: "REVIEW", activeGenerationAttempt: "2", generationAttempt: "2", ruleVersion: "clause22-v1", rowCount: 1, sourceBatches: [], sourceFingerprint: `fp-${id}`, summary: { provisional: false, reasons: [], totals: {}, counts: {} }, createdAt: now, updatedAt: now });
+  const staleOnlyRunId = oid();
+  const mixedRunId = oid();
+  await mkGenerationRun(staleOnlyRunId);
+  await mkGenerationRun(mixedRunId);
+  const decided = { version: 1, state: "CONFIRMED", choice: "REPORT", decidedBy: ownerId, decidedAt: new Date("2026-01-06T10:00:00Z"), reason: "Past the appointed time.", note: "Seen." };
+  const sameKey = "f".repeat(64);
+  await raw("auditpackrows").insertMany([
+    { ...packRow(sameKey, "Old attempt label", "CONFIRMED", decided), _id: oid(), runId: staleOnlyRunId, generationAttempt: "1" },
+    { ...packRow(sameKey, "Old attempt label", "CONFIRMED", decided), _id: oid(), runId: mixedRunId, generationAttempt: "1" },
+    { ...packRow(sameKey, "Current attempt label", "CONFIRMED", decided), _id: oid(), runId: mixedRunId, generationAttempt: "2" },
+  ]);
+  const currentRevision = async () => (await raw("auditworkingpapers").findOne({ _id: new mongoose2.Types.ObjectId(paperId) })).revision;
+
+  await check("a row that exists only in an older generation of the run is refused 404, and nothing is written", async () => {
+    const before = await wpRowCount();
+    const reply = await addRow({ mutationKey: "wp-land-stale-gen", expectedRevision: await currentRevision(), packRow: { runId: String(staleOnlyRunId), rowKey: sameKey } });
+    assert.equal(reply.status, 404, `status ${reply.status} ${JSON.stringify(reply.json)?.slice(0, 200)}`);
+    assert.equal(await wpRowCount(), before);
+  });
+
+  await check("when an older generation holds the same row key, the CURRENT row is the one that lands", async () => {
+    const reply = await addRow({ mutationKey: "wp-land-current-gen", expectedRevision: await currentRevision(), packRow: { runId: String(mixedRunId), rowKey: sameKey } });
+    assert.equal(reply.status, 201, `status ${reply.status} ${JSON.stringify(reply.json)?.slice(0, 200)}`);
+    assert.match(reply.json.row.description, /Current attempt label/);
+    assert.doesNotMatch(reply.json.row.description, /Old attempt label/);
   });
 
   await new Promise((resolve) => server.close(resolve));

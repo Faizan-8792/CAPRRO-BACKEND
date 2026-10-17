@@ -143,6 +143,21 @@ const PUBLIC_ERROR_CODES = new Set([
   // W10 AP36: landing a pack row in a working paper is refused until the person confirms the row, and
   // only for the working paper's own client. Always 409.
   "AUDIT_PACK_ROW_NOT_CONFIRMED",
+  // W10 AP41: the measured request list.
+  "NO_MEASURED_REQUESTS",
+  "ENGAGEMENT_PACK_CLIENT_MISMATCH",
+  "ENGAGEMENT_REQUEST_LIST_FULL",
+  // W10 AP38: attribution, independence and the 60-day assembly.
+  "ENGAGEMENT_TEAM_REQUIRED",
+  "ASSURANCE_ASSEMBLED",
+  "ASSURANCE_ALREADY_ASSEMBLED",
+  "ASSURANCE_NOT_ASSEMBLED",
+  "ASSURANCE_REPORT_DATE_REQUIRED",
+  "ASSURANCE_DAY_OVERFLOW",
+  "ASSURANCE_LIMIT",
+  // W10 AP37: drafted memos.
+  "MEMO_SIGNED",
+  "MEMO_NOTHING_SELECTED",
   "PARTY_CHANGED",
   // Books snapshots (W10 AP18). The upload client is software, but its person needs the sentence: which chunk
   // to send next, that a snapshot is sealed, that counts differ. A malformed record names its line.

@@ -9,6 +9,20 @@ import {
   showWorkingPaper,
 } from "../controllers/audit-working-paper.controller.js";
 import {
+  getMemos,
+  patchMemo,
+  postMemo,
+  postSignMemo,
+  getAssurance,
+  postAssemble,
+  postIndependence,
+  postModification,
+  postReportDate,
+  postTimeEntry,
+  postVoidTimeEntry,
+  addPackRequests,
+  chaseDraft,
+  showPackRequestProposals,
   createEngagementRecord,
   createFinding,
   exportEngagement,
@@ -65,6 +79,24 @@ router.post(
 router.post("/", createEngagementRecord);
 router.get("/", listEngagementRecords);
 router.get("/templates", listTemplates);
+// W10 AP41: the measured request list - proposals from a pack's gaps, adding the chosen ones with the
+// request time recorded, and the chase draft built only from requests that carry that time.
+router.get("/:id/requests/proposals", showPackRequestProposals);
+router.post("/:id/requests/from-pack", addPackRequests);
+router.post("/:id/requests/chase-draft", chaseDraft);
+// W10 AP38: attribution, independence and the 60-day assembly of the file.
+router.get("/:id/assurance", getAssurance);
+router.post("/:id/assurance/independence", postIndependence);
+router.post("/:id/assurance/report-date", postReportDate);
+router.post("/:id/assurance/assemble", postAssemble);
+router.post("/:id/assurance/modifications", postModification);
+router.post("/:id/assurance/time", postTimeEntry);
+router.post("/:id/assurance/time/:entryId/void", postVoidTimeEntry);
+// W10 AP37: drafted memos - assembled from the team's inputs, edited by the team, signed by the reviewer.
+router.get("/:id/memos", getMemos);
+router.post("/:id/memos", postMemo);
+router.patch("/:id/memos/:memoId", patchMemo);
+router.post("/:id/memos/:memoId/sign", postSignMemo);
 router.get("/:id/export", exportEngagement);
 router.get("/:id", showEngagement);
 router.patch("/:id", patchEngagement);

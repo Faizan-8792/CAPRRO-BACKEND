@@ -31,7 +31,25 @@ export const DEFAULT_FEATURE_FLAGS = Object.freeze({
 // who changed them, what was set and why. The newest CONTROL_CHANGE_LIMIT entries are kept.
 export const CONTROL_CHANGE_LIMIT = 50;
 export const CONTROL_REASON_MAX = 300;
-export const CONTROL_CHANGE_KINDS = Object.freeze(["maintenance", "featureFlags"]);
+export const CONTROL_CHANGE_KINDS = Object.freeze(["maintenance", "featureFlags", "deadlineCatalogue"]);
+
+// W10 AP40: one row of the deadline catalogue. The statutory date and the notified extension are
+// separate fields on purpose, and both are UTC days written "YYYY-MM-DD" (never a Date, so no time
+// zone can move them). Validated by services/deadline-catalogue.service.js before it is stored.
+const ISO_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const DeadlineEntrySchema = new mongoose.Schema(
+  {
+    formKey: { type: String, trim: true, maxlength: 40, required: true },
+    label: { type: String, trim: true, maxlength: 120, required: true },
+    clientType: { type: String, trim: true, maxlength: 40, required: true },
+    financialYear: { type: String, trim: true, maxlength: 7, required: true },
+    statutoryDate: { type: String, match: ISO_DAY_PATTERN, required: true },
+    extendedDate: { type: String, match: ISO_DAY_PATTERN, default: null },
+    extensionReference: { type: String, trim: true, maxlength: 300, default: "" },
+    note: { type: String, trim: true, maxlength: 500, default: "" },
+  },
+  { _id: false },
+);
 
 const ControlChangeSchema = new mongoose.Schema(
   {
@@ -145,6 +163,15 @@ const AppConfigSchema = new mongoose.Schema(
     // GET /api/app-config/control-changes; the public /api/app-config route names its keys and
     // does not name this one.
     controlChanges: { type: [ControlChangeSchema], default: [] },
+    // W10 AP40: the statutory calendar the owner publishes. version 0 / no entries = never published,
+    // and the public config then serves null (see publishableCatalogue) rather than an empty list that
+    // could be read as "nothing is due".
+    deadlineCatalogue: {
+      version: { type: Number, min: 0, default: 0 },
+      publishedAt: { type: Date, default: null },
+      publishedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      entries: { type: [DeadlineEntrySchema], default: [] },
+    },
   },
   { timestamps: true, _id: false }
 );
