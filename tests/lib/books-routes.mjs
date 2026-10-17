@@ -192,6 +192,25 @@ export async function runBooksRouteChecks({ uri, MASTERS, DAYBOOK, only, linesOf
     check("two snapshots of different years cannot be diffed", otherYear.status === 400 && otherYear.json?.code === "BOOKS_SNAPSHOT_MISMATCH", `status ${otherYear.status}`);
     check("another firm cannot diff them", (await call("GET", `/api/books/snapshots/${id}/diff?against=${second}`, B.token)).status === 404);
 
+    // AUDIT_PACK_DUMP_DIR: write the real responses so the desktop and extension tests can pin them.
+    if (process.env.AUDIT_PACK_DUMP_DIR) {
+      const { mkdirSync, writeFileSync } = await import("node:fs");
+      mkdirSync(process.env.AUDIT_PACK_DUMP_DIR, { recursive: true });
+      const listed = await call("GET", "/api/books/snapshots", A.token);
+      const dump = {
+        "books-snapshot-created": created.json,
+        "books-chunk-accepted": g0.json,
+        "books-sealed": sealed.json,
+        "books-snapshots": listed.json,
+        "books-groups": oddReport,
+        "books-groups-mapped": mapped.json,
+        "books-suggest-unavailable": suggestion.json,
+        "books-parties": seeded.json,
+        "books-party-patched": patched.json,
+      };
+      for (const [name, body] of Object.entries(dump)) writeFileSync(`${process.env.AUDIT_PACK_DUMP_DIR}/${name}.json`, JSON.stringify(body, null, 2));
+    }
+
     // ─── the flag ───
     await raw("appconfigs").updateOne({ _id: "singleton" }, { $set: { "featureFlags.auditPacks": false } });
     const off = await call("GET", "/api/books/snapshots", A.token);

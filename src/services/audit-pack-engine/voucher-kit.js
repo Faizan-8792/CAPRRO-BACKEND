@@ -29,6 +29,11 @@ export function voucherSource(snapshotId, voucher) {
   return { kind: "BOOKS_VOUCHER", batchId: String(snapshotId), rowId: String(voucher._id), sourceRow: 0 };
 }
 
+/** A ledger of the snapshot as evidence: a row that rests on a master record, not on any one voucher. */
+export function ledgerSource(snapshotId, ledger) {
+  return { kind: "BOOKS_LEDGER", batchId: String(snapshotId), rowId: String(ledger._id ?? ledger.guid ?? ledger.name), sourceRow: 0 };
+}
+
 /**
  * True when a voucher is a live entry in the year: not cancelled, not optional (a memorandum Tally keeps out
  * of the books), with a readable date inside the financial year.

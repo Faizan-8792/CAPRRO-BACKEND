@@ -37,6 +37,12 @@ export function snapshotBatch(snapshot, role = "") {
   };
 }
 
+/** "2025-26" -> "2024-25": the year a prior-year snapshot must be for. */
+export function previousFinancialYear(financialYear) {
+  const start = Number(String(financialYear).slice(0, 4)) - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, "0")}`;
+}
+
 async function loadSealed({ firmId, client, financialYear, snapshotId, label, helpers }) {
   const { httpError, objectId } = helpers;
   if (!snapshotId) throw httpError(400, `Choose the ${label} snapshot of the client's books.`, "AUDIT_PACK_SOURCE_REFUSED");
@@ -55,7 +61,8 @@ async function loadSealed({ firmId, client, financialYear, snapshotId, label, he
  * @param {{code:string,label:string}[]} def.sections
  * @param {string[]} [def.extraCreateFields]
  * @param {object[]} [def.extraInputs]      one inputs.js descriptor per extraCreateFields entry, in the same order
- * @param {boolean} [def.needsPrior]       the pack also reads the prior year's snapshot (priorSnapshotId)
+ * @param {boolean} [def.needsPrior]       the pack also reads the prior year's snapshot (priorSnapshotId), required
+ * @param {boolean} [def.optionalPrior]    the pack reads the prior year's snapshot when one is given, and says what it cannot know without it
  * @param {(input:object, helpers:object) => object} [def.prepareParams]   checks the pack's own request fields
  * @param {(ctx:{financialYear:string,masters:object,vouchers:()=>AsyncIterable,params:object,snapshot:object,prior:object|null}) => Promise<{rows:object[],monthsLoaded?:string[],monthsMissing?:string[]}>} def.build
  * @param {string[]} def.reportChoices     the choices that put an amount into the filing sheet
@@ -106,10 +113,14 @@ export function defineFindingKind(def) {
     label: def.label,
     ruleVersion: def.ruleVersion,
     sections: def.sections,
-    createFields: ["snapshotId", ...(def.needsPrior ? ["priorSnapshotId"] : []), ...(def.extraCreateFields || [])],
+    createFields: ["snapshotId", ...(def.needsPrior || def.optionalPrior ? ["priorSnapshotId"] : []), ...(def.extraCreateFields || [])],
     inputs: Object.freeze([
       booksSnapshotInput("snapshotId", "The year's books", "A sealed snapshot of this client's Tally export for this financial year."),
-      ...(def.needsPrior ? [booksSnapshotInput("priorSnapshotId", "The prior year's books", "A sealed snapshot for the year before; it must be a different export.")] : []),
+      ...(def.needsPrior
+        ? [booksSnapshotInput("priorSnapshotId", "The prior year's books", "A sealed snapshot of the year before; it must be a different export.")]
+        : def.optionalPrior
+          ? [Object.freeze({ ...booksSnapshotInput("priorSnapshotId", "The prior year's books", "Optional. A sealed snapshot of the year before. Without it, balances brought forward cannot be traced to the bills behind them, and the pack says so."), required: false })]
+          : []),
       ...(def.extraInputs || []),
     ]),
     reasonWords,
@@ -121,9 +132,13 @@ export function defineFindingKind(def) {
       }
       const batches = [snapshotBatch(snapshot, "current")];
       let priorId = null;
-      if (def.needsPrior) {
+      if (def.needsPrior || (def.optionalPrior && input.priorSnapshotId)) {
         const prior = await loadSealed({ firmId, client, financialYear, snapshotId: input.priorSnapshotId, label: "prior-year", helpers });
         if (String(prior._id) === String(snapshot._id)) throw helpers.httpError(400, "The prior-year snapshot must be a different export.", "AUDIT_PACK_SOURCE_REFUSED");
+        // A prior year that is not the year before would put another year's figures into every comparison.
+        if (prior.financialYear !== previousFinancialYear(financialYear)) {
+          throw helpers.httpError(400, `The prior-year snapshot is for ${prior.financialYear}, not ${previousFinancialYear(financialYear)}.`, "AUDIT_PACK_SOURCE_REFUSED");
+        }
         batches.push(snapshotBatch(prior, "prior"));
         priorId = String(prior._id);
       }

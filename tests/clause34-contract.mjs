@@ -266,20 +266,31 @@ async function runRouteChecks(uri) {
     check("published to REVIEW naming its sections", run?.status === "REVIEW" && run?.sections?.map((s) => s.code).join(",") === "DEPOSIT_TIMING,STATEMENT_TIMING,INPUT_GAPS", JSON.stringify(run)?.slice(0, 300));
     const reasons = run?.summary?.reasons || [];
     check("a generic pack's summary carries each reason as a sentence from its own table, so a client carries no words of its own", reasons.length >= 1 && reasons.every((r) => typeof r.text === "string" && r.text.length > 0) && reasons.some((r) => r.code === "ROWS_NOT_DECIDED" && /not yet confirmed or excluded/.test(r.text)), JSON.stringify(reasons));
-    const deposits = (await call("GET", `/api/audit-packs/${runId}/rows?section=DEPOSIT_TIMING&limit=100`, token)).json?.rows || [];
-    const statementRows = (await call("GET", `/api/audit-packs/${runId}/rows?section=STATEMENT_TIMING&limit=100`, token)).json?.rows || [];
+    const depositsPage = (await call("GET", `/api/audit-packs/${runId}/rows?section=DEPOSIT_TIMING&limit=100`, token)).json;
+    const deposits = depositsPage?.rows || [];
+    const statementsPage = (await call("GET", `/api/audit-packs/${runId}/rows?section=STATEMENT_TIMING&limit=100`, token)).json;
+    const statementRows = statementsPage?.rows || [];
     check("two deposit rows and three statement rows are read by section, Q4 absent", deposits.length === 2 && statementRows.length === 3 && !deposits.some((r) => r.values.quarter === "Q4"), `${deposits.length}/${statementRows.length}`);
     check("the Q1 interest survives the database in paise: 450,000 with 300,000 running", deposits.some((r) => r.values.quarter === "Q1" && r.values.interestMinor === 450_000 && r.values.runningInterestMinor === 300_000));
     check("the Q3 fee is capped at the quarter's tax: 150,000", statementRows.some((r) => r.values.quarter === "Q3" && r.values.feeMinor === 150_000 && r.values.feeCapped === true));
     check("the Q4 statement row is pending with an unknown fee", statementRows.some((r) => r.values.quarter === "Q4" && r.state === "PENDING_INPUT" && r.values.feeMinor === null));
     const early = await call("GET", `/api/audit-packs/${runId}/export`, token);
     check("while rows are undecided the export carries the provisional header", early.status === 200 && early.headers.get("x-audit-pack-provisional") === "true", `status ${early.status}`);
+    let firstDecision = null;
     for (const row of [...deposits, ...statementRows]) {
       if (!row.decidable || row.decision.state) continue;
       const answer = await call("POST", `/api/audit-packs/${runId}/rows/${row.rowKey}/decision`, token, { expectedVersion: row.decision.version, state: "CONFIRMED", choice: "REPORT" });
+      firstDecision ??= answer.json;
       if (answer.status !== 200) check(`deciding ${row.label}`, false, `status ${answer.status} ${JSON.stringify(answer.json)?.slice(0, 200)}`);
     }
     const decided = await call("GET", `/api/audit-packs/${runId}`, token);
+    // AUDIT_PACK_DUMP_DIR: write the real responses so the desktop tests can pin them (see audit-pack-route-contract).
+    if (process.env.AUDIT_PACK_DUMP_DIR) {
+      const { mkdirSync, writeFileSync } = await import("node:fs");
+      mkdirSync(process.env.AUDIT_PACK_DUMP_DIR, { recursive: true });
+      const dump = { "generic-run": shown.json, "generic-run-decided": decided.json, "generic-rows-deposits": depositsPage, "generic-rows-statements": statementsPage, "generic-decided-row": firstDecision };
+      for (const [name, body] of Object.entries(dump)) writeFileSync(`${process.env.AUDIT_PACK_DUMP_DIR}/${name}.json`, JSON.stringify(body, null, 2));
+    }
     check("once every row is decided the pack is no longer provisional", decided.json?.run?.summary?.provisional === false, JSON.stringify(decided.json?.run?.summary?.reasons));
     const final = await call("GET", `/api/audit-packs/${runId}/export`, token);
     const finalParts = final.bytes ? readWorkbookParts(final.bytes) : new Map();

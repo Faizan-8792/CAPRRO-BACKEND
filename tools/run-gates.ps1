@@ -779,6 +779,8 @@ try {
         "audit-pack-gstr9c-contract",
         # W10 AP15: the pack catalogue both clients draw their screens from - every pack declares exactly the fields its create route takes, in a closed vocabulary; seven deliberate breakages each caught; then the route, the flag and the TDS imports the sources route lists (Mongo, scratch-marked).
         "audit-pack-catalogue-contract",
+        # W10 AP27 (2026-10-17): the Schedule III ageing schedules - receivables, payables (micro, small and medium apart) and capital work in progress - engine against a hand-worked year, the column edges to the day, thirteen automated breakages of the engine and the bill book, then routes with and without the previous year's books (Mongo, scratch-marked).
+        "ageing-contract",
         # IMPROVEMENT-PLAN-V2-2026-09-28 Part 1: email observability. Pins the single
         # transport path through services/mailer.js, the suppression gate, the
         # forward-only webhook transitions, the Svix signature scheme, and the
@@ -1021,6 +1023,7 @@ try {
         "books-snapshot-contract" = "scratch-gates-books-snapshot"
         "audit-pack-gstr9c-contract" = "scratch-gates-audit-pack-9c"
         "audit-pack-catalogue-contract" = "scratch-gates-catalogue"
+        "ageing-contract" = "scratch-gates-ageing"
         "email-delivery-contract" = "scratch-gates-email-delivery"
         "super-emails-controller-contract" = "scratch-gates-super-emails"
         "api-not-found-contract" = "scratch-gates-api-not-found"

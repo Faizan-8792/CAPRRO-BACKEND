@@ -154,6 +154,13 @@ async function runRouteChecks(uri) {
     const byKind = Object.fromEntries((sources.json?.batches || []).map((b) => [b.kind, b]));
     check("the sources route lists the year's TDS imports with their quarter", sources.status === 200 && byKind.TDS_DEDUCTIONS?.quarter === "Q1" && byKind.TDS_CHALLANS?.quarter === "Q2" && byKind.TDS_DEDUCTIONS?.statementType === "24Q", JSON.stringify(sources.json?.batches));
     check("a TDS import of another financial year is not listed", !byKind.TDS_STATEMENTS, JSON.stringify(Object.keys(byKind)));
+    // AUDIT_PACK_DUMP_DIR: write the real responses so the desktop tests can pin them (see audit-pack-route-contract).
+    if (process.env.AUDIT_PACK_DUMP_DIR) {
+      const { mkdirSync, writeFileSync } = await import("node:fs");
+      mkdirSync(process.env.AUDIT_PACK_DUMP_DIR, { recursive: true });
+      writeFileSync(`${process.env.AUDIT_PACK_DUMP_DIR}/kinds.json`, JSON.stringify(listed.json, null, 2));
+      writeFileSync(`${process.env.AUDIT_PACK_DUMP_DIR}/sources-tds.json`, JSON.stringify(sources.json, null, 2));
+    }
     const other = await call("GET", `/api/audit-packs/sources?clientId=${clientId}&financialYear=2025-26`, B.token);
     check("another firm cannot read this client's sources", other.status === 404, `status ${other.status}`);
 
