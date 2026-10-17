@@ -86,3 +86,50 @@ export async function collect(iterable) {
   for await (const item of iterable) out.push(item);
   return out;
 }
+
+/**
+ * How one entry of a voucher was settled. The entries on the other side of the voucher are the legs that paid
+ * it; their cash, bank and other amounts are shared across the entries on this side in proportion to those
+ * entries' amounts (the books do not say which leg settled which). The three parts always sum to the entry's own
+ * amount: whatever the legs do not account for is "other" (a journal, a set-off, an unbalanced voucher).
+ *
+ * @param {{ledger:string,amountMinor:number}[]} entries   every entry of the voucher (amounts must be readable)
+ * @param {number} targetIndex
+ * @param {(ledgerName:string)=>string|null} groupOfLedger
+ */
+export function legSplit(entries, targetIndex, groupOfLedger) {
+  const target = entries[targetIndex];
+  const sign = Math.sign(target.amountMinor);
+  const sameSide = entries.map((e, i) => ({ e, i })).filter(({ e }) => Math.sign(e.amountMinor) === sign);
+  const opposite = entries.filter((e) => Math.sign(e.amountMinor) === -sign);
+  const weights = sameSide.map(({ e }) => Math.abs(e.amountMinor));
+  const mine = sameSide.findIndex(({ i }) => i === targetIndex);
+  const part = (predicate) =>
+    proportionalShares(sumMinor(opposite.filter((e) => predicate(groupOfLedger(e.ledger))).map((e) => Math.abs(e.amountMinor)), "legs"), weights)[mine];
+  const total = Math.abs(target.amountMinor);
+  const cashMinor = Math.min(total, part((g) => CASH_GROUPS.has(g)));
+  const bankMinor = Math.min(total - cashMinor, part((g) => BANK_GROUPS.has(g)));
+  return { cashMinor, bankMinor, otherMinor: total - cashMinor - bankMinor };
+}
+
+/**
+ * The bank allocations of a voucher that sit under bank ledgers, classified by how the money moved:
+ * ELECTRONIC (a transfer through the banking system), INSTRUMENT (a cheque or draft - whether it was account
+ * payee is not in the books), CASH_AT_BANK (a deposit or withdrawal over the counter), or UNKNOWN.
+ */
+export function bankChannel(voucher, groupOfLedger) {
+  const kinds = new Set();
+  for (const bank of voucher.banks || []) {
+    if (!BANK_GROUPS.has(groupOfLedger(bank.ledger))) continue;
+    const type = String(bank.transactionType || "").toLowerCase();
+    if (/e-?fund|neft|rtgs|imps|upi|ecs|nach|online|electronic|transfer/.test(type)) kinds.add("ELECTRONIC");
+    else if (/cheque|check|\bdd\b|draft|demand/.test(type)) kinds.add("INSTRUMENT");
+    else if (/cash/.test(type)) kinds.add("CASH_AT_BANK");
+    else kinds.add("UNKNOWN");
+  }
+  if (kinds.size === 0) return "UNKNOWN";
+  if (kinds.has("CASH_AT_BANK")) return "CASH_AT_BANK";
+  if (kinds.has("INSTRUMENT")) return "INSTRUMENT";
+  if (kinds.has("UNKNOWN")) return "UNKNOWN";
+  return "ELECTRONIC";
+}

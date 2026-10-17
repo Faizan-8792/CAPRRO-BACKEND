@@ -2445,9 +2445,12 @@ if (listed.status !== 0 || listed.error) {
   // provider: src/services/books/books-ai.service.js calls callDeepSeek (deepseek-provider.service.js, which
   // reads the key); it reads no key itself and sends group names only. HTTP glue with no secret:
   // src/controllers/books.controller.js and src/routes/books.routes.js.
+  // 251 -> 257 on 2026-10-17 for the snapshot-pack kinds (W10 AP22 and AP25), all six confirmed clean by this scan before the pin moved. Pure computation, no network, no secret, no I/O:
+  // src/services/audit-pack-kinds/finding-kind.js, clause21d.kind.js and clause31.kind.js, and src/services/audit-pack-engine/voucher-kit.js,
+  // clause21d.engine.js and clause31.engine.js. The books they read arrive through books-snapshot.service.js, already pinned above.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 251 && result.status === 0,
+    files.length === 257 && result.status === 0,
     result,
   );
 }

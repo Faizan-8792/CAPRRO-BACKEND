@@ -763,6 +763,8 @@ try {
         "audit-pack-route-contract",
         # W10 AP9: the shared workbook writer - exact paise, Indian grouping, no formulas (pure).
         "workbook-indian-grouping-contract",
+        # W10 AP25 (2026-10-17): clause 31 loans and 269ST receipts from a sealed day book.
+        "clause31-contract",
         # W10 AP22: Form 3CD clause 21(d), cash payments over the section 40A(3) limit - engine against a hand-worked day book, seven automated breakages, then routes, worker and workbook (Mongo, scratch-marked).
         "clause21d-contract",
         # W10 AP18-AP21: the Tally books snapshot - group resolution and strict chunk validation with automated mutants, then upload, seal, group mapping, party master and snapshot diff through the real app (Mongo, scratch-marked; no AI key).
@@ -1003,6 +1005,7 @@ try {
         "engagement-season-types-contract" = "scratch-gates-season-types"
         "books-import-contract" = "scratch-gates-books-import"
         "audit-pack-route-contract" = "scratch-gates-audit-pack"
+        "clause31-contract" = "scratch-gates-clause31"
         "clause21d-contract" = "scratch-gates-clause21d"
         "books-snapshot-contract" = "scratch-gates-books-snapshot"
         "audit-pack-gstr9c-contract" = "scratch-gates-audit-pack-9c"

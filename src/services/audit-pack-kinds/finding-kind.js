@@ -131,6 +131,7 @@ export function defineFindingKind(def) {
       const prior = run.params.priorSnapshotId ? await readSnapshotMasters({ firmId, snapshotId: run.params.priorSnapshotId }) : null;
       const vouchers = (snapshotId = run.params.snapshotId) => streamVouchers({ firmId, snapshotId });
       const built = await def.build({
+        run,
         financialYear: run.financialYear,
         masters,
         vouchers,

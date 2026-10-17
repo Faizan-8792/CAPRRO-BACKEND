@@ -25,6 +25,7 @@ export async function runSnapshotPackFlow({
   expect = async () => [],
   decide = null,
   expectedWorkbookSheets = null,
+  beforeCreate = null,
 }) {
   const checks = [];
   const check = (name, pass, detail = "") => checks.push({ name: `route: ${name}`, pass: Boolean(pass), detail });
@@ -107,6 +108,9 @@ export async function runSnapshotPackFlow({
   const priorSnapshotId = priorSnapshot
     ? await writeSnapshot({ ledgerDocs: priorSnapshot.ledgers, voucherDocs: priorSnapshot.vouchers || [], groupDocs: priorSnapshot.groups || [], fy: priorSnapshot.financialYear, tag: "prior" })
     : null;
+
+  // A pack may read things beside the snapshot (a person's answers); the caller writes them here.
+  if (beforeCreate) await beforeCreate({ raw, A, clientId, oid, now, snapshotId });
 
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
