@@ -763,6 +763,8 @@ try {
         "audit-pack-route-contract",
         # W10 AP9: the shared workbook writer - exact paise, Indian grouping, no formulas (pure).
         "workbook-indian-grouping-contract",
+        # W10 AP26 (2026-10-17): every registered pack's filing sheet carries CONFIRMED rows only, and certifies nothing while provisional (pure).
+        "pack-filing-sheet-contract",
         # W10 AP25 (2026-10-17): clause 31 loans and 269ST receipts from a sealed day book.
         "clause31-contract",
         # W10 AP22: Form 3CD clause 21(d), cash payments over the section 40A(3) limit - engine against a hand-worked day book, seven automated breakages, then routes, worker and workbook (Mongo, scratch-marked).
