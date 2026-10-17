@@ -183,6 +183,16 @@ async function runSuite() {
     const noStatus = await call("POST", `/api/audit-packs/${runId}/rows/${s4.rowKey}/decision`, A.token, { expectedVersion: 0, state: "CONFIRMED" });
     check("AP8: a supplier not in GSTR-2B cannot be confirmed without a status", noStatus.status === 400, `status ${noStatus.status}`);
     const decided = await call("POST", `/api/audit-packs/${runId}/rows/${s4.rowKey}/decision`, A.token, { expectedVersion: 0, state: "CONFIRMED", status: "COMPOSITION", note: "Checked on the GST portal" });
+    // AUDIT_PACK_DUMP_DIR: write the real responses so the desktop and extension tests can pin them
+    // (W10 AP11). Not a check: it only runs when a person asks for the payloads.
+    if (process.env.AUDIT_PACK_DUMP_DIR) {
+      const { mkdirSync, writeFileSync } = await import("node:fs");
+      mkdirSync(process.env.AUDIT_PACK_DUMP_DIR, { recursive: true });
+      const sources = await call("GET", `/api/audit-packs/sources?clientId=${clientId}&financialYear=2025-26`, A.token);
+      const runs = await call("GET", `/api/audit-packs?clientId=${clientId}&financialYear=2025-26`, A.token);
+      const dump = { sources: sources.json, runs: runs.json, run: shown.json, ledgers: ledgers.json, suppliers: suppliers.json, tieouts: tieouts.json, decided: decided.json, created: created.json };
+      for (const [name, body] of Object.entries(dump)) writeFileSync(`${process.env.AUDIT_PACK_DUMP_DIR}/${name}.json`, JSON.stringify(body, null, 2));
+    }
     check("AP8: a decision sets the status and records who decided",
       decided.status === 200 && decided.json?.row?.values?.status === "COMPOSITION" && decided.json?.row?.decision?.decidedBy === String(A.ownerId) && decided.json?.row?.decision?.version === 1,
       `status ${decided.status} ${JSON.stringify(decided.json)?.slice(0, 200)}`);
