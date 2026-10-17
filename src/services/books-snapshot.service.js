@@ -175,7 +175,12 @@ export async function ingestChunk({ firmId, actorUserId, snapshotId, input }) {
   try {
     parsed = parseChunk(kind, input.ndjson);
   } catch (error) {
-    if (error instanceof RangeError) throw httpError(400, error.message, "BOOKS_CHUNK_INVALID");
+    // The dynamic detail rides inside one un-nested template so the error-contract scan can still see the
+    // code this throws; a bare message expression would hide it.
+    if (error instanceof RangeError) {
+      const detail = error.message;
+      throw httpError(400, `A chunk could not be read: ${detail}`, "BOOKS_CHUNK_INVALID");
+    }
     throw error;
   }
 
@@ -253,7 +258,10 @@ export async function sealSnapshot({ firmId, actorUserId, requestId = "", snapsh
   for (const kind of BOOKS_CHUNK_KINDS) stored[kind] = await MODEL_FOR_KIND[kind].countDocuments({ firmId, snapshotId: snapshot._id });
   const mismatched = BOOKS_CHUNK_KINDS.filter((kind) => stored[kind] !== claimed[kind] || stored[kind] !== (snapshot.counts?.[kind] || 0));
   if (mismatched.length) {
-    throw httpError(409, `The snapshot holds ${mismatched.map((k) => `${stored[k]} ${k}`).join(", ")} but ${mismatched.map((k) => `${claimed[k]} ${k}`).join(", ")} were expected. Send the missing chunks, or start a new snapshot.`, "BOOKS_SNAPSHOT_COUNT_MISMATCH");
+    // Built before the call so the thrown message is one un-nested template the error-contract scan reads.
+    const held = mismatched.map((k) => `${stored[k]} ${k}`).join(", ");
+    const expectedCounts = mismatched.map((k) => `${claimed[k]} ${k}`).join(", ");
+    throw httpError(409, `The snapshot holds ${held} but ${expectedCounts} were expected. Send the missing chunks, or start a new snapshot.`, "BOOKS_SNAPSHOT_COUNT_MISMATCH");
   }
   if (stored.groups + stored.ledgers + stored.vouchers === 0) throw httpError(409, "A snapshot with no records cannot be sealed.", "BOOKS_SNAPSHOT_EMPTY");
   const digest = chunkDigest(snapshot.chunkLog || []);

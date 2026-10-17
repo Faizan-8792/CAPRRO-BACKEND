@@ -36,7 +36,7 @@ export const clause26Kind = defineFindingKind({
     const list = input.nextYearPayments ?? null;
     if (list === null) return { returnDueDay: day, nextYearPayments: null };
     if (!Array.isArray(list) || list.length > 500 || list.length === 0) {
-      throw httpError(400, "nextYearPayments is a list of the payments made after 31 March (ledger, date, amount), at most 500.", "AUDIT_PACK_SOURCE_REFUSED");
+      throw httpError(400, "nextYearPayments is the list of payments made after the year end (ledger, date, amount), no more than five hundred of them.", "AUDIT_PACK_SOURCE_REFUSED");
     }
     const clean = list.map((p) => {
       if (!p || typeof p.ledger !== "string" || !p.ledger.trim() || p.ledger.length > 300) {
