@@ -144,3 +144,6 @@ export const RESIDUAL_CHOICES = Object.freeze([
 ]);
 
 export const RESIDUAL_CHOICE_CODES = Object.freeze(RESIDUAL_CHOICES.map(([code]) => code));
+
+/** A choice a person may give on a row, the way an engine offers it. */
+export const choice = (value, label, { needsNote = false } = {}) => ({ value, label, needsNote });

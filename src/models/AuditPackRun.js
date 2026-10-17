@@ -8,7 +8,9 @@
 
 import mongoose from "mongoose";
 
-const AUDIT_PACK_KINDS = Object.freeze(["CLAUSE44", "GSTR9C", "ANNEXURE_3CD", "SCHEDULE3", "LEDGER_SCAN"]);
+const AUDIT_PACK_KINDS = Object.freeze([
+  "CLAUSE44", "GSTR9C", "CLAUSE21D", "CLAUSE22", "CLAUSE26", "CLAUSE31", "SCHEDULE3_AGEING", "SCHEDULE3_RATIOS", "CARO", "LEDGER_SCAN",
+]);
 const AUDIT_PACK_RUN_STATUSES = Object.freeze(["QUEUED", "PROCESSING", "REVIEW", "FAILED"]);
 
 const SourceBatchSchema = new mongoose.Schema(

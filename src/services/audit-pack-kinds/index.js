@@ -12,10 +12,12 @@
 //
 // A descriptor computes nothing itself: the arithmetic lives in an engine under audit-pack-engine/.
 
+import { clause21dKind } from "./clause21d.kind.js";
 import { gstr9cKind } from "./gstr9c.kind.js";
 
 const KINDS = Object.freeze({
   [gstr9cKind.kind]: gstr9cKind,
+  [clause21dKind.kind]: clause21dKind,
 });
 
 export const GENERIC_PACK_KINDS = Object.freeze(Object.keys(KINDS));
