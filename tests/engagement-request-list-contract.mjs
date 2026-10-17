@@ -27,6 +27,17 @@ import {
   proposalsFromGapRows,
 } from "../src/services/engagement-request-list.service.js";
 
+
+// ENGAGEMENT_FILE_DUMP_DIR=<folder>: write the responses the desktop's tests pin as fixtures (CaPro.Desktop.Core.Tests/Fixtures/EngagementFile).
+// Real answers from the real routes, fields the desktop does not read included, so a server rename breaks a test instead of emptying a screen.
+const dumpDir = process.env.ENGAGEMENT_FILE_DUMP_DIR || "";
+const dump = async (name, json) => {
+  if (!dumpDir) return;
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  await mkdir(dumpDir, { recursive: true });
+  await writeFile(`${dumpDir}/${name}.json`, JSON.stringify(json, null, 2));
+};
+
 let passed = 0;
 let failed = 0;
 const check = async (name, fn) => {
@@ -249,6 +260,7 @@ if (!uri) {
     assert.deepEqual(r.json.proposals.map((p) => [p.code, p.count, p.alreadyRequested]), [["PURCHASES_NOT_BILLWISE", 1, false], ["UDYAM_UNKNOWN", 3, false]]);
     assert.ok(!r.json.proposals.some((p) => p.code === "BANK_RATE_NOT_SUPPLIED"), "a bank rate is the CA's to supply, not the client's");
     assert.equal(r.json.kind, "CLAUSE22");
+    await dump("proposals", r.json);
   });
 
   await check("adding a proposal records WHEN it was asked for, once, through the revision fence", async () => {
@@ -256,6 +268,7 @@ if (!uri) {
     const r = await call("POST", `/api/engagements/${engagementId}/requests/from-pack`, { mutationKey: "rl-add-1", expectedRevision: revision, runId: String(runId), codes: ["UDYAM_UNKNOWN"] });
     assert.equal(r.status, 200, JSON.stringify(r.json));
     assert.deepEqual(r.json.added.map((a) => a.code), ["UDYAM_UNKNOWN"]);
+    await dump("from-pack", r.json);
     const doc = await eng();
     const added = doc.clientRequests.filter((q) => q.templateKey === "pack:CLAUSE22:UDYAM_UNKNOWN:2025-26");
     assert.equal(added.length, 1);
@@ -321,6 +334,7 @@ if (!uri) {
     const r = await call("POST", `/api/engagements/${engagementId}/requests/chase-draft`, {});
     assert.equal(r.status, 200, JSON.stringify(r.json));
     const draft = r.json.draft;
+    await dump("chase-draft", r.json);
     assert.equal(draft.label, "DRAFT FOR REVIEW - NOT SENT");
     assert.equal(draft.nothingSent, true);
     assert.deepEqual(draft.items.map((i) => i.daysPending), [7]);

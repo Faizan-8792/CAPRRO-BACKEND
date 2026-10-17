@@ -27,6 +27,17 @@ import {
   readMaterialityInputs,
 } from "../src/services/engagement-memo.service.js";
 
+
+// ENGAGEMENT_FILE_DUMP_DIR=<folder>: write the responses the desktop's tests pin as fixtures (CaPro.Desktop.Core.Tests/Fixtures/EngagementFile).
+// Real answers from the real routes, fields the desktop does not read included, so a server rename breaks a test instead of emptying a screen.
+const dumpDir = process.env.ENGAGEMENT_FILE_DUMP_DIR || "";
+const dump = async (name, json) => {
+  if (!dumpDir) return;
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  await mkdir(dumpDir, { recursive: true });
+  await writeFile(`${dumpDir}/${name}.json`, JSON.stringify(json, null, 2));
+};
+
 let passed = 0;
 let failed = 0;
 const check = async (name, fn) => {
@@ -314,6 +325,12 @@ if (!uri) {
     assert.equal(edit.status, 409);
     assert.equal(edit.json.code, "MEMO_SIGNED");
     assert.equal((await record()).memos.find((m) => String(m._id) === materialityId).text, stored.text);
+  });
+
+  await check("the memos, dumped for the desktop's fixtures (a signed one and drafts of the other kinds)", async () => {
+    const r = await call("owner", "GET", M());
+    assert.equal(r.status, 200);
+    await dump("memos", r.json);
   });
 
   await check("a memo changed behind the signature is reported: the text no longer matches what was signed", async () => {

@@ -24,6 +24,17 @@ import { fileURLToPath } from "node:url";
 import { ASSEMBLY_DAYS, INDEPENDENCE_STATEMENT, assemblyStatus } from "../src/services/engagement-assurance.service.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+// ENGAGEMENT_FILE_DUMP_DIR=<folder>: write the responses the desktop's tests pin as fixtures (CaPro.Desktop.Core.Tests/Fixtures/EngagementFile).
+// Real answers from the real routes, fields the desktop does not read included, so a server rename breaks a test instead of emptying a screen.
+const dumpDir = process.env.ENGAGEMENT_FILE_DUMP_DIR || "";
+const dump = async (name, json) => {
+  if (!dumpDir) return;
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  await mkdir(dumpDir, { recursive: true });
+  await writeFile(`${dumpDir}/${name}.json`, JSON.stringify(json, null, 2));
+};
+
 let passed = 0;
 let failed = 0;
 const check = async (name, fn) => {
@@ -358,6 +369,12 @@ if (!uri) {
     assert.equal(ok.json.assurance.time.totalMinutes, 45, "only the reviewer's 45 minutes still count");
     const dayAgain = await call("member", "POST", A("/time"), { mutationKey: key("time"), workDay: dayString(-1), minutes: 1400 });
     assert.equal(dayAgain.status, 200, "a voided entry no longer counts toward the day's 24 hours");
+  });
+
+  await check("the whole picture after the voiding, dumped for the desktop's fixtures", async () => {
+    const r = await call("owner", "GET", A());
+    assert.equal(r.status, 200);
+    await dump("assurance", r.json);
   });
 
   server.close();

@@ -43,6 +43,8 @@ export function renderCSharp() {
 // Do not edit by hand: edit the table, run the generator, commit all three files.
 // </auto-generated>
 
+#nullable enable
+
 namespace CaPro.Desktop.Core.Audit;
 
 /// <summary>One Standard on Auditing: number, title and group. <see cref="EffectiveDate"/> is an ISO day or null when not recorded.</summary>
