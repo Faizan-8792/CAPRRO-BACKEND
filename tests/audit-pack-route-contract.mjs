@@ -164,6 +164,12 @@ async function runSuite() {
       shown.status === 200 && run?.status === "REVIEW" && run?.monthsMissing?.length === 0 && run?.rowCount > 0, JSON.stringify(run)?.slice(0, 300));
     check("AP8: its figures are provisional until people decide the rows",
       run?.summary?.provisional === true && run?.summary?.columns?.col2 === rupees(5600000), JSON.stringify(run?.summary)?.slice(0, 300));
+    // AP44: the clients quoted a flagged row as "CLAUSE44, 2025-26: ..." because no run said what the pack is called.
+    const listed = await call("GET", `/api/audit-packs?clientId=${clientId}&financialYear=2025-26`, A.token);
+    check("AP44: every run names its pack for people (kindLabel \"Clause 44\"), on create, show and list alike",
+      created.json?.run?.kindLabel === "Clause 44" && run?.kindLabel === "Clause 44" &&
+      Array.isArray(listed.json?.runs) && listed.json.runs.length > 0 && listed.json.runs.every((r) => r.kindLabel === "Clause 44"),
+      `${created.json?.run?.kindLabel} / ${run?.kindLabel} / ${JSON.stringify(listed.json?.runs?.map((r) => r.kindLabel))}`);
 
     const ledgers = await call("GET", `/api/audit-packs/${runId}/rows?section=LEDGER&limit=100`, A.token);
     const suppliers = await call("GET", `/api/audit-packs/${runId}/rows?section=SUPPLIER&limit=100`, A.token);

@@ -216,6 +216,9 @@ if (!uri) {
   for (let i = 1; i <= 3; i += 1) await mkRow(matterRun, i, `Supplier ${i}: bill late`, "COMPUTED");
   await mkRow(matterRun, 4, "Bank rate not supplied", "PENDING_INPUT");
   await mkRow(matterRun, 5, "Supplier 5: confirmed late", "CONFIRMED", { decision: confirmed("REPORT") });
+  // AP44: Clause 44 predates the kinds registry, so a memo once named it by its code.
+  const clause44Run = await mkRun("CLAUSE44", clientId);
+  await mkRow(clause44Run, 1, "Packing supplier not in GSTR-2B", "PENDING_INPUT");
   const otherClientRun = await mkRun("LEDGER_SCAN", otherClientId);
   const foreignRun = await mkRun("LEDGER_SCAN", clientId, otherFirmId);
 
@@ -287,6 +290,12 @@ if (!uri) {
     assert.match(memo.text, /Supplier 1: bill late/);
     assert.match(memo.text, /Supplier timing needs the partner\./);
     assert.equal((await call("member", "POST", M(), { mutationKey: key("mem"), kind: "SIGNIFICANT_MATTERS", inputs: { runIds: [] } })).status, 400);
+    const named = await call("member", "POST", M(), { mutationKey: key("mem"), kind: "SIGNIFICANT_MATTERS", inputs: { runIds: [String(clause44Run)], matters: "The packing supplier's status is open." } });
+    assert.equal(named.status, 200, JSON.stringify(named.json));
+    const namedMemo = named.json.memos.find((m) => /packing supplier's status is open/.test(m.text));
+    assert.ok(namedMemo, "the Clause 44 memo was not returned");
+    assert.match(namedMemo.text, /Clause 44, 2025-26: /, "AP44: a memo names a Clause 44 pack as people do");
+    assert.doesNotMatch(JSON.stringify(namedMemo), /CLAUSE44/, "AP44: never by its code");
     assert.equal((await call("member", "POST", M(), { mutationKey: key("mem"), kind: "SIGNIFICANT_MATTERS", inputs: { runIds: Array.from({ length: 11 }, () => String(oid())) } })).status, 400, "eleven distinct packs are over the limit of ten");
   });
 

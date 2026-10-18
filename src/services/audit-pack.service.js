@@ -40,7 +40,7 @@ import {
 } from "./audit-pack-engine/clause44.engine.js";
 import { looksLikePredefinedGroup } from "./books-normalization.service.js";
 import { DRAFT_SYSTEM, buildDraftPrompt, noteSourceFor, readDraftAnswer, shapeDraft, validateSpec } from "./audit-pack-kinds/draft.js";
-import { allCreateFields, getPackKind } from "./audit-pack-kinds/index.js";
+import { allCreateFields, getPackKind, packLabel } from "./audit-pack-kinds/index.js";
 import { reasonSentence } from "./audit-pack-kinds/workbook-generic.js";
 
 export const AUDIT_PACK_JOB_KIND = "AUDIT_PACK";
@@ -95,6 +95,7 @@ function serializeRun(run, summary = null) {
     id: String(run._id),
     clientId: String(run.clientId),
     kind: run.kind,
+    kindLabel: packLabel(run.kind),
     financialYear: run.financialYear,
     status: run.status,
     revision: run.revision,

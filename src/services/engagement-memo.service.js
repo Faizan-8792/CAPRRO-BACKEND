@@ -20,7 +20,7 @@ import AuditPackRun from "../models/AuditPackRun.js";
 import Client from "../models/Client.js";
 import EngagementAssurance, { ASSURANCE_LIMITS, MEMO_KINDS } from "../models/EngagementAssurance.js";
 import User from "../models/User.js";
-import { getPackKind } from "./audit-pack-kinds/index.js";
+import { getPackKind, packLabel } from "./audit-pack-kinds/index.js";
 import { assuranceKit } from "./engagement-assurance.service.js";
 import { httpError, mutationKey as readMutationKey, objectId } from "./case-validation.service.js";
 import { rupeesText } from "../utils/rupees.js";
@@ -290,7 +290,7 @@ async function buildFor({ kind, engagement, firmId, input, clientName }) {
     if (selected.length === 0) {
       throw httpError(409, "No row in that pack is confirmed to be looked at, so there is nothing to describe yet.", "MEMO_NOTHING_SELECTED");
     }
-    return { inputs, built: buildSamplingMemo({ inputs, clientName, engagement, run, kindLabel: packKind?.label, selected }) };
+    return { inputs, built: buildSamplingMemo({ inputs, clientName, engagement, run, kindLabel: packLabel(run.kind), selected }) };
   }
   // SIGNIFICANT_MATTERS
   const raw = input.inputs || {};
@@ -311,7 +311,7 @@ async function buildFor({ kind, engagement, firmId, input, clientName }) {
           AuditPackRow.find({ ...base, decidable: true, state: "COMPUTED" }).select("label").sort({ ordinal: 1 }).limit(MAX_OPEN_LISTED).lean(),
         ])
       : [0, 0, 0, []];
-    packs.push({ kind: run.kind, kindLabel: packKind?.label, financialYear: run.financialYear, open, gaps, reported, openLabels: openRows.map((r) => r.label) });
+    packs.push({ kind: run.kind, kindLabel: packLabel(run.kind), financialYear: run.financialYear, open, gaps, reported, openLabels: openRows.map((r) => r.label) });
   }
   return { inputs, built: buildSignificantMattersMemo({ inputs, clientName, engagement, packs }) };
 }

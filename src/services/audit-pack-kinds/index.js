@@ -46,6 +46,17 @@ export function getPackKind(kind) {
 }
 
 /**
+ * What a pack is called wherever a person reads it (W10 AP44): "Clause 44" for the pack that predates this registry,
+ * the descriptor's label for every other, and the stored code only for a kind this build does not know. Sent on every
+ * run as `kindLabel` and used by the drafted memos, so a client, a memo and the Audit page's quotation of a flagged row
+ * all name a pack alike. Before this, Clause 44 reached people as "CLAUSE44".
+ */
+export function packLabel(kind) {
+  if (kind === "CLAUSE44") return "Clause 44";
+  return getPackKind(kind)?.label || String(kind ?? "");
+}
+
+/**
  * What a client needs to offer every generic pack without carrying a copy of it: the label, the sections the
  * rows fall into, and the inputs the create request takes (see inputs.js for the vocabulary). Clause 44 is not
  * here: it predates the registry and both clients still have their own screen for it.
