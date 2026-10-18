@@ -138,6 +138,11 @@ if (!uri) {
     await raw("users").insertOne({ _id: id, email: `${tag}-assure@scratch.test`, name: `Person ${tag}`, role: "FIRM_ADMIN", accountType: "FIRM_USER", isActive: true, tokenVersion: 0, firmId: fid, createdAt: now, updatedAt: now });
     await raw("firmmemberships").insertOne({ _id: oid(), firmId: fid, userId: id, status: "ACTIVE", role: id === ownerId || id === otherFirmUserId ? "OWNER" : "FIRM_ADMIN", memberAccess: "FULL", createdAt: now, updatedAt: now });
   }
+  // A view-only member of the firm, put on an engagement's team (nothing stops that; the owner question is whether
+  // such a member may confirm their own independence and record their own time - pinned below as it stands).
+  const viewerId = oid();
+  await raw("users").insertOne({ _id: viewerId, email: "viewer-assure@scratch.test", name: "Person viewer", role: "USER", accountType: "FIRM_USER", isActive: true, tokenVersion: 0, firmId, createdAt: now, updatedAt: now });
+  await raw("firmmemberships").insertOne({ _id: oid(), firmId, userId: viewerId, status: "ACTIVE", role: "VIEWER", memberAccess: "FULL", createdAt: now, updatedAt: now });
   await raw("firms").insertMany([
     { _id: firmId, name: "Assurance Firm", displayName: "Assurance Firm", handle: "scratch-assure", ownerId, ownerUserId: ownerId, type: "FIRM", isActive: true, joinCode: "JASSUR1", createdAt: now, updatedAt: now },
     { _id: otherFirmId, name: "Other Firm", displayName: "Other Firm", handle: "scratch-assure-o", ownerId: otherFirmUserId, ownerUserId: otherFirmUserId, type: "FIRM", isActive: true, joinCode: "JASSUR2", createdAt: now, updatedAt: now },
@@ -149,6 +154,7 @@ if (!uri) {
   await new Promise((resolve) => server.once("listening", resolve));
   const tokenFor = (id, tag, fid) => jwt.sign({ id, email: `${tag}-assure@scratch.test`, role: "FIRM_ADMIN", accountType: "FIRM_USER", firmId: fid, isActive: true, tv: 0 }, process.env.JWT_SECRET, { expiresIn: "30m" });
   const T = { owner: tokenFor(ownerId, "owner", firmId), reviewer: tokenFor(reviewerId, "reviewer", firmId), member: tokenFor(memberId, "member", firmId), outsider: tokenFor(outsiderId, "outsider", firmId), elsewhere: tokenFor(otherFirmUserId, "elsewhere", otherFirmId) };
+  T.viewer = jwt.sign({ id: viewerId, email: "viewer-assure@scratch.test", role: "USER", accountType: "FIRM_USER", firmId, isActive: true, tv: 0 }, process.env.JWT_SECRET, { expiresIn: "30m" });
   const call = async (who, method, path, body) => {
     const response = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {
       method,
@@ -225,6 +231,35 @@ if (!uri) {
     assert.equal((await call("elsewhere", "POST", A("/independence"), { mutationKey: key("ind"), confirmed: true })).status, 404);
     assert.equal((await call("elsewhere", "GET", A())).status, 404);
     assert.equal((await record()).independence.length, lengthBefore);
+  });
+
+  await check("a view-only member on the team reads the file but is refused confirming independence and recording time (the firm write guard) - nothing written", async () => {
+    // Pinned as it stands (2026-10-18). Both clients now leave these controls out for a view-only member and say why;
+    // whether such a member should be able to confirm their own independence is the owner's question (OWNER-TODO).
+    const created = await call("owner", "POST", "/api/engagements", {
+      mutationKey: "seed-engagement-viewer",
+      clientId: String(clientId),
+      engagementType: "TAX_AUDIT",
+      reviewerUserId: String(reviewerId),
+      teamUserIds: [String(memberId), String(viewerId)],
+      scope: "Statutory audit under section 44AB for FY 2025-26.",
+      startDate: "2026-04-01",
+      targetDate: "2026-10-15",
+    });
+    const id = created.json?.engagement?.id || created.json?.engagement?._id;
+    assert.ok(id, JSON.stringify(created.json));
+    const V = (suffix = "") => `/api/engagements/${id}/assurance${suffix}`;
+    const read = await call("viewer", "GET", V());
+    assert.equal(read.status, 200, JSON.stringify(read.json));
+    assert.deepEqual(read.json.assurance.team.find((m) => m.userId === String(viewerId))?.roles, ["MEMBER"], "the viewer is listed on the team");
+    for (const [path, body] of [["/independence", { confirmed: true }], ["/time", { workDay: dayString(-1), minutes: 30, note: "x" }]]) {
+      const refused = await call("viewer", "POST", V(path), { mutationKey: key("viewer"), ...body });
+      assert.equal(refused.status, 403, `${path}: ${JSON.stringify(refused.json)}`);
+      assert.match(refused.json.error, /view-only/);
+    }
+    const stored = await raw("engagementassurances").findOne({ engagementId: new mongoose.Types.ObjectId(id) });
+    assert.equal(stored?.independence?.length || 0, 0);
+    assert.equal(stored?.timeEntries?.length || 0, 0);
   });
 
   await check("nothing to log before assembly: a modification is refused 409 NOT_ASSEMBLED", async () => {
