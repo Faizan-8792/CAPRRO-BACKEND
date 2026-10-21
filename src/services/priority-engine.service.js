@@ -226,5 +226,12 @@ export async function getTodayPriorities({ firmId, userId, today = new Date() })
   }
 
   const ranked = rankPriorities(entries, { today });
-  return { ruleVersion: PRIORITY_RULE_VERSION, today: isoToday, ...ranked };
+  // A source read up to its cap may hold more than was read, so `total` is then a floor: clients show "N+".
+  const totalIsLowerBound = tasks.length >= SOURCE_LIMIT
+    || reminders.length >= SOURCE_LIMIT
+    || cases.length >= SOURCE_LIMIT
+    || reconRuns.length >= 50
+    || tdsRuns.length >= 50
+    || engagements.length >= 100;
+  return { ruleVersion: PRIORITY_RULE_VERSION, today: isoToday, ...ranked, totalIsLowerBound };
 }

@@ -111,6 +111,11 @@ async function runRoute() {
     check("route: a notice shows its demand and links to the case", /demand ₹4,12,380/.test(items.find((i) => i.kind === "NOTICE")?.reason || "") && items.find((i) => i.kind === "NOTICE").link.surface === "case");
     check("route: a filed task is not listed", !items.some((i) => i.title === "Filed already"));
     check("route: another firm's work never appears", !items.some((i) => i.title === "Firm B task") && (await get(B.token)).json.items.every((i) => i.title === "Firm B task"));
+    check("route: with every source under its cap the total is exact", on.json?.totalIsLowerBound === false, JSON.stringify(on.json?.totalIsLowerBound));
+    // Firm B gets 200 open tasks: the task read stops at its cap, so the total is only a floor.
+    await raw("tasks").insertMany(Array.from({ length: 200 }, (_, n) => ({ _id: oid(), firmId: B.firmId, title: `B task ${n}`, clientName: "B client", dueDateISO: day(n % 20), status: "NOT_STARTED", isActive: true, createdAt: now, updatedAt: now })));
+    const capped = (await get(B.token)).json;
+    check("route: a source read up to its cap makes the total a floor (clients show N+)", capped?.totalIsLowerBound === true && capped.truncated === true, JSON.stringify({ total: capped?.total, floor: capped?.totalIsLowerBound }));
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await mongoose.connection.dropDatabase().catch(() => {});
