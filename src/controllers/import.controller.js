@@ -431,7 +431,9 @@ export const convertGstr2bImport = async (req, res, next) => {
  */
 export async function suggestImportMappingWithModel(req, res, next) {
   try {
-    const result = await suggestMappingsWithModel({ firmId: req.user.firmId, userId: req.user.id, input: req.body || {} });
+    const body = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+    const input = "delimiter" in body ? { ...body, delimiter: requestDelimiter(body.delimiter) } : body;
+    const result = await suggestMappingsWithModel({ firmId: req.user.firmId, userId: req.user.id, input });
     return res.json({ ok: true, ...result });
   } catch (error) {
     return next(error);

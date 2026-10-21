@@ -123,6 +123,11 @@ async function runSuite() {
     check("model suggestion: refused 400 without consent", noConsent.status === 400 && noConsent.json?.code === "AI_CONSENT_REQUIRED" && mock.calls.length === 0);
     const suggested = await call("POST", "/api/imports/mapping-suggestions", A.token, { kind: "TRIAL_BALANCE", text: fileA, consent: true });
     check("model suggestion: the unmapped field comes back mapped to the heading text, labelled DRAFT FOR REVIEW", suggested.status === 200 && suggested.json?.suggestions?.ledgerName === "Acct Head" && suggested.json.label === "DRAFT FOR REVIEW" && typeof suggested.json.draftId === "string", JSON.stringify(suggested.json));
+    const headingFields = Object.keys(suggested.json?.headingMatches || {});
+    check("model suggestion: the heading-rule placements come back too (Closing Dr, Closing Cr), never the field the model was asked for", headingFields.length === 2 && !headingFields.includes("ledgerName") && Object.values(suggested.json.headingMatches).every((heading) => ["Closing Dr", "Closing Cr"].includes(heading)), JSON.stringify(suggested.json?.headingMatches));
+    const callsBeforeTab = mock.calls.length;
+    const tabbed = await call("POST", "/api/imports/mapping-suggestions", A.token, { kind: "TRIAL_BALANCE", text: fileA.replace(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/g, "\t"), delimiter: "TAB", consent: true });
+    check("model suggestion: delimiter TAB is read as a tab (the same layout, answered from the stored draft)", tabbed.status === 200 && tabbed.json?.suggestions?.ledgerName === "Acct Head" && mock.calls.length === callsBeforeTab, JSON.stringify(tabbed.json).slice(0, 300));
     const outbound = JSON.stringify(mock.calls[0]?.body || {});
     check("model suggestion: no cell value left CA PRO (no ledger name, no amount, no company name)", !/Capital Account|Purchase of Goods|25,00,000|ABC Traders/.test(outbound) && /Acct Head/.test(outbound) && /numeric/.test(outbound), outbound.slice(0, 400));
     mock.on(() => JSON.stringify({ items: [{ id: "file", mappings: [{ field: "openingBalance", headingRef: "h1" }] }] }));
@@ -132,6 +137,11 @@ async function runSuite() {
     check("model suggestion: a field that was not asked for is refused and nothing is suggested", badField.status === 200 && badField.json?.available === false && Object.keys(badField.json?.suggestions || {}).length === 0, JSON.stringify(badField.json));
     const extra = await call("POST", "/api/imports/mapping-suggestions", A.token, { kind: "TRIAL_BALANCE", text: fileA, consent: true, mapping: {} });
     check("model suggestion: a field the route does not take is refused", extra.status === 400);
+    const task = (await import("../src/services/ai/tasks/import-mapping-suggest.js")).default;
+    const twoFields = { fieldsToMap: [{ name: "ledgerName" }, { name: "closingDebit" }], headings: [{ ref: "h1" }, { ref: "h2" }] };
+    let twice = "";
+    try { task.validate({ mappings: [{ field: "ledgerName", headingRef: "h1" }, { field: "closingDebit", headingRef: "h1" }] }, twoFields); } catch (error) { twice = error.message; }
+    check("model suggestion: one heading answered for two fields is refused", /one heading is mapped to two fields/.test(twice), twice);
   } finally {
     mock.off();
     await new Promise((resolve) => server.close(resolve));

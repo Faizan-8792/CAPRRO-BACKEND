@@ -116,24 +116,6 @@ export async function getCaseRuleReading({ firmId, caseId }) {
 }
 
 /**
- * Rule proposals in the case's stored proposal shape, for the model extraction to store beside its own (provider
- * RULES). Rule proposals carry no model confidence: 1 marks "read verbatim by a rule", and both clients show the
- * rule id instead of a percentage for provider RULES.
- */
-export function ruleProposalsForCase(text) {
-  const reading = readNoticeByRules(text);
-  return reading.proposals.map((proposal) => ({
-    field: proposal.field,
-    value: String(proposal.value),
-    sourceText: proposal.sourceText,
-    confidence: 1,
-    provider: "RULES",
-    model: `${reading.version}:${proposal.ruleId}`,
-    proposedAt: new Date(),
-  }));
-}
-
-/**
  * POST /api/cases/:id/document-requests - one task that lists the documents the notice asks for, once the
  * requestedDocuments field is confirmed. One per case (generationKey), due on the confirmed reply-by date.
  */

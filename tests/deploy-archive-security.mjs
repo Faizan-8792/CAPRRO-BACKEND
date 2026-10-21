@@ -2474,9 +2474,16 @@ if (listed.status !== 0 || listed.error) {
   // the drafted memos (W10 AP33, AP37, AP38, AP40, AP41), all six confirmed clean by this scan before the pin moved. Pure computation and
   // database reads through the app's own models: src/data/sa-index.js, src/models/EngagementAssurance.js and the services deadline-catalogue,
   // engagement-request-list, engagement-assurance and engagement-memo. None calls the network or reads a secret.
+  // 282 -> 306 on 2026-10-21 for W11 intelligence (IN1-IN22), all 24 confirmed clean by this scan before the pin moved: the
+  // controllers ai-draft and gst-intelligence; the models AiDraft, AiSuggestionOutcome and ImportMappingProfile; the route
+  // ai-draft.routes.js; src/services/ai/ (ai-task.service, ai-validate, deepseek-models and tasks/ index, gst-cause-residue,
+  // import-mapping-suggest, supplier-chase-draft, tds-action-draft); and the services case-intelligence, gst-cause,
+  // gst-intelligence, import-intelligence, intelligence-index-readiness, notice-catalogue, notice-rules/index,
+  // priority-engine, tds-action-checklists and tds-intelligence. Only ai-task.service.js reaches the network, through
+  // callDeepSeek in deepseek-provider.service.js (already pinned), and none reads a secret itself.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 282 && result.status === 0,
+    files.length === 306 && result.status === 0,
     result,
   );
 }

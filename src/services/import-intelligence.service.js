@@ -106,9 +106,12 @@ export async function suggestMappingsWithModel({ firmId, userId, input = {} }) {
   } catch (error) {
     throw httpError(400, "The file could not be read for its headings.", "IMPORT_HEADINGS_UNREADABLE");
   }
+  // headingMatches: every field the server's heading rules place, returned on every answer so a client whose own
+  // name matching is stricter can fill them too; the model is asked only for the required fields left over.
+  const headingMatches = { ...described.suggestedMapping };
   const fieldsToMap = described.missingRequired;
   if (!fieldsToMap.length) {
-    return { available: true, suggestions: {}, draftId: null, note: "Every required field is already mapped from its heading." };
+    return { available: true, suggestions: {}, headingMatches, draftId: null, note: "Every required field is matched from its heading." };
   }
   const mapped = new Set(Object.values(described.suggestedMapping));
   const headings = described.headers
@@ -116,7 +119,7 @@ export async function suggestMappingsWithModel({ firmId, userId, input = {} }) {
     .filter((heading) => heading.text && !heading.mapped)
     .map(({ mapped: _mapped, ...rest }) => rest);
   if (!headings.length) {
-    return { available: true, suggestions: {}, draftId: null, note: "No unmapped heading is left to suggest from." };
+    return { available: true, suggestions: {}, headingMatches, draftId: null, note: "No unmapped heading is left to suggest from." };
   }
   const facts = {
     kind: described.kind,
@@ -131,7 +134,7 @@ export async function suggestMappingsWithModel({ firmId, userId, input = {} }) {
     units: [{ id: "file", facts, subject: { kind: "ImportLayout", id: `${described.kind}:${headerSignature(described.headers)}` } }],
   });
   const draft = result.results[0]?.draft || null;
-  if (!draft) return { available: false, suggestions: {}, draftId: null, note: result.note };
+  if (!draft) return { available: false, suggestions: {}, headingMatches, draftId: null, note: result.note };
   const headingByRef = new Map(headings.map((heading) => [heading.ref, heading.text]));
   const suggestions = {};
   for (const entry of draft.output.mappings || []) {
@@ -140,6 +143,7 @@ export async function suggestMappingsWithModel({ firmId, userId, input = {} }) {
   return {
     available: true,
     suggestions,
+    headingMatches,
     draftId: draft.id,
     abstained: draft.abstained,
     label: "DRAFT FOR REVIEW",

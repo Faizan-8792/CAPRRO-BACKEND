@@ -105,6 +105,9 @@ async function runRoutes() {
   process.env.OCR_SPACE_API_KEY = "";
   const mongoose = (await import("mongoose")).default;
   const jwt = (await import("jsonwebtoken")).default;
+  // The provider reads DEEPSEEK_URL when first imported, so the stand-in starts before the app.
+  const { ensureMockDeepSeek } = await import("./lib/mock-deepseek.mjs");
+  const mock = await ensureMockDeepSeek();
   const { default: app } = await import("../src/app.js");
   await mongoose.connect(uri, { serverSelectionTimeoutMS: 20000 });
   await mongoose.connection.dropDatabase();
@@ -160,11 +163,23 @@ async function runRoutes() {
     check("routes: a publish from an older copy is refused 409", stale.status === 409 && stale.json?.code === "NOTICE_CATALOGUE_CHANGED");
     const notSuper = await call("PATCH", "/api/app-config/notice-catalogue", { entries: [], reason: "Nope" });
     check("routes: a firm admin who is not the super admin cannot publish", notSuper.status === 403);
+    const noReason = await call("PATCH", "/api/app-config/notice-catalogue", { entries: [], actTransition: null, expectedVersion: 2 }, superToken);
+    check("routes: a publish without a reason is refused 400 and changes nothing", noReason.status === 400 && (await raw("appconfigs").findOne({ _id: "singleton" })).noticeCatalogue.version === 2, JSON.stringify(noReason.json));
     const config = await fetch(`${base}/api/app-config`).then((r) => r.json());
     check("routes: the public config carries the published catalogue", config?.config?.noticeCatalogue?.version === 2 && config.config.noticeCatalogue.entries[0].form === "IT_142_1");
     const history = await raw("appconfigs").findOne({ _id: "singleton" });
     check("routes: the publish is in the control-change history with its reason", (history.controlChanges || []).some((entry) => entry.kind === "noticeCatalogue" && entry.reason === "Test publish"));
+    // IN21 as built: with intelligence on, the model is still asked for every field (the rules' fields included,
+    // so the rule reading has a second reading to cross-check), and only the model's own proposals are returned.
+    const asmt = NOTICES.find((n) => n.form === "GST_ASMT10").text;
+    mock.on(() => JSON.stringify({ fields: [{ field: "responseDueDate", value: "2026-11-20", sourceText: asmt.slice(0, 40), confidence: 0.7 }] }));
+    const { proposeCaseExtraction } = await import("../src/services/case-ai.service.js");
+    const extracted = await proposeCaseExtraction({ source: { extractedText: asmt } }, ownerId);
+    const asked = JSON.stringify(mock.calls.at(-1)?.body || {});
+    check("extraction: the model is asked for the fields the rules read too", /responseDueDate/.test(asked) && /requestedDocuments/.test(asked), asked.slice(0, 200));
+    check("extraction: no rule reading is returned as the model's proposal", extracted.proposals.length === 1 && extracted.proposals.every((p) => p.provider !== "RULES" && p.confidence === 0.7), JSON.stringify(extracted.proposals));
   } finally {
+    mock.off();
     await new Promise((resolve) => server.close(resolve));
     await mongoose.connection.dropDatabase().catch(() => {});
     await mongoose.disconnect();

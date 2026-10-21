@@ -94,6 +94,15 @@ async function runSuite() {
   const leftover = await seedItem(july, { status: "MISSING_IN_2B", gstin: OTHER, number: "KY/2231", books: money(1680000, 302400) });
   const leftover2 = await seedItem(july, { status: "MISSING_IN_2B", gstin: OTHER, number: "KY/2232", books: money(50000, 9000) });
   await seedItem(july, { status: "MATCHED", gstin: OTHER, number: "KY/2213", books: money(840000, 151200), portal: money(840000, 151200) });
+  // R2 must look only at this firm's runs for this client's same registration: the same invoice in another firm's
+  // run, or in this client's run for another GSTIN, is no reason.
+  const october = await seedRun("2026-10");
+  const isolated = await seedItem(october, { status: "MISSING_IN_2B", number: "INV-909", books: money(500000, 90000) });
+  for (const [firmId, gstin] of [[B.firmId, "27AAACE1234F1Z5"], [A.firmId, "29AAACE1234F1Z1"]]) {
+    const otherRun = oid();
+    await raw("reconciliationruns").insertOne({ _id: otherRun, firmId, clientId, kind: "GST_ITC", gstin, period: "2026-11", sourceFingerprint: `fp-iso-${gstin}`, status: "REVIEW", activeGenerationAttempt: 1, createdAt: now, updatedAt: now });
+    await raw("reconciliationitems").insertOne({ ...isolated, _id: oid(), firmId, runId: otherRun, itemKey: `k${key++}`, booksRowId: null, portalRowId: oid(), booksAmounts: zero, portalAmounts: money(500000, 90000), status: "MISSING_IN_BOOKS", originalStatus: "MISSING_IN_BOOKS" });
+  }
 
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
@@ -119,6 +128,9 @@ async function runSuite() {
     check("causes: counts are reported and nothing was truncated", causes.json?.counts?.explained === 4 && causes.json.truncated === false, JSON.stringify(causes.json?.counts));
     const foreign = await call("GET", `/api/gst-reconciliation/runs/${july}/causes`, B.token);
     check("another firm's run is 404", foreign.status === 404, `status ${foreign.status}`);
+    const octCauses = await call("GET", `/api/gst-reconciliation/runs/${october}/causes`, A.token);
+    const isolatedCause = (octCauses.json?.causes || []).find((entry) => entry.itemId === String(isolated._id));
+    check("R2 never links another firm's run or the client's run for another GSTIN", octCauses.status === 200 && isolatedCause?.ruleId !== "R2" && !isolatedCause?.relatedRun, JSON.stringify(isolatedCause));
 
     // ─── leftovers to the model ───
     mock.reset();
@@ -146,6 +158,9 @@ async function runSuite() {
     const kothari = suppliers.find((group) => group.supplierGstin === OTHER);
     check("chase pack: the supplier with missing invoices is listed with its name and ITC at stake in paise", kothari?.supplierName === "Kothari Yarns" && kothari.itcAtStakeMinor === 302400 + 9000 && kothari.invoices.length === 2, JSON.stringify(kothari));
     check("chase pack: an invoice already in a later 2B and a GSTIN typo are not chased", pack.json?.notChased?.some((entry) => entry.itemId === String(late._id)) && pack.json.notChased.some((entry) => entry.itemId === String(typoBooks._id)));
+    const foreignPack = await call("GET", `/api/gst-reconciliation/runs/${july}/chase-pack`, B.token);
+    const foreignDraft = await call("POST", `/api/gst-reconciliation/runs/${july}/chase-pack/draft`, B.token, { language: "en", channel: "email", useTemplate: true });
+    check("chase pack: another firm's run is 404, for the pack and its drafts", foreignPack.status === 404 && foreignDraft.status === 404, `${foreignPack.status} ${foreignDraft.status}`);
     check("chase pack: largest ITC at stake first", suppliers.length >= 1 && suppliers.every((group, i) => i === 0 || suppliers[i - 1].itcAtStakeMinor >= group.itcAtStakeMinor));
 
     const template = await call("POST", `/api/gst-reconciliation/runs/${july}/chase-pack/draft`, A.token, { language: "en", channel: "email", useTemplate: true });
