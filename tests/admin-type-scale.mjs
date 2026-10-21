@@ -40,9 +40,11 @@ check("a 14px body", /^[^}]*font-size:\s*14px/.test(body.slice(0, body.indexOf("
 const tokenSheet = readFileSync(join(HERE, "..", "public", "admin", "capro-tokens.css"), "utf8");
 const fontSheet = readFileSync(join(HERE, "..", "public", "admin", "ui", "capro-fonts.css"), "utf8");
 const pages = ["admin.html", "super.html"].map((name) => readFileSync(join(HERE, "..", "public", "admin", name), "utf8"));
-check("the stack is the design system's, led by IBM Plex Sans",
+// W11 IN31: Plex has no Indian scripts, so the design system puts Nirmala UI, Noto Sans and Mangal straight
+// after it, ahead of Windows' Latin faces: a Hindi or Tamil name renders in one consistent face.
+check("the stack is the design system's, led by IBM Plex Sans, with the Indian-script faces next",
   /--font:\s*var\(--capro-font-ui\);/.test(css) &&
-    /--capro-font-ui:\s*"IBM Plex Sans", "Segoe UI Variable", "Segoe UI", system-ui,/.test(tokenSheet) &&
+    /--capro-font-ui:\s*"IBM Plex Sans", "Nirmala UI", "Noto Sans", "Noto Sans Devanagari", Mangal, "Segoe UI Variable", "Segoe UI", system-ui,/.test(tokenSheet) &&
     pages.every((page) => /href="ui\/capro-fonts\.css(\?v=\d+)?"/.test(page)));
 const fontSources = [...fontSheet.matchAll(/url\(\s*['"]?([^'")]+)/g)].map((m) => m[1]);
 check("no web font fetched from another host",

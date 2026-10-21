@@ -2481,9 +2481,13 @@ if (listed.status !== 0 || listed.error) {
   // gst-intelligence, import-intelligence, intelligence-index-readiness, notice-catalogue, notice-rules/index,
   // priority-engine, tds-action-checklists and tds-intelligence. Only ai-task.service.js reaches the network, through
   // callDeepSeek in deepseek-provider.service.js (already pinned), and none reads a secret itself.
+  // 306 -> 308 on 2026-10-21 for the W11 hardening (IN27, IN30), both confirmed clean by this scan before the pin moved.
+  // Pure computation, no network, no secret, no I/O: src/services/text/fold.js (one folding of digits, dashes, spaces
+  // and zero-width characters for every script) and src/services/case-excerpt.service.js (locating a model's excerpt
+  // in the notice and checking its value against it), whose only imports are fold.js and notice-rules/index.js.
   record(
     `all ${files.length} tracked runtime JavaScript files pass`,
-    files.length === 306 && result.status === 0,
+    files.length === 308 && result.status === 0,
     result,
   );
 }

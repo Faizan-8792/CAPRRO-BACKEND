@@ -41,8 +41,17 @@ const check = (name, pass, detail = "") => checks.push({ name, pass, detail });
 // and audit-insights-grounding.mjs. Tracks call counts so "the refused call
 // never reached the provider" is a real assertion, not an assumption. ─────
 let fetchCallCount = 0;
-globalThis.fetch = async () => {
+// W11 IN29: the OCR service now judges its reading (at least 20 letters, mostly letters) and tries Engine 3 once
+// when it does not read as text, each attempt metered. The default reading here is a readable sentence, so one
+// read is one metered call as the C checks assume; C5 swaps in symbols to prove the retry and its metering.
+const READABLE_OCR_TEXT = "Notice under section 73 of the Central Goods and Services Tax Act";
+const UNREADABLE_OCR_TEXT = "@#~ %% ^^ ][ ~~ ## ** ;; 1 2";
+let ocrParsedText = READABLE_OCR_TEXT;
+const ocrEngines = [];
+globalThis.fetch = async (_url, init) => {
   fetchCallCount += 1;
+  const engine = typeof init?.body?.get === "function" ? init.body.get("OCREngine") : null;
+  if (engine) ocrEngines.push(engine);
   return {
     ok: true,
     status: 200,
@@ -51,7 +60,7 @@ globalThis.fetch = async () => {
       // OCR.space's ParsedResults[].ParsedText.
       choices: [{ message: { content: '{"ok":true}' } }],
       IsErroredOnProcessing: false,
-      ParsedResults: [{ ParsedText: "synthetic OCR text" }],
+      ParsedResults: [{ ParsedText: ocrParsedText }],
     }),
     text: async () => "",
   };
@@ -701,6 +710,59 @@ const PDF_BYTES = Buffer.from("%PDF-1.4\n%%EOF\n");
     dailyShaped.length === 0 && monthlyShaped.length === 0,
     `daily=${dailyShaped.length} monthly=${monthlyShaped.length}`,
   );
+}
+
+// C5 — W11 IN29: a reading that does not read as text is tried once more on Engine 3, and each attempt is its own
+// metered call, reserved before it is made. When the quota refuses the second, the first reading stands and says
+// it may be poor (readable: false) instead of failing the person's read.
+{
+  const callArgs = { buffer: PDF_BYTES, mimeType: "application/pdf", fileName: "n.pdf", consent: true };
+
+  installFakeProviderUsageStore();
+  ocrParsedText = READABLE_OCR_TEXT;
+  ocrEngines.length = 0;
+  const plain = await extractTextWithOcrSpace({ ...callArgs, userId: "c5c5c5c5c5c5c5c5c5c5c5c1" });
+  check(
+    "C5: a readable first reading is used as it is: one call, Engine 2, readable true",
+    ocrEngines.join(",") === "2" && plain.readable === true && plain.providerEngine === "2",
+    `engines=${ocrEngines.join(",")} readable=${plain.readable}`,
+  );
+
+  installFakeProviderUsageStore();
+  ocrParsedText = UNREADABLE_OCR_TEXT;
+  ocrEngines.length = 0;
+  const retryUser = "c5c5c5c5c5c5c5c5c5c5c5c2";
+  const before = fetchCallCount;
+  const retried = await extractTextWithOcrSpace({ ...callArgs, userId: retryUser });
+  check(
+    "C5: an unreadable reading is tried once more on Engine 3, and the answer says it is still not readable",
+    ocrEngines.join(",") === "2,3" && fetchCallCount - before === 2 && retried.readable === false && retried.providerEngine === "3",
+    `engines=${ocrEngines.join(",")} fetches=${fetchCallCount - before} readable=${retried.readable}`,
+  );
+  let spent = null;
+  try {
+    await extractTextWithOcrSpace({ ...callArgs, userId: retryUser });
+  } catch (error) {
+    spent = error;
+  }
+  check(
+    "C5: both attempts were metered: with the weekly cap of 2 spent, the next read is refused 429 before any fetch",
+    spent?.statusCode === 429 && spent?.code === "OCR_QUOTA_EXCEEDED" && fetchCallCount - before === 2,
+  );
+
+  installFakeProviderUsageStore();
+  const lastSlotUser = "c5c5c5c5c5c5c5c5c5c5c5c3";
+  ocrParsedText = READABLE_OCR_TEXT;
+  await extractTextWithOcrSpace({ ...callArgs, userId: lastSlotUser });
+  ocrParsedText = UNREADABLE_OCR_TEXT;
+  ocrEngines.length = 0;
+  const lastSlot = await extractTextWithOcrSpace({ ...callArgs, userId: lastSlotUser });
+  check(
+    "C5: when the quota refuses the retry, the first reading stands with readable false (no 429, no second fetch)",
+    ocrEngines.join(",") === "2" && lastSlot.text === UNREADABLE_OCR_TEXT && lastSlot.readable === false,
+    `engines=${ocrEngines.join(",")} readable=${lastSlot.readable}`,
+  );
+  ocrParsedText = READABLE_OCR_TEXT;
 }
 
 // C3 — the global daily ceiling refuses a brand-new OCR user under their own cap.
