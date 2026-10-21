@@ -16,7 +16,7 @@ import ReconciliationItem from "../models/ReconciliationItem.js";
 import ReconciliationRun from "../models/ReconciliationRun.js";
 import { runAiTask } from "./ai/ai-task.service.js";
 import { fillSlots } from "./ai/ai-validate.js";
-import { CHASE_CHANNELS, CHASE_LANGUAGE_NAMES, CHASE_LANGUAGES } from "./ai/tasks/supplier-chase-draft.js";
+import { CHASE_CHANNELS, CHASE_LANGUAGE_LABELS, CHASE_LANGUAGE_NAMES, CHASE_LANGUAGES } from "./ai/tasks/supplier-chase-draft.js";
 import { explainItems, formatRupees, residueFacts, RULE_CAUSES } from "./gst-cause.service.js";
 
 const MAX_OPEN_ITEMS = 5000;
@@ -327,6 +327,8 @@ export async function getChasePack({ firmId, runId }) {
     totalItcAtStakeMinor: suppliers.reduce((sum, group) => sum + group.itcAtStakeMinor, 0),
     notChased,
     deliveryEvidence: "ACTION_RECORDED_ONLY",
+    // W11 IN33: the clients build their language picker from this, so a language added here needs no release.
+    languages: CHASE_LANGUAGE_CHOICES,
   };
 }
 
@@ -337,20 +339,38 @@ function invoiceTable(group, channel) {
   return channel === "email" ? lines.join("\n") : lines.map((line) => `- ${line}`).join("\n");
 }
 
-// The fixed template used when the model is off, refused or unavailable. English only; the owner approves its
-// wording before the flag goes on (.kiro/OWNER-TODO.md, W11 item 3).
-const TEMPLATE = Object.freeze({
-  subject: "GST returns: invoices not yet showing for {{client}} ({{period}})",
-  message:
-    "Dear {{supplier}},\n\nThe following {{invoiceCount}} invoice(s) issued to {{client}} do not yet appear in their GSTR-2B for {{period}}:\n\n{{invoiceTable}}\n\nTax involved: {{itcAtStake}}. Please file them in your GSTR-1, or correct the GSTIN or amount if it was reported differently, and let us know once done.\n\nRegards,\n{{sender}}",
+// The fixed templates used when the model is off, refused or unavailable: English, Hindi and Hinglish (W11
+// IN33). The owner approves their wording before the flag goes on (.kiro/OWNER-TODO.md, W11 item 3). A language
+// with no template here gets the English one, and the message says so.
+const CHASE_TEMPLATES = Object.freeze({
+  en: Object.freeze({
+    subject: "GST returns: invoices not yet showing for {{client}} ({{period}})",
+    message:
+      "Dear {{supplier}},\n\nThe following {{invoiceCount}} invoice(s) issued to {{client}} do not yet appear in their GSTR-2B for {{period}}:\n\n{{invoiceTable}}\n\nTax involved: {{itcAtStake}}. Please file them in your GSTR-1, or correct the GSTIN or amount if it was reported differently, and let us know once done.\n\nRegards,\n{{sender}}",
+  }),
+  hi: Object.freeze({
+    subject: "जीएसटी रिटर्न: {{client}} ({{period}}) के इनवॉइस अभी नहीं दिख रहे",
+    message:
+      "प्रिय {{supplier}},\n\n{{client}} को जारी किए गए नीचे दिए {{invoiceCount}} इनवॉइस अभी {{period}} के उनके GSTR-2B में नहीं दिख रहे हैं:\n\n{{invoiceTable}}\n\nइनमें कर राशि: {{itcAtStake}}। कृपया इन्हें अपने GSTR-1 में दर्ज करें, या यदि GSTIN या राशि अलग दर्ज हुई है तो उसे सुधारें, और हो जाने पर हमें बताएं।\n\nधन्यवाद,\n{{sender}}",
+  }),
+  hinglish: Object.freeze({
+    subject: "GST returns: {{client}} ({{period}}) ke invoices abhi nahi dikh rahe",
+    message:
+      "Namaste {{supplier}} ji,\n\n{{client}} ko issue kiye gaye ye {{invoiceCount}} invoice(s) abhi unke {{period}} ke GSTR-2B mein nahi dikh rahe:\n\n{{invoiceTable}}\n\nTax amount: {{itcAtStake}}. Kripya inhe apne GSTR-1 mein file karein, ya agar GSTIN ya amount alag report hua hai to use sahi karein, aur ho jaane par humein batayein.\n\nDhanyavaad,\n{{sender}}",
+  }),
 });
+
+/** The languages a chase message can be drafted in, for the clients' picker: code, label, and whether a fixed template exists. */
+export const CHASE_LANGUAGE_CHOICES = Object.freeze(
+  CHASE_LANGUAGES.map((code) => Object.freeze({ code, label: CHASE_LANGUAGE_LABELS[code], template: Boolean(CHASE_TEMPLATES[code]) })),
+);
 
 /** POST /runs/:id/chase-pack/draft - a message per supplier, from one template per kind of problem. */
 export async function draftChaseMessages({ firmId, userId, runId, input = {} }) {
   assertAllowed(input, new Set(["language", "channel", "consent", "supplierGstins", "useTemplate"]), "A chase draft request");
   const language = input.language || "en";
   const channel = input.channel || "whatsapp";
-  if (!CHASE_LANGUAGES.includes(language)) throw httpError(400, "Language must be en, hi or hinglish.");
+  if (!CHASE_LANGUAGES.includes(language)) throw httpError(400, `Language must be one of: ${CHASE_LANGUAGES.join(", ")}.`);
   if (!CHASE_CHANNELS.includes(channel)) throw httpError(400, "Channel must be whatsapp or email.");
   const run = await requireRun(firmId, runId);
   const { suppliers } = await buildChaseGroups(run);
@@ -366,8 +386,12 @@ export async function draftChaseMessages({ firmId, userId, runId, input = {} }) 
   // One unit per distinct mix of problems; the model sees the mix, the language and the channel, nothing else.
   const mixKey = (covers) => `${covers.notFiled ? 1 : 0}${covers.amountDiffers ? 1 : 0}${covers.other ? 1 : 0}`;
   const templates = new Map();
+  // The template in the language asked for, or the English one when there is none (said on each message).
+  const templateLanguage = CHASE_TEMPLATES[language] ? language : "en";
+  const template = CHASE_TEMPLATES[templateLanguage];
+  const templateNote = templateLanguage === language ? "" : ` There is no fixed template in ${CHASE_LANGUAGE_LABELS[language]} yet, so the English one is used.`;
   let source = "TEMPLATE";
-  let note = "A fixed template, not a model draft.";
+  let note = `A fixed template, not a model draft.${templateNote}`;
   if (input.useTemplate !== true) {
     const mixes = [...new Map(chosen.map((group) => [mixKey(group.covers), group.covers])).entries()];
     const units = mixes.map(([key, covers]) => ({
@@ -381,9 +405,11 @@ export async function draftChaseMessages({ firmId, userId, runId, input = {} }) 
       source = "MODEL";
       note = result.results.length === units.length
         ? "Drafted by AI from the kind of problem only; names, invoices and amounts were filled in by CA PRO. Check each before you send it."
-        : "Some messages use the fixed template because a model draft was not available for them.";
+        : `Some messages use the fixed template because a model draft was not available for them.${templateNote}`;
     } else {
-      note = "A model draft is not available right now; this is the fixed English template.";
+      note = templateLanguage === "en"
+        ? `A model draft is not available right now; this is the fixed English template.${templateNote}`
+        : "A model draft is not available right now; this is the fixed template.";
     }
   }
 
@@ -398,13 +424,15 @@ export async function draftChaseMessages({ firmId, userId, runId, input = {} }) 
       itcAtStake: formatRupees(group.itcAtStakeMinor),
       sender: firm?.displayName || "",
     };
-    const subjectTemplate = channel === "email" ? draft?.output?.subject || TEMPLATE.subject : "";
-    const messageTemplate = draft?.output?.message || TEMPLATE.message;
+    const subjectTemplate = channel === "email" ? draft?.output?.subject || template.subject : "";
+    const messageTemplate = draft?.output?.message || template.message;
     return {
       supplierGstin: group.supplierGstin,
       supplierName: group.supplierName,
       itemIds: group.itemIds,
       source: draft ? "MODEL" : "TEMPLATE",
+      // The language this message is actually in: the one asked for, or English when it fell back to that template.
+      language: draft ? language : templateLanguage,
       draftId: draft?.id || null,
       subject: subjectTemplate ? fillSlots(subjectTemplate, values) : "",
       message: fillSlots(messageTemplate, values),

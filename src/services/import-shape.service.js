@@ -22,6 +22,7 @@
 // headings and which are the data.
 
 import { HEADER_SYNONYMS } from "./robust-normalize.service.js";
+import { foldText } from "./text/fold.js";
 
 // A heading names a field; a data cell holds a value. The words real files use
 // for those fields are already catalogued once, per import kind, in
@@ -39,7 +40,7 @@ const ALL_SYNONYMS = Object.freeze(
       Object.values(HEADER_SYNONYMS)
         .flatMap((fieldsForKind) => Object.values(fieldsForKind))
         .flat()
-        .map((synonym) => String(synonym).toLowerCase()),
+        .map((synonym) => compare(synonym)),
     ),
   ),
 );
@@ -48,10 +49,12 @@ const ALL_SYNONYMS = Object.freeze(
 // this is not a preamble, it is a different document.
 const MAX_HEADER_SEARCH_ROWS = 25;
 
+// W11 IN32: folded, and letters and digits of ANY script kept. Before, every non-ASCII letter was stripped, so a
+// Hindi heading compared as nothing: a repeated Hindi heading row was read as data.
 function compare(value) {
-  return String(value ?? "")
+  return foldText(String(value ?? ""))
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, " ")
     .trim();
 }
 
@@ -198,7 +201,22 @@ export function classifyNonDataRow(row, headers, dataRowLabels = new Set()) {
     "closing balance",
     "opening balance",
     "net total",
-  ]);
+    "page total",
+    "carried forward",
+    "brought forward",
+    "c f",
+    "b f",
+    // Hindi: कुल (total), योग (sum), कुल योग, महायोग (grand total), उप योग (subtotal)
+    "कुल",
+    "योग",
+    "कुल योग",
+    "महायोग",
+    "उप योग",
+  ].map((label) => compare(label)));
+  // W11 IN32: a totals label with a short qualifier after it - "Grand Total (A+B)", "Total c/f", "Total B/F" -
+  // is still a totals line. The qualifier is one word of up to three characters and at most one more short word, so
+  // a ledger or supplier called "Total Solutions Pvt Ltd" stays a record.
+  const TOTALS_WITH_QUALIFIER = /^(?:grand |sub |net |page )?totals? (?:[\p{L}\p{N}]{1,3})(?: [\p{L}\p{N}]{1,6})?$/u;
   const hasGstin = cells.some((cell) =>
     /^\d{2}[A-Z]{5}\d{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/i.test(cell),
   );
@@ -217,7 +235,9 @@ export function classifyNonDataRow(row, headers, dataRowLabels = new Set()) {
   // leaves the invoice-register behaviour exactly as it was.
   if (dataRowLabels.has(label)) return null;
 
-  if (!hasGstin && TOTALS_LABELS.has(label)) return "TOTALS";
+  if (!hasGstin && (TOTALS_LABELS.has(label) || TOTALS_WITH_QUALIFIER.test(label))) return "TOTALS";
+  // A printed page's own line ("Page 2", "Page 2 of 5", "पृष्ठ 2"): one or two cells, no GSTIN.
+  if (!hasGstin && filled.length <= 2 && /^(?:page|pg|पृष्ठ|पेज) \d+(?: of \d+)?$/u.test(label)) return "PAGE_LINE";
   return null;
 }
 

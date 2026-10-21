@@ -1,4 +1,5 @@
 import { userFacingError } from "../utils/user-facing-error.js";
+import { foldText } from "./text/fold.js";
 
 // Robust, DETERMINISTIC adaptive-import primitives shared by the GST and TDS
 // normalizers. The goal: accept messy, format-varied, real-world data (any date
@@ -15,6 +16,37 @@ const MONTHS = Object.freeze({
   MAY: 5, JUN: 6, JUNE: 6, JUL: 7, JULY: 7, AUG: 8, AUGUST: 8, SEP: 9, SEPT: 9,
   SEPTEMBER: 9, OCT: 10, OCTOBER: 10, NOV: 11, NOVEMBER: 11, DEC: 12, DECEMBER: 12,
 });
+
+// W11 IN32 (2026-10-21): Hindi and Marathi month names, keyed in NFKC form as folded text carries them (a nukta
+// letter such as the one in फ़रवरी decomposes).
+const INDIAN_MONTHS = Object.freeze(Object.fromEntries(Object.entries({
+  "जनवरी": 1, "फरवरी": 2, "फ़रवरी": 2, "मार्च": 3, "अप्रैल": 4, "अप्रेल": 4, "मई": 5, "जून": 6, "जुलाई": 7, "अगस्त": 8,
+  "सितंबर": 9, "सितम्बर": 9, "अक्टूबर": 10, "अक्तूबर": 10, "नवंबर": 11, "नवम्बर": 11, "दिसंबर": 12, "दिसम्बर": 12,
+  "जानेवारी": 1, "फेब्रुवारी": 2, "एप्रिल": 4, "मे": 5, "जुलै": 7, "ऑगस्ट": 8, "सप्टेंबर": 9, "ऑक्टोबर": 10, "नोव्हेंबर": 11, "डिसेंबर": 12,
+}).map(([word, month]) => [word.normalize("NFKC"), month])));
+
+/** A month written as a word, English (any case), Hindi or Marathi, to 1-12; undefined when it is not one. */
+function monthFromWord(word) {
+  const raw = String(word || "").replace(/\.$/, "");
+  return MONTHS[raw.toUpperCase()] ?? INDIAN_MONTHS[raw.normalize("NFKC")];
+}
+
+const WEEKDAY_PREFIX = /^(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)[a-z]*\.?,?\s+/i;
+
+/**
+ * One date cell made ready to read, for the column classifier and the parser alike: folded (any script's
+ * digits, any dash, Unicode spaces), time and time zone dropped, a leading weekday dropped ("Tue, 01 Apr 2025"),
+ * an ordinal after the day dropped ("1st Apr 2025"), and an Excel serial's time of day dropped (45383.5).
+ */
+function prepareDateText(value) {
+  let s = foldText(String(value ?? "")).trim();
+  s = s.replace(/\bT\d{1,2}:\d{2}.*$/i, "").trim();
+  s = s.replace(/\s+\d{1,2}:\d{2}(:\d{2})?\s*(am|pm)?$/i, "").trim();
+  s = s.replace(WEEKDAY_PREFIX, "").trim();
+  s = s.replace(/\b(\d{1,2})(?:st|nd|rd|th)\b/gi, "$1");
+  s = s.replace(/^(\d{5})\.\d+$/, "$1");
+  return s;
+}
 
 function validUtcDay(year, month, day) {
   const date = new Date(Date.UTC(year, month - 1, day));
@@ -89,10 +121,8 @@ const DATE_FIELDS_BY_KIND = Object.freeze({
 //          order -- e.g. "13/13/2026"), or null when both fields are <= 12 (this
 //          row alone cannot prove an order either way).
 function classifyNumericDate(value) {
-  let s = String(value ?? "").trim();
+  const s = prepareDateText(value);
   if (!s) return { shape: "UNPARSEABLE", proves: null };
-  s = s.replace(/\bT\d{1,2}:\d{2}.*$/i, "").trim();
-  s = s.replace(/\s+\d{1,2}:\d{2}(:\d{2})?\s*(am|pm)?$/i, "").trim();
 
   const numeric = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
   if (numeric) {
@@ -106,8 +136,9 @@ function classifyNumericDate(value) {
   }
 
   const isoLike = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.test(s);
-  const monthName = /^(\d{1,2})[-/. ]+([A-Za-z]{3,9})[-/. ]+(\d{2,4})$/.test(s)
-    || /^([A-Za-z]{3,9})[-/. ]+(\d{1,2}),?[-/. ]+(\d{2,4})$/.test(s);
+  const dayMonth = s.match(/^(\d{1,2})[-/. ]+([\p{L}\p{M}]{3,12}\.?)[-/. ]+(\d{2,4})$/u);
+  const monthDay = s.match(/^([\p{L}\p{M}]{3,12}\.?)[-/. ]+(\d{1,2}),?[-/. ]+(\d{2,4})$/u);
+  const monthName = Boolean((dayMonth && monthFromWord(dayMonth[2])) || (monthDay && monthFromWord(monthDay[1])));
   const compact = /^(\d{4})(\d{2})(\d{2})$/.test(s);
   const serial = /^\d{5}$/.test(s);
   if (isoLike || monthName || compact || serial) {
@@ -215,11 +246,9 @@ function resolveDateOrder({ classification, stated }) {
 // month-first, because that row was never ambiguous in the first place.
 // Returns null when not a real date.
 function parseFlexibleDateIso(value, { dateOrder = DATE_ORDER.DAY_FIRST } = {}) {
-  let s = String(value ?? "").trim();
+  // Folded, and the weekday, ordinal, time and serial fraction dropped (prepareDateText).
+  const s = prepareDateText(value);
   if (!s) return null;
-  // strip a leading weekday and any time / timezone portion
-  s = s.replace(/\bT\d{1,2}:\d{2}.*$/i, "").trim();
-  s = s.replace(/\s+\d{1,2}:\d{2}(:\d{2})?\s*(am|pm)?$/i, "").trim();
 
   // ISO / YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
   let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
@@ -245,16 +274,16 @@ function parseFlexibleDateIso(value, { dateOrder = DATE_ORDER.DAY_FIRST } = {}) 
   }
 
   // DD-Mon-YYYY / DD Mon YYYY / DD-Mon-YY   (e.g. 05-Apr-2026, 5 April 26)
-  m = s.match(/^(\d{1,2})[-/. ]+([A-Za-z]{3,9})[-/. ]+(\d{2,4})$/);
+  m = s.match(/^(\d{1,2})[-/. ]+([\p{L}\p{M}]{3,12}\.?)[-/. ]+(\d{2,4})$/u);
   if (m) {
-    const month = MONTHS[m[2].toUpperCase()];
+    const month = monthFromWord(m[2]);
     if (month) return isoFrom(expandYear(m[3]), month, Number(m[1]));
   }
 
   // Mon DD, YYYY  (e.g. Apr 5, 2026 / April 05 2026)
-  m = s.match(/^([A-Za-z]{3,9})[-/. ]+(\d{1,2}),?[-/. ]+(\d{2,4})$/);
+  m = s.match(/^([\p{L}\p{M}]{3,12}\.?)[-/. ]+(\d{1,2}),?[-/. ]+(\d{2,4})$/u);
   if (m) {
-    const month = MONTHS[m[1].toUpperCase()];
+    const month = monthFromWord(m[1]);
     if (month) return isoFrom(expandYear(m[3]), month, Number(m[2]));
   }
 
@@ -281,7 +310,8 @@ function parseFlexibleDateIso(value, { dateOrder = DATE_ORDER.DAY_FIRST } = {}) 
 // be read by them, so it is tagged user-facing per V13-P12-F2. That tag is what lets the import
 // preview forward this text while still replacing the message of an unexpected exception.
 function parseFlexibleMoneyMinor(value, { allowBlank = true, nonNegative = false, field = "amount" } = {}) {
-  let raw = String(value ?? "").replace(/\u00a0/g, " ").trim();
+  // W11 IN32: folded first - any script's digits, any dash or minus, any Unicode space (fold.js).
+  let raw = foldText(String(value ?? "")).trim();
   if (!raw) {
     if (allowBlank) return 0;
     throw userFacingError(`${field} is required`);
@@ -290,10 +320,14 @@ function parseFlexibleMoneyMinor(value, { allowBlank = true, nonNegative = false
   let s = raw.toUpperCase();
   let negative = false;
 
-  // currency words / symbols
-  s = s.replace(/₹/g, "").replace(/\bINR\b/g, "").replace(/\bRS\.?/g, "").trim();
-  // unicode minus / dashes -> ascii hyphen
-  s = s.replace(/[\u2212\u2013\u2014]/g, "-");
+  // currency words / symbols, English and Hindi
+  s = s.replace(/₹/g, "").replace(/\bINR\b/g, "").replace(/\bRS\.?/g, "").replace(/रुपये|रु\.?/g, "").trim();
+  // Excel's Accounting format writes a zero as a lone dash (" - "), and so does a hand-kept register.
+  if (/^-+$/.test(s)) return 0;
+  // Excel's scientific notation (1.23457E+11) has already lost the digits: it is refused, saying why.
+  if (/^[+-]?\d+(?:\.\d+)?E[+-]?\d+$/.test(s.replace(/[,\s]/g, ""))) {
+    throw userFacingError(`${field} is in Excel's scientific notation (${raw}), which has lost digits. Format the column as a number and export again`);
+  }
   // accounting suffixes
   if (/CR$/.test(s)) { negative = true; s = s.replace(/CR$/, "").trim(); }
   else if (/(DR|DB)$/.test(s)) { s = s.replace(/(DR|DB)$/, "").trim(); }
@@ -307,6 +341,16 @@ function parseFlexibleMoneyMinor(value, { allowBlank = true, nonNegative = false
   // strip grouping separators and inner spaces and apostrophes
   s = s.replace(/[,\s']/g, "");
 
+  // A spreadsheet formula's result can carry a float tail (1234.5600000001): within a hundredth of a paisa of
+  // a two-decimal amount it IS that amount. Anything further is a real third decimal and is refused.
+  const tail = s.match(/^(\d+)\.(\d{3,})$/);
+  if (tail) {
+    const scaled = Number(s) * 100;
+    const nearest = Math.round(scaled);
+    if (Number.isFinite(scaled) && Math.abs(scaled - nearest) < 0.01 && Number.isSafeInteger(nearest)) {
+      s = `${Math.trunc(nearest / 100)}.${String(nearest % 100).padStart(2, "0")}`;
+    }
+  }
   if (!/^\d+(\.\d{1,2})?$/.test(s)) {
     throw userFacingError(`${field} must be a decimal amount with at most two fraction digits`);
   }
@@ -333,10 +377,11 @@ function aliasLookup(value, table, fallback = null) {
 }
 
 /* --------------------------------------------------- header synonym resolver */
+// W11 IN32: letters and digits of ANY script are kept (a Hindi heading used to fold to nothing and never map).
 function headerToken(value) {
-  return String(value ?? "")
+  return foldText(String(value ?? ""))
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -344,17 +389,19 @@ function headerToken(value) {
 // canonical field -> list of accepted header synonyms (as loose phrases)
 const HEADER_SYNONYMS = Object.freeze({
   GST: {
-    supplierGstin: ["supplier gstin", "gstin of supplier", "supplier gst", "seller gstin", "vendor gstin", "supplier gstn", "gstin supplier", "from gstin"],
+    supplierGstin: ["supplier gstin", "gstin of supplier", "supplier gst", "seller gstin", "vendor gstin", "supplier gstn", "gstin supplier", "from gstin", "gstin uin", "party gstin", "party gstin uin", "gstin of party", "gstin uin of supplier", "आपूर्तिकर्ता जीएसटीआईएन", "जीएसटीआईएन", "विक्रेता जीएसटीआईएन"],
     recipientGstin: ["recipient gstin", "buyer gstin", "gstin of recipient", "our gstin", "purchaser gstin", "receiver gstin", "to gstin", "customer gstin"],
-    invoiceNumber: ["invoice number", "invoice no", "inv no", "inv number", "bill no", "bill number", "document number", "doc no", "invoice", "voucher no"],
-    documentDate: ["document date", "invoice date", "bill date", "doc date", "date", "dated", "invoice dt"],
+    // The supplier's own invoice number and date are named in full so they beat Tally's "Voucher No." and bare
+    // "Date" (the voucher's): the exact supplier phrase scores above the exact generic one.
+    invoiceNumber: ["supplier invoice no", "supplier invoice number", "supplier inv no", "party invoice no", "vendor invoice no", "supplier bill no", "supplier ref no", "invoice number", "invoice no", "inv no", "inv number", "bill no", "bill number", "document number", "doc no", "invoice", "voucher no", "बीजक संख्या", "इनवॉइस संख्या", "इनवॉइस नंबर", "बिल संख्या", "बिल नंबर"],
+    documentDate: ["supplier invoice date", "supplier inv date", "party invoice date", "vendor invoice date", "supplier bill date", "document date", "invoice date", "bill date", "doc date", "date", "dated", "invoice dt", "दिनांक", "तारीख", "बीजक दिनांक", "इनवॉइस दिनांक"],
     documentType: ["document type", "doc type", "invoice type", "type", "voucher type"],
-    taxableValue: ["taxable value", "taxable amount", "taxable", "assessable value", "base amount", "net amount", "taxable val"],
-    igst: ["igst", "igst amount", "integrated tax", "igst amt", "i gst"],
-    cgst: ["cgst", "cgst amount", "central tax", "cgst amt", "c gst"],
-    sgst: ["sgst", "sgst amount", "state tax", "sgst utgst", "sgst amt", "s gst", "utgst"],
-    cess: ["cess", "cess amount", "cess amt", "gst cess"],
-    totalTax: ["total tax", "tax amount", "total gst", "gst amount", "tax total"],
+    taxableValue: ["taxable value", "taxable amount", "taxable", "assessable value", "base amount", "net amount", "taxable val", "कर योग्य मूल्य", "कर योग्य राशि", "करयोग्य मूल्य"],
+    igst: ["igst", "igst amount", "integrated tax", "igst amt", "i gst", "आईजीएसटी", "एकीकृत कर"],
+    cgst: ["cgst", "cgst amount", "central tax", "cgst amt", "c gst", "सीजीएसटी", "केंद्रीय कर"],
+    sgst: ["sgst", "sgst amount", "state tax", "sgst utgst", "sgst amt", "s gst", "utgst", "एसजीएसटी", "राज्य कर"],
+    cess: ["cess", "cess amount", "cess amt", "gst cess", "उपकर"],
+    totalTax: ["total tax", "tax amount", "total gst", "gst amount", "tax total", "कुल कर"],
   },
   // The summary returns - GSTR-3B, GSTR-1 and the electronic credit ledger - are shaped
   // category-then-amounts rather than one-invoice-per-row, so they need their own dictionary.
@@ -436,7 +483,7 @@ const HEADER_SYNONYMS = Object.freeze({
   // over "Debit" and "Credit") reaches here already merged by import-shape.service.js into
   // "Closing Balance Debit" and "Closing Balance Credit".
   BOOKS: {
-    ledgerName: ["particulars", "ledger", "ledger name", "ledger account", "name of ledger", "account name", "account head", "ledger head"],
+    ledgerName: ["particulars", "ledger", "ledger name", "ledger account", "name of ledger", "account name", "account head", "ledger head", "विवरण", "खाता", "खाते का नाम"],
     groupName: ["group", "group name", "under", "parent group", "primary group", "account group", "schedule head"],
     openingBalance: ["opening balance", "opening", "op balance", "opening bal"],
     openingDebit: ["opening balance debit", "opening debit", "opening dr"],
@@ -483,9 +530,15 @@ const KIND_DICTIONARIES = Object.freeze({
   TRIAL_BALANCE: "BOOKS",
 });
 
+// Each dictionary with its synonyms in the form headerToken gives a heading (folded, any script kept), built once.
+const NORMALISED_SYNONYMS = Object.freeze(Object.fromEntries(Object.entries(HEADER_SYNONYMS).map(([name, dict]) => [
+  name,
+  Object.freeze(Object.fromEntries(Object.entries(dict).map(([field, synonyms]) => [field, synonyms.map((synonym) => headerToken(synonym))]))),
+])));
+
 function dictionaryForKind(kind) {
   const key = KIND_DICTIONARIES[kind] || kind;
-  return HEADER_SYNONYMS[key] || null;
+  return NORMALISED_SYNONYMS[key] || null;
 }
 
 // Score one header against one dictionary. Exact synonym first, then token-subset containment,

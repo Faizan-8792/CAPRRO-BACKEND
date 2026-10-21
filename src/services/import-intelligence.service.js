@@ -16,6 +16,7 @@ import Client from "../models/Client.js";
 import ImportMappingProfile from "../models/ImportMappingProfile.js";
 import { runAiTask } from "./ai/ai-task.service.js";
 import { describeImportColumns } from "./import-preview.service.js";
+import { foldForCompare } from "./text/fold.js";
 
 function httpError(statusCode, message, code = "") {
   const error = new Error(message);
@@ -24,7 +25,14 @@ function httpError(statusCode, message, code = "") {
   return error;
 }
 
-const normaliseHeading = (value) => String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+// W11 IN32: folded (fold.js), so the same heading with a no-break space, a zero-width character, a full-width
+// letter or a different dash is the same layout; letters of every script are kept.
+const normaliseHeading = (value) => foldForCompare(value);
+
+// What the model is shown of a file's headings, at most: a register wider than this is not one layout a person
+// could check either, and a heading longer than this is not a heading.
+const MODEL_HEADINGS_MAX = 100;
+const MODEL_HEADING_CHARS = 120;
 
 /** sha-256 of the normalised, ordered headings: the identity of a file layout. */
 export function headerSignature(headers) {
@@ -117,7 +125,8 @@ export async function suggestMappingsWithModel({ firmId, userId, input = {} }) {
   const headings = described.headers
     .map((text, index) => ({ ref: `h${index + 1}`, text, profile: described.profiles[index], mapped: mapped.has(text) }))
     .filter((heading) => heading.text && !heading.mapped)
-    .map(({ mapped: _mapped, ...rest }) => rest);
+    .slice(0, MODEL_HEADINGS_MAX)
+    .map(({ mapped: _mapped, text, ...rest }) => ({ ...rest, text: String(text).slice(0, MODEL_HEADING_CHARS) }));
   if (!headings.length) {
     return { available: true, suggestions: {}, headingMatches, draftId: null, note: "No unmapped heading is left to suggest from." };
   }
@@ -135,7 +144,8 @@ export async function suggestMappingsWithModel({ firmId, userId, input = {} }) {
   });
   const draft = result.results[0]?.draft || null;
   if (!draft) return { available: false, suggestions: {}, headingMatches, draftId: null, note: result.note };
-  const headingByRef = new Map(headings.map((heading) => [heading.ref, heading.text]));
+  // The heading as the file has it (the model may have seen it shortened), so the client can find its column.
+  const headingByRef = new Map(headings.map((heading) => [heading.ref, described.headers[Number(heading.ref.slice(1)) - 1]]));
   const suggestions = {};
   for (const entry of draft.output.mappings || []) {
     if (entry.headingRef !== "NONE" && headingByRef.has(entry.headingRef)) suggestions[entry.field] = headingByRef.get(entry.headingRef);

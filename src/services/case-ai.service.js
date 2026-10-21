@@ -1,11 +1,14 @@
 import { CASE_FIELD_NAMES } from "../models/CaseMatter.js";
 import {
+  AMOUNT_FIELDS,
+  DATE_FIELDS,
   boundedStringArray,
   boundedText,
   hashText,
   httpError,
   stableJson,
 } from "./case-validation.service.js";
+import { locateExcerpt, valueAgreesWithExcerpt } from "./case-excerpt.service.js";
 import {
   callDeepSeek,
   parseJsonObject,
@@ -127,11 +130,6 @@ function ensureJson(result) {
   return parsed;
 }
 
-function excerptAppearsInSource(excerpt, source) {
-  const normalizedExcerpt = String(excerpt || "").replace(/\s+/g, " ").trim().toLowerCase();
-  const normalizedSource = String(source || "").replace(/\s+/g, " ").toLowerCase();
-  return normalizedExcerpt.length >= 3 && normalizedSource.includes(normalizedExcerpt);
-}
 
 async function proposeCaseExtraction(caseMatter, userId) {
   const source = String(caseMatter?.source?.extractedText || "").trim();
@@ -157,15 +155,18 @@ SOURCE:\n${source.slice(0, 90000)}`,
   for (const item of Array.isArray(parsed.fields) ? parsed.fields.slice(0, 100) : []) {
     const field = typeof item?.field === "string" ? item.field.trim() : "";
     const value = typeof item?.value === "string" ? item.value.trim().slice(0, 4000) : "";
-    const sourceText = typeof item?.sourceText === "string" ? item.sourceText.trim().slice(0, 1200) : "";
     const confidence = Number(item?.confidence);
+    // W11 IN30: the excerpt kept is the notice's own text the model's excerpt matched (found through folding and
+    // the redaction tokens), and the value must say what that excerpt says.
+    const sourceText = typeof item?.sourceText === "string" ? locateExcerpt(item.sourceText.slice(0, 1200), source) : null;
     if (
       !FIELD_SET.has(field) ||
       !value ||
       !Number.isFinite(confidence) ||
       confidence < 0 ||
       confidence > 1 ||
-      !excerptAppearsInSource(sourceText, source)
+      !sourceText ||
+      !valueAgreesWithExcerpt(field, value, sourceText, { dateFields: DATE_FIELDS, amountFields: AMOUNT_FIELDS })
     ) continue;
     proposals.push({
       field,

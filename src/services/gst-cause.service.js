@@ -20,6 +20,8 @@
 // (.kiro/OWNER-TODO.md, W11 item 3). Rule order decides which cause an item shows when two fire; the others are
 // listed as alsoFired.
 
+import { foldText } from "./text/fold.js";
+
 export const GST_CAUSE_RULE_VERSION = "gst-cause-v1";
 
 export const RULE_CAUSES = Object.freeze({
@@ -396,8 +398,10 @@ export function explainItems({ items = [], otherRunItems = [], period }) {
 }
 
 /** The invoice number's shape for the model: letters as A, digits as 9, separators kept, never the number. */
+// W11 IN32: every letter of every script is masked, and every script's digits (folded first). Before, only A-Z
+// and 0-9 were masked, so an invoice number written in Devanagari reached the model as written.
 export function invoiceShape(original) {
-  return String(original || "").toUpperCase().replace(/[A-Z]/g, "A").replace(/[0-9]/g, "9").replace(/\s+/g, " ").slice(0, 30);
+  return foldText(String(original || "")).toUpperCase().replace(/\p{M}/gu, "").replace(/\p{L}/gu, "A").replace(/\p{N}/gu, "9").replace(/\s+/g, " ").slice(0, 30);
 }
 
 const rupeesOf = (breakdown) => {

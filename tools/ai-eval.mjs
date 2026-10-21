@@ -90,8 +90,14 @@ const SCORERS = {
   supplier_chase_draft(expect, result) {
     if (!result.valid) return { valid: false, answered: false, correct: false, cannotCase: false, falseConfident: false };
     const text = `${result.output.subject || ""} ${result.output.message}`;
-    const devanagari = /[ऀ-ॿ]/.test(text);
-    let correct = expect.script === "devanagari" ? devanagari : !devanagari;
+    // W11 IN37: written in the script asked for. "latin" means no Indian or Arabic script at all.
+    const SCRIPTS = {
+      devanagari: /[\u0900-\u097F]/, bengali: /[\u0980-\u09FF]/, gurmukhi: /[\u0A00-\u0A7F]/, gujarati: /[\u0A80-\u0AFF]/,
+      oriya: /[\u0B00-\u0B7F]/, tamil: /[\u0B80-\u0BFF]/, telugu: /[\u0C00-\u0C7F]/, kannada: /[\u0C80-\u0CFF]/,
+      malayalam: /[\u0D00-\u0D7F]/, arabic: /[\u0600-\u06FF]/,
+    };
+    const anyIndian = Object.values(SCRIPTS).some((pattern) => pattern.test(text));
+    let correct = expect.script === "latin" ? !anyIndian : Boolean(SCRIPTS[expect.script]?.test(text));
     if (expect.hinglish) correct = correct && /\b(kripya|aapke|aapka|hai|hain|nahi|karein|kar|ji|humare|hamare|abhi|mein)\b/i.test(text);
     return { valid: true, answered: true, correct, cannotCase: false, falseConfident: false };
   },

@@ -167,6 +167,18 @@ async function runSuite() {
     const tmsg = template.json?.messages?.find((m) => m.supplierGstin === OTHER);
     check("chase draft (template): filled by the server with the supplier, client, invoices and amount, labelled NOT SENT", template.json?.source === "TEMPLATE" && /Kothari Yarns/.test(tmsg?.message) && /KY\/2231/.test(tmsg.message) && /Evergreen Textiles/.test(tmsg.message) && /₹3,114/.test(tmsg.message) && tmsg.label === "DRAFT FOR REVIEW - NOT SENT" && !/\{\{/.test(tmsg.message), tmsg?.message);
 
+    // ─── IN33: languages ───
+    const languages = pack.json?.languages || [];
+    check("IN33: the pack lists 13 languages, each with a label and whether a fixed template exists", languages.length === 13 && languages.find((l) => l.code === "hi")?.template === true && languages.find((l) => l.code === "ta")?.template === false && languages.every((l) => l.label), JSON.stringify(languages.map((l) => l.code)));
+    const hindiTemplate = await call("POST", `/api/gst-reconciliation/runs/${july}/chase-pack/draft`, A.token, { language: "hi", channel: "whatsapp", useTemplate: true });
+    const hmsg = hindiTemplate.json?.messages?.find((m) => m.supplierGstin === OTHER);
+    check("IN33: Hindi gets the Hindi template, filled, and says it is Hindi", hmsg?.language === "hi" && /प्रिय Kothari Yarns/.test(hmsg.message) && /KY\/2231/.test(hmsg.message) && !/\{\{/.test(hmsg.message), hmsg?.message);
+    const marathiTemplate = await call("POST", `/api/gst-reconciliation/runs/${july}/chase-pack/draft`, A.token, { language: "mr", channel: "email", useTemplate: true });
+    const mmsg = marathiTemplate.json?.messages?.find((m) => m.supplierGstin === OTHER);
+    check("IN33: Marathi has no fixed template yet: the English one is used, and the message and note say so", mmsg?.language === "en" && /^Dear Kothari Yarns/.test(mmsg.message) && /no fixed template in Marathi/.test(marathiTemplate.json?.note || ""), JSON.stringify({ language: mmsg?.language, note: marathiTemplate.json?.note }));
+    const unknownLanguage = await call("POST", `/api/gst-reconciliation/runs/${july}/chase-pack/draft`, A.token, { language: "xx", channel: "email", useTemplate: true });
+    check("IN33: a language CA PRO does not draft in is refused 400", unknownLanguage.status === 400);
+
     mock.reset();
     // The stand-in answers every mix the request asks for (one unit per mix of problems).
     const askedIds = (body) => [...String(body?.messages?.[1]?.content || "").matchAll(/"id":"(mix-[01]{3})"/g)].map((m) => m[1]);

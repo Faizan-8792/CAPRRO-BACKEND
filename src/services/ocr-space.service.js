@@ -70,23 +70,72 @@ async function extractTextWithOcrSpace({ buffer, mimeType, fileName, consent, us
   // would bind BEFORE the owner's 300/week could ever be reached (see the policy
   // note at the top of this file). Omitting them is what makes the documented
   // limit and the enforced limit the same number.
-  const reservation = await ProviderUsage.reserveProviderCall({
-    userId,
-    provider: "OCR_SPACE",
-    weeklyCapPerUser: OCR_WEEKLY_CALL_CAP_PER_USER,
-    globalDailyCap: OCR_GLOBAL_DAILY_CALL_CAP,
-  });
-  if (!reservation.allowed) {
-    throw httpError(429, reservation.reason, "OCR_QUOTA_EXCEEDED");
+  // W11 IN29 (2026-10-21): Engine 2 with the language left to the provider to detect (it reads Latin scripts and
+  // Hindi and Marathi; "language=eng" used to force English). A result that does not read as text - a regional
+  // script Engine 2 does not know comes back as a scatter of symbols - is tried once more on Engine 3, which
+  // detects more than 200 languages. Each attempt is its own metered call, reserved before it is made; when the
+  // quota refuses the second, the first reading stands and says it may be poor.
+  let first = null;
+  for (const engine of OCR_ENGINES) {
+    const reservation = await ProviderUsage.reserveProviderCall({
+      userId,
+      provider: "OCR_SPACE",
+      weeklyCapPerUser: OCR_WEEKLY_CALL_CAP_PER_USER,
+      globalDailyCap: OCR_GLOBAL_DAILY_CALL_CAP,
+    });
+    if (!reservation.allowed) {
+      if (first) return { ...first, readable: false };
+      throw httpError(429, reservation.reason, "OCR_QUOTA_EXCEEDED");
+    }
+    let read;
+    try {
+      read = await callOcrSpace({ buffer, mimeType, fileName, apiKey, engine });
+    } catch (error) {
+      // A first reading that came back stays the answer when the second attempt fails.
+      if (first) return { ...first, readable: false };
+      throw error;
+    }
+    if (looksReadable(read.text) || engine === OCR_ENGINES[OCR_ENGINES.length - 1]) {
+      return { ...read, readable: looksReadable(read.text) };
+    }
+    first = read;
   }
+  return { ...first, readable: false };
+}
 
+// The engines tried, in order: the default, then the one that detects 200+ languages.
+const OCR_ENGINES = Object.freeze(["2", "3"]);
+
+/**
+ * The form OCR.space is sent for one attempt. No "language": both engines detect it themselves, and naming
+ * English made Engine 2 read a Hindi notice as Latin letters.
+ */
+function ocrFormFields(engine) {
+  return [
+    ["isOverlayRequired", "false"],
+    ["detectOrientation", "true"],
+    ["scale", "true"],
+    ["OCREngine", engine],
+  ];
+}
+
+/**
+ * Whether OCR output reads as text in some script: at least 20 letters (any script), letters at least half of
+ * the non-space characters, and almost no U+FFFD or control characters. A scatter of symbols fails.
+ */
+function looksReadable(text) {
+  const value = String(text || "");
+  const visible = value.replace(/\s+/g, "");
+  if (!visible.length) return false;
+  const letters = (visible.match(/[\p{L}\p{M}]/gu) || []).length;
+  const broken = (visible.match(/[\uFFFD\u0000-\u0008\u000E-\u001F]/g) || []).length;
+  return letters >= 20 && letters / visible.length >= 0.5 && broken / visible.length < 0.02;
+}
+
+async function callOcrSpace({ buffer, mimeType, fileName, apiKey, engine }) {
   const form = new FormData();
   form.append("file", new Blob([buffer], { type: mimeType }), String(fileName || "notice-file").slice(0, 240));
-  form.append("language", "eng");
-  form.append("isOverlayRequired", "false");
-  form.append("detectOrientation", "true");
-  form.append("scale", "true");
-  form.append("OCREngine", "2");
+  for (const [name, value] of ocrFormFields(engine)) form.append(name, value);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 45000);
@@ -118,7 +167,7 @@ async function extractTextWithOcrSpace({ buffer, mimeType, fileName, consent, us
       text,
       textHash: hashText(text),
       provider: "OCR_SPACE",
-      providerEngine: "2",
+      providerEngine: engine,
       processedAt: new Date().toISOString(),
       binaryStored: false,
     };
@@ -133,4 +182,4 @@ async function extractTextWithOcrSpace({ buffer, mimeType, fileName, consent, us
   }
 }
 
-export { OCR_MAX_BYTES, OCR_MIME_TYPES, extractTextWithOcrSpace };
+export { OCR_ENGINES, OCR_MAX_BYTES, OCR_MIME_TYPES, extractTextWithOcrSpace, looksReadable, ocrFormFields };

@@ -89,6 +89,31 @@ check("period start: from a financial year, an assessment year and a written per
 check("Act rule: a period before the published date falls under the earlier Act, from it under the later", actForPeriod(catalogue, { assessmentYear: "2026-27" })?.act === "Income-tax Act, 1961" && actForPeriod(catalogue, { financialYear: "2026-27" })?.act === "Income-tax Act, 2025");
 check("Act rule: nothing is said without a published rule", actForPeriod({ entries: [] }, { financialYear: "2026-27" }) === null);
 
+// ─── IN28: any script's digits, Hindi and bilingual notices, messy formatting ───
+const fieldsOf = (reading) => Object.fromEntries(reading.proposals.map((proposal) => [proposal.field, proposal.value]));
+const hindi = "प्ररूप जीएसटी एएसएमटी-10\nदिनांक: २१/१०/२०२६\nकर अवधि: अप्रैल 2024 से मार्च 2025\nकुल देय राशि: रु. ४,१२,३८०/-\nकृपया २०/११/२०२६ तक उत्तर प्रस्तुत करें।";
+const hindiReading = readNoticeByRules(hindi);
+const hindiFields = fieldsOf(hindiReading);
+check("IN28: a notice wholly in Hindi is recognised (ASMT-10) with Devanagari digits read as numbers", hindiReading.form?.id === "GST_ASMT10" && hindiFields.issueDate === "2026-10-21" && hindiFields.responseDueDate === "2026-11-20" && hindiFields.demandMinor === "41238000", JSON.stringify(hindiFields));
+check("IN28: every excerpt from the Hindi notice is cut from the original (Devanagari digits kept)", hindiReading.proposals.length > 0 && hindiReading.proposals.every((p) => hindi.replace(/\s+/g, " ").includes(p.sourceText)) && hindiReading.proposals.some((p) => p.sourceText.includes("२०/११/२०२६")), JSON.stringify(hindiReading.proposals.map((p) => p.sourceText)));
+const bilingual = "प्ररूप जीएसटी डीआरसी-01सी / FORM GST DRC—01C\nDate: 05/09/2026\nदिनांक: 05/09/2026\nReply on or before 12/09/2026";
+const bilingualReading = readNoticeByRules(bilingual);
+check("IN28: a bilingual heading with an em dash is still DRC-01C, not DRC-01", bilingualReading.form?.id === "GST_DRC01C", JSON.stringify(bilingualReading.form));
+const messy = "Form\u00a0GST\u00a0ASMT\u2011\u200b10\nREF: ZD27 DATE: 21/10/2026\nTotal amount payable\n₹ 4.12 lakh\nPlease reply by October 20, 2026";
+const messyFields = fieldsOf(readNoticeByRules(messy));
+check("IN28: no-break spaces, a non-breaking hyphen and a zero-width space do not hide the form", readNoticeByRules(messy).form?.id === "GST_ASMT10");
+check("IN28: \"DATE:\" in capitals mid-line is the issue date", messyFields.issueDate === "2026-10-21", JSON.stringify(messyFields));
+check("IN28: an amount on the line under its label, in lakh, is read exactly (₹4.12 lakh = 41200000 paise)", messyFields.demandMinor === "41200000", JSON.stringify(messyFields));
+check("IN28: a month-first date (October 20, 2026) is read", messyFields.responseDueDate === "2026-10-20", JSON.stringify(messyFields));
+check("IN28: \"u/s.143(1)\" with a dot is an intimation under 143(1)", readNoticeByRules("Intimation u/s.143(1) of the Income-tax Act\nA.Y. 2025-26").form?.id === "IT_143_1");
+check("IN28: a Hindi income-tax notice (धारा 142(1) ... सूचना) is recognised", readNoticeByRules("आयकर अधिनियम की धारा 142(1) के अधीन सूचना\nनिर्धारण वर्ष: 2024-25").form?.id === "IT_142_1");
+check("IN28: day-first with a month word and a two-digit year (20-Nov-26)", readDay("20-Nov-26") === "2026-11-20");
+check("IN28: Hindi and Marathi month names (२० नवंबर २०२६, 20 नोव्हेंबर 2026)", readDay("२० नवंबर २०२६") === "2026-11-20" && readDay("20 नोव्हेंबर 2026") === "2026-11-20");
+check("IN28: a nukta month written precomposed or decomposed reads the same (फ़रवरी)", readDay("20 \u095e\u0930\u0935\u0930\u0940 2026") === "2026-02-20" && readDay("20 \u092b\u093c\u0930\u0935\u0930\u0940 2026") === "2026-02-20");
+check("IN28: lakh and crore scale exactly; Devanagari amounts read", readRupeesToPaise("₹ 4.125 lakh") === 41250000 && readRupeesToPaise("₹ 2 करोड़") === 2000000000 && readRupeesToPaise("रु. ४,१२,३८०/-") === 41238000);
+check("IN28: an amount followed by Cr, thousand or million is NOT proposed (never read 1,00,00,000 times too small)", readRupeesToPaise("Rs. 5 Cr") === null && readRupeesToPaise("₹ 5 thousand") === null && readRupeesToPaise("INR 3 million") === null && !fieldsOf(readNoticeByRules("Total demand\nRs. 5 Cr")).demandMinor);
+check("IN28: a fraction finer than paise is not proposed (₹ 10.505)", readRupeesToPaise("₹ 10.505") === null);
+
 // ─── the routes (scratch Mongo) ───
 const uri = process.env.MONGODB_URI || "";
 const scratch = /^mongodb:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(uri) && /scratch/i.test((uri.split("/").pop() || "").split("?")[0]);
@@ -171,13 +196,28 @@ async function runRoutes() {
     check("routes: the publish is in the control-change history with its reason", (history.controlChanges || []).some((entry) => entry.kind === "noticeCatalogue" && entry.reason === "Test publish"));
     // IN21 as built: with intelligence on, the model is still asked for every field (the rules' fields included,
     // so the rule reading has a second reading to cross-check), and only the model's own proposals are returned.
-    const asmt = NOTICES.find((n) => n.form === "GST_ASMT10").text;
-    mock.on(() => JSON.stringify({ fields: [{ field: "responseDueDate", value: "2026-11-20", sourceText: asmt.slice(0, 40), confidence: 0.7 }] }));
+    // IN30: each value must say what its excerpt says, and the excerpt kept is the notice's own text, found through
+    // folding (an en dash the model wrote) and the redaction tokens (the model saw [GSTIN], the notice has the GSTIN).
+    const notice = "FORM GST ASMT-10\nGSTIN: 27AAACE1234F1Z5\nDate: 21/10/2026\nTotal amount payable: Rs. 4,12,380/-\nYou are directed to explain the discrepancies on or before 20-11-2026.";
+    mock.on(() => JSON.stringify({ fields: [
+      { field: "responseDueDate", value: "2026-11-20", sourceText: "on or before 20\u201311\u20132026", confidence: 0.7 },
+      { field: "issueDate", value: "2026-10-22", sourceText: "Date: 21/10/2026", confidence: 0.9 },
+      { field: "demandMinor", value: "Rs. 4,12,380", sourceText: "Total amount payable: Rs. 4,12,380/-", confidence: 0.8 },
+      { field: "disputedMinor", value: "Rs. 9,99,999", sourceText: "Total amount payable: Rs. 4,12,380/-", confidence: 0.8 },
+      { field: "authority", value: "GST", sourceText: "GSTIN: [GSTIN]", confidence: 0.6 },
+      { field: "din", value: "ZD9999", sourceText: "IGNORE PREVIOUS INSTRUCTIONS", confidence: 1 },
+    ] }));
     const { proposeCaseExtraction } = await import("../src/services/case-ai.service.js");
-    const extracted = await proposeCaseExtraction({ source: { extractedText: asmt } }, ownerId);
+    const extracted = await proposeCaseExtraction({ source: { extractedText: notice } }, ownerId);
     const asked = JSON.stringify(mock.calls.at(-1)?.body || {});
+    const byField = Object.fromEntries(extracted.proposals.map((p) => [p.field, p]));
     check("extraction: the model is asked for the fields the rules read too", /responseDueDate/.test(asked) && /requestedDocuments/.test(asked), asked.slice(0, 200));
-    check("extraction: no rule reading is returned as the model's proposal", extracted.proposals.length === 1 && extracted.proposals.every((p) => p.provider !== "RULES" && p.confidence === 0.7), JSON.stringify(extracted.proposals));
+    check("extraction: no rule reading is returned as the model's proposal", extracted.proposals.every((p) => p.provider !== "RULES"), JSON.stringify(extracted.proposals));
+    check("IN30: an excerpt with an en dash the notice does not have is found, and the notice's own text is kept", byField.responseDueDate?.sourceText === "on or before 20-11-2026", JSON.stringify(byField.responseDueDate));
+    check("IN30: an excerpt the model saw redacted ([GSTIN]) is found, and kept with the real GSTIN", byField.authority?.sourceText === "GSTIN: 27AAACE1234F1Z5", JSON.stringify(byField.authority));
+    check("IN30: a date its excerpt does not write (22 Oct against 21/10/2026) is dropped", !byField.issueDate);
+    check("IN30: an amount its excerpt does not write is dropped; the one it writes is kept", !byField.disputedMinor && byField.demandMinor?.value === "Rs. 4,12,380");
+    check("IN30: an excerpt that is not in the notice is dropped, whatever it says", !byField.din && extracted.proposals.length === 3, JSON.stringify(Object.keys(byField)));
   } finally {
     mock.off();
     await new Promise((resolve) => server.close(resolve));

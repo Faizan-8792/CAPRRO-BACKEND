@@ -147,10 +147,12 @@ for (const { file, sink, why } of SINKS) {
 
 const robust = read("services/robust-normalize.service.js");
 const moneyThrows = robust.match(/throw userFacingError\(`\$\{field\}/g) || [];
+// 4 -> 5 on 2026-10-21 (W11 IN32): Excel's scientific notation (1.23457E+11) is refused, naming the column and
+// saying how to export it again - the fifth throw a person must read.
 check(
   "the money parser's field-naming throws stay tagged user-facing",
-  moneyThrows.length === 4,
-  `${moneyThrows.length}/4 tagged — these name the user's own column`,
+  moneyThrows.length === 5,
+  `${moneyThrows.length}/5 tagged — these name the user's own column`,
 );
 
 check(

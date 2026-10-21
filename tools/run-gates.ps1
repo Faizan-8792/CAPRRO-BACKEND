@@ -903,6 +903,8 @@ try {
         "notice-rules-contract",
         "priority-engine-contract",
         "ai-eval-fixtures",
+        # W11 IN27-IN34 (2026-10-21): other scripts, encodings and layouts; answers tied to their source. Pure.
+        "intelligence-language-contract",
         # DS25 (2026-10-07): every email in one branded layout, with a text part and its own words.
         "email-layout-contract",
         # Added 2026-08-26. These six existed in tests/ and passed, but were NEVER in this list, so a

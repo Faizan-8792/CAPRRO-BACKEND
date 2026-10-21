@@ -8,7 +8,10 @@
 
 import { fail, readFreeText, slotsUsed } from "../ai-validate.js";
 
-export const CHASE_LANGUAGES = Object.freeze(["en", "hi", "hinglish"]);
+// W11 IN33 (2026-10-21): the languages a supplier may read. The model drafts in any of them; a fixed template
+// exists in English, Hindi and Hinglish (gst-intelligence.service.js CHASE_TEMPLATES), and any other language
+// falls back to the English template, said so on the message.
+export const CHASE_LANGUAGES = Object.freeze(["en", "hi", "hinglish", "mr", "gu", "ta", "te", "kn", "ml", "bn", "pa", "or", "ur"]);
 export const CHASE_CHANNELS = Object.freeze(["whatsapp", "email"]);
 export const CHASE_SLOTS = Object.freeze([
   "supplier",
@@ -25,13 +28,40 @@ export const CHASE_LANGUAGE_NAMES = Object.freeze({
   en: "plain Indian English",
   hi: "Hindi in Devanagari script",
   hinglish: "Hinglish (Hindi in Latin script, mixed with English as Indian businesses write)",
+  mr: "Marathi in Devanagari script",
+  gu: "Gujarati in Gujarati script",
+  ta: "Tamil in Tamil script",
+  te: "Telugu in Telugu script",
+  kn: "Kannada in Kannada script",
+  ml: "Malayalam in Malayalam script",
+  bn: "Bengali in Bengali script",
+  pa: "Punjabi in Gurmukhi script",
+  or: "Odia in Odia script",
+  ur: "Urdu in Urdu (Nastaliq) script",
+});
+
+// How each language is named on screen: its English name, then its own name.
+export const CHASE_LANGUAGE_LABELS = Object.freeze({
+  en: "English",
+  hi: "Hindi (हिन्दी)",
+  hinglish: "Hinglish",
+  mr: "Marathi (मराठी)",
+  gu: "Gujarati (ગુજરાતી)",
+  ta: "Tamil (தமிழ்)",
+  te: "Telugu (తెలుగు)",
+  kn: "Kannada (ಕನ್ನಡ)",
+  ml: "Malayalam (മലയാളം)",
+  bn: "Bengali (বাংলা)",
+  pa: "Punjabi (ਪੰਜਾਬੀ)",
+  or: "Odia (ଓଡ଼ିଆ)",
+  ur: "Urdu (اردو)",
 });
 
 export default {
   name: "supplier_chase_draft",
   operation: "supplier_chase_draft",
   surface: "gst_chase",
-  promptVersion: "supplier-chase-v1",
+  promptVersion: "supplier-chase-v2",
   batchSize: 1,
   // One unit per distinct mix of problems in a run (three yes/no kinds: at most seven).
   maxUnits: 8,
@@ -48,6 +78,7 @@ export default {
     'Answer as {"items":[{"id":"<the item id>","subject":"<email subject, or empty for whatsapp>","message":"<the message>"}]}.',
     "Write in the language and for the channel given. A whatsapp message is under ninety words; an email may be longer but stays under two hundred words.",
     "Mention each kind of problem the facts mark true, in plain words: not yet filed, GSTIN typed wrongly on the invoice, an amount that differs.",
+    "Whatever the language, write the return names in Latin letters exactly as GSTR-1 and GSTR-2B, and write no other number or date: the placeholders carry them.",
   ].join("\n"),
   validate(item, facts) {
     const message = readFreeText(item.message, { max: 1600, slots: CHASE_SLOTS, label: "message" });

@@ -50,7 +50,7 @@
   --capro-shadow-3: 0 4px 8px rgba(19, 38, 44, 0.08), 0 12px 28px rgba(19, 38, 44, 0.12);
   --capro-shadow-4: 0 8px 16px rgba(19, 38, 44, 0.10), 0 24px 56px rgba(19, 38, 44, 0.18);
 
-  --capro-font-ui: "IBM Plex Sans", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --capro-font-ui: "IBM Plex Sans", "Nirmala UI", "Noto Sans", "Noto Sans Devanagari", Mangal, "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --capro-font-mono: "IBM Plex Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
   --capro-weight-regular: 400;
   --capro-weight-semibold: 600;

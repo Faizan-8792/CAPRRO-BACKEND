@@ -108,7 +108,8 @@ function detectDelimiter(text) {
 
   if (!lines.length) return ",";
 
-  const candidates = ["\t", ",", ";"];
+  // W11 IN32: the pipe too - some accounting exports and bank statements use it.
+  const candidates = ["\t", ",", ";", "|"];
   let best = ",";
   let bestScore = -1;
 
@@ -119,9 +120,17 @@ function detectDelimiter(text) {
     for (const line of lines) {
       let columns = 1;
       let quoted = false;
+      let atFieldStart = true;
       for (const character of line) {
-        if (character === '"') quoted = !quoted;
-        else if (character === candidate && !quoted) columns += 1;
+        // A quote opens a quoted field only at the start of a field (parseDelimited's rule), so the inch mark
+        // in 12" Pipe does not hide the rest of the line's delimiters.
+        if (character === '"' && (quoted || atFieldStart)) quoted = !quoted;
+        else if (character === candidate && !quoted) {
+          columns += 1;
+          atFieldStart = true;
+          continue;
+        }
+        if (character !== " " && character !== "\t") atFieldStart = false;
       }
       if (columns > 1) counts.set(columns, (counts.get(columns) || 0) + 1);
     }
@@ -155,12 +164,18 @@ function parseDelimited(text, delimiter) {
 
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index];
-    if (character === '"') {
+    // W11 IN32: a quote OPENS a quoted field only at the start of a field (after optional spaces); anywhere else
+    // it is a literal character, as in 12" Pipe or Ravi's "A" grade. Before, any quote flipped the parser into
+    // quoted mode and swallowed every delimiter to the next quote, merging cells or failing the file.
+    if (character === '"' && (quoted || cell.trim() === "")) {
       if (quoted && text[index + 1] === '"') {
         cell += '"';
         index += 1;
+      } else if (!quoted) {
+        cell = "";
+        quoted = true;
       } else {
-        quoted = !quoted;
+        quoted = false;
       }
     } else if (character === delimiter && !quoted) {
       row.push(cell);
@@ -260,8 +275,8 @@ function validateRequest({ kind, text, mapping, delimiter, dateOrder }) {
   }
 
   const selectedDelimiter = delimiter || detectDelimiter(text);
-  if (![",", ";", "\t"].includes(selectedDelimiter)) {
-    throw new Error("Delimiter must be comma, semicolon, or tab");
+  if (![",", ";", "\t", "|"].includes(selectedDelimiter)) {
+    throw new Error("Delimiter must be comma, semicolon, tab or pipe");
   }
 
   const parsed = parseDelimited(text, selectedDelimiter);
@@ -650,8 +665,8 @@ export function suggestImportMapping({ kind, text, delimiter = null }) {
   }
 
   const selectedDelimiter = delimiter || detectDelimiter(text);
-  if (![",", ";", "\t"].includes(selectedDelimiter)) {
-    throw new Error("Delimiter must be comma, semicolon, or tab");
+  if (![",", ";", "\t", "|"].includes(selectedDelimiter)) {
+    throw new Error("Delimiter must be comma, semicolon, tab or pipe");
   }
 
   const parsed = parseDelimited(text, selectedDelimiter);

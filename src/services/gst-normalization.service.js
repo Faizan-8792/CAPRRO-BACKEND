@@ -3,6 +3,7 @@ import {
   parseFlexibleMoneyMinor,
 } from "./robust-normalize.service.js";
 import { userFacingError, userFacingMessage } from "../utils/user-facing-error.js";
+import { foldText } from "./text/fold.js";
 
 const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const PERIOD_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -267,11 +268,18 @@ function normalizeGstin(value) {
   return cleanText(value, 32).replace(/\s+/g, "").toUpperCase();
 }
 
+// W11 IN32 (2026-10-21): the matching key is folded first (any script's digits read as 0-9, full-width letters
+// as ASCII) and keeps the letters of every script, so "बी/123" and "123" are two invoices, not one. Excel's
+// scientific notation (1.23457E+11) has already lost the invoice's digits: it is flagged, never turned into a
+// key that would pair or miss the wrong invoice.
+const SCIENTIFIC_NOTATION = /^\d(?:\.\d+)?E\+?\d+$/i;
+
 function normalizeInvoiceNumber(value) {
   const original = cleanText(value, 120).toUpperCase();
-  let normalized = original.replace(/[^A-Z0-9]/g, "");
+  const folded = foldText(original).toUpperCase();
+  let normalized = folded.replace(/[^\p{L}\p{M}\p{N}]/gu, "");
   if (/^\d+$/.test(normalized)) normalized = normalized.replace(/^0+(?=\d)/, "");
-  return { original, normalized };
+  return { original, normalized, scientific: SCIENTIFIC_NOTATION.test(folded.replace(/\s+/g, "")) };
 }
 
 function normalizeDocumentType(value) {
@@ -765,6 +773,13 @@ function normalizeGstImportRow(kind, input, { dateOrder } = {}) {
   if (!GSTIN_PATTERN.test(supplierGstin)) addError("supplierGstin", "INVALID_GSTIN");
   if (!GSTIN_PATTERN.test(recipientGstin)) addError("recipientGstin", "INVALID_GSTIN");
   if (!invoice.original || !invoice.normalized) addError("invoiceNumber", "REQUIRED");
+  else if (invoice.scientific) {
+    addError(
+      "invoiceNumber",
+      "SCIENTIFIC_NOTATION",
+      `Invoice number ${invoice.original} is in Excel's scientific notation and has lost digits. Format the column as text and export again.`,
+    );
+  }
   if (!documentDate) addError("documentDate", "INVALID_DATE");
   if (!documentType) addError("documentType", "REQUIRED");
   try {

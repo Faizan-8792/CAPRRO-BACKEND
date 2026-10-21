@@ -674,6 +674,326 @@
     "script": "latin",
     "hinglish": true
    }
+  },
+  {
+   "id": "chase-mr-whatsapp-100",
+   "facts": {
+    "language": "Marathi in Devanagari script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-mr-email-111",
+   "facts": {
+    "language": "Marathi in Devanagari script",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-gu-whatsapp-100",
+   "facts": {
+    "language": "Gujarati in Gujarati script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "gujarati",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-gu-email-111",
+   "facts": {
+    "language": "Gujarati in Gujarati script",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "gujarati",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-ta-whatsapp-100",
+   "facts": {
+    "language": "Tamil in Tamil script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "tamil",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-ta-email-111",
+   "facts": {
+    "language": "Tamil in Tamil script",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "tamil",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-te-whatsapp-100",
+   "facts": {
+    "language": "Telugu in Telugu script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "telugu",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-te-email-111",
+   "facts": {
+    "language": "Telugu in Telugu script",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "telugu",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-kn-whatsapp-100",
+   "facts": {
+    "language": "Kannada in Kannada script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "kannada",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-kn-email-111",
+   "facts": {
+    "language": "Kannada in Kannada script",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "kannada",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-ml-whatsapp-100",
+   "facts": {
+    "language": "Malayalam in Malayalam script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "malayalam",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-ml-email-111",
+   "facts": {
+    "language": "Malayalam in Malayalam script",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "malayalam",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-bn-whatsapp-100",
+   "facts": {
+    "language": "Bengali in Bengali script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "bengali",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-bn-email-111",
+   "facts": {
+    "language": "Bengali in Bengali script",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "bengali",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-pa-whatsapp-100",
+   "facts": {
+    "language": "Punjabi in Gurmukhi script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "gurmukhi",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-pa-email-111",
+   "facts": {
+    "language": "Punjabi in Gurmukhi script",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "gurmukhi",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-or-whatsapp-100",
+   "facts": {
+    "language": "Odia in Odia script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "oriya",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-or-email-111",
+   "facts": {
+    "language": "Odia in Odia script",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "oriya",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-ur-whatsapp-100",
+   "facts": {
+    "language": "Urdu in Urdu (Nastaliq) script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "arabic",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-ur-email-111",
+   "facts": {
+    "language": "Urdu in Urdu (Nastaliq) script",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "arabic",
+    "hinglish": false
+   }
   }
  ]
 }
