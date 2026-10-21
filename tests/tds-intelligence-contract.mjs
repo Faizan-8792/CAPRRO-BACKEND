@@ -92,6 +92,7 @@ async function runSuite() {
   }
   const challan = await seedCheck("CHALLAN_UNMAPPED");
   const pan = await seedCheck("PAN_MISSING");
+  const noPan = await seedCheck("CHALLAN_UNMAPPED", { deducteePan: "" });
 
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
@@ -105,6 +106,7 @@ async function runSuite() {
   try {
     const offPreview = await call("POST", `/api/tds-health/runs/${runId}/action-plan/preview`, planBody());
     const offSteps = offPreview.json?.result?.plan?.[0]?.correctionChecklist || [];
+    check("with intelligence off the preview carries no deductee groups", offPreview.status === 200 && !("deducteeGroups" in (offPreview.json?.result || {})));
     check("with intelligence off the plan keeps the earlier family checklist", offPreview.status === 200 && offSteps[0] === "Review ITNS 281 source row", JSON.stringify(offSteps));
     const offDraft = await call("POST", `/api/tds-health/runs/${runId}/action-drafts`, { checkIds: [String(challan._id)], consent: true });
     check("with intelligence off the draft route answers 404 naming the flag", offDraft.status === 404 && offDraft.json?.featureFlag === "intelligence");
@@ -113,6 +115,10 @@ async function runSuite() {
     const onPreview = await call("POST", `/api/tds-health/runs/${runId}/action-plan/preview`, planBody());
     const onSteps = onPreview.json?.result?.plan?.[0]?.correctionChecklist || [];
     check("with intelligence on the plan carries the per-status checklist for a challan not mapped", onSteps.length === TDS_ACTION_CHECKLISTS.CHALLAN_UNMAPPED.length && onSteps[0] === TDS_ACTION_CHECKLISTS.CHALLAN_UNMAPPED[0], JSON.stringify(onSteps));
+    const grouped = await call("POST", `/api/tds-health/runs/${runId}/action-plan/preview`, planBody({ checkIds: [String(challan._id), String(pan._id), String(noPan._id)] }));
+    const groups = grouped.json?.result?.deducteeGroups;
+    check("with intelligence on the planned checks are grouped by deductee PAN, one follow-up per deductee", groups?.groups?.length === 1 && groups.groups[0].deducteePan === PAN && groups.groups[0].count === 2 && groups.groups[0].differenceMinor === 400000 && groups.withoutPan === 1, JSON.stringify(groups));
+    check("a check with no deductee PAN is counted, not grouped", grouped.status === 200 && groups?.groups?.every((group) => group.deducteePan));
     const listed = await call("GET", `/api/tds-health/runs/${runId}/action-plan`);
     check("the action-plan list suggests the same per-status checklist", (listed.json?.result?.items || listed.json?.items || []).some((entry) => entry.suggestedChecklist?.[0] === TDS_ACTION_CHECKLISTS.CHALLAN_UNMAPPED[0] || entry.suggestedChecklist?.[0] === TDS_ACTION_CHECKLISTS.PAN_MISSING[0]), JSON.stringify(listed.json)?.slice(0, 300));
 

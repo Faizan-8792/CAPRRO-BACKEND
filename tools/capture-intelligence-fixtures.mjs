@@ -68,6 +68,30 @@ async function capture() {
   const leftover = await item(july, { status: "MISSING_IN_2B", gstin: "24AABCU9603R1ZM", number: "KY/2231", books: money(1680000, 302400) });
   await item(july, { status: "MATCHED", gstin: "24AABCU9603R1ZM", number: "KY/2213", books: money(840000, 151200), portal: money(840000, 151200) });
 
+  // A TDS health run as the worker publishes it, with two checks for one deductee and one with no PAN.
+  const tdsRunId = oid();
+  await raw("tdshealthruns").insertOne({
+    _id: tdsRunId, firmId, clientId, tan: "PNER12345F", financialYear: "2025-26", quarter: "Q2", statementType: "26Q",
+    sourceImports: { deductionsBatchId: oid(), challansBatchId: oid(), statementsBatchId: oid(), creditBatchId: null },
+    sourceFingerprint: "b".repeat(64), revision: 1, rolloutVersion: 0, generationAttempt: "gen-1", activeGenerationAttempt: "gen-1",
+    status: "REVIEW", checkVersion: 1, jobId: oid(),
+    summary: { deductedMinor: 0, depositedMinor: 0, reportedMinor: 0, importedCreditMinor: 0, estimatedGapMinor: 0, totalChecks: 3, openChecks: 3, actionPlannedChecks: 0, resolvedChecks: 0 },
+    calculationPolicy: { version: "tds-health-v1-no-rate-engine", sourceLabel: "Imported register", sourceReference: "Arithmetic comparison", estimate: true, professionalConfirmed: false, ratesApplied: false },
+    createdAt: now, updatedAt: now,
+  });
+  const tdsCheck = async (status, deducteePan) => {
+    const doc = {
+      _id: oid(), firmId, runId: tdsRunId, clientId, generationAttempt: "gen-1", itemKey: `${status}-${n++}`, checkVersion: 1, status,
+      dimension: status.startsWith("PAN") ? "PAN" : "DEPOSIT", severity: "ERROR", state: "OPEN", title: `Check ${status}`, explanation: "Computed from the imported rows.",
+      recommendedAction: "Review.", deducteePan, sectionCode: "194J", expectedMinor: 1000000, actualMinor: 800000, differenceMinor: 200000,
+      sourceRows: [{ rowId: oid(), batchId: oid(), kind: "TDS_DEDUCTIONS", sourceRow: 2, label: "Row 2" }], sourceEvidenceCount: 1, sourceEvidenceHash: "a".repeat(64),
+      resolution: { version: 0 }, ruleVersion: "tds-health-v1-no-rate-engine", sourceLabel: "Imported register", sourceReference: "Arithmetic comparison", createdAt: now, updatedAt: now,
+    };
+    await raw("tdshealthchecks").insertOne(doc);
+    return String(doc._id);
+  };
+  const tdsChecks = [await tdsCheck("CHALLAN_UNMAPPED", "ABCPR1234K"), await tdsCheck("PAN_MISSING", "ABCPR1234K"), await tdsCheck("CHALLAN_UNMAPPED", "")];
+
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -115,6 +139,12 @@ async function capture() {
     save("case-document-task", await call("POST", `/api/cases/${caseId}/document-requests`, {}));
     await raw("tasks").insertOne({ _id: oid(), firmId, title: "GSTR-3B Sep 2026", clientName: "Evergreen Textiles", dueDateISO: new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10), status: "WAITING_DOCS", isActive: true, assignedTo: ownerId, createdAt: now, updatedAt: now });
     save("priorities", await call("GET", "/api/home/priorities"));
+    save("tds-action-plan-preview", await call("POST", `/api/tds-health/runs/${tdsRunId}/action-plan/preview`, { checkIds: tdsChecks, ownerUserId: String(ownerId), dueDateISO: "2026-11-15", priority: "HIGH", reviewerNote: "Shared note." }));
+    mock.on((body) => {
+      const ids = [...String(body.messages[1].content).matchAll(/"id":"([a-f0-9]{24})"/g)].map((m) => m[1]);
+      return JSON.stringify({ items: ids.map((id) => ({ id, cannotTell: false, reviewerNote: "Map the challan to section 194J for the quarter before any correction statement is prepared.", chaseMessage: "Dear {{client}}, please share the challan counterfoil for {{deductee}} for {{period}} (section {{section}}, difference {{amount}}). Regards, {{sender}}" })) });
+    });
+    save("tds-action-drafts", await call("POST", `/api/tds-health/runs/${tdsRunId}/action-drafts`, { checkIds: tdsChecks.slice(0, 2), consent: true }));
     console.log("captured into", out.pathname);
     return 0;
   } finally {

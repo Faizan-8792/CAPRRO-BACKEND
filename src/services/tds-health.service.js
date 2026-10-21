@@ -1580,7 +1580,29 @@ async function buildActionPlan({
       checkId, itemKey, checkVersion, resolutionVersion, ownerUserId: owner, dueDateISO: due, priority: level, reviewerNote: note, clientChaseMessage: chase,
     })),
   });
-  return { run, checks: orderedChecks, plan, fingerprint };
+  return { run, checks: orderedChecks, plan, fingerprint, intelligence: specificChecklists };
+}
+
+// W11 IN17: the planned checks grouped by deductee PAN, so a reviewer sends one follow-up per deductee instead of
+// one per check. Presentation only: derived from the checks, outside the plan fingerprint, nothing stored. A check
+// with no PAN is counted, not grouped. Largest group first, then PAN.
+function deducteeGroupsFor(checks) {
+  const groups = new Map();
+  let withoutPan = 0;
+  for (const check of checks) {
+    const pan = String(check.deducteePan || "").trim().toUpperCase();
+    if (!pan) {
+      withoutPan += 1;
+      continue;
+    }
+    if (!groups.has(pan)) groups.set(pan, { deducteePan: pan, checkIds: [], titles: [], differenceMinor: 0 });
+    const group = groups.get(pan);
+    group.checkIds.push(String(check._id));
+    group.titles.push(check.title);
+    group.differenceMinor += Math.abs(Number(check.differenceMinor) || 0);
+  }
+  const list = [...groups.values()].sort((a, b) => b.checkIds.length - a.checkIds.length || a.deducteePan.localeCompare(b.deducteePan));
+  return { groups: list.map((group) => ({ ...group, count: group.checkIds.length })), withoutPan };
 }
 
 async function previewTdsActionPlan(input) {
@@ -1590,6 +1612,7 @@ async function previewTdsActionPlan(input) {
     planFingerprint: built.fingerprint,
     commitToken: actionToken(built.fingerprint),
     expiresInSeconds: ACTION_TOKEN_TTL_MS / 1000,
+    ...(built.intelligence ? { deducteeGroups: deducteeGroupsFor(built.checks) } : {}),
   };
 }
 
