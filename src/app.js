@@ -28,6 +28,7 @@ import caseRoutes from "./routes/case.routes.js";
 import engagementRoutes from "./routes/engagement.routes.js";
 import auditPackRoutes from "./routes/audit-pack.routes.js";
 import booksRoutes from "./routes/books.routes.js";
+import aiDraftRoutes from "./routes/ai-draft.routes.js";
 import firmOperationsRoutes from "./routes/firm-operations.routes.js";
 import digestRoutes from "./routes/digest.routes.js";
 import portalMapRoutes from "./routes/portal-map.routes.js";
@@ -172,6 +173,19 @@ const PUBLIC_ERROR_CODES = new Set([
   "BOOKS_SNAPSHOT_EMPTY",
   "BOOKS_SNAPSHOT_NOT_SEALED",
   "BOOKS_SNAPSHOT_MISMATCH",
+  // W11 IN5: why a model draft was refused before anything was sent, and the one conflict a draft can have.
+  "AI_FEATURE_OFF",
+  "AI_DRAFTING_OFF_FOR_FIRM",
+  "AI_CONSENT_REQUIRED",
+  "AI_NOTHING_SELECTED",
+  "AI_TOO_MANY_ITEMS",
+  "AI_DRAFT_ALREADY_DECIDED",
+  // W11: a reconciliation still being prepared, a notice whose documents or reply-by date are not confirmed yet,
+  // a file whose headings cannot be read.
+  "GST_RUN_NOT_READY",
+  "CASE_DOCUMENTS_NOT_CONFIRMED",
+  "CASE_DUE_DATE_NOT_CONFIRMED",
+  "IMPORT_HEADINGS_UNREADABLE",
 ]);
 
 const PUBLIC_IMPORT_ERROR_MESSAGES = Object.freeze({
@@ -667,6 +681,8 @@ app.use("/api/engagements", engagementRoutes);
 // W10: audit packs (Clause 44 first). Behind the auditPacks flag; mounted before the catch-all.
 app.use("/api/audit-packs", auditPackRoutes);
 app.use("/api/books", booksRoutes);
+// W11: the shared intelligence layer (the firm's opt-in, drafts and their outcomes). Mounted before the catch-all.
+app.use("/api/ai-drafts", aiDraftRoutes);
 app.use("/api/digests", digestRoutes);
 // GD28: the GST downloader's signed portal map. Mounted before the /api
 // catch-all below, which would otherwise answer every one of its paths.

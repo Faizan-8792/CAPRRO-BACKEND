@@ -1,14 +1,24 @@
 import ProviderUsage, { DEEPSEEK_OPERATIONS } from "../models/ProviderUsage.js";
+import {
+  DEFAULT_DEEPSEEK_FALLBACK_MODEL,
+  DEFAULT_DEEPSEEK_MODEL,
+  resolveDeepSeekModel,
+} from "./ai/deepseek-models.js";
 
 const DEEPSEEK_URL =
   process.env.DEEPSEEK_URL || "https://api.deepseek.com/chat/completions";
 // Models are env-configurable so provider naming changes never need a code
-// deploy ("deepseek-chat" is retired). Default general model is the cheaper/
-// faster "flash"; callers that need maximum accuracy (e.g. the classifier) pass
-// an explicit model. Fallback is the higher-accuracy "pro" for reliability.
-const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-v4-flash";
-const DEEPSEEK_MODEL_FALLBACK =
-  process.env.DEEPSEEK_MODEL_FALLBACK || "deepseek-v4-pro";
+// deploy. Default general model is the cheaper/faster "flash"; callers that need
+// maximum accuracy (e.g. the classifier) pass an explicit model. Fallback is the
+// higher-accuracy "pro" for reliability. W11 IN1: every name goes through
+// resolveDeepSeekModel, so an environment still naming a retired model
+// ("deepseek-v4-flash", retired 2026-09-10; "deepseek-chat", 2026-07-24) is
+// translated to the name that replaced it instead of failing.
+const DEEPSEEK_MODEL = resolveDeepSeekModel(process.env.DEEPSEEK_MODEL, DEFAULT_DEEPSEEK_MODEL);
+const DEEPSEEK_MODEL_FALLBACK = resolveDeepSeekModel(
+  process.env.DEEPSEEK_MODEL_FALLBACK,
+  DEFAULT_DEEPSEEK_FALLBACK_MODEL,
+);
 
 // O10 spend meter/cap: DeepSeek is billed per call, and callDeepSeek is the one
 // choke point every caller (classifier, insights, reminder, standard-guidance,
@@ -100,6 +110,23 @@ function redactPII(text) {
   );
 }
 
+// W11 IN2: the token counts DeepSeek reports with every answer (OpenAI-compatible `usage`, plus DeepSeek's own
+// cache-hit and cache-miss split of the prompt). Only non-negative safe integers are kept; an answer without
+// usage, or with a shape this does not recognise, gives null and nothing is recorded - never a guessed zero.
+function readUsage(usage) {
+  if (!usage || typeof usage !== "object") return null;
+  const count = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
+  const promptTokens = count(usage.prompt_tokens);
+  const completionTokens = count(usage.completion_tokens);
+  if (promptTokens === null && completionTokens === null) return null;
+  return {
+    promptTokens: promptTokens ?? 0,
+    cacheHitTokens: count(usage.prompt_cache_hit_tokens) ?? 0,
+    cacheMissTokens: count(usage.prompt_cache_miss_tokens) ?? 0,
+    completionTokens: completionTokens ?? 0,
+  };
+}
+
 function isRetriable(status) {
   return status === 0 || status === 429 || (status >= 500 && status <= 599);
 }
@@ -176,7 +203,7 @@ async function attemptDeepSeek({
     if (typeof content !== "string" || !content.trim()) {
       return { ok: false, status: 502, reason: "LLM returned no content" };
     }
-    return { ok: true, content, provider: "DEEPSEEK", model };
+    return { ok: true, content, provider: "DEEPSEEK", model, usage: readUsage(payload?.usage) };
   } catch (error) {
     const timeout = error?.name === "AbortError";
     return {
@@ -247,7 +274,7 @@ async function callDeepSeek({
   // recordOperation never throws; a failure to count does not stop the call.
   await ProviderUsage.recordOperation({ userId, provider: "DEEPSEEK", operation });
   const attemptsPerModel = Math.max(1, Number(maxAttemptsPerModel) || 1);
-  const primary = model || DEEPSEEK_MODEL;
+  const primary = resolveDeepSeekModel(model, DEEPSEEK_MODEL);
   const models = [primary];
   if (DEEPSEEK_MODEL_FALLBACK && DEEPSEEK_MODEL_FALLBACK !== primary) {
     models.push(DEEPSEEK_MODEL_FALLBACK);
@@ -265,7 +292,13 @@ async function callDeepSeek({
         timeoutMs,
         temperature,
       });
-      if (r.ok) return r;
+      if (r.ok) {
+        // IN2: best effort, like recordOperation - a failure to count never fails the answer.
+        if (r.usage) {
+          await ProviderUsage.recordTokens({ userId, provider: "DEEPSEEK", operation, usage: r.usage });
+        }
+        return r;
+      }
       last = r;
       if (!isRetriable(r.status)) break;
       await new Promise((s) => setTimeout(s, 400 * (attempt + 1)));

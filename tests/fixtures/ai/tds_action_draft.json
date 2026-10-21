@@ -1,0 +1,907 @@
+{
+ "task": "tds_action_draft",
+ "builtBy": "build-fixtures.mjs",
+ "seed": 20261021,
+ "cases": [
+  {
+   "id": "tds-0",
+   "facts": {
+    "status": "RETURN_NOT_FILED",
+    "statusLabel": "Quarterly statement is not recorded as filed",
+    "dimension": "STATEMENT",
+    "severity": "ERROR",
+    "sectionLabel": "192",
+    "period": "2025-26 Q1",
+    "statementType": "26Q",
+    "difference": "shortfall",
+    "deducteeKnown": true,
+    "checklist": [
+     "Confirm on TRACES or the e-filing portal whether the quarterly statement was filed",
+     "If it was filed, record the token number and filing date against this run",
+     "If not, collect the deduction and challan details for the quarter and prepare the statement",
+     "Reviewer checks the statement against the register before it is filed",
+     "Record the filing acknowledgement"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-1",
+   "facts": {
+    "status": "DEPOSIT_MISSING",
+    "statusLabel": "No mapped ITNS 281 deposit found",
+    "dimension": "DEPOSIT",
+    "severity": "ERROR",
+    "sectionLabel": "194C",
+    "period": "2025-26 Q3",
+    "statementType": "24Q",
+    "difference": "shortfall",
+    "deducteeKnown": true,
+    "checklist": [
+     "Ask the client for the ITNS 281 challan counterfoil or bank statement entry for this deduction",
+     "Match BSR code, challan date and serial number to the deduction's section and quarter",
+     "If no deposit was made, record that for the reviewer before any payment is advised",
+     "Record the evidence against this check"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-2",
+   "facts": {
+    "status": "SHORT_DEPOSIT_ESTIMATE",
+    "statusLabel": "Potential short deposit",
+    "dimension": "DEPOSIT",
+    "severity": "ERROR",
+    "sectionLabel": "194H",
+    "period": "2025-26 Q3",
+    "statementType": "24Q",
+    "difference": "none",
+    "deducteeKnown": true,
+    "checklist": [
+     "List the deductions and challans mapped to this section and quarter",
+     "Look for a challan mapped to a different section or quarter",
+     "Reviewer confirms whether the difference is real before any payment is advised",
+     "Record the conclusion and the evidence it rests on"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-3",
+   "facts": {
+    "status": "CHALLAN_UNMAPPED",
+    "statusLabel": "ITNS 281 challan is not mapped",
+    "dimension": "DEPOSIT",
+    "severity": "WARNING",
+    "sectionLabel": "194C",
+    "period": "2025-26 Q2",
+    "statementType": "26Q",
+    "difference": "none",
+    "deducteeKnown": false,
+    "checklist": [
+     "Read BSR code, challan date, serial number and amount from the challan",
+     "Match it to the deductions of the right section and quarter",
+     "If the challan was already used in a filed statement, note it for a correction statement",
+     "Record the mapping and who confirmed it"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-4",
+   "facts": {
+    "status": "DEDUCTION_NOT_REPORTED",
+    "statusLabel": "Imported deduction is not fully reported",
+    "dimension": "STATEMENT",
+    "severity": "WARNING",
+    "sectionLabel": "192",
+    "period": "2025-26 Q4",
+    "statementType": "26Q",
+    "difference": "shortfall",
+    "deducteeKnown": true,
+    "checklist": [
+     "Compare the register rows with the filed statement for this deductee and section",
+     "Confirm whether the deduction belongs to this quarter",
+     "Prepare a correction statement adding the missing rows if the reviewer agrees",
+     "Record the correction token once filed"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-5",
+   "facts": {
+    "status": "PAN_MISSING",
+    "statusLabel": "Deductee PAN is missing",
+    "dimension": "PAN",
+    "severity": "WARNING",
+    "sectionLabel": "194J",
+    "period": "2025-26 Q4",
+    "statementType": "24Q",
+    "difference": "shortfall",
+    "deducteeKnown": false,
+    "checklist": [
+     "Ask the client for the deductee's PAN with supporting evidence",
+     "Record the PAN and its source",
+     "Reviewer decides whether a correction statement is needed once the PAN is known"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-6",
+   "facts": {
+    "status": "PAN_FORMAT_INVALID",
+    "statusLabel": "Local PAN format check failed",
+    "dimension": "PAN",
+    "severity": "ERROR",
+    "sectionLabel": "194I",
+    "period": "2025-26 Q1",
+    "statementType": "24Q",
+    "difference": "shortfall",
+    "deducteeKnown": false,
+    "checklist": [
+     "Check the PAN as written in the register against the deductee's documents",
+     "Correct the register entry, or record evidence that the PAN as written is right",
+     "Reviewer decides whether a correction statement is needed"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-7",
+   "facts": {
+    "status": "CREDIT_MISSING_IN_IMPORTED_26AS",
+    "statusLabel": "Credit is missing in imported 26AS/TRACES evidence",
+    "dimension": "CREDIT",
+    "severity": "WARNING",
+    "sectionLabel": "194J",
+    "period": "2025-26 Q4",
+    "statementType": "24Q",
+    "difference": "shortfall",
+    "deducteeKnown": false,
+    "checklist": [
+     "Download the latest 26AS or TRACES statement for the period",
+     "Check whether the credit appears under a different PAN, TAN or section",
+     "Follow up with the deductor if the credit is still missing",
+     "Record the follow-up and its date"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-8",
+   "facts": {
+    "status": "CORRECTION_REQUIRED",
+    "statusLabel": "Correction statement follow-up is required",
+    "dimension": "STATEMENT",
+    "severity": "WARNING",
+    "sectionLabel": "194I",
+    "period": "2025-26 Q3",
+    "statementType": "26Q",
+    "difference": "excess",
+    "deducteeKnown": false,
+    "checklist": [
+     "List the rows that need correcting and why",
+     "Prepare the correction statement from the original filed statement",
+     "Reviewer approves the correction before it is filed",
+     "Record the correction acknowledgement and keep the original run"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-9",
+   "facts": {
+    "status": "CERTIFICATE_PENDING",
+    "statusLabel": "Form 16/16A issue is pending or not tracked",
+    "dimension": "CERTIFICATE",
+    "severity": "WARNING",
+    "sectionLabel": "194J",
+    "period": "2025-26 Q2",
+    "statementType": "24Q",
+    "difference": "shortfall",
+    "deducteeKnown": true,
+    "checklist": [
+     "Confirm the quarterly statement for the period is processed",
+     "Generate Form 16 or 16A from TRACES for the deductees concerned",
+     "Issue the certificates and record when and how each was issued"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-10",
+   "facts": {
+    "status": "RETURN_NOT_FILED",
+    "statusLabel": "Quarterly statement is not recorded as filed",
+    "dimension": "STATEMENT",
+    "severity": "ERROR",
+    "sectionLabel": "194I",
+    "period": "2025-26 Q4",
+    "statementType": "24Q",
+    "difference": "shortfall",
+    "deducteeKnown": true,
+    "checklist": [
+     "Confirm on TRACES or the e-filing portal whether the quarterly statement was filed",
+     "If it was filed, record the token number and filing date against this run",
+     "If not, collect the deduction and challan details for the quarter and prepare the statement",
+     "Reviewer checks the statement against the register before it is filed",
+     "Record the filing acknowledgement"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-11",
+   "facts": {
+    "status": "DEPOSIT_MISSING",
+    "statusLabel": "No mapped ITNS 281 deposit found",
+    "dimension": "DEPOSIT",
+    "severity": "ERROR",
+    "sectionLabel": "194J",
+    "period": "2025-26 Q2",
+    "statementType": "26Q",
+    "difference": "excess",
+    "deducteeKnown": true,
+    "checklist": [
+     "Ask the client for the ITNS 281 challan counterfoil or bank statement entry for this deduction",
+     "Match BSR code, challan date and serial number to the deduction's section and quarter",
+     "If no deposit was made, record that for the reviewer before any payment is advised",
+     "Record the evidence against this check"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-12",
+   "facts": {
+    "status": "SHORT_DEPOSIT_ESTIMATE",
+    "statusLabel": "Potential short deposit",
+    "dimension": "DEPOSIT",
+    "severity": "ERROR",
+    "sectionLabel": "194H",
+    "period": "2025-26 Q3",
+    "statementType": "24Q",
+    "difference": "excess",
+    "deducteeKnown": true,
+    "checklist": [
+     "List the deductions and challans mapped to this section and quarter",
+     "Look for a challan mapped to a different section or quarter",
+     "Reviewer confirms whether the difference is real before any payment is advised",
+     "Record the conclusion and the evidence it rests on"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-13",
+   "facts": {
+    "status": "CHALLAN_UNMAPPED",
+    "statusLabel": "ITNS 281 challan is not mapped",
+    "dimension": "DEPOSIT",
+    "severity": "ERROR",
+    "sectionLabel": "194J",
+    "period": "2025-26 Q3",
+    "statementType": "24Q",
+    "difference": "shortfall",
+    "deducteeKnown": true,
+    "checklist": [
+     "Read BSR code, challan date, serial number and amount from the challan",
+     "Match it to the deductions of the right section and quarter",
+     "If the challan was already used in a filed statement, note it for a correction statement",
+     "Record the mapping and who confirmed it"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-14",
+   "facts": {
+    "status": "DEDUCTION_NOT_REPORTED",
+    "statusLabel": "Imported deduction is not fully reported",
+    "dimension": "STATEMENT",
+    "severity": "WARNING",
+    "sectionLabel": "194I",
+    "period": "2025-26 Q3",
+    "statementType": "26Q",
+    "difference": "shortfall",
+    "deducteeKnown": false,
+    "checklist": [
+     "Compare the register rows with the filed statement for this deductee and section",
+     "Confirm whether the deduction belongs to this quarter",
+     "Prepare a correction statement adding the missing rows if the reviewer agrees",
+     "Record the correction token once filed"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-15",
+   "facts": {
+    "status": "PAN_MISSING",
+    "statusLabel": "Deductee PAN is missing",
+    "dimension": "PAN",
+    "severity": "WARNING",
+    "sectionLabel": "194I",
+    "period": "2025-26 Q1",
+    "statementType": "24Q",
+    "difference": "shortfall",
+    "deducteeKnown": true,
+    "checklist": [
+     "Ask the client for the deductee's PAN with supporting evidence",
+     "Record the PAN and its source",
+     "Reviewer decides whether a correction statement is needed once the PAN is known"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-16",
+   "facts": {
+    "status": "PAN_FORMAT_INVALID",
+    "statusLabel": "Local PAN format check failed",
+    "dimension": "PAN",
+    "severity": "WARNING",
+    "sectionLabel": "194J",
+    "period": "2025-26 Q4",
+    "statementType": "24Q",
+    "difference": "none",
+    "deducteeKnown": false,
+    "checklist": [
+     "Check the PAN as written in the register against the deductee's documents",
+     "Correct the register entry, or record evidence that the PAN as written is right",
+     "Reviewer decides whether a correction statement is needed"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-17",
+   "facts": {
+    "status": "CREDIT_MISSING_IN_IMPORTED_26AS",
+    "statusLabel": "Credit is missing in imported 26AS/TRACES evidence",
+    "dimension": "CREDIT",
+    "severity": "ERROR",
+    "sectionLabel": "194J",
+    "period": "2025-26 Q4",
+    "statementType": "24Q",
+    "difference": "excess",
+    "deducteeKnown": true,
+    "checklist": [
+     "Download the latest 26AS or TRACES statement for the period",
+     "Check whether the credit appears under a different PAN, TAN or section",
+     "Follow up with the deductor if the credit is still missing",
+     "Record the follow-up and its date"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-18",
+   "facts": {
+    "status": "CORRECTION_REQUIRED",
+    "statusLabel": "Correction statement follow-up is required",
+    "dimension": "STATEMENT",
+    "severity": "ERROR",
+    "sectionLabel": "192",
+    "period": "2025-26 Q3",
+    "statementType": "26Q",
+    "difference": "excess",
+    "deducteeKnown": true,
+    "checklist": [
+     "List the rows that need correcting and why",
+     "Prepare the correction statement from the original filed statement",
+     "Reviewer approves the correction before it is filed",
+     "Record the correction acknowledgement and keep the original run"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-19",
+   "facts": {
+    "status": "CERTIFICATE_PENDING",
+    "statusLabel": "Form 16/16A issue is pending or not tracked",
+    "dimension": "CERTIFICATE",
+    "severity": "ERROR",
+    "sectionLabel": "194H",
+    "period": "2025-26 Q3",
+    "statementType": "26Q",
+    "difference": "excess",
+    "deducteeKnown": true,
+    "checklist": [
+     "Confirm the quarterly statement for the period is processed",
+     "Generate Form 16 or 16A from TRACES for the deductees concerned",
+     "Issue the certificates and record when and how each was issued"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-20",
+   "facts": {
+    "status": "RETURN_NOT_FILED",
+    "statusLabel": "Quarterly statement is not recorded as filed",
+    "dimension": "STATEMENT",
+    "severity": "ERROR",
+    "sectionLabel": "194H",
+    "period": "2025-26 Q3",
+    "statementType": "24Q",
+    "difference": "none",
+    "deducteeKnown": true,
+    "checklist": [
+     "Confirm on TRACES or the e-filing portal whether the quarterly statement was filed",
+     "If it was filed, record the token number and filing date against this run",
+     "If not, collect the deduction and challan details for the quarter and prepare the statement",
+     "Reviewer checks the statement against the register before it is filed",
+     "Record the filing acknowledgement"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-21",
+   "facts": {
+    "status": "DEPOSIT_MISSING",
+    "statusLabel": "No mapped ITNS 281 deposit found",
+    "dimension": "DEPOSIT",
+    "severity": "WARNING",
+    "sectionLabel": "192",
+    "period": "2025-26 Q4",
+    "statementType": "24Q",
+    "difference": "excess",
+    "deducteeKnown": false,
+    "checklist": [
+     "Ask the client for the ITNS 281 challan counterfoil or bank statement entry for this deduction",
+     "Match BSR code, challan date and serial number to the deduction's section and quarter",
+     "If no deposit was made, record that for the reviewer before any payment is advised",
+     "Record the evidence against this check"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-22",
+   "facts": {
+    "status": "SHORT_DEPOSIT_ESTIMATE",
+    "statusLabel": "Potential short deposit",
+    "dimension": "DEPOSIT",
+    "severity": "WARNING",
+    "sectionLabel": "194J",
+    "period": "2025-26 Q2",
+    "statementType": "26Q",
+    "difference": "excess",
+    "deducteeKnown": true,
+    "checklist": [
+     "List the deductions and challans mapped to this section and quarter",
+     "Look for a challan mapped to a different section or quarter",
+     "Reviewer confirms whether the difference is real before any payment is advised",
+     "Record the conclusion and the evidence it rests on"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-23",
+   "facts": {
+    "status": "CHALLAN_UNMAPPED",
+    "statusLabel": "ITNS 281 challan is not mapped",
+    "dimension": "DEPOSIT",
+    "severity": "ERROR",
+    "sectionLabel": "194C",
+    "period": "2025-26 Q1",
+    "statementType": "26Q",
+    "difference": "excess",
+    "deducteeKnown": true,
+    "checklist": [
+     "Read BSR code, challan date, serial number and amount from the challan",
+     "Match it to the deductions of the right section and quarter",
+     "If the challan was already used in a filed statement, note it for a correction statement",
+     "Record the mapping and who confirmed it"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-24",
+   "facts": {
+    "status": "DEDUCTION_NOT_REPORTED",
+    "statusLabel": "Imported deduction is not fully reported",
+    "dimension": "STATEMENT",
+    "severity": "WARNING",
+    "sectionLabel": "194J",
+    "period": "2025-26 Q1",
+    "statementType": "24Q",
+    "difference": "none",
+    "deducteeKnown": true,
+    "checklist": [
+     "Compare the register rows with the filed statement for this deductee and section",
+     "Confirm whether the deduction belongs to this quarter",
+     "Prepare a correction statement adding the missing rows if the reviewer agrees",
+     "Record the correction token once filed"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-25",
+   "facts": {
+    "status": "PAN_MISSING",
+    "statusLabel": "Deductee PAN is missing",
+    "dimension": "PAN",
+    "severity": "ERROR",
+    "sectionLabel": "194J",
+    "period": "2025-26 Q4",
+    "statementType": "24Q",
+    "difference": "shortfall",
+    "deducteeKnown": true,
+    "checklist": [
+     "Ask the client for the deductee's PAN with supporting evidence",
+     "Record the PAN and its source",
+     "Reviewer decides whether a correction statement is needed once the PAN is known"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-26",
+   "facts": {
+    "status": "PAN_FORMAT_INVALID",
+    "statusLabel": "Local PAN format check failed",
+    "dimension": "PAN",
+    "severity": "WARNING",
+    "sectionLabel": "192",
+    "period": "2025-26 Q2",
+    "statementType": "24Q",
+    "difference": "none",
+    "deducteeKnown": false,
+    "checklist": [
+     "Check the PAN as written in the register against the deductee's documents",
+     "Correct the register entry, or record evidence that the PAN as written is right",
+     "Reviewer decides whether a correction statement is needed"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-27",
+   "facts": {
+    "status": "CREDIT_MISSING_IN_IMPORTED_26AS",
+    "statusLabel": "Credit is missing in imported 26AS/TRACES evidence",
+    "dimension": "CREDIT",
+    "severity": "ERROR",
+    "sectionLabel": "192",
+    "period": "2025-26 Q4",
+    "statementType": "24Q",
+    "difference": "none",
+    "deducteeKnown": true,
+    "checklist": [
+     "Download the latest 26AS or TRACES statement for the period",
+     "Check whether the credit appears under a different PAN, TAN or section",
+     "Follow up with the deductor if the credit is still missing",
+     "Record the follow-up and its date"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-28",
+   "facts": {
+    "status": "CORRECTION_REQUIRED",
+    "statusLabel": "Correction statement follow-up is required",
+    "dimension": "STATEMENT",
+    "severity": "ERROR",
+    "sectionLabel": "194I",
+    "period": "2025-26 Q1",
+    "statementType": "26Q",
+    "difference": "excess",
+    "deducteeKnown": true,
+    "checklist": [
+     "List the rows that need correcting and why",
+     "Prepare the correction statement from the original filed statement",
+     "Reviewer approves the correction before it is filed",
+     "Record the correction acknowledgement and keep the original run"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-29",
+   "facts": {
+    "status": "CERTIFICATE_PENDING",
+    "statusLabel": "Form 16/16A issue is pending or not tracked",
+    "dimension": "CERTIFICATE",
+    "severity": "ERROR",
+    "sectionLabel": "194I",
+    "period": "2025-26 Q1",
+    "statementType": "24Q",
+    "difference": "none",
+    "deducteeKnown": true,
+    "checklist": [
+     "Confirm the quarterly statement for the period is processed",
+     "Generate Form 16 or 16A from TRACES for the deductees concerned",
+     "Issue the certificates and record when and how each was issued"
+    ]
+   },
+   "expect": {
+    "cannotTell": false
+   }
+  },
+  {
+   "id": "tds-cannot-0",
+   "facts": {
+    "status": "UNRECOGNISED",
+    "statusLabel": "",
+    "dimension": "UNKNOWN",
+    "severity": "INFO",
+    "sectionLabel": "not recorded",
+    "period": "not recorded",
+    "statementType": "",
+    "difference": "none",
+    "deducteeKnown": false,
+    "checklist": []
+   },
+   "expect": {
+    "cannotTell": true
+   }
+  },
+  {
+   "id": "tds-cannot-1",
+   "facts": {
+    "status": "UNRECOGNISED",
+    "statusLabel": "",
+    "dimension": "UNKNOWN",
+    "severity": "INFO",
+    "sectionLabel": "not recorded",
+    "period": "not recorded",
+    "statementType": "",
+    "difference": "none",
+    "deducteeKnown": false,
+    "checklist": []
+   },
+   "expect": {
+    "cannotTell": true
+   }
+  },
+  {
+   "id": "tds-cannot-2",
+   "facts": {
+    "status": "UNRECOGNISED",
+    "statusLabel": "",
+    "dimension": "UNKNOWN",
+    "severity": "INFO",
+    "sectionLabel": "not recorded",
+    "period": "not recorded",
+    "statementType": "",
+    "difference": "none",
+    "deducteeKnown": false,
+    "checklist": []
+   },
+   "expect": {
+    "cannotTell": true
+   }
+  },
+  {
+   "id": "tds-cannot-3",
+   "facts": {
+    "status": "UNRECOGNISED",
+    "statusLabel": "",
+    "dimension": "UNKNOWN",
+    "severity": "INFO",
+    "sectionLabel": "not recorded",
+    "period": "not recorded",
+    "statementType": "",
+    "difference": "none",
+    "deducteeKnown": false,
+    "checklist": []
+   },
+   "expect": {
+    "cannotTell": true
+   }
+  },
+  {
+   "id": "tds-cannot-4",
+   "facts": {
+    "status": "UNRECOGNISED",
+    "statusLabel": "",
+    "dimension": "UNKNOWN",
+    "severity": "INFO",
+    "sectionLabel": "not recorded",
+    "period": "not recorded",
+    "statementType": "",
+    "difference": "none",
+    "deducteeKnown": false,
+    "checklist": []
+   },
+   "expect": {
+    "cannotTell": true
+   }
+  },
+  {
+   "id": "tds-cannot-5",
+   "facts": {
+    "status": "UNRECOGNISED",
+    "statusLabel": "",
+    "dimension": "UNKNOWN",
+    "severity": "INFO",
+    "sectionLabel": "not recorded",
+    "period": "not recorded",
+    "statementType": "",
+    "difference": "none",
+    "deducteeKnown": false,
+    "checklist": []
+   },
+   "expect": {
+    "cannotTell": true
+   }
+  },
+  {
+   "id": "tds-cannot-6",
+   "facts": {
+    "status": "UNRECOGNISED",
+    "statusLabel": "",
+    "dimension": "UNKNOWN",
+    "severity": "INFO",
+    "sectionLabel": "not recorded",
+    "period": "not recorded",
+    "statementType": "",
+    "difference": "none",
+    "deducteeKnown": false,
+    "checklist": []
+   },
+   "expect": {
+    "cannotTell": true
+   }
+  },
+  {
+   "id": "tds-cannot-7",
+   "facts": {
+    "status": "UNRECOGNISED",
+    "statusLabel": "",
+    "dimension": "UNKNOWN",
+    "severity": "INFO",
+    "sectionLabel": "not recorded",
+    "period": "not recorded",
+    "statementType": "",
+    "difference": "none",
+    "deducteeKnown": false,
+    "checklist": []
+   },
+   "expect": {
+    "cannotTell": true
+   }
+  },
+  {
+   "id": "tds-cannot-8",
+   "facts": {
+    "status": "UNRECOGNISED",
+    "statusLabel": "",
+    "dimension": "UNKNOWN",
+    "severity": "INFO",
+    "sectionLabel": "not recorded",
+    "period": "not recorded",
+    "statementType": "",
+    "difference": "none",
+    "deducteeKnown": false,
+    "checklist": []
+   },
+   "expect": {
+    "cannotTell": true
+   }
+  },
+  {
+   "id": "tds-cannot-9",
+   "facts": {
+    "status": "UNRECOGNISED",
+    "statusLabel": "",
+    "dimension": "UNKNOWN",
+    "severity": "INFO",
+    "sectionLabel": "not recorded",
+    "period": "not recorded",
+    "statementType": "",
+    "difference": "none",
+    "deducteeKnown": false,
+    "checklist": []
+   },
+   "expect": {
+    "cannotTell": true
+   }
+  },
+  {
+   "id": "tds-cannot-10",
+   "facts": {
+    "status": "UNRECOGNISED",
+    "statusLabel": "",
+    "dimension": "UNKNOWN",
+    "severity": "INFO",
+    "sectionLabel": "not recorded",
+    "period": "not recorded",
+    "statementType": "",
+    "difference": "none",
+    "deducteeKnown": false,
+    "checklist": []
+   },
+   "expect": {
+    "cannotTell": true
+   }
+  },
+  {
+   "id": "tds-cannot-11",
+   "facts": {
+    "status": "UNRECOGNISED",
+    "statusLabel": "",
+    "dimension": "UNKNOWN",
+    "severity": "INFO",
+    "sectionLabel": "not recorded",
+    "period": "not recorded",
+    "statementType": "",
+    "difference": "none",
+    "deducteeKnown": false,
+    "checklist": []
+   },
+   "expect": {
+    "cannotTell": true
+   }
+  }
+ ]
+}

@@ -186,6 +186,10 @@ const CANONICAL_MUTANTS = [
 ];
 
 async function main() {
+  // W11 IN3: the loopback DeepSeek stand-in must exist before anything imports the provider (it reads
+  // DEEPSEEK_URL once); books-ai.service.js below imports it. The key stays blank until a check turns it on.
+  const { ensureMockDeepSeek } = await import("./lib/mock-deepseek.mjs");
+  await ensureMockDeepSeek();
   const mapping = await import("../src/services/books/group-mapping.js");
   const canonical = await import("../src/services/books/tally-canonical.js");
   const ai = await import("../src/services/books/books-ai.service.js");

@@ -569,9 +569,19 @@ for (const [label, operation] of [["no operation", undefined], ["an unknown oper
     let match;
     while ((match = re.exec(text))) {
       sites += 1;
-      if (!/\boperation:\s*"[a-z_]+"/.test(match[1])) missing.push(file.slice(srcRoot.length));
+      // W11 IN5: the shared layer passes its task's operation, which the registry pins below to the list.
+      const registryDispatch = /ai-task\.service\.js$/.test(file) && /\boperation:\s*task\.operation\b/.test(match[1]);
+      if (!registryDispatch && !/\boperation:\s*"[a-z_]+"/.test(match[1])) missing.push(file.slice(srcRoot.length));
     }
   }
+  const { AI_TASK_NAMES, getAiTask } = await import("../src/services/ai/tasks/index.js");
+  const { DEEPSEEK_OPERATIONS } = await import("../src/models/ProviderUsage.js");
+  const unlisted = AI_TASK_NAMES.filter((name) => !DEEPSEEK_OPERATIONS.includes(getAiTask(name).operation));
+  check(
+    "B7 (W11): every AI task in the registry names an operation on DEEPSEEK_OPERATIONS",
+    AI_TASK_NAMES.length >= 4 && unlisted.length === 0,
+    `tasks=${AI_TASK_NAMES.length} unlisted=${unlisted.join(", ") || "none"}`,
+  );
   check(
     "B7 (AP3): every callDeepSeek call site in src passes an operation name",
     sites >= 10 && missing.length === 0,

@@ -14,6 +14,7 @@ import {
   getDesktopReleaseDraft,
   getControlChanges,
   publishDeadlineCatalogue,
+  publishNoticeCatalogue,
 } from "../controllers/appconfig.controller.js";
 
 const router = Router();
@@ -38,6 +39,8 @@ router.patch("/maintenance", authRequired, superLimiter, updateMaintenance);
 router.get("/control-changes", authRequired, superLimiter, getControlChanges);
 // W10 AP40: the owner publishes the statutory calendar; clients read it from the public config above.
 router.patch("/deadline-catalogue", authRequired, superLimiter, publishDeadlineCatalogue);
+// W11 IN21: reply windows per notice form and the Income-tax Act transition rule, published by the owner.
+router.patch("/notice-catalogue", authRequired, superLimiter, publishNoticeCatalogue);
 router.patch("/welcome", authRequired, superLimiter, updateWelcomeAnnouncement);
 router.get("/desktop-release", authRequired, superLimiter, getDesktopReleaseDraft);
 router.patch("/desktop-release", authRequired, superLimiter, updateDesktopRelease);

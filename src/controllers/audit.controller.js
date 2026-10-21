@@ -8,6 +8,12 @@ import {
   wasJsonTruncated,
 } from "../services/deepseek-provider.service.js";
 import { AUDIT_TOPIC_REFERENCE } from "../data/audit-topic-reference.js";
+import {
+  CURRENT_DEEPSEEK_MODELS,
+  DEFAULT_DEEPSEEK_MODEL,
+  RETIRED_DEEPSEEK_MODELS,
+  resolveDeepSeekModel,
+} from "../services/ai/deepseek-models.js";
 import { buildNumericalIntegrityInsights } from "../services/audit-numerical-integrity.service.js";
 import {
   buildCoverageLedger,
@@ -83,9 +89,16 @@ function publicLlmFailureReason(rawReason) {
 // insights and other longer calls use the cheaper general model. Both are
 // env-configurable; a request may override the classifier model only within
 // this allowlist (used for A/B evaluation).
-const ALLOWED_LLM_MODELS = new Set(["deepseek-v4-pro", "deepseek-v4-flash"]);
-const CLASSIFIER_MODEL =
-  process.env.DEEPSEEK_CLASSIFIER_MODEL || "deepseek-v4-pro";
+// W11 IN1: the current names plus the retired ones a shipped client may still send; callDeepSeek translates a
+// retired name to its replacement (services/ai/deepseek-models.js), so neither can reach DeepSeek as is.
+const ALLOWED_LLM_MODELS = new Set([
+  ...CURRENT_DEEPSEEK_MODELS,
+  ...Object.keys(RETIRED_DEEPSEEK_MODELS),
+]);
+const CLASSIFIER_MODEL = resolveDeepSeekModel(
+  process.env.DEEPSEEK_CLASSIFIER_MODEL,
+  "deepseek-v4-pro",
+);
 // Raised from 3500 in lockstep with the desktop client's single-call cap
 // (CaProApiClient.MaxAuditTextChars). Classification is not chunked client-side - a topic
 // verdict does not decompose into several calls and merge the way a list of insights does -
@@ -96,8 +109,10 @@ const REFINE_TEXT_CAP = 12000;
 // imperative framing) drives the quality. The higher-accuracy model is slower
 // here and can time out on 6-8 detailed procedures. Override via
 // DEEPSEEK_INSIGHTS_MODEL if desired.
-const INSIGHTS_MODEL =
-  process.env.DEEPSEEK_INSIGHTS_MODEL || "deepseek-v4-flash";
+const INSIGHTS_MODEL = resolveDeepSeekModel(
+  process.env.DEEPSEEK_INSIGHTS_MODEL,
+  DEFAULT_DEEPSEEK_MODEL,
+);
 
 // Canonical audit-area taxonomy (mirrors the extension's data/topics.json ids).
 // Used so the LLM can classify against ALL areas even when the local keyword

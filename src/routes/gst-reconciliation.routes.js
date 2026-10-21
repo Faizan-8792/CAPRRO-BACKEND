@@ -14,6 +14,12 @@ import {
   updateItemsBulk,
 } from "../controllers/gst-reconciliation.controller.js";
 import {
+  createChaseDrafts,
+  createResidueCauses,
+  showChasePack,
+  showRunCauses,
+} from "../controllers/gst-intelligence.controller.js";
+import {
   authRequiredWithoutUsageTracking,
 } from "../middleware/auth.middleware.js";
 import { trackWorkflow } from "../middleware/workflow-usage.middleware.js";
@@ -44,6 +50,11 @@ router.get("/runs/:id/activity", listActivity);
 router.post("/runs/:id/recover-review", recoverRunReview);
 router.post("/runs/:id/lock", lockRun);
 router.get("/runs/:id/export", exportRun);
+// W11 IN8-IN12: likely causes and the supplier chase pack, also behind the `intelligence` flag.
+router.get("/runs/:id/causes", requireFeatureFlag("intelligence"), showRunCauses);
+router.post("/runs/:id/causes/residue", requireFeatureFlag("intelligence"), createResidueCauses);
+router.get("/runs/:id/chase-pack", requireFeatureFlag("intelligence"), showChasePack);
+router.post("/runs/:id/chase-pack/draft", requireFeatureFlag("intelligence"), createChaseDrafts);
 router.get("/runs/:id", showRun);
 
 export default router;

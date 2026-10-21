@@ -58,10 +58,36 @@ export const DEEPSEEK_OPERATIONS = Object.freeze([
   "case_draft",
   "audit_pack_draft",
   "self_test",
+  // W11 IN3 (2026-10-21): the Tally group suggestion was metered as audit_pack_draft, which mixed two
+  // features in the admin report; it has its own name now. The other four are the W11 features.
+  "books_group_suggest",
+  "gst_cause_residue",
+  "supplier_chase_draft",
+  "import_mapping_suggest",
+  "tds_action_draft",
 ]);
 
 const OPERATION_COUNTER_FIELDS = Object.fromEntries(
   DEEPSEEK_OPERATIONS.map((name) => [name, { type: Number, min: 0 }]),
+);
+
+// W11 IN2: the tokens each feature used, on the same daily rows as the per-feature call counts. Four
+// counters per feature, as DeepSeek reports them: the whole prompt, the part of it served from DeepSeek's
+// prefix cache (billed at about 1/50 of the rest), the part that was not, and the answer.
+export const TOKEN_COUNTERS = Object.freeze([
+  "promptTokens",
+  "cacheHitTokens",
+  "cacheMissTokens",
+  "completionTokens",
+]);
+const TOKEN_COUNTER_FIELDS = Object.fromEntries(
+  TOKEN_COUNTERS.map((name) => [name, { type: Number, min: 0 }]),
+);
+const OPERATION_TOKEN_FIELDS = Object.fromEntries(
+  DEEPSEEK_OPERATIONS.map((name) => [
+    name,
+    { type: new mongoose.Schema(TOKEN_COUNTER_FIELDS, { _id: false }), default: undefined },
+  ]),
 );
 
 const ProviderUsageSchema = new mongoose.Schema(
@@ -94,6 +120,11 @@ const ProviderUsageSchema = new mongoose.Schema(
     // AP3: per-feature counts, on daily rows only, written by recordOperation below. No default,
     // so the weekly, monthly and provider-wide rows never carry the field at all.
     operations: { type: new mongoose.Schema(OPERATION_COUNTER_FIELDS, { _id: false }), default: undefined },
+    // W11 IN2: tokens per feature, daily rows only, written by recordTokens below.
+    operationTokens: {
+      type: new mongoose.Schema(OPERATION_TOKEN_FIELDS, { _id: false }),
+      default: undefined,
+    },
   },
   { timestamps: true },
 );
@@ -255,6 +286,34 @@ ProviderUsageSchema.statics.recordOperation = async function recordOperation({
     await this.updateOne(
       { userId, provider, periodKey: dailyPeriodKey(now) },
       { $inc: { [`operations.${operation}`]: 1 } },
+      { upsert: true },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// W11 IN2: add the tokens one answered call used to its feature's daily row. Same contract as recordOperation:
+// best effort, never throws, and an unknown operation or a usage block with no counts records nothing.
+ProviderUsageSchema.statics.recordTokens = async function recordTokens({
+  userId,
+  provider,
+  operation,
+  usage,
+  now = new Date(),
+}) {
+  if (!DEEPSEEK_OPERATIONS.includes(operation) || !usage || typeof usage !== "object") return false;
+  const inc = {};
+  for (const counter of TOKEN_COUNTERS) {
+    const value = usage[counter];
+    if (Number.isSafeInteger(value) && value > 0) inc[`operationTokens.${operation}.${counter}`] = value;
+  }
+  if (!Object.keys(inc).length) return false;
+  try {
+    await this.updateOne(
+      { userId, provider, periodKey: dailyPeriodKey(now) },
+      { $inc: inc },
       { upsert: true },
     );
     return true;

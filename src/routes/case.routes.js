@@ -30,6 +30,25 @@ import {
   requireFirmWriteAccess,
 } from "../middleware/authorization.middleware.js";
 import { requireFeatureFlag } from "../middleware/rollout.middleware.js";
+import { createCaseDocumentTask, getCaseRuleReading } from "../services/case-intelligence.service.js";
+
+// W11 IN19-IN21: the rule reading of a notice (no model, no consent) and the requested documents as a task.
+async function showRuleReading(req, res, next) {
+  try {
+    return res.json({ ok: true, reading: await getCaseRuleReading({ firmId: req.user.firmId, caseId: req.params.id }) });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function createDocumentRequests(req, res, next) {
+  try {
+    const result = await createCaseDocumentTask({ firmId: req.user.firmId, actorUserId: req.user.id, caseId: req.params.id, input: req.body || {} });
+    return res.status(result.created ? 201 : 200).json({ ok: true, ...result });
+  } catch (error) {
+    return next(error);
+  }
+}
 import {
   OCR_MAX_BYTES,
   OCR_MIME_TYPES,
@@ -93,6 +112,8 @@ router.get("/:id/export", exportCase);
 router.get("/:id", showCase);
 router.patch("/:id", patchCase);
 router.post("/:id/extraction", proposeCaseFields);
+router.get("/:id/rule-reading", requireFeatureFlag("intelligence"), showRuleReading);
+router.post("/:id/document-requests", requireFeatureFlag("intelligence"), createDocumentRequests);
 router.patch("/:id/confirmations", confirmFields);
 router.post("/:id/timeline", createTimelineEntry);
 router.get("/:id/references", listReferences);

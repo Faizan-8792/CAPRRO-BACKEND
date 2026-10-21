@@ -579,6 +579,65 @@ export function previewImport(input) {
  * disagrees with - which is why a merely probable proposal is useful here, where the same guess
  * applied silently at commit time would not be.
  */
+/**
+ * The required fields a mapping leaves unmapped. A kind that takes one of two layouts (a trial balance's closing
+ * balance) is complete only when one layout was found whole; otherwise the first layout's missing columns are
+ * named. W11 IN14: shared by the heading proposal and a remembered mapping, so both say "complete" the same way.
+ */
+export function missingRequiredFor(kind, mapping) {
+  const spec = IMPORT_SPECS[String(kind || "").toUpperCase()];
+  if (!spec) return [];
+  const missing = (spec.required || []).filter((field) => !mapping[field]);
+  if (Array.isArray(spec.requiredOneOf) &&
+    !spec.requiredOneOf.some((group) => group.every((field) => mapping[field]))) {
+    const partial = spec.requiredOneOf.find((group) => group.some((field) => mapping[field]))
+      || spec.requiredOneOf[0];
+    missing.push(...partial.filter((field) => !mapping[field]));
+  }
+  return missing;
+}
+
+/**
+ * W11 IN14/IN15 (2026-10-21): what a mapping memory and a model suggestion need from a file, without a single
+ * cell value leaving this function: the headings, the synonym proposal, the required fields still unmapped,
+ * every field the kind accepts, and per column the share (0-100) of its data cells that look like a date, a
+ * number or a GSTIN, or are empty. Reads at most PROFILE_ROWS data rows.
+ */
+const PROFILE_ROWS = 200;
+const PROFILE_DATE = /^(\d{1,2}[-/.](\d{1,2}|[A-Za-z]{3})[-/.]\d{2,4}|\d{4}-\d{2}-\d{2})$/;
+const PROFILE_NUMBER = /^[-+(]?\s*(?:₹|rs\.?|inr)?\s*[\d,]+(?:\.\d+)?\s*\)?\s*(?:cr|dr)?$/i;
+const PROFILE_GSTIN = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/i;
+
+export function describeImportColumns({ kind, text, delimiter = null }) {
+  const suggestion = suggestImportMapping({ kind, text, delimiter });
+  const parsed = parseDelimited(text, suggestion.delimiter);
+  const shaped = shapeTable(parsed, { dataRowLabels: dataRowLabelsForKind(suggestion.kind) });
+  const dataRows = (shaped.dataRows || []).slice(0, PROFILE_ROWS);
+  const profiles = suggestion.headers.map((_, column) => {
+    let date = 0;
+    let number = 0;
+    let gstin = 0;
+    let empty = 0;
+    for (const row of dataRows) {
+      const cell = String(row?.cells?.[column] ?? "").trim();
+      if (!cell) empty += 1;
+      else if (PROFILE_GSTIN.test(cell)) gstin += 1;
+      else if (PROFILE_DATE.test(cell)) date += 1;
+      else if (PROFILE_NUMBER.test(cell)) number += 1;
+    }
+    const share = (count) => (dataRows.length ? Math.round((count * 100) / dataRows.length) : 0);
+    return { dateLike: share(date), numeric: share(number), gstinLike: share(gstin), empty: share(empty) };
+  });
+  const spec = IMPORT_SPECS[suggestion.kind];
+  return {
+    ...suggestion,
+    profiles,
+    sampledRows: dataRows.length,
+    requiredFields: [...(spec.required || [])],
+    allowedFields: [...(spec.allowed || [])],
+  };
+}
+
 export function suggestImportMapping({ kind, text, delimiter = null }) {
   const normalizedKind = String(kind || "").toUpperCase();
   const spec = IMPORT_SPECS[normalizedKind];
@@ -606,16 +665,7 @@ export function suggestImportMapping({ kind, text, delimiter = null }) {
   const suggestedMapping = buildMappingFromHeaders(headers, normalizedKind);
   const mappedHeaders = new Set(Object.values(suggestedMapping));
 
-  const required = spec.required || [];
-  const missingRequired = required.filter((field) => !suggestedMapping[field]);
-  // A kind that takes one of two layouts (a trial balance's closing balance) is complete only when
-  // one layout was found whole; otherwise the first layout's missing columns are named.
-  if (Array.isArray(spec.requiredOneOf) &&
-    !spec.requiredOneOf.some((group) => group.every((field) => suggestedMapping[field]))) {
-    const partial = spec.requiredOneOf.find((group) => group.some((field) => suggestedMapping[field]))
-      || spec.requiredOneOf[0];
-    missingRequired.push(...partial.filter((field) => !suggestedMapping[field]));
-  }
+  const missingRequired = missingRequiredFor(normalizedKind, suggestedMapping);
 
   return {
     kind: normalizedKind,

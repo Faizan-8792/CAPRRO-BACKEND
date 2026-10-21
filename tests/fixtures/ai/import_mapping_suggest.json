@@ -1,0 +1,2527 @@
+{
+ "task": "import_mapping_suggest",
+ "builtBy": "build-fixtures.mjs",
+ "seed": 20261021,
+ "cases": [
+  {
+   "id": "map-0",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Acct Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 61,
+       "gstinLike": 0,
+       "empty": 27
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 4
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h2"
+    }
+   }
+  },
+  {
+   "id": "map-1",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Head of A/c",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 57,
+       "gstinLike": 0,
+       "empty": 9
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Primary Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 6
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h1"
+    }
+   }
+  },
+  {
+   "id": "map-2",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 78,
+       "gstinLike": 0,
+       "empty": 26
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Ledger A/c Name",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Primary Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h3"
+    }
+   }
+  },
+  {
+   "id": "map-3",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "A/c Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 63,
+       "gstinLike": 0,
+       "empty": 19
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h2"
+    }
+   }
+  },
+  {
+   "id": "map-4",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Account Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Under Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 5
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 89,
+       "gstinLike": 0,
+       "empty": 7
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h2"
+    }
+   }
+  },
+  {
+   "id": "map-5",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 6
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 87,
+       "gstinLike": 0,
+       "empty": 42
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Ledger Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h4"
+    }
+   }
+  },
+  {
+   "id": "map-6",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 70,
+       "gstinLike": 0,
+       "empty": 42
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Name of Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Primary Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 2
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h2"
+    }
+   }
+  },
+  {
+   "id": "map-7",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "GL Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 1
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 76,
+       "gstinLike": 0,
+       "empty": 40
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h2"
+    }
+   }
+  },
+  {
+   "id": "map-8",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 76,
+       "gstinLike": 0,
+       "empty": 3
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Under Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 1
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Acc. Name",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h3"
+    }
+   }
+  },
+  {
+   "id": "map-9",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Head Name",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 60,
+       "gstinLike": 0,
+       "empty": 8
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Under Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 9
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h1"
+    }
+   }
+  },
+  {
+   "id": "map-10",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 60,
+       "gstinLike": 0,
+       "empty": 13
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Under Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 1
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Acct Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h3"
+    }
+   }
+  },
+  {
+   "id": "map-11",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Head of A/c",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Primary Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 3
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 69,
+       "gstinLike": 0,
+       "empty": 38
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h2"
+    }
+   }
+  },
+  {
+   "id": "map-12",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 79,
+       "gstinLike": 0,
+       "empty": 36
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Primary Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 1
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Ledger A/c Name",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h3"
+    }
+   }
+  },
+  {
+   "id": "map-13",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Primary Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 6
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "A/c Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 86,
+       "gstinLike": 0,
+       "empty": 19
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h2"
+    }
+   }
+  },
+  {
+   "id": "map-14",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 6
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 68,
+       "gstinLike": 0,
+       "empty": 22
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Account Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h3"
+    }
+   }
+  },
+  {
+   "id": "map-15",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Ledger Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 8
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 64,
+       "gstinLike": 0,
+       "empty": 33
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h2"
+    }
+   }
+  },
+  {
+   "id": "map-16",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Name of Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Under Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 6
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 74,
+       "gstinLike": 0,
+       "empty": 11
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h2"
+    }
+   }
+  },
+  {
+   "id": "map-17",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 84,
+       "gstinLike": 0,
+       "empty": 14
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "GL Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Under Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 10
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h3"
+    }
+   }
+  },
+  {
+   "id": "map-18",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 62,
+       "gstinLike": 0,
+       "empty": 23
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Under Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 9
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Acc. Name",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h3"
+    }
+   }
+  },
+  {
+   "id": "map-19",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Head Name",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 2
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 66,
+       "gstinLike": 0,
+       "empty": 12
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h2"
+    }
+   }
+  },
+  {
+   "id": "map-20",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 81,
+       "gstinLike": 0,
+       "empty": 13
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Primary Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 9
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Acct Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h3"
+    }
+   }
+  },
+  {
+   "id": "map-21",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Head of A/c",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 81,
+       "gstinLike": 0,
+       "empty": 15
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 8
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h2"
+    }
+   }
+  },
+  {
+   "id": "map-22",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 73,
+       "gstinLike": 0,
+       "empty": 31
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Primary Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 6
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Ledger A/c Name",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h3"
+    }
+   }
+  },
+  {
+   "id": "map-23",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "A/c Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Primary Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 9
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 80,
+       "gstinLike": 0,
+       "empty": 30
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h2"
+    }
+   }
+  },
+  {
+   "id": "map-24",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 93,
+       "gstinLike": 0,
+       "empty": 19
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Under Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 9
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Account Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h3"
+    }
+   }
+  },
+  {
+   "id": "map-25",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Ledger Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 97,
+       "gstinLike": 0,
+       "empty": 35
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Primary Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 7
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h1"
+    }
+   }
+  },
+  {
+   "id": "map-26",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 92,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Primary Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 8
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Name of Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h3"
+    }
+   }
+  },
+  {
+   "id": "map-27",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "GL Head",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 83,
+       "gstinLike": 0,
+       "empty": 38
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 10
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h2"
+    }
+   }
+  },
+  {
+   "id": "map-28",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Acc. Name",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Primary Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 3
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 99,
+       "gstinLike": 0,
+       "empty": 9
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h2"
+    }
+   }
+  },
+  {
+   "id": "map-29",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Head Name",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Primary Group",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 0,
+       "gstinLike": 0,
+       "empty": 6
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 73,
+       "gstinLike": 0,
+       "empty": 9
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "h2"
+    }
+   }
+  },
+  {
+   "id": "map-none-0",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 99,
+       "gstinLike": 0,
+       "empty": 2
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Debit",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 78,
+       "gstinLike": 0,
+       "empty": 32
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Credit",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 72,
+       "gstinLike": 0,
+       "empty": 43
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "NONE"
+    }
+   }
+  },
+  {
+   "id": "map-none-1",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 93,
+       "gstinLike": 0,
+       "empty": 39
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Debit",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 99,
+       "gstinLike": 0,
+       "empty": 32
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Credit",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 74,
+       "gstinLike": 0,
+       "empty": 15
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "NONE"
+    }
+   }
+  },
+  {
+   "id": "map-none-2",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 71,
+       "gstinLike": 0,
+       "empty": 23
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Debit",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 92,
+       "gstinLike": 0,
+       "empty": 43
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Credit",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 94,
+       "gstinLike": 0,
+       "empty": 20
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "NONE"
+    }
+   }
+  },
+  {
+   "id": "map-none-3",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 99,
+       "gstinLike": 0,
+       "empty": 15
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Dr",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 59,
+       "gstinLike": 0,
+       "empty": 12
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Credit",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 65,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "NONE"
+    }
+   }
+  },
+  {
+   "id": "map-none-4",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 69,
+       "gstinLike": 0,
+       "empty": 8
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Dr",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 59,
+       "gstinLike": 0,
+       "empty": 25
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Cr",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 74,
+       "gstinLike": 0,
+       "empty": 36
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "NONE"
+    }
+   }
+  },
+  {
+   "id": "map-none-5",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 66,
+       "gstinLike": 0,
+       "empty": 12
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Dr",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 78,
+       "gstinLike": 0,
+       "empty": 6
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Cr",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 77,
+       "gstinLike": 0,
+       "empty": 35
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "NONE"
+    }
+   }
+  },
+  {
+   "id": "map-none-6",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 95,
+       "gstinLike": 0,
+       "empty": 35
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Debit",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 57,
+       "gstinLike": 0,
+       "empty": 4
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Credit",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 80,
+       "gstinLike": 0,
+       "empty": 41
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "NONE"
+    }
+   }
+  },
+  {
+   "id": "map-none-7",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 60,
+       "gstinLike": 0,
+       "empty": 9
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Dr",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 71,
+       "gstinLike": 0,
+       "empty": 3
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Credit",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 96,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "NONE"
+    }
+   }
+  },
+  {
+   "id": "map-none-8",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Op Bal",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 61,
+       "gstinLike": 0,
+       "empty": 2
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Debit",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 62,
+       "gstinLike": 0,
+       "empty": 34
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Credit",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 79,
+       "gstinLike": 0,
+       "empty": 43
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "NONE"
+    }
+   }
+  },
+  {
+   "id": "map-none-9",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 89,
+       "gstinLike": 0,
+       "empty": 5
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Dr",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 68,
+       "gstinLike": 0,
+       "empty": 25
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Cr",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 97,
+       "gstinLike": 0,
+       "empty": 29
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "NONE"
+    }
+   }
+  },
+  {
+   "id": "map-none-10",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 63,
+       "gstinLike": 0,
+       "empty": 29
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Dr",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 56,
+       "gstinLike": 0,
+       "empty": 4
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Credit",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 84,
+       "gstinLike": 0,
+       "empty": 15
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "NONE"
+    }
+   }
+  },
+  {
+   "id": "map-none-11",
+   "facts": {
+    "kind": "TRIAL_BALANCE",
+    "fieldsToMap": [
+     {
+      "name": "ledgerName",
+      "description": "ledger name",
+      "required": true
+     }
+    ],
+    "headings": [
+     {
+      "ref": "h1",
+      "text": "Sr No",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 100,
+       "gstinLike": 0,
+       "empty": 0
+      }
+     },
+     {
+      "ref": "h2",
+      "text": "Opening",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 63,
+       "gstinLike": 0,
+       "empty": 25
+      }
+     },
+     {
+      "ref": "h3",
+      "text": "Debit",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 85,
+       "gstinLike": 0,
+       "empty": 29
+      }
+     },
+     {
+      "ref": "h4",
+      "text": "Credit",
+      "profile": {
+       "dateLike": 0,
+       "numeric": 78,
+       "gstinLike": 0,
+       "empty": 30
+      }
+     }
+    ]
+   },
+   "expect": {
+    "mappings": {
+     "ledgerName": "NONE"
+    }
+   }
+  }
+ ]
+}

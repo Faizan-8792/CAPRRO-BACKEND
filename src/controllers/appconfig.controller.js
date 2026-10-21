@@ -10,6 +10,7 @@ import {
 import { assertCaseIndexesReady } from "../services/case-index-readiness.service.js";
 import { assertEngagementIndexesReady } from "../services/engagement-index-readiness.service.js";
 import { describeRetentionPolicy } from "../services/data-retention.service.js";
+import { publishableNoticeCatalogue, validateNoticeCatalogue } from "../services/notice-catalogue.service.js";
 import User from "../models/User.js";
 
 const SUPER_EMAIL = "saifullahfaizan786@gmail.com";
@@ -109,6 +110,9 @@ export const getAppConfig = async (req, res, next) => {
         // admin panel, or null while none has been. Dates are UTC days written YYYY-MM-DD; the
         // statutory date and any notified extension are separate fields.
         deadlineCatalogue: publishableCatalogue(cfg.deadlineCatalogue),
+        // W11 IN21, additive: reply windows per notice form and the Act transition rule the owner publishes,
+        // or null while none has been.
+        noticeCatalogue: publishableNoticeCatalogue(cfg.noticeCatalogue),
         updatedAt: cfg.updatedAt,
       },
     });
@@ -242,6 +246,13 @@ export const updateFeatureFlags = async (req, res, next) => {
       const { assertAuditPackStorageReady } =
         await import("../services/audit-pack-index-readiness.service.js");
       await assertAuditPackStorageReady();
+    }
+
+    // W11: the intelligence features cannot be switched on over a database missing their unique and TTL keys.
+    if (featureFlags.intelligence === true) {
+      const { assertIntelligenceIndexesReady } =
+        await import("../services/intelligence-index-readiness.service.js");
+      await assertIntelligenceIndexesReady();
     }
 
     const versionIncrements = {};
@@ -410,6 +421,63 @@ export const publishDeadlineCatalogue = async (req, res, next) => {
     }
     AppConfig.invalidateCache();
     return res.json({ ok: true, deadlineCatalogue: publishableCatalogue(written.deadlineCatalogue) });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// W11 IN21: the owner publishes the notice catalogue - reply windows per form and the Income-tax Act transition
+// rule - exactly as the deadline catalogue is published: super admin only, a reason required, fenced on the
+// version the panel read, recorded in the control-change history. The agent publishes nothing.
+export const publishNoticeCatalogue = async (req, res, next) => {
+  try {
+    assertSuper(req.user);
+    const reason = readControlReason(req.body);
+    if (!reason.ok) return res.status(400).json({ ok: false, error: reason.error });
+    if (reason.reason.length < 3) {
+      return res.status(400).json({ ok: false, error: "Say why the notice catalogue is changing (a rule, a notification or a short reason)." });
+    }
+    const checked = validateNoticeCatalogue(req.body || {});
+    if (!checked.ok) {
+      return res.status(400).json({ ok: false, error: "The notice catalogue was not published: fix the entries listed and publish again.", errors: checked.errors });
+    }
+    const current = await AppConfig.findById("singleton").select("noticeCatalogue.version").lean();
+    const currentVersion = Number.isSafeInteger(current?.noticeCatalogue?.version) ? current.noticeCatalogue.version : 0;
+    const expectedVersion = req.body?.expectedVersion;
+    if (expectedVersion !== undefined && expectedVersion !== currentVersion) {
+      return res.status(409).json({ ok: false, code: "NOTICE_CATALOGUE_CHANGED", error: "The notice catalogue was published by someone else since you opened it. Reload it and apply your change again.", currentVersion });
+    }
+    await AppConfig.updateOne({ _id: "singleton" }, { $setOnInsert: { _id: "singleton" } }, { upsert: true });
+    const fence = currentVersion === 0
+      ? { $or: [{ "noticeCatalogue.version": { $exists: false } }, { "noticeCatalogue.version": 0 }] }
+      : { "noticeCatalogue.version": currentVersion };
+    const written = await AppConfig.findOneAndUpdate(
+      { _id: "singleton", ...fence },
+      {
+        $set: {
+          noticeCatalogue: {
+            version: currentVersion + 1,
+            publishedAt: new Date(),
+            publishedBy: req.user.id,
+            entries: checked.entries,
+            actTransition: checked.actTransition || { effectiveFrom: "", before: "", after: "", sourceReference: "" },
+          },
+          updatedBy: req.user.id,
+        },
+        $push: controlChangePush(
+          req,
+          "noticeCatalogue",
+          `Published the notice catalogue, version ${currentVersion + 1}, ${checked.entries.length} ${checked.entries.length === 1 ? "form" : "forms"}${checked.actTransition ? ", with the Act transition rule" : ""}`,
+          reason.reason,
+        ),
+      },
+      { new: true },
+    ).lean();
+    if (!written) {
+      return res.status(409).json({ ok: false, code: "NOTICE_CATALOGUE_CHANGED", error: "The notice catalogue was published by someone else while you were publishing. Reload it and apply your change again." });
+    }
+    AppConfig.invalidateCache();
+    return res.json({ ok: true, noticeCatalogue: publishableNoticeCatalogue(written.noticeCatalogue) });
   } catch (err) {
     next(err);
   }

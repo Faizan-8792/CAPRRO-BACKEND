@@ -82,6 +82,11 @@ export const REASONS = Object.freeze({
     reason:
       "Per-user analytics counters (IMPROVEMENT-PLAN-V2 Part 3: usage split by desktop/extension). Not work product — a (user, client type, workflow, day) tally with ok/error counts and nothing else. Added 2026-09-28; classified explicitly rather than left to the derived PURGE default so the record shows the decision was made, per the pinned-surface rule that a new firmId-carrying collection must be classified by a person.",
   },
+  AiDraft: {
+    strategy: STRATEGY.PURGE,
+    reason:
+      "Model-drafted suggestions (W11 IN5, 2026-10-21). Carries a TTL for drafts nobody adopted, but a TTL is a retention rule and not an answer to an erasure request, and adopted drafts have no expiry at all. Holds no name, GSTIN, PAN or invoice number; deleted with the firm.",
+  },
   TaskBulkOperation: {
     strategy: STRATEGY.PURGE,
     reason:
@@ -138,6 +143,13 @@ export const PINNED_FIRM_SCOPED = Object.freeze([
   // by the service, not by a schema hook), deleted with the firm (derived PURGE). Entries carry user ids;
   // purging the document removes the link with it.
   "EngagementAssurance",
+  // AiDraft and AiSuggestionOutcome added 2026-10-21 with the intelligence layer (W11 IN5). Both carry firmId
+  // and no identity field of their own (a draft's creating and deciding user ids are links purged with the
+  // document, as for Task.createdBy), so the derived PURGE applies: deleted with the firm.
+  "AiDraft", "AiSuggestionOutcome",
+  // ImportMappingProfile added 2026-10-21 (W11 IN14): a client's confirmed column mapping. firmId, no identity of
+  // its own beyond the confirming user's id (purged with the document), so the derived PURGE applies.
+  "ImportMappingProfile",
 ]);
 
 /**

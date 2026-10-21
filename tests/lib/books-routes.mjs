@@ -12,6 +12,10 @@ export async function runBooksRouteChecks({ uri, MASTERS, DAYBOOK, only, linesOf
   process.env.JWT_SECRET = process.env.JWT_SECRET || "scratch-only-secret-not-a-real-credential-0000";
   process.env.DEEPSEEK_API_KEY = "";
   process.env.OCR_SPACE_API_KEY = "";
+  // W11 IN3: a loopback stand-in for DeepSeek, so the metering of a group suggestion can be checked. Must
+  // run before the app is imported (the provider reads DEEPSEEK_URL once); the key stays blank until on().
+  const { ensureMockDeepSeek } = await import("./mock-deepseek.mjs");
+  const mock = await ensureMockDeepSeek();
 
   const mongoose = (await import("mongoose")).default;
   const jwt = (await import("jsonwebtoken")).default;
@@ -124,6 +128,12 @@ export async function runBooksRouteChecks({ uri, MASTERS, DAYBOOK, only, linesOf
     check("a group that leads nowhere is listed unmapped, with its ledger counted", oddReport.unmappedGroups >= 1 && oddReport.groups.find((g) => g.name === "Mystery")?.standardGroup === null && oddReport.unmappedLedgers === 1, JSON.stringify(oddReport.groups));
     const suggestion = await call("POST", `/api/books/snapshots/${odd}/groups/suggest`, A.token, { groups: ["Mystery"] });
     check("with no AI key the suggestion route says so and the mapping still works", suggestion.status === 200 && suggestion.json?.available === false && suggestion.json?.suggestions?.length === 0, `status ${suggestion.status} ${JSON.stringify(suggestion.json)}`);
+    // W11 IN3: a suggestion is metered under its own feature name, not as an audit pack draft.
+    mock.on(() => JSON.stringify({ suggestions: [{ index: 1, standardGroup: "SUNDRY_DEBTORS", why: "Named like a debtors group." }] }));
+    const metered = await call("POST", `/api/books/snapshots/${odd}/groups/suggest`, A.token, { groups: ["Mystery"] });
+    mock.off();
+    const usageRow = await raw("providerusages").findOne({ userId: A.ownerId, provider: "DEEPSEEK", periodKey: new Date().toISOString().slice(0, 10) });
+    check("IN3: a group suggestion is counted as books_group_suggest and never as audit_pack_draft", metered.status === 200 && metered.json?.available === true && usageRow?.operations?.books_group_suggest === 1 && !usageRow?.operations?.audit_pack_draft, `status ${metered.status} ${JSON.stringify(usageRow?.operations)}`);
     const refusedCode = await call("PUT", "/api/books/group-mappings", A.token, { clientId: String(clientId), groupName: "Mystery", standardGroup: "MADE_UP" });
     check("a mapping to a code that is not a standard group is refused", refusedCode.status === 400, `status ${refusedCode.status}`);
     const mapped = await call("PUT", "/api/books/group-mappings", A.token, { clientId: String(clientId), groupName: "Mystery", standardGroup: "SUNDRY_DEBTORS" });

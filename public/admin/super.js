@@ -308,6 +308,7 @@ const FEATURE_FLAG_KEYS = [
   "auditPacks",
   "dailyDigest",
   "weeklySummary",
+  "intelligence",
 ];
 
 // Last-loaded server state for feature flags, so Save can diff against it and send only the
@@ -374,6 +375,7 @@ function reportAppConfigUnread() {
   setControlsCardReady("welcomeSet", false);
   setControlsCardReady("featureFlagsSet", false);
   setControlsCardReady("deadlineSet", false);
+  setControlsCardReady("noticeCatalogueSet", false);
 }
 
 async function loadAppConfigSection() {
@@ -402,6 +404,8 @@ async function loadAppConfigSection() {
 
     renderDeadlineCatalogue(c.deadlineCatalogue);
     setControlsCardReady("deadlineSet", true);
+    renderNoticeCatalogue(c.noticeCatalogue);
+    setControlsCardReady("noticeCatalogueSet", true);
 
     // An empty or absent map is a LOAD FAILURE, not "all flags are off". An unauthenticated or
     // expired-session GET returns exactly that, and treating it as real state is what allowed a
@@ -580,6 +584,117 @@ function bindDeadlineHandlers() {
     } finally {
       publishBtn.disabled = false;
       publishBtn.textContent = "Publish the calendar";
+    }
+  });
+}
+
+// ─── Notice catalogue (W11 IN21) ────────────────────────────────────
+// Reply windows per notice form the apps read by rule, and the Income-tax Act transition rule, edited as rows and
+// published whole, fenced on the version this panel read. The form ids match the server's rule reader.
+const NOTICE_FORMS = [
+  ["GST_DRC01C", "GST DRC-01C"], ["GST_DRC01A", "GST DRC-01A"], ["GST_DRC01", "GST DRC-01"], ["GST_DRC07", "GST DRC-07"],
+  ["GST_ASMT10", "GST ASMT-10"], ["GST_REG03", "GST REG-03"], ["GST_REG17", "GST REG-17"],
+  ["IT_143_1", "Income tax 143(1)"], ["IT_139_9", "Income tax 139(9)"], ["IT_142_1", "Income tax 142(1)"],
+  ["IT_148A", "Income tax 148A"], ["IT_133_6", "Income tax 133(6)"], ["IT_245", "Income tax 245"],
+];
+let lastNoticeCatalogueVersion = 0;
+
+function noticeCatalogueRowHtml(entry = {}) {
+  const forms = NOTICE_FORMS.map(([id, label]) => `<option value="${id}"${entry.form === id ? " selected" : ""}>${escapeHtml(label)}</option>`).join("");
+  const basis = [["ISSUE_DATE", "Issue date"], ["RECEIPT_DATE", "Date received"]]
+    .map(([id, label]) => `<option value="${id}"${(entry.basis || "ISSUE_DATE") === id ? " selected" : ""}>${label}</option>`).join("");
+  return `
+    <tr class="notice-catalogue-row">
+      <td><select class="form-select form-select-sm" data-field="form" aria-label="Notice form">${forms}</select></td>
+      <td><input class="form-control form-control-sm" type="number" min="1" max="365" step="1" data-field="windowDays" value="${escapeHtml(String(entry.windowDays || ""))}" aria-label="Reply window in days" /></td>
+      <td><select class="form-select form-select-sm" data-field="basis" aria-label="Counted from">${basis}</select></td>
+      <td><input class="form-control form-control-sm" data-field="sourceReference" maxlength="300" placeholder="Rule or notification" value="${escapeHtml(entry.sourceReference || "")}" aria-label="Rule or notification the window comes from" /></td>
+      <td><button class="btn btn-sm btn-outline-secondary" type="button" data-action="remove">Remove</button></td>
+    </tr>`;
+}
+
+function renderNoticeCatalogue(catalogue) {
+  const body = qs("noticeCatalogueRows");
+  if (!body) return;
+  const entries = Array.isArray(catalogue?.entries) ? catalogue.entries : [];
+  lastNoticeCatalogueVersion = Number.isSafeInteger(catalogue?.version) ? catalogue.version : 0;
+  body.innerHTML = entries.map((entry) => noticeCatalogueRowHtml(entry)).join("");
+  const act = catalogue?.actTransition || {};
+  if (qs("actTransitionFrom")) qs("actTransitionFrom").value = act.effectiveFrom || "";
+  if (qs("actTransitionBefore")) qs("actTransitionBefore").value = act.before || "";
+  if (qs("actTransitionAfter")) qs("actTransitionAfter").value = act.after || "";
+  if (qs("actTransitionSource")) qs("actTransitionSource").value = act.sourceReference || "";
+  const note = qs("noticeCatalogueVersion");
+  if (note) {
+    note.textContent = catalogue
+      ? `Published version ${catalogue.version}: ${entries.length} ${entries.length === 1 ? "form" : "forms"}${catalogue.actTransition ? ", with the Act rule" : ", no Act rule"}.`
+      : "Nothing has been published yet, so a case shows only the reply-by date its notice states.";
+  }
+}
+
+function readNoticeCatalogue() {
+  const entries = [...document.querySelectorAll("#noticeCatalogueRows .notice-catalogue-row")].map((row) => {
+    const get = (field) => row.querySelector(`[data-field="${field}"]`)?.value?.trim() || "";
+    return { form: get("form"), windowDays: Number.parseInt(get("windowDays"), 10), basis: get("basis"), sourceReference: get("sourceReference") };
+  });
+  const act = {
+    effectiveFrom: qs("actTransitionFrom")?.value?.trim() || "",
+    before: qs("actTransitionBefore")?.value?.trim() || "",
+    after: qs("actTransitionAfter")?.value?.trim() || "",
+    sourceReference: qs("actTransitionSource")?.value?.trim() || "",
+  };
+  const anyAct = Object.values(act).some(Boolean);
+  return { entries, actTransition: anyAct ? act : null };
+}
+
+function bindNoticeCatalogueHandlers() {
+  const body = qs("noticeCatalogueRows");
+  const addBtn = qs("noticeCatalogueAddBtn");
+  const publishBtn = qs("noticeCataloguePublishBtn");
+  const status = qs("noticeCatalogueStatus");
+  if (!body || !addBtn || !publishBtn) return;
+  addBtn.addEventListener("click", () => {
+    body.insertAdjacentHTML("beforeend", noticeCatalogueRowHtml());
+    body.lastElementChild?.querySelector('[data-field="form"]')?.focus();
+  });
+  body.addEventListener("click", (event) => {
+    const remove = event.target.closest?.('[data-action="remove"]');
+    if (remove) remove.closest("tr")?.remove();
+  });
+  publishBtn.addEventListener("click", async () => {
+    const draft = readNoticeCatalogue();
+    const scope = superScope();
+    const reason = await superAskText({
+      title: `Publish ${draft.entries.length} ${draft.entries.length === 1 ? "form" : "forms"}${draft.actTransition ? " and the Act rule" : ""}?`,
+      body: `This replaces the whole notice catalogue for every firm and every user (${scope.label.toLowerCase()}, ${scope.host}). A case never changes the date its notice states.`,
+      label: "Reason (recorded with the change)",
+      placeholder: "For example: Rule 99 - ASMT-11 within 30 days",
+      required: true,
+      maxLength: 300,
+      requireText: scope.word,
+      confirmLabel: "Publish the notice catalogue",
+      cancelLabel: "Keep the current catalogue",
+      tone: "warning",
+    });
+    if (reason === null) return;
+    publishBtn.disabled = true;
+    publishBtn.textContent = "Publishing...";
+    try {
+      const r = await api("/app-config/notice-catalogue", {
+        method: "PATCH",
+        body: { ...draft, reason, expectedVersion: lastNoticeCatalogueVersion },
+      });
+      renderNoticeCatalogue(r.noticeCatalogue);
+      superStatus(status, `Published version ${r.noticeCatalogue?.version}.`, "success");
+      loadControlChanges();
+    } catch (err) {
+      const problems = Array.isArray(err.data?.errors) ? err.data.errors : [];
+      if (problems.length) superStatus(status, `${err.message} ${problems.join(" ")}`, "critical");
+      else if (err.status === 403) superStatus(status, "Only the super-admin account may publish the notice catalogue.", "critical");
+      else superStatus(status, err.message || "The notice catalogue could not be published. Try again.", "critical");
+    } finally {
+      publishBtn.disabled = false;
+      publishBtn.textContent = "Publish the notice catalogue";
     }
   });
 }
@@ -1493,8 +1608,75 @@ const DEEPSEEK_OPERATION_LABELS = {
   case_draft: "Case reply draft",
   audit_pack_draft: "Audit pack drafts",
   self_test: "Deep system review",
+  // W11 IN3
+  books_group_suggest: "Tally group suggestions",
+  gst_cause_residue: "GST mismatch causes",
+  supplier_chase_draft: "Supplier chase messages",
+  import_mapping_suggest: "Import column suggestions",
+  tds_action_draft: "TDS action-plan drafts",
   unattributed: "Before features were recorded",
 };
+
+// W11 IN2: tokens and an estimate of what they cost, per feature, this month. The price basis comes from the
+// server (deepseek-flash at peak prices, the upper bound for Flash); it is an estimate, never a bill.
+function formatUsd(value) {
+  const n = Number(value) || 0;
+  if (n === 0) return "$0";
+  if (n < 0.01) return "under $0.01";
+  return `$${n.toFixed(2)}`;
+}
+
+// W11 IN5/IN24: adopted as suggested, edited, discarded - per surface and per rule (R1-R7, ...) or AI task. These
+// are the keep-or-retire measures; a call count says nothing about whether a suggestion was any use.
+const SUGGESTION_SURFACE_LABELS = {
+  gst_cause: "GST mismatch causes",
+  gst_chase: "Supplier chase messages",
+  import_mapping: "Import column mapping",
+  tds_action: "TDS action drafts",
+  notice_rules: "Notice rule reading",
+};
+
+function renderSuggestionOutcomes(rows) {
+  if (!rows.length) return `<div class="admin-empty-line">No suggestion was used or discarded this month.</div>`;
+  return rows
+    .map((row) => {
+      const total = (Number(row.adoptedUnchanged) || 0) + (Number(row.edited) || 0) + (Number(row.discarded) || 0);
+      const adoptedShare = total ? Math.round(((Number(row.adoptedUnchanged) || 0) * 100) / total) : 0;
+      const who = row.source === "RULE" ? `rule ${row.key}` : (DEEPSEEK_OPERATION_LABELS[row.key] || row.key);
+      return `
+        <div class="provider-top__row">
+          <div class="provider-top__who">${escapeHtml(SUGGESTION_SURFACE_LABELS[row.surface] || row.surface)} <span class="provider-figure__caption">${escapeHtml(who)}</span></div>
+          <div class="provider-top__calls">${adoptedShare}% as suggested <span class="provider-figure__caption">${superCount(row.adoptedUnchanged)} as suggested · ${superCount(row.edited)} edited · ${superCount(row.discarded)} discarded</span></div>
+        </div>`;
+    })
+    .join("");
+}
+
+function renderDeepSeekTokens(tokens) {
+  const month = tokens?.thisMonth;
+  const total = month?.total;
+  if (!total || !(Number(total.promptTokens) || Number(total.completionTokens))) {
+    return `<div class="admin-empty-line">No tokens recorded this month. Calls made before tokens were counted are not included.</div>`;
+  }
+  const byOp = month.byOperation || {};
+  const names = Object.keys(byOp).filter((name) => (Number(byOp[name]?.promptTokens) || 0) + (Number(byOp[name]?.completionTokens) || 0) > 0);
+  names.sort((a, b) => (Number(byOp[b]?.estimatedUsd) || 0) - (Number(byOp[a]?.estimatedUsd) || 0));
+  const basis = tokens.priceBasis || {};
+  const rows = names
+    .map((name) => {
+      const block = byOp[name] || {};
+      const prompt = Number(block.promptTokens) || 0;
+      const hit = Number(block.cacheHitTokens) || 0;
+      return `
+        <div class="provider-top__row">
+          <div class="provider-top__who">${escapeHtml(DEEPSEEK_OPERATION_LABELS[name] || name)}</div>
+          <div class="provider-top__calls">${escapeHtml(formatUsd(block.estimatedUsd))} <span class="provider-figure__caption">${superCount(prompt)} in (${superCount(hit)} from cache) · ${superCount(Number(block.completionTokens) || 0)} out</span></div>
+        </div>`;
+    })
+    .join("");
+  return `${rows}
+    <div class="provider-figure__caption">This month about ${escapeHtml(formatUsd(total.estimatedUsd))}: an estimate at ${escapeHtml(String(basis.model || "deepseek-flash"))} ${escapeHtml(String(basis.window || "peak"))} prices read ${escapeHtml(String(basis.readOn || ""))}. Calls answered by the fallback model cost more and are not separated.</div>`;
+}
 
 function renderDeepSeekByOperation(byOperation) {
   const month = byOperation?.thisMonth || {};
@@ -1550,6 +1732,12 @@ async function loadProviderUsageStats() {
                 ${provider === "DEEPSEEK" && u.deepSeekByOperation ? `
                 <div class="provider-top__heading">Calls by feature</div>
                 ${renderDeepSeekByOperation(u.deepSeekByOperation)}` : ""}
+                ${provider === "DEEPSEEK" && u.deepSeekTokens ? `
+                <div class="provider-top__heading">Tokens and estimated cost this month</div>
+                ${renderDeepSeekTokens(u.deepSeekTokens)}` : ""}
+                ${provider === "DEEPSEEK" && Array.isArray(u.suggestionOutcomesThisMonth) ? `
+                <div class="provider-top__heading">What people did with suggestions this month</div>
+                ${renderSuggestionOutcomes(u.suggestionOutcomesThisMonth)}` : ""}
               </div>
             </div>`;
         })
@@ -3059,6 +3247,7 @@ async function initSuperPage() {
 
     bindAppConfigHandlers();
     bindDeadlineHandlers();
+    bindNoticeCatalogueHandlers();
     bindUserDirectoryControls();
     bindTermsAcceptanceControls();
     bindEmailsPageControls();

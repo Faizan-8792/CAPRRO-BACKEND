@@ -1,4 +1,14 @@
-import { previewImport, suggestImportMapping } from "../services/import-preview.service.js";
+import {
+  missingRequiredFor,
+  previewImport,
+  suggestImportMapping,
+} from "../services/import-preview.service.js";
+import {
+  headerSignature,
+  rememberConfirmedMapping,
+  rememberedMapping,
+  suggestMappingsWithModel,
+} from "../services/import-intelligence.service.js";
 import { convertGstr2bJson } from "../services/gstr2b-json.service.js";
 import {
   commitGstImport,
@@ -36,7 +46,9 @@ const PREVIEW_FIELDS = new Set([
 ]);
 // A suggestion needs the file and nothing else: no mapping (that is what it produces), and no
 // statutory context, because it neither previews figures nor authorizes a commit.
-const SUGGEST_FIELDS = new Set(["kind", "text", "delimiter"]);
+// W11 IN14: clientId is optional; with it (and the `intelligence` flag on) a layout this client's file had before
+// comes back with the mapping a person confirmed for it.
+const SUGGEST_FIELDS = new Set(["kind", "text", "delimiter", "clientId"]);
 const COMMIT_FIELDS = new Set([
   "kind",
   "text",
@@ -98,6 +110,21 @@ function requestDelimiter(value) {
   return value === "TAB" ? "\t" : value || null;
 }
 
+// W11 IN14: a committed import's mapping is remembered against its file layout for that client. Best effort and
+// only with the `intelligence` flag on (rememberConfirmedMapping never throws); a replayed commit saves nothing new.
+async function rememberAfterCommit(req, result) {
+  if (result?.replayed) return;
+  await rememberConfirmedMapping({
+    firmId: req.user.firmId,
+    userId: req.user.id,
+    clientId: req.body.clientId,
+    kind: req.body.kind,
+    text: req.body.text,
+    delimiter: requestDelimiter(req.body.delimiter),
+    mapping: req.body.mapping,
+  });
+}
+
 /**
  * Proposes a column mapping for a file, without importing anything.
  *
@@ -109,11 +136,38 @@ function requestDelimiter(value) {
 export async function suggestImportMappingForFile(req, res, next) {
   try {
     validateBody(req.body, SUGGEST_FIELDS);
-    const suggestion = suggestImportMapping({
+    let suggestion = suggestImportMapping({
       kind: req.body.kind,
       text: req.body.text,
       delimiter: requestDelimiter(req.body.delimiter),
     });
+    // W11 IN14: a remembered mapping for this client's layout overrides the heading guess field by field;
+    // completeness is recomputed by the same rule the heading guess uses.
+    const remembered = req.body.clientId
+      ? await rememberedMapping({
+          firmId: req.user.firmId,
+          clientId: req.body.clientId,
+          kind: suggestion.kind,
+          headers: suggestion.headers,
+        })
+      : null;
+    if (remembered && Object.keys(remembered.mapping).length) {
+      const merged = { ...suggestion.suggestedMapping, ...remembered.mapping };
+      const used = new Set(Object.values(merged));
+      const missingRequired = missingRequiredFor(suggestion.kind, merged);
+      suggestion = {
+        ...suggestion,
+        suggestedMapping: merged,
+        unmappedHeaders: suggestion.headers.filter((header) => header && !used.has(header)),
+        missingRequired,
+        complete: missingRequired.length === 0,
+        mappingSource: "REMEMBERED",
+        remembered: { confirmedAt: remembered.confirmedAt, timesApplied: remembered.timesApplied },
+      };
+    } else {
+      suggestion = { ...suggestion, mappingSource: "HEADINGS", remembered: null };
+    }
+    suggestion.headerSignature = headerSignature(suggestion.headers);
     return res.json({ ok: true, suggestion });
   } catch (error) {
     return next(error);
@@ -214,6 +268,7 @@ export async function commitMappedGstImport(req, res, next) {
       gstin: req.body.gstin,
       period: req.body.period,
     });
+    await rememberAfterCommit(req, result);
     return res.status(result.replayed ? 200 : 201).json({
       ok: true,
       replayed: result.replayed,
@@ -242,6 +297,7 @@ export async function commitMappedBooksImport(req, res, next) {
       clientId: req.body.clientId,
       financialYear: req.body.financialYear,
     });
+    await rememberAfterCommit(req, result);
     return res.status(result.replayed ? 200 : 201).json({
       ok: true,
       replayed: result.replayed,
@@ -283,6 +339,7 @@ export async function commitMappedTdsImport(req, res, next) {
       quarter: req.body.quarter,
       statementType: req.body.statementType,
     });
+    await rememberAfterCommit(req, result);
     return res.status(result.replayed ? 200 : 201).json({
       ok: true,
       replayed: result.replayed,
@@ -367,3 +424,16 @@ export const convertGstr2bImport = async (req, res, next) => {
     return next(err);
   }
 };
+
+/**
+ * W11 IN15: a model suggestion for the required fields the heading synonyms could not place. Headings and column
+ * type shares only; nothing is imported. Behind the `intelligence` flag, the firm's opt-in and per-request consent.
+ */
+export async function suggestImportMappingWithModel(req, res, next) {
+  try {
+    const result = await suggestMappingsWithModel({ firmId: req.user.firmId, userId: req.user.id, input: req.body || {} });
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return next(error);
+  }
+}

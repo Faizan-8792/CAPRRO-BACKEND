@@ -30,6 +30,7 @@ import {
   assertTdsReviewStorageReady,
 } from "./tds-storage-readiness.service.js";
 import { normalizeTdsContext } from "./tds-normalization.service.js";
+import { checklistForTdsStatus } from "./tds-action-checklists.js";
 import { csvCell } from "../utils/csv.js";
 import { userFacingMessage } from "../utils/user-facing-error.js";
 
@@ -1438,7 +1439,39 @@ function checklistForStatus(status) {
   return ["Review linked source rows", "Confirm professional treatment", "Complete follow-up", "Record reviewer note"];
 }
 
-function planForCheck({ run, check, ownerUserId, dueDateISO, priority, reviewerNote }) {
+// W11 IN17: the per-status list from tds-action-checklists.js while the `intelligence` flag is on; the earlier
+// family list otherwise, so nothing a user sees changes until the owner switches the flag on.
+function correctionStepsFor(status, specific) {
+  return (specific && checklistForTdsStatus(status)) || checklistForStatus(status);
+}
+
+// W11 IN18: per-check wording a person kept from a draft (or typed), sent with the preview and the commit. Each
+// value is plain text within the stored field's limit; a check not in the plan is refused.
+function readPlanMessages(messages, checkIds) {
+  if (messages === undefined || messages === null) return new Map();
+  if (typeof messages !== "object" || Array.isArray(messages)) {
+    throw serviceError("Action-plan messages must be an object keyed by check id");
+  }
+  const allowedIds = new Set(checkIds.map(String));
+  const out = new Map();
+  for (const [checkId, value] of Object.entries(messages)) {
+    if (!allowedIds.has(checkId)) throw serviceError("Action-plan messages name a check that is not in the plan");
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw serviceError("Each action-plan message must be an object");
+    const extra = Object.keys(value).filter((key) => key !== "clientChaseMessage" && key !== "reviewerNote");
+    if (extra.length) throw serviceError(`An action-plan message does not accept: ${extra.join(", ")}`);
+    const entry = {};
+    for (const key of ["clientChaseMessage", "reviewerNote"]) {
+      if (value[key] === undefined) continue;
+      if (typeof value[key] !== "string") throw serviceError(`${key} must be text`);
+      const text = cleanText(value[key], 1000);
+      if (text) entry[key] = text;
+    }
+    out.set(checkId, entry);
+  }
+  return out;
+}
+
+function planForCheck({ run, check, ownerUserId, dueDateISO, priority, reviewerNote, override = {}, specificChecklists = false }) {
   const period = `${run.financialYear} ${run.quarter} ${run.statementType}`;
   return {
     checkId: String(check._id),
@@ -1451,12 +1484,12 @@ function planForCheck({ run, check, ownerUserId, dueDateISO, priority, reviewerN
     ownerUserId: String(ownerUserId),
     dueDateISO,
     priority,
-    clientChaseMessage: `Please provide or confirm records for TDS ${period}: ${check.title}. This message records a follow-up request, not delivery or professional confirmation.`.slice(0, 1000),
+    clientChaseMessage: override.clientChaseMessage || `Please provide or confirm records for TDS ${period}: ${check.title}. This message records a follow-up request, not delivery or professional confirmation.`.slice(0, 1000),
     deducteeFollowUp: check.deducteePan
       ? `Follow up for deductee PAN ${check.deducteePan} using linked source rows; do not describe local format checking as official verification.`
       : "Review whether deductee-specific follow-up is required from linked source rows.",
-    correctionChecklist: checklistForStatus(check.status),
-    reviewerNote,
+    correctionChecklist: correctionStepsFor(check.status, specificChecklists),
+    reviewerNote: override.reviewerNote || reviewerNote,
     generationKey: `tds-action:${run._id}:${check.itemKey}:v${check.checkVersion}`.slice(0, 200),
   };
 }
@@ -1469,6 +1502,7 @@ async function buildActionPlan({
   dueDateISO,
   priority,
   reviewerNote = "",
+  messages = null,
   session = null,
 }) {
   assertObjectId(runId, "TDS run");
@@ -1511,6 +1545,8 @@ async function buildActionPlan({
   }
   const checkById = new Map(checks.map((check) => [String(check._id), check]));
   const orderedChecks = uniqueIds.map((id) => checkById.get(id));
+  const overrides = readPlanMessages(messages, uniqueIds);
+  const specificChecklists = await AppConfig.isFeatureEnabled("intelligence", { fresh: true });
   const plan = orderedChecks.map((check) => planForCheck({
     run,
     check,
@@ -1518,6 +1554,8 @@ async function buildActionPlan({
     dueDateISO,
     priority: normalizedPriority,
     reviewerNote: normalizedNote,
+    override: overrides.get(String(check._id)) || {},
+    specificChecklists,
   }));
   for (let index = 0; index < orderedChecks.length; index += 1) {
     const check = orderedChecks[index];
@@ -1537,8 +1575,9 @@ async function buildActionPlan({
     runId: String(run._id),
     generationAttempt,
     checkVersion: run.checkVersion,
-    plan: plan.map(({ checkId, itemKey, checkVersion, resolutionVersion, ownerUserId: owner, dueDateISO: due, priority: level, reviewerNote: note }) => ({
-      checkId, itemKey, checkVersion, resolutionVersion, ownerUserId: owner, dueDateISO: due, priority: level, reviewerNote: note,
+    // W11 IN18: the chase message is part of what a preview promises, so a different message is a different plan.
+    plan: plan.map(({ checkId, itemKey, checkVersion, resolutionVersion, ownerUserId: owner, dueDateISO: due, priority: level, reviewerNote: note, clientChaseMessage: chase }) => ({
+      checkId, itemKey, checkVersion, resolutionVersion, ownerUserId: owner, dueDateISO: due, priority: level, reviewerNote: note, clientChaseMessage: chase,
     })),
   });
   return { run, checks: orderedChecks, plan, fingerprint };
@@ -1567,6 +1606,7 @@ async function getTdsActionPlan({ firmId, runId, page = 1, limit = 100 }) {
     generationAttempt,
     state: { $in: ["OPEN", "ACTION_PLANNED"] },
   };
+  const specificChecklists = await AppConfig.isFeatureEnabled("intelligence", { fresh: true });
   const [checks, total] = await Promise.all([
     TdsHealthCheck.find(query)
       .sort({ severity: 1, dimension: 1, status: 1, _id: 1 })
@@ -1579,7 +1619,7 @@ async function getTdsActionPlan({ firmId, runId, page = 1, limit = 100 }) {
     run: serializeRun(run),
     items: checks.map((check) => ({
       check: serializeCheck(check),
-      suggestedChecklist: checklistForStatus(check.status),
+      suggestedChecklist: correctionStepsFor(check.status, specificChecklists),
       taskCreated: Boolean(check.actionPlan?.taskId),
     })),
     pagination: {
@@ -1599,6 +1639,7 @@ async function commitTdsActionPlan({
   dueDateISO,
   priority,
   reviewerNote = "",
+  messages = null,
   previewToken,
   actorUserId,
   requestId = "",
@@ -1613,6 +1654,7 @@ async function commitTdsActionPlan({
     dueDateISO,
     priority,
     reviewerNote,
+    messages,
   });
   if (!actionTokenMatches(initial.fingerprint, previewToken)) {
     throw serviceError("Action-plan inputs or checks changed after preview; preview again", 409);
@@ -1630,6 +1672,7 @@ async function commitTdsActionPlan({
         dueDateISO,
         priority,
         reviewerNote,
+        messages,
         session,
       });
       if (built.fingerprint !== initial.fingerprint) {

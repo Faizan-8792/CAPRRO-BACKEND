@@ -25,6 +25,7 @@ import { REQUIRED_WORKFLOW_USAGE_INDEXES } from "./workflow-usage-index-readines
 import { REQUIRED_EMAIL_INDEXES } from "./email-index-readiness.service.js";
 import { REQUIRED_AUDIT_PACK_INDEXES } from "./audit-pack-index-readiness.service.js";
 import { REQUIRED_GST_STORAGE_INDEXES } from "./gst-storage-readiness.service.js";
+import { REQUIRED_INTELLIGENCE_INDEXES } from "./intelligence-index-readiness.service.js";
 
 // Taking the model set from the same requirement lists startup asserts against
 // keeps the two in step. A hand-maintained list would drift the moment a
@@ -60,6 +61,8 @@ const REQUIREMENT_GROUPS = Object.freeze([
   // W10 (2026-10-15): the trial-balance import and the audit packs. Provisioned every boot, flag or
   // no flag, so switching auditPacks on never meets a database without its unique keys.
   ["auditPacks", REQUIRED_AUDIT_PACK_INDEXES],
+  // W11: drafts (question key and 30-day expiry), suggestion counters, import mapping profiles.
+  ["intelligence", REQUIRED_INTELLIGENCE_INDEXES],
 ]);
 
 function isNamespaceMissing(error) {

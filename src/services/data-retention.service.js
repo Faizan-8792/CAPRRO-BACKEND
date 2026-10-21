@@ -179,6 +179,17 @@ export const RETENTION_CLASSIFICATION = Object.freeze({
   // engagement itself is: the firm's audit file, kept as long as the firm keeps its records and purged
   // with the firm. No TTL.
   EngagementAssurance: RETENTION_CLASSES.RETAIN,
+  // W11 IN5 (2026-10-21). AiDraft: a TTL index removes every draft nobody adopted 30 days after it was made
+  // (PLAN.md section 33.6); an adopted one has its expiry cleared and is kept beside the record it became
+  // part of. Because adopted drafts stay, the collection as a whole is not SELF_EXPIRING - calling it that is
+  // the false claim this file's header warns about - so it is RETAIN, with the TTL doing the 30-day purge.
+  // AiSuggestionOutcome: content-free daily counters (firm, day, surface, rule or task, three counts), RETAIN
+  // for the reason WorkflowUsage is. Both carry firmId and are purged with the firm on erasure.
+  AiDraft: RETENTION_CLASSES.RETAIN,
+  AiSuggestionOutcome: RETENTION_CLASSES.RETAIN,
+  // W11 IN14: the column mapping a person confirmed for a client's file layout. RETAIN for as long as the firm
+  // keeps the client - it is what makes next month's import map itself - and purged with the firm. No TTL.
+  ImportMappingProfile: RETENTION_CLASSES.RETAIN,
 });
 
 // Named so the skip is visible in the run report and in logs, not only in PLAN.md.

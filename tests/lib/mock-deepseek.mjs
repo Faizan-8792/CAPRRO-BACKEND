@@ -17,7 +17,7 @@ let singleton = null;
 
 export async function ensureMockDeepSeek() {
   if (singleton) return singleton;
-  const state = { calls: [], reply: () => "A draft.", status: 200 };
+  const state = { calls: [], reply: () => "A draft.", status: 200, usage: null };
   const server = http.createServer(async (request, response) => {
     let text = "";
     for await (const chunk of request) text += chunk;
@@ -35,7 +35,8 @@ export async function ensureMockDeepSeek() {
     }
     const content = state.reply(body);
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ choices: [{ message: { content } }] }));
+    // W11 IN2: usage is sent only when a test set it, so every existing suite sees the old body exactly.
+    response.end(JSON.stringify({ choices: [{ message: { content } }], ...(state.usage ? { usage: state.usage } : {}) }));
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   server.unref();
@@ -48,6 +49,12 @@ export async function ensureMockDeepSeek() {
       state.calls.length = 0;
       state.status = 200;
       state.reply = () => "A draft.";
+      state.usage = null;
+    },
+    // W11 IN2: the usage block DeepSeek reports with an answer (prompt_tokens, prompt_cache_hit_tokens,
+    // prompt_cache_miss_tokens, completion_tokens), or null for none.
+    usage(value) {
+      state.usage = value || null;
     },
     on(reply) {
       state.status = 200;

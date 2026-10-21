@@ -242,6 +242,10 @@
               <label class="admin-check"><input type="checkbox" id="flag-weeklySummary" /><code>weeklySummary</code></label>
               <div class="admin-hint">Enables outbound email.</div>
             </div>
+            <div class="flag-grid__item">
+              <label class="admin-check"><input type="checkbox" id="flag-intelligence" /><code>intelligence</code></label>
+              <div class="admin-hint">Mismatch causes, supplier chase packs, remembered import mappings, TDS action drafts, the notice rule reader and today's priorities. A firm must also opt in before anything is sent to DeepSeek.</div>
+            </div>
           </div>
           <div class="admin-card-actions">
             <span></span>
@@ -303,6 +307,61 @@
             <button class="btn btn-sm btn-primary" id="deadlinePublishBtn" type="button">Publish the calendar</button>
           </div>
           <div id="deadlineStatus" class="admin-status" role="status" aria-live="polite"></div>
+          </fieldset>
+        </section>
+
+        <!-- W11 IN21: the notice catalogue. For each notice form the apps recognise, the standard reply window
+             and what it runs from, with the rule it comes from; and which Income-tax Act governs a period.
+             Nothing is pre-filled. The apps never change the reply-by date a notice states: a published
+             window only shows a second date beside it when the two differ. -->
+        <section class="card p-3 super-admin-card admin-danger-zone" id="noticeCatalogueCard" aria-labelledby="noticeCatalogueTitle">
+          <fieldset id="noticeCatalogueSet" class="super-loading-set" disabled aria-busy="true">
+          <div class="admin-danger-zone__head">
+            <h2 class="admin-section-title" id="noticeCatalogueTitle">Notice catalogue</h2>
+            <span class="admin-danger-zone__tag">Every firm and every user</span>
+          </div>
+          <p class="admin-section-lede">
+            Reply windows for the notice forms the apps read by rule, and which Income-tax Act a period falls under. A case shows the reply-by date the notice states; when a window is published here and the two disagree, it shows both with their sources. Nothing is filled in for you &mdash; publish a window only from its rule or notification. Publishing replaces the whole catalogue.
+          </p>
+          <div id="noticeCatalogueVersion" class="admin-hint">Reading the catalogue&hellip;</div>
+          <div class="table-responsive">
+            <table class="table table-sm mb-0" id="noticeCatalogueTable">
+              <thead>
+                <tr>
+                  <th scope="col">Form</th>
+                  <th scope="col">Days</th>
+                  <th scope="col">Counted from</th>
+                  <th scope="col">Rule or notification</th>
+                  <th scope="col"><span class="visually-hidden">Remove</span></th>
+                </tr>
+              </thead>
+              <tbody id="noticeCatalogueRows"></tbody>
+            </table>
+          </div>
+          <div class="row g-2 mt-2">
+            <div class="col-md-3">
+              <label class="form-label" for="actTransitionFrom">Periods from (new Act)</label>
+              <input type="date" class="form-control form-control-sm" id="actTransitionFrom" />
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="actTransitionBefore">Earlier periods: Act</label>
+              <input type="text" class="form-control form-control-sm" id="actTransitionBefore" maxlength="120" placeholder="Income-tax Act, 1961" />
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="actTransitionAfter">From then: Act</label>
+              <input type="text" class="form-control form-control-sm" id="actTransitionAfter" maxlength="120" placeholder="Income-tax Act, 2025" />
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="actTransitionSource">Source</label>
+              <input type="text" class="form-control form-control-sm" id="actTransitionSource" maxlength="300" placeholder="Section and notification" />
+            </div>
+          </div>
+          <div class="admin-hint">Leave all four Act fields empty to publish no Act rule; the apps then say nothing about which Act applies.</div>
+          <div class="admin-card-actions">
+            <button class="btn btn-sm btn-outline-secondary" id="noticeCatalogueAddBtn" type="button">Add a form</button>
+            <button class="btn btn-sm btn-primary" id="noticeCataloguePublishBtn" type="button">Publish the notice catalogue</button>
+          </div>
+          <div id="noticeCatalogueStatus" class="admin-status" role="status" aria-live="polite"></div>
           </fieldset>
         </section>
 

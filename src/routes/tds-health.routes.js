@@ -25,6 +25,16 @@ import {
   requireFirmWriteAccess,
 } from "../middleware/authorization.middleware.js";
 import { requireFeatureFlag } from "../middleware/rollout.middleware.js";
+import { draftTdsActions } from "../services/tds-intelligence.service.js";
+
+async function createActionDrafts(req, res, next) {
+  try {
+    const result = await draftTdsActions({ firmId: req.user.firmId, userId: req.user.id, runId: req.params.id, input: req.body || {} });
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return next(error);
+  }
+}
 
 const router = Router();
 
@@ -47,6 +57,8 @@ router.get("/runs/:id/rows", listRows);
 router.get("/runs/:id/action-plan", showActionPlan);
 router.post("/runs/:id/action-plan/preview", previewActionPlan);
 router.post("/runs/:id/action-plan/commit", commitActionPlan);
+// W11 IN18: drafted reviewer notes and chase messages for the action-plan preview; nothing is stored by drafting.
+router.post("/runs/:id/action-drafts", requireFeatureFlag("intelligence"), createActionDrafts);
 router.post("/runs/:id/create-tasks", createTasksCompatibility);
 router.get("/runs/:id/history", listHistory);
 router.post("/runs/:id/lock", requireFirmAdmin, lockRun);

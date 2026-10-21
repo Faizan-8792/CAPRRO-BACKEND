@@ -1,0 +1,2341 @@
+{
+ "task": "gst_cause_residue",
+ "builtBy": "build-fixtures.mjs",
+ "seed": 20261021,
+ "cases": [
+  {
+   "id": "split-0",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 572297,
+     "igst": 0,
+     "cgst": 51506.73,
+     "sgst": 51506.73,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AA-9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MISSING_IN_BOOKS",
+      "documentType": "INVOICE",
+      "side": "2B",
+      "taxable": 292210,
+      "totalTax": 52597.8,
+      "dayGap": 0
+     },
+     {
+      "ref": "n2",
+      "status": "MISSING_IN_BOOKS",
+      "documentType": "INVOICE",
+      "side": "2B",
+      "taxable": 280087,
+      "totalTax": 50415.66,
+      "dayGap": 0
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "SPLIT_OR_CLUBBED_INVOICE"
+    ]
+   }
+  },
+  {
+   "id": "split-1",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 184423,
+     "igst": 33196.14,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AAA/9999/99-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MISSING_IN_BOOKS",
+      "documentType": "INVOICE",
+      "side": "2B",
+      "taxable": 42401,
+      "totalTax": 7632.18,
+      "dayGap": 0
+     },
+     {
+      "ref": "n2",
+      "status": "MISSING_IN_BOOKS",
+      "documentType": "INVOICE",
+      "side": "2B",
+      "taxable": 142022,
+      "totalTax": 25563.96,
+      "dayGap": 0
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "SPLIT_OR_CLUBBED_INVOICE"
+    ]
+   }
+  },
+  {
+   "id": "split-2",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 216738,
+     "igst": 39012.84,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MISSING_IN_BOOKS",
+      "documentType": "INVOICE",
+      "side": "2B",
+      "taxable": 177178,
+      "totalTax": 31892.04,
+      "dayGap": 0
+     },
+     {
+      "ref": "n2",
+      "status": "MISSING_IN_BOOKS",
+      "documentType": "INVOICE",
+      "side": "2B",
+      "taxable": 39560,
+      "totalTax": 7120.8,
+      "dayGap": 0
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "SPLIT_OR_CLUBBED_INVOICE"
+    ]
+   }
+  },
+  {
+   "id": "split-3",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 311303,
+     "igst": 0,
+     "cgst": 28017.27,
+     "sgst": 28017.27,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "999/99-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MISSING_IN_BOOKS",
+      "documentType": "INVOICE",
+      "side": "2B",
+      "taxable": 278763,
+      "totalTax": 50177.34,
+      "dayGap": 0
+     },
+     {
+      "ref": "n2",
+      "status": "MISSING_IN_BOOKS",
+      "documentType": "INVOICE",
+      "side": "2B",
+      "taxable": 32540,
+      "totalTax": 5857.2,
+      "dayGap": 0
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "SPLIT_OR_CLUBBED_INVOICE"
+    ]
+   }
+  },
+  {
+   "id": "split-4",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 264627,
+     "igst": 0,
+     "cgst": 23816.43,
+     "sgst": 23816.43,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MISSING_IN_BOOKS",
+      "documentType": "INVOICE",
+      "side": "2B",
+      "taxable": 30681,
+      "totalTax": 5522.58,
+      "dayGap": 0
+     },
+     {
+      "ref": "n2",
+      "status": "MISSING_IN_BOOKS",
+      "documentType": "INVOICE",
+      "side": "2B",
+      "taxable": 233946,
+      "totalTax": 42110.28,
+      "dayGap": 0
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "SPLIT_OR_CLUBBED_INVOICE"
+    ]
+   }
+  },
+  {
+   "id": "split-5",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 311113,
+     "igst": 0,
+     "cgst": 28000.17,
+     "sgst": 28000.17,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AA/999/9999-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MISSING_IN_BOOKS",
+      "documentType": "INVOICE",
+      "side": "2B",
+      "taxable": 95267,
+      "totalTax": 17148.06,
+      "dayGap": 0
+     },
+     {
+      "ref": "n2",
+      "status": "MISSING_IN_BOOKS",
+      "documentType": "INVOICE",
+      "side": "2B",
+      "taxable": 215846,
+      "totalTax": 38852.28,
+      "dayGap": 0
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "SPLIT_OR_CLUBBED_INVOICE"
+    ]
+   }
+  },
+  {
+   "id": "dup-0",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 218917,
+     "igst": 0,
+     "cgst": 19702.53,
+     "sgst": 19702.53,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AA/999/9999-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 218917,
+      "totalTax": 39405.06,
+      "dayGap": 0
+     },
+     {
+      "ref": "n2",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 57207,
+      "totalTax": 0,
+      "dayGap": 11
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "DUPLICATE_IN_BOOKS"
+    ]
+   }
+  },
+  {
+   "id": "dup-1",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 100288,
+     "igst": 18051.84,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 100288,
+      "totalTax": 18051.84,
+      "dayGap": 0
+     },
+     {
+      "ref": "n2",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 79573,
+      "totalTax": 0,
+      "dayGap": 6
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "DUPLICATE_IN_BOOKS"
+    ]
+   }
+  },
+  {
+   "id": "dup-2",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 185249,
+     "igst": 33344.82,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AAA9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 185249,
+      "totalTax": 33344.82,
+      "dayGap": 0
+     },
+     {
+      "ref": "n2",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 13870,
+      "totalTax": 0,
+      "dayGap": 24
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "DUPLICATE_IN_BOOKS"
+    ]
+   }
+  },
+  {
+   "id": "dup-3",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 242496,
+     "igst": 43649.28,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "999/99-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 242496,
+      "totalTax": 43649.28,
+      "dayGap": 0
+     },
+     {
+      "ref": "n2",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 29627,
+      "totalTax": 0,
+      "dayGap": 6
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "DUPLICATE_IN_BOOKS"
+    ]
+   }
+  },
+  {
+   "id": "dup-4",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 425999,
+     "igst": 76679.82,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AAA/9999/99-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 425999,
+      "totalTax": 76679.82,
+      "dayGap": 0
+     },
+     {
+      "ref": "n2",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 30694,
+      "totalTax": 0,
+      "dayGap": 23
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "DUPLICATE_IN_BOOKS"
+    ]
+   }
+  },
+  {
+   "id": "dup-5",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 195112,
+     "igst": 35120.16,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AA/999/9999-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 195112,
+      "totalTax": 35120.16,
+      "dayGap": 0
+     },
+     {
+      "ref": "n2",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 51058,
+      "totalTax": 0,
+      "dayGap": 5
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "DUPLICATE_IN_BOOKS"
+    ]
+   }
+  },
+  {
+   "id": "rate-0",
+   "facts": {
+    "status": "TAX_AMOUNT_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 275895,
+     "igst": 49661.1,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 275895,
+     "igst": 77250.6,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 0,
+     "igst": -27589.5,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "RATE_ERROR"
+    ]
+   }
+  },
+  {
+   "id": "rate-1",
+   "facts": {
+    "status": "TAX_AMOUNT_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 284617,
+     "igst": 0,
+     "cgst": 25615.53,
+     "sgst": 25615.53,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 284617,
+     "igst": 0,
+     "cgst": 39846.38,
+     "sgst": 39846.38,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 0,
+     "igst": 0,
+     "cgst": -14230.85,
+     "sgst": -14230.85,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "RATE_ERROR"
+    ]
+   }
+  },
+  {
+   "id": "rate-2",
+   "facts": {
+    "status": "TAX_AMOUNT_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 337523,
+     "igst": 16876.15,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 337523,
+     "igst": 60754.14,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 0,
+     "igst": -43877.99,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "AAA9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "RATE_ERROR"
+    ]
+   }
+  },
+  {
+   "id": "rate-3",
+   "facts": {
+    "status": "TAX_AMOUNT_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 90608,
+     "igst": 10872.96,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 90608,
+     "igst": 16309.44,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 0,
+     "igst": -5436.48,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "AA-9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "RATE_ERROR"
+    ]
+   }
+  },
+  {
+   "id": "rate-4",
+   "facts": {
+    "status": "TAX_AMOUNT_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 370625,
+     "igst": 0,
+     "cgst": 33356.25,
+     "sgst": 33356.25,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 370625,
+     "igst": 0,
+     "cgst": 22237.5,
+     "sgst": 22237.5,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 0,
+     "igst": 0,
+     "cgst": 11118.75,
+     "sgst": 11118.75,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "AAA/9999/99-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "RATE_ERROR"
+    ]
+   }
+  },
+  {
+   "id": "rate-5",
+   "facts": {
+    "status": "TAX_AMOUNT_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 165410,
+     "igst": 0,
+     "cgst": 14886.9,
+     "sgst": 14886.9,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 165410,
+     "igst": 0,
+     "cgst": 23157.4,
+     "sgst": 23157.4,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 0,
+     "igst": 0,
+     "cgst": -8270.5,
+     "sgst": -8270.5,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "RATE_ERROR"
+    ]
+   }
+  },
+  {
+   "id": "round-0",
+   "facts": {
+    "status": "TAX_AMOUNT_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 172471,
+     "igst": 31044.78,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 172471,
+     "igst": 31052.78,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 0,
+     "igst": -8,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "AA/999/9999-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "ROUNDING"
+    ]
+   }
+  },
+  {
+   "id": "round-1",
+   "facts": {
+    "status": "TAX_AMOUNT_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 310027,
+     "igst": 55804.86,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 310027,
+     "igst": 55811.86,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 0,
+     "igst": -7,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "AAA/9999/99-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "ROUNDING"
+    ]
+   }
+  },
+  {
+   "id": "round-2",
+   "facts": {
+    "status": "TAX_AMOUNT_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 185762,
+     "igst": 33437.16,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 185762,
+     "igst": 33445.16,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 0,
+     "igst": -8,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "AAA9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "ROUNDING"
+    ]
+   }
+  },
+  {
+   "id": "round-3",
+   "facts": {
+    "status": "TAX_AMOUNT_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 399243,
+     "igst": 71863.74,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 399243,
+     "igst": 71866.74,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 0,
+     "igst": -3,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "AAA/9999/99-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "ROUNDING"
+    ]
+   }
+  },
+  {
+   "id": "round-4",
+   "facts": {
+    "status": "TAX_AMOUNT_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 208737,
+     "igst": 37572.66,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 208737,
+     "igst": 37574.66,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 0,
+     "igst": -2,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "AA-9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "ROUNDING"
+    ]
+   }
+  },
+  {
+   "id": "round-5",
+   "facts": {
+    "status": "TAX_AMOUNT_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 277155,
+     "igst": 49887.9,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 277155,
+     "igst": 49890.9,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 0,
+     "igst": -3,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "999/99-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "ROUNDING"
+    ]
+   }
+  },
+  {
+   "id": "notfiled-0",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 328939,
+     "igst": 0,
+     "cgst": 29604.51,
+     "sgst": 29604.51,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AAA9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 61419,
+      "totalTax": 0,
+      "dayGap": -16
+     },
+     {
+      "ref": "n2",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 48460,
+      "totalTax": 0,
+      "dayGap": 15
+     },
+     {
+      "ref": "n3",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 31933,
+      "totalTax": 0,
+      "dayGap": 27
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "SUPPLIER_NOT_FILED"
+    ]
+   }
+  },
+  {
+   "id": "notfiled-1",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 36312,
+     "igst": 6536.16,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "999/99-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 81657,
+      "totalTax": 0,
+      "dayGap": -19
+     },
+     {
+      "ref": "n2",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 71170,
+      "totalTax": 0,
+      "dayGap": 6
+     },
+     {
+      "ref": "n3",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 68888,
+      "totalTax": 0,
+      "dayGap": 24
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "SUPPLIER_NOT_FILED"
+    ]
+   }
+  },
+  {
+   "id": "notfiled-2",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 344915,
+     "igst": 0,
+     "cgst": 31042.35,
+     "sgst": 31042.35,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AAA9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 25627,
+      "totalTax": 0,
+      "dayGap": -18
+     },
+     {
+      "ref": "n2",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 53785,
+      "totalTax": 0,
+      "dayGap": 6
+     },
+     {
+      "ref": "n3",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 49887,
+      "totalTax": 0,
+      "dayGap": 25
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "SUPPLIER_NOT_FILED"
+    ]
+   }
+  },
+  {
+   "id": "notfiled-3",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 371147,
+     "igst": 66806.46,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AAA9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 8720,
+      "totalTax": 0,
+      "dayGap": -12
+     },
+     {
+      "ref": "n2",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 87303,
+      "totalTax": 0,
+      "dayGap": 9
+     },
+     {
+      "ref": "n3",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 41819,
+      "totalTax": 0,
+      "dayGap": 25
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "SUPPLIER_NOT_FILED"
+    ]
+   }
+  },
+  {
+   "id": "notfiled-4",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 138994,
+     "igst": 25018.92,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AAA9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 76034,
+      "totalTax": 0,
+      "dayGap": -13
+     },
+     {
+      "ref": "n2",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 44430,
+      "totalTax": 0,
+      "dayGap": 3
+     },
+     {
+      "ref": "n3",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 21823,
+      "totalTax": 0,
+      "dayGap": 22
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "SUPPLIER_NOT_FILED"
+    ]
+   }
+  },
+  {
+   "id": "notfiled-5",
+   "facts": {
+    "status": "MISSING_IN_2B",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 341700,
+     "igst": 0,
+     "cgst": 30753,
+     "sgst": 30753,
+     "cess": 0
+    },
+    "portal": null,
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AA/999/9999-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": [
+     {
+      "ref": "n1",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 17097,
+      "totalTax": 0,
+      "dayGap": -11
+     },
+     {
+      "ref": "n2",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 29612,
+      "totalTax": 0,
+      "dayGap": 4
+     },
+     {
+      "ref": "n3",
+      "status": "MATCHED",
+      "documentType": "INVOICE",
+      "side": "both",
+      "taxable": 86826,
+      "totalTax": 0,
+      "dayGap": 24
+     }
+    ]
+   },
+   "expect": {
+    "acceptable": [
+     "SUPPLIER_NOT_FILED"
+    ]
+   }
+  },
+  {
+   "id": "cannot-lone-0",
+   "facts": {
+    "status": "MISSING_IN_BOOKS",
+    "documentType": "INVOICE",
+    "books": null,
+    "portal": {
+     "taxable": 249493,
+     "igst": 0,
+     "cgst": 6237.33,
+     "sgst": 6237.33,
+     "cess": 0
+    },
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-lone-1",
+   "facts": {
+    "status": "MISSING_IN_BOOKS",
+    "documentType": "INVOICE",
+    "books": null,
+    "portal": {
+     "taxable": 102155,
+     "igst": 12258.6,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AA-9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-lone-2",
+   "facts": {
+    "status": "MISSING_IN_BOOKS",
+    "documentType": "INVOICE",
+    "books": null,
+    "portal": {
+     "taxable": 259794,
+     "igst": 0,
+     "cgst": 23381.46,
+     "sgst": 23381.46,
+     "cess": 0
+    },
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AA-9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-lone-3",
+   "facts": {
+    "status": "MISSING_IN_BOOKS",
+    "documentType": "INVOICE",
+    "books": null,
+    "portal": {
+     "taxable": 163321,
+     "igst": 8166.05,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AAA/9999/99-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-lone-4",
+   "facts": {
+    "status": "MISSING_IN_BOOKS",
+    "documentType": "INVOICE",
+    "books": null,
+    "portal": {
+     "taxable": 177773,
+     "igst": 21332.76,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AA-9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-lone-5",
+   "facts": {
+    "status": "MISSING_IN_BOOKS",
+    "documentType": "INVOICE",
+    "books": null,
+    "portal": {
+     "taxable": 162679,
+     "igst": 29282.22,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "999/99-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-lone-6",
+   "facts": {
+    "status": "MISSING_IN_BOOKS",
+    "documentType": "INVOICE",
+    "books": null,
+    "portal": {
+     "taxable": 363191,
+     "igst": 65374.38,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AAA9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-lone-7",
+   "facts": {
+    "status": "MISSING_IN_BOOKS",
+    "documentType": "INVOICE",
+    "books": null,
+    "portal": {
+     "taxable": 291931,
+     "igst": 52547.58,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": null,
+    "dateGapDays": null,
+    "invoiceShape": "AAA9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-taxable-0",
+   "facts": {
+    "status": "TAXABLE_VALUE_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 65311,
+     "igst": 11755.98,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 54004.48,
+     "igst": 9720.81,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 11306.52,
+     "igst": 2035.17,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "AA/999/9999-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-taxable-1",
+   "facts": {
+    "status": "TAXABLE_VALUE_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 251612,
+     "igst": 45290.16,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 131576.77,
+     "igst": 23683.82,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 120035.23,
+     "igst": 21606.34,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-taxable-2",
+   "facts": {
+    "status": "TAXABLE_VALUE_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 103682,
+     "igst": 18662.76,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 104112.84,
+     "igst": 18740.31,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": -430.84,
+     "igst": -77.55,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "AA/999/9999-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-taxable-3",
+   "facts": {
+    "status": "TAXABLE_VALUE_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 76204,
+     "igst": 13716.72,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 79129.93,
+     "igst": 14243.39,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": -2925.93,
+     "igst": -526.67,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "AAA9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-taxable-4",
+   "facts": {
+    "status": "TAXABLE_VALUE_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 164056,
+     "igst": 29530.08,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 195414.54,
+     "igst": 35174.62,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": -31358.54,
+     "igst": -5644.54,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-taxable-5",
+   "facts": {
+    "status": "TAXABLE_VALUE_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 362948,
+     "igst": 65330.64,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 245726.52,
+     "igst": 44230.77,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 117221.48,
+     "igst": 21099.87,
+     "cgst": 0,
+     "sgst": 0,
+     "cess": 0
+    },
+    "dateGapDays": null,
+    "invoiceShape": "AAA/9999/99-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-date-0",
+   "facts": {
+    "status": "DATE_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 107828,
+     "igst": 0,
+     "cgst": 9704.52,
+     "sgst": 9704.52,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 75479.6,
+     "igst": 0,
+     "cgst": 4528.77,
+     "sgst": 4528.77,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 32348.4,
+     "igst": 0,
+     "cgst": 5175.75,
+     "sgst": 5175.75,
+     "cess": 0
+    },
+    "dateGapDays": 104,
+    "invoiceShape": "999/99-99",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-date-1",
+   "facts": {
+    "status": "DATE_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 36787,
+     "igst": 0,
+     "cgst": 3310.83,
+     "sgst": 3310.83,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 25750.9,
+     "igst": 0,
+     "cgst": 1545.06,
+     "sgst": 1545.06,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 11036.1,
+     "igst": 0,
+     "cgst": 1765.77,
+     "sgst": 1765.77,
+     "cess": 0
+    },
+    "dateGapDays": 164,
+    "invoiceShape": "AAA9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-date-2",
+   "facts": {
+    "status": "DATE_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 209862,
+     "igst": 0,
+     "cgst": 18887.58,
+     "sgst": 18887.58,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 146903.4,
+     "igst": 0,
+     "cgst": 8814.21,
+     "sgst": 8814.21,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 62958.6,
+     "igst": 0,
+     "cgst": 10073.37,
+     "sgst": 10073.37,
+     "cess": 0
+    },
+    "dateGapDays": 109,
+    "invoiceShape": "AAA9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-date-3",
+   "facts": {
+    "status": "DATE_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 205846,
+     "igst": 0,
+     "cgst": 18526.14,
+     "sgst": 18526.14,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 144092.2,
+     "igst": 0,
+     "cgst": 8645.53,
+     "sgst": 8645.53,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 61753.8,
+     "igst": 0,
+     "cgst": 9880.61,
+     "sgst": 9880.61,
+     "cess": 0
+    },
+    "dateGapDays": 99,
+    "invoiceShape": "9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-date-4",
+   "facts": {
+    "status": "DATE_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 278748,
+     "igst": 0,
+     "cgst": 25087.32,
+     "sgst": 25087.32,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 195123.6,
+     "igst": 0,
+     "cgst": 11707.42,
+     "sgst": 11707.42,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 83624.4,
+     "igst": 0,
+     "cgst": 13379.9,
+     "sgst": 13379.9,
+     "cess": 0
+    },
+    "dateGapDays": 189,
+    "invoiceShape": "AA-9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  },
+  {
+   "id": "cannot-date-5",
+   "facts": {
+    "status": "DATE_MISMATCH",
+    "documentType": "INVOICE",
+    "books": {
+     "taxable": 144555,
+     "igst": 0,
+     "cgst": 13009.95,
+     "sgst": 13009.95,
+     "cess": 0
+    },
+    "portal": {
+     "taxable": 101188.5,
+     "igst": 0,
+     "cgst": 6071.31,
+     "sgst": 6071.31,
+     "cess": 0
+    },
+    "difference": {
+     "taxable": 43366.5,
+     "igst": 0,
+     "cgst": 6938.64,
+     "sgst": 6938.64,
+     "cess": 0
+    },
+    "dateGapDays": 161,
+    "invoiceShape": "AAA9999",
+    "rulesTried": [
+     "R1",
+     "R2",
+     "R3",
+     "R4",
+     "R5",
+     "R6",
+     "R7"
+    ],
+    "sameSupplier": []
+   },
+   "expect": {
+    "acceptable": [
+     "CANNOT_TELL"
+    ]
+   }
+  }
+ ]
+}

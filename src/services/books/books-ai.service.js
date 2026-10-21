@@ -3,7 +3,7 @@
 // W10 AP19 (2026-10-17): the one place AI touches the books snapshot - a SUGGESTION of which standard group
 // an unrecognised Tally group belongs to. Never applied: it is returned beside the group with the words
 // AI_DRAFT, and becomes a mapping only when a person accepts it through the same route a person's own
-// answer takes (source AI_ACCEPTED). Metered as "audit_pack_draft" within the existing per-user and global
+// answer takes (source AI_ACCEPTED). Metered as "books_group_suggest" (W11 IN3; it was "audit_pack_draft") within the existing per-user and global
 // DeepSeek caps. Every pack works with this switched off.
 //
 // What is sent: group NAMES and the names of the groups above them. No ledger names, no amounts, no GSTIN.
@@ -75,7 +75,8 @@ export async function suggestGroupMappings({ firmId, actorUserId, snapshotId, in
       timeoutMs: 25000,
       temperature: 0,
       userId: actorUserId,
-      operation: "audit_pack_draft",
+      // W11 IN3: its own name, so the admin report no longer mixes it with the pack drafts.
+      operation: "books_group_suggest",
     });
   } catch {
     result = { ok: false, reason: "The suggestion could not be requested." };

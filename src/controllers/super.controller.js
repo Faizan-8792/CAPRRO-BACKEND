@@ -35,9 +35,12 @@ import { publishPortalMap } from "../services/portal-map.service.js";
 import ProviderUsage, {
   DEEPSEEK_OPERATIONS,
   GLOBAL_USAGE_USER_ID,
+  TOKEN_COUNTERS,
   dailyPeriodKey,
   monthlyPeriodKey,
 } from "../models/ProviderUsage.js";
+import { DEEPSEEK_PRICE_TABLE, estimateDeepSeekCostUsd } from "../services/ai/deepseek-models.js";
+import AiSuggestionOutcome from "../models/AiSuggestionOutcome.js";
 
 // DS43: every report below leaves out the owner's own accounts unless the panel asks for them
 // (?includeOwn=1), and answers with `ownAccounts` saying what it left out.
@@ -424,15 +427,86 @@ export const getProviderUsageStats = async (req, res, next) => {
     const todayTotals = totalsByProvider(dailyTotalsRaw);
     const monthTotals = totalsByProvider(monthlyTotalsRaw);
 
+    // W11 IN2: tokens per feature from the same daily rows (owner accounts left out the same way), and an
+    // estimate in US dollars at deepseek-flash peak prices. Calls recorded before tokens were counted have
+    // none, so a month that began before IN2 under-reports; the card says so.
+    const tokenGroup = Object.fromEntries([
+      ["_id", null],
+      ...DEEPSEEK_OPERATIONS.flatMap((name) =>
+        TOKEN_COUNTERS.map((counter) => [
+          `${name}__${counter}`,
+          { $sum: { $ifNull: [`$operationTokens.${name}.${counter}`, 0] } },
+        ]),
+      ),
+    ]);
+    const [tokensToday, tokensMonth] = await Promise.all([
+      ProviderUsage.aggregate([
+        { $match: { ...realUserFilter, provider: "DEEPSEEK", periodKey: dayKey } },
+        { $group: tokenGroup },
+      ]),
+      ProviderUsage.aggregate([
+        {
+          $match: {
+            ...realUserFilter,
+            provider: "DEEPSEEK",
+            periodKey: { $regex: `^${monthKey}-\\d{2}$` },
+          },
+        },
+        { $group: tokenGroup },
+      ]),
+    ]);
+    const tokensByOperation = (row) => {
+      const byOp = {};
+      const total = Object.fromEntries(TOKEN_COUNTERS.map((counter) => [counter, 0]));
+      for (const name of DEEPSEEK_OPERATIONS) {
+        const block = Object.fromEntries(
+          TOKEN_COUNTERS.map((counter) => [counter, row?.[`${name}__${counter}`] || 0]),
+        );
+        for (const counter of TOKEN_COUNTERS) total[counter] += block[counter];
+        byOp[name] = { ...block, estimatedUsd: estimateDeepSeekCostUsd(block) };
+      }
+      return { byOperation: byOp, total: { ...total, estimatedUsd: estimateDeepSeekCostUsd(total) } };
+    };
+
+    // W11 IN5/IN24: what people did with suggestions this month - per surface, per rule or AI task - from the
+    // content-free daily counters, owner firms left out like every other count. These, not call counts, are
+    // the keep-or-retire measures (INTELLIGENCE-PLAN-2026-10-21.md section 10.3).
+    const outcomeRows = await AiSuggestionOutcome.aggregate([
+      { $match: { day: { $regex: `^${monthKey}-\\d{2}$` }, ...without("firmId", scope.firmIds) } },
+      {
+        $group: {
+          _id: { surface: "$surface", source: "$source", key: "$key" },
+          adoptedUnchanged: { $sum: "$adoptedUnchanged" },
+          edited: { $sum: "$edited" },
+          discarded: { $sum: "$discarded" },
+        },
+      },
+      { $sort: { "_id.surface": 1, "_id.source": 1, "_id.key": 1 } },
+    ]);
+    const suggestionOutcomes = outcomeRows.map((row) => ({
+      surface: row._id.surface,
+      source: row._id.source,
+      key: row._id.key,
+      adoptedUnchanged: row.adoptedUnchanged,
+      edited: row.edited,
+      discarded: row.discarded,
+    }));
+
     return res.json({
       ok: true,
       usage: {
         today: todayTotals,
         thisMonth: monthTotals,
         topUsersToday,
+        suggestionOutcomesThisMonth: suggestionOutcomes,
         deepSeekByOperation: {
           today: byOperation(operationsToday[0], todayTotals.DEEPSEEK),
           thisMonth: byOperation(operationsMonth[0], monthTotals.DEEPSEEK),
+        },
+        deepSeekTokens: {
+          today: tokensByOperation(tokensToday[0]),
+          thisMonth: tokensByOperation(tokensMonth[0]),
+          priceBasis: DEEPSEEK_PRICE_TABLE,
         },
       },
       ownAccounts: scope.note,

@@ -55,6 +55,14 @@ const FirmSchema = new mongoose.Schema({
   // When false, the firm is private: the invite/join code will not admit new
   // members. Existing members and the owner are unaffected. Absent on legacy
   // documents, which are treated as sharing-enabled (backward compatible).
+  // W11 IN5 (2026-10-21): the firm's own opt-in to having facts sent to DeepSeek for drafts. Off unless a
+  // firm owner or admin switches it on; the global `intelligence` flag and per-request consent are still
+  // checked on top of it, on the server, before anything is sent. Rule-based suggestions need none of this.
+  aiDrafting: {
+    enabled: { type: Boolean, default: false },
+    changedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    changedAt: { type: Date, default: null },
+  },
   sharingEnabled: {
     type: Boolean,
     default: true,

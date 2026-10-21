@@ -7,6 +7,7 @@ import {
   showBooksImportBatch,
   previewMappedImport,
   suggestImportMappingForFile,
+  suggestImportMappingWithModel,
   showGstImportBatch,
   showGstImportErrors,
   showTdsImportBatch,
@@ -58,6 +59,8 @@ router.post("/preview", requireImportPreviewFeature, previewMappedImport);
 // Same feature gate and the same firm-write authorization as a preview: it reads a file the
 // caller supplied and returns nothing about any stored record, but it is still import work.
 router.post("/suggest-mapping", requireImportPreviewFeature, suggestImportMappingForFile);
+// W11 IN15: suggested mappings for unrecognised headings, from the headings and column types alone.
+router.post("/mapping-suggestions", requireImportPreviewFeature, requireFeatureFlag("intelligence"), suggestImportMappingWithModel);
 router.post("/gstr2b/convert", requireGstReconciliation, convertGstr2bImport);
 router.post("/:sourceHash/books-commit", requireAuditPacks, commitMappedBooksImport);
 router.get("/books/:id", requireAuditPacks, showBooksImportBatch);

@@ -891,6 +891,18 @@ try {
         "due-day-utc-contract",
         # DS24 (2026-10-07): a platform-wide switch records who moved it, what was set and why.
         "control-change-reason",
+        # W11 (2026-10-21), registered the day each was added: the shared intelligence layer (refusals, replay,
+        # validation, outcomes, tokens), the consent pin, the GST cause rules (pure) and routes, import mapping
+        # memory and suggestions, the notice rule reader and catalogue, today's priorities, and the frozen
+        # evaluation sets. tds-intelligence-contract needs transactions and is in the replica-set list below.
+        "ai-task-contract",
+        "ai-consent-pin-contract",
+        "gst-cause-engine",
+        "gst-intelligence-route-contract",
+        "import-mapping-profile-contract",
+        "notice-rules-contract",
+        "priority-engine-contract",
+        "ai-eval-fixtures",
         # DS25 (2026-10-07): every email in one branded layout, with a text part and its own words.
         "email-layout-contract",
         # Added 2026-08-26. These six existed in tests/ and passed, but were NEVER in this list, so a
@@ -1008,7 +1020,9 @@ try {
         # W10 AP38 (2026-10-17): independence confirmations, the report date and the 60-day assembly timer in UTC days, the log after assembly, time. Transactions.
         "engagement-assurance-contract",
         # W10 AP37 (2026-10-17): drafted materiality, sampling and significant-matters memos - the wording contract, the reviewer's signature and its hash. Transactions.
-        "engagement-memo-contract"
+        "engagement-memo-contract",
+        # W11 IN17/IN18 (2026-10-21): per-status TDS checklists, drafted notes and messages kept through the action-plan preview and commit. Transactions.
+        "tds-intelligence-contract"
     )
     # Suites that hold EXTRA assertions behind "if (process.env.MONGODB_URI)". This runner never
     # set that variable, so those assertions had never run in a single gate execution. Measured
@@ -1064,6 +1078,12 @@ try {
         "owner-accounts-contract" = "scratch-gates-owner-accounts"
         "gst-downloads-contract" = "scratch-gates-gst-downloads"
         "control-change-reason" = "scratch-gates-control-change"
+        "ai-task-contract" = "scratch-gates-ai-task"
+        "ai-consent-pin-contract" = "scratch-gates-ai-consent"
+        "gst-intelligence-route-contract" = "scratch-gates-gst-intelligence"
+        "import-mapping-profile-contract" = "scratch-gates-import-mapping"
+        "notice-rules-contract" = "scratch-gates-notice-rules"
+        "priority-engine-contract" = "scratch-gates-priorities"
     }
     # Probed once, not assumed. On a machine with no local Mongo the behaviour is unchanged from
     # before -- the variable stays unset and the suites run their Mongo-free subset -- but the

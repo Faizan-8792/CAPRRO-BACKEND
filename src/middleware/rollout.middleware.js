@@ -13,7 +13,8 @@ async function featureState(flagName) {
       flagName === "noticeCases" ||
       flagName === "assuranceEngagements" ||
       flagName === "auditWorkingPapers" ||
-      flagName === "auditPacks",
+      flagName === "auditPacks" ||
+      flagName === "intelligence",
   });
 }
 

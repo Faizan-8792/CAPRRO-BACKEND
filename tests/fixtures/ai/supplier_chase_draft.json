@@ -1,0 +1,679 @@
+{
+ "task": "supplier_chase_draft",
+ "builtBy": "build-fixtures.mjs",
+ "seed": 20261021,
+ "cases": [
+  {
+   "id": "chase-en-whatsapp-100",
+   "facts": {
+    "language": "plain Indian English",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-en-whatsapp-010",
+   "facts": {
+    "language": "plain Indian English",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": true,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-en-whatsapp-001",
+   "facts": {
+    "language": "plain Indian English",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": false,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-en-whatsapp-110",
+   "facts": {
+    "language": "plain Indian English",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-en-whatsapp-101",
+   "facts": {
+    "language": "plain Indian English",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-en-whatsapp-011",
+   "facts": {
+    "language": "plain Indian English",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-en-whatsapp-111",
+   "facts": {
+    "language": "plain Indian English",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-en-email-100",
+   "facts": {
+    "language": "plain Indian English",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-en-email-010",
+   "facts": {
+    "language": "plain Indian English",
+    "channel": "email",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": true,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-en-email-001",
+   "facts": {
+    "language": "plain Indian English",
+    "channel": "email",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": false,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-en-email-110",
+   "facts": {
+    "language": "plain Indian English",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-en-email-101",
+   "facts": {
+    "language": "plain Indian English",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-en-email-011",
+   "facts": {
+    "language": "plain Indian English",
+    "channel": "email",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-en-email-111",
+   "facts": {
+    "language": "plain Indian English",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-hi-whatsapp-100",
+   "facts": {
+    "language": "Hindi in Devanagari script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-hi-whatsapp-010",
+   "facts": {
+    "language": "Hindi in Devanagari script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": true,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-hi-whatsapp-001",
+   "facts": {
+    "language": "Hindi in Devanagari script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": false,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-hi-whatsapp-110",
+   "facts": {
+    "language": "Hindi in Devanagari script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-hi-whatsapp-101",
+   "facts": {
+    "language": "Hindi in Devanagari script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-hi-whatsapp-011",
+   "facts": {
+    "language": "Hindi in Devanagari script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-hi-whatsapp-111",
+   "facts": {
+    "language": "Hindi in Devanagari script",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-hi-email-100",
+   "facts": {
+    "language": "Hindi in Devanagari script",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-hi-email-010",
+   "facts": {
+    "language": "Hindi in Devanagari script",
+    "channel": "email",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": true,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-hi-email-001",
+   "facts": {
+    "language": "Hindi in Devanagari script",
+    "channel": "email",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": false,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-hi-email-110",
+   "facts": {
+    "language": "Hindi in Devanagari script",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-hi-email-101",
+   "facts": {
+    "language": "Hindi in Devanagari script",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-hi-email-011",
+   "facts": {
+    "language": "Hindi in Devanagari script",
+    "channel": "email",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-hi-email-111",
+   "facts": {
+    "language": "Hindi in Devanagari script",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "devanagari",
+    "hinglish": false
+   }
+  },
+  {
+   "id": "chase-hinglish-whatsapp-100",
+   "facts": {
+    "language": "Hinglish (Hindi in Latin script, mixed with English as Indian businesses write)",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": true
+   }
+  },
+  {
+   "id": "chase-hinglish-whatsapp-010",
+   "facts": {
+    "language": "Hinglish (Hindi in Latin script, mixed with English as Indian businesses write)",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": true,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": true
+   }
+  },
+  {
+   "id": "chase-hinglish-whatsapp-001",
+   "facts": {
+    "language": "Hinglish (Hindi in Latin script, mixed with English as Indian businesses write)",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": false,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": true
+   }
+  },
+  {
+   "id": "chase-hinglish-whatsapp-110",
+   "facts": {
+    "language": "Hinglish (Hindi in Latin script, mixed with English as Indian businesses write)",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": true
+   }
+  },
+  {
+   "id": "chase-hinglish-whatsapp-101",
+   "facts": {
+    "language": "Hinglish (Hindi in Latin script, mixed with English as Indian businesses write)",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": true
+   }
+  },
+  {
+   "id": "chase-hinglish-whatsapp-011",
+   "facts": {
+    "language": "Hinglish (Hindi in Latin script, mixed with English as Indian businesses write)",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": true
+   }
+  },
+  {
+   "id": "chase-hinglish-whatsapp-111",
+   "facts": {
+    "language": "Hinglish (Hindi in Latin script, mixed with English as Indian businesses write)",
+    "channel": "whatsapp",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": true
+   }
+  },
+  {
+   "id": "chase-hinglish-email-100",
+   "facts": {
+    "language": "Hinglish (Hindi in Latin script, mixed with English as Indian businesses write)",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": true
+   }
+  },
+  {
+   "id": "chase-hinglish-email-010",
+   "facts": {
+    "language": "Hinglish (Hindi in Latin script, mixed with English as Indian businesses write)",
+    "channel": "email",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": true,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": true
+   }
+  },
+  {
+   "id": "chase-hinglish-email-001",
+   "facts": {
+    "language": "Hinglish (Hindi in Latin script, mixed with English as Indian businesses write)",
+    "channel": "email",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": false,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": true
+   }
+  },
+  {
+   "id": "chase-hinglish-email-110",
+   "facts": {
+    "language": "Hinglish (Hindi in Latin script, mixed with English as Indian businesses write)",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": false
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": true
+   }
+  },
+  {
+   "id": "chase-hinglish-email-101",
+   "facts": {
+    "language": "Hinglish (Hindi in Latin script, mixed with English as Indian businesses write)",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": false,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": true
+   }
+  },
+  {
+   "id": "chase-hinglish-email-011",
+   "facts": {
+    "language": "Hinglish (Hindi in Latin script, mixed with English as Indian businesses write)",
+    "channel": "email",
+    "covers": {
+     "notFiled": false,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": true
+   }
+  },
+  {
+   "id": "chase-hinglish-email-111",
+   "facts": {
+    "language": "Hinglish (Hindi in Latin script, mixed with English as Indian businesses write)",
+    "channel": "email",
+    "covers": {
+     "notFiled": true,
+     "amountDiffers": true,
+     "other": true
+    }
+   },
+   "expect": {
+    "script": "latin",
+    "hinglish": true
+   }
+  }
+ ]
+}

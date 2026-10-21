@@ -51,6 +51,8 @@ const ACTION_PLAN_FIELDS = new Set([
   "dueDateISO",
   "priority",
   "reviewerNote",
+  // W11 IN18: per-check chase message and reviewer note a person kept from a draft or typed.
+  "messages",
   "previewToken",
 ]);
 
@@ -80,6 +82,7 @@ function actionPlanInput(req) {
     dueDateISO: req.body.dueDateISO,
     priority: req.body.priority,
     reviewerNote: req.body.reviewerNote,
+    messages: req.body.messages,
   };
 }
 

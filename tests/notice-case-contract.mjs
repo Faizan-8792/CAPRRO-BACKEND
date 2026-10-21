@@ -413,9 +413,10 @@ const routeCount = [
 // check had drifted to before that. Recounted directly from case.routes.js
 // rather than carried forward from the ledger or coordination board, which this
 // check's own failure message shows had drifted first.
+// W11 IN19-IN21 (2026-10-21) added GET /:id/rule-reading and POST /:id/document-requests: 19.
 check(
-  "the case router exposes 17 handlers",
-  routeCount === 17,
+  "the case router exposes 19 handlers",
+  routeCount === 19,
   `counted ${routeCount}`,
 );
 

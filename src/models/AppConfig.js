@@ -25,13 +25,29 @@ export const DEFAULT_FEATURE_FLAGS = Object.freeze({
   auditPacks: false,
   dailyDigest: false,
   weeklySummary: false,
+  // W11 (2026-10-21): the intelligence features - mismatch causes, chase packs, import mapping memory and
+  // suggestions, TDS action drafts, the notice rule reader and today's priorities. Each firm must also opt in
+  // before anything is sent to the model (Firm.aiDrafting).
+  intelligence: false,
 });
 
 // DS24: the platform-wide switches (maintenance mode, the feature flags) keep a short history of
 // who changed them, what was set and why. The newest CONTROL_CHANGE_LIMIT entries are kept.
 export const CONTROL_CHANGE_LIMIT = 50;
 export const CONTROL_REASON_MAX = 300;
-export const CONTROL_CHANGE_KINDS = Object.freeze(["maintenance", "featureFlags", "deadlineCatalogue"]);
+export const CONTROL_CHANGE_KINDS = Object.freeze(["maintenance", "featureFlags", "deadlineCatalogue", "noticeCatalogue"]);
+
+// W11 IN21: one notice form's standard reply window, as the owner publishes it (validated by
+// services/notice-catalogue.service.js before it is stored). Nothing is pre-filled.
+const NoticeWindowEntrySchema = new mongoose.Schema(
+  {
+    form: { type: String, trim: true, maxlength: 40, required: true },
+    windowDays: { type: Number, min: 1, max: 365, required: true },
+    basis: { type: String, enum: ["ISSUE_DATE", "RECEIPT_DATE"], required: true },
+    sourceReference: { type: String, trim: true, maxlength: 300, required: true },
+  },
+  { _id: false },
+);
 
 // W10 AP40: one row of the deadline catalogue. The statutory date and the notified extension are
 // separate fields on purpose, and both are UTC days written "YYYY-MM-DD" (never a Date, so no time
@@ -125,6 +141,7 @@ const AppConfigSchema = new mongoose.Schema(
       auditPacks: { type: Boolean, default: false },
       dailyDigest: { type: Boolean, default: false },
       weeklySummary: { type: Boolean, default: false },
+      intelligence: { type: Boolean, default: false },
     },
     featureFlagVersions: {
       tdsHealth: { type: Number, min: 0, default: 0 },
@@ -171,6 +188,19 @@ const AppConfigSchema = new mongoose.Schema(
       publishedAt: { type: Date, default: null },
       publishedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
       entries: { type: [DeadlineEntrySchema], default: [] },
+    },
+    // W11 IN21: reply windows per notice form and the Income-tax Act transition rule, both owner-published.
+    noticeCatalogue: {
+      version: { type: Number, min: 0, default: 0 },
+      publishedAt: { type: Date, default: null },
+      publishedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      entries: { type: [NoticeWindowEntrySchema], default: [] },
+      actTransition: {
+        effectiveFrom: { type: String, match: /^(\d{4}-\d{2}-\d{2})?$/, default: "" },
+        before: { type: String, trim: true, maxlength: 120, default: "" },
+        after: { type: String, trim: true, maxlength: 120, default: "" },
+        sourceReference: { type: String, trim: true, maxlength: 300, default: "" },
+      },
     },
   },
   { timestamps: true, _id: false }

@@ -10,6 +10,8 @@ import {
   callDeepSeek,
   parseJsonObject,
 } from "./deepseek-provider.service.js";
+import AppConfig from "../models/AppConfig.js";
+import { ruleProposalsForCase } from "./case-intelligence.service.js";
 
 const FIELD_SET = new Set(CASE_FIELD_NAMES);
 const ANALYSIS_KEYS = Object.freeze([
@@ -136,7 +138,17 @@ function excerptAppearsInSource(excerpt, source) {
 async function proposeCaseExtraction(caseMatter, userId) {
   const source = String(caseMatter?.source?.extractedText || "").trim();
   if (!source) throw httpError(422, "Source text is required for AI extraction");
-  const fields = CASE_FIELD_NAMES.join(", ");
+  // W11 IN21: with the `intelligence` flag on, the notice rules read first (no model) and the model is asked only
+  // for the fields they did not find; the rule proposals are stored beside the model's with provider RULES. With
+  // every field found by rule, no model call is made at all. With the flag off, nothing here changes.
+  const rulesFirst = await AppConfig.isFeatureEnabled("intelligence", { fresh: true });
+  const ruleProposals = rulesFirst ? ruleProposalsForCase(source) : [];
+  const ruleFields = new Set(ruleProposals.map((proposal) => proposal.field));
+  const askFor = CASE_FIELD_NAMES.filter((field) => !ruleFields.has(field));
+  if (rulesFirst && !askFor.length) {
+    return { proposals: ruleProposals, provider: "RULES", model: "" };
+  }
+  const fields = askFor.join(", ");
   const result = await callDeepSeek({
     system: "You extract facts from Indian tax and regulatory notices. Use source text only. Return strict JSON. Never infer a missing date, amount, DIN, period, section, authority, or citation.",
     prompt: `Return {"fields":[{"field":"allowed field","value":"source value","sourceText":"exact verbatim excerpt","confidence":0.0}]}.
@@ -158,6 +170,7 @@ SOURCE:\n${source.slice(0, 90000)}`,
     const confidence = Number(item?.confidence);
     if (
       !FIELD_SET.has(field) ||
+      ruleFields.has(field) ||
       !value ||
       !Number.isFinite(confidence) ||
       confidence < 0 ||
@@ -174,6 +187,7 @@ SOURCE:\n${source.slice(0, 90000)}`,
       proposedAt: new Date(),
     });
   }
+  proposals.push(...ruleProposals);
   if (!proposals.length) {
     // Public (app.js PUBLIC_ERROR_CODES), so this sentence is what the user reads; it is the desktop's
     // own wording for this code (CaseExtractionService.NoVerifiableProposalsMessage), pinned equal by
