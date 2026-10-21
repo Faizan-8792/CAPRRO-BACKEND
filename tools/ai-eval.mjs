@@ -132,7 +132,8 @@ async function evaluate(taskName) {
     const items = new Map((Array.isArray(parsed?.items) ? parsed.items : []).filter((item) => item && typeof item.id === "string").map((item) => [item.id, item]));
     for (const entry of batch) {
       const item = items.get(entry.id);
-      let result = { valid: false };
+      // A case the model's answer left out is reported as such: "refused ()" read like a validator fault.
+      let result = { valid: false, reason: response.ok ? "the model's answer left this case out" : "the call failed" };
       if (item) {
         try {
           const { output, abstained } = task.validate(item, entry.facts);

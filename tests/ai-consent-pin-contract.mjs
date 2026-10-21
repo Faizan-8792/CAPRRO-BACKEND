@@ -85,6 +85,21 @@ async function runSuite() {
       body: JSON.stringify({ rawText: "Sundry creditors include an unreconciled balance with a related party carried forward for three years without confirmation.", topicId: "related_parties" }),
     });
     check("PIN: POST /api/audit/insights with no consent field reaches the model", response.status !== 400 && mock.calls.length >= 1, `status ${response.status}, calls ${mock.calls.length}`);
+
+    // Behavioural, not only the text above: removing the working-paper guard while leaving its names in the file
+    // passed the static pin (mutation 2 in tools/mutations/ai-consent-pin.mjs survived on 2026-10-21).
+    const { generateAuditWorkingPaperAnalysis } = await import("../src/services/audit-working-paper.service.js");
+    mock.reset();
+    const refusals = [];
+    for (const input of [{}, { consentToExternalProcessing: false }, { consentToExternalProcessing: "true" }]) {
+      try {
+        await generateAuditWorkingPaperAnalysis({ workingPaperId: String(oid()), firmId, actorUserId: userId, input, requestId: "consent-pin", publication: null });
+        refusals.push("not refused");
+      } catch (error) {
+        refusals.push(error?.code || error?.message);
+      }
+    }
+    check("working-paper analysis refuses a missing, false or string consent before anything is sent", refusals.every((code) => code === "AUDIT_AI_CONSENT_REQUIRED") && mock.calls.length === 0, `${refusals.join(", ")}; calls ${mock.calls.length}`);
   } finally {
     mock.off();
     await new Promise((resolve) => server.close(resolve));

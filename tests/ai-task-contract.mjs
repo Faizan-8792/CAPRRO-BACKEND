@@ -223,6 +223,23 @@ async function runSuite() {
     const many = await run(A, Array.from({ length: 61 }, (_, i) => unit(`m${i}`)));
     check("IN5: more units than the task allows is refused before any call", many.error?.code === "AI_TOO_MANY_ITEMS" && mock.calls.length === 0);
 
+    // IN11: what no rule explains goes to the model in batches of the task's size (20 for gst_cause_residue), so a
+    // page of leftovers is a few small calls, and every item asked is answered or reported.
+    const sentIds = (callBody) => {
+      const user = String(callBody?.messages?.[1]?.content || "");
+      const at = user.indexOf("INPUT (json):\n");
+      try {
+        return at < 0 ? [] : (JSON.parse(user.slice(at + "INPUT (json):\n".length)).items || []).map((item) => item.id);
+      } catch {
+        return [];
+      }
+    };
+    mock.reset();
+    mock.on((body) => answer(sentIds(body).map((id) => good(id))));
+    const batched = await run(A, Array.from({ length: 45 }, (_, i) => unit(`b${i}`, { dateGapDays: 100 + i })));
+    const sizes = mock.calls.map((call) => sentIds(call.body).length);
+    check("IN11: 45 leftovers go to the model as batches of 20, 20 and 5, and every one comes back answered", sizes.join(",") === "20,20,5" && batched.value?.results?.length === 45 && batched.value.failed.length === 0, `batches ${sizes.join(",")} results ${batched.value?.results?.length}`);
+
     // ─── IN5: outcomes ───
     const draftId = String(stored._id);
     const otherRead = await call("GET", `/api/ai-drafts/${draftId}`, B.token);
